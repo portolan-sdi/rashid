@@ -45,10 +45,9 @@ Exit code 0 when the catalog passes (no errors; warnings and infos allowed), 1 w
 from reis import validate
 
 report = validate("path/to/catalog")
-report.passed          # no ERROR findings
+report.passed  # no ERROR findings
 for finding in report.findings:
-    print(finding.rule_id, finding.severity.value,
-          finding.path, finding.message)
+    print(finding.rule_id, finding.severity.value, finding.path, finding.message)
 ```
 
 `validate` runs the metadata pass only. Add `structural=True` to also run the STAC structural pass, `schema=True` for the Portolan profile schema pass, `data=True` for the data pass, or `live=True` for the live-hosting pass (all reach the network; `data=True` also needs the `reis[data]` extra). The CLI turns `structural` on by default:
