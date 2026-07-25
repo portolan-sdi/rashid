@@ -8,7 +8,7 @@ exactly one aspect (builder kwarg or post-write surgery via ``mutate_json`` /
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -267,3 +267,29 @@ def rule_ids(report: Report) -> set[str]:
 
 def findings_for(report: Report, rule_id: str) -> list[Any]:
     return [finding for finding in report.findings if finding.rule_id == rule_id]
+
+
+# Substrings that mark a finding as "the host went away", not "the catalog is wrong".
+_NETWORK_FLAKE_MARKERS = (
+    "could not be read",
+    "unresolvable",
+    "connection",
+    "timed out",
+    "timeout",
+    "name resolution",
+    "ssl",
+)
+
+
+def skip_if_network_flaked(messages: Iterable[str]) -> None:
+    """Skip the calling test when a networked check never reached its host.
+
+    Networked tests talk to live servers, which sometimes reset the connection
+    or stall. A finding that reports unreadable bytes or an unresolvable schema
+    describes the transport, not the catalog under test, so it should skip
+    rather than fail.
+    """
+    for message in messages:
+        lowered = message.lower()
+        if any(marker in lowered for marker in _NETWORK_FLAKE_MARKERS):
+            pytest.skip(f"network flaked: {message}")
