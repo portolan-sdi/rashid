@@ -14,7 +14,12 @@ from reis import RulesConfig, validate, validate_schema
 from reis.catalog import CatalogGraph
 from reis.model import Severity
 from reis.schema import DEFAULT_SCHEMA_URI, _schema_uri_for, default_validator
-from tests.conftest import PORTOLAN_URI, CatalogBuilder, mutate_json
+from tests.conftest import (
+    PORTOLAN_URI,
+    CatalogBuilder,
+    mutate_json,
+    skip_if_network_flaked,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -266,4 +271,6 @@ def test_real_schema_accepts_the_builder(catalog: CatalogBuilder) -> None:
     collection.item("seg1")
     report = validate(catalog.write(), schema=True)
     schema_errors = [f for f in report.findings if f.rule_id == "PTL-SCH-001"]
+    # Fetching the profile schema can fail after the reachability probe passed.
+    skip_if_network_flaked(f.message for f in schema_errors)
     assert schema_errors == []  # the builder's tree satisfies the profile schema

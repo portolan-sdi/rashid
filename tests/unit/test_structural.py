@@ -13,7 +13,7 @@ from reis import RulesConfig, validate, validate_structural
 from reis.catalog import CatalogGraph
 from reis.model import Severity
 from reis.structural import default_validator
-from tests.conftest import CatalogBuilder
+from tests.conftest import CatalogBuilder, skip_if_network_flaked
 
 pytestmark = pytest.mark.unit
 
@@ -77,7 +77,7 @@ def test_default_validator_used_when_none(
 ) -> None:
     import reis.structural as structural
 
-    monkeypatch.setattr(structural, "default_validator", lambda: (lambda data: []))
+    monkeypatch.setattr(structural, "default_validator", lambda: lambda data: [])
     assert structural.validate_structural(_graph(catalog), None) == []
 
 
@@ -175,4 +175,7 @@ def test_real_stac_validator_accepts_the_builder(catalog: CatalogBuilder) -> Non
     catalog.collection("roads")
     report = validate(catalog.write(), structural=True)
     structural_errors = [f for f in report.findings if f.rule_id == "PTL-STR-001"]
+    # The validator resolves remote schemas, so a reset connection reads as an
+    # unresolvable reference rather than a conformance fault.
+    skip_if_network_flaked(f.message for f in structural_errors)
     assert structural_errors == []  # the builder's tree is valid STAC 1.1.0

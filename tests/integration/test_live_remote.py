@@ -10,12 +10,12 @@ make the test flake on their config changes.
 
 from __future__ import annotations
 
-from urllib.error import URLError
+from collections.abc import Callable
 from urllib.request import urlopen
 
 import pytest
 
-from reis.live import _UrllibProber
+from reis.live import ProbeResponse, _UrllibProber
 
 pytestmark = [pytest.mark.integration, pytest.mark.network]
 
@@ -28,20 +28,28 @@ def _require_reachable(url: str) -> None:
         with urlopen(url, timeout=30) as response:  # noqa: S310 - literal https URL
             if response.status != 200:
                 pytest.skip(f"{url} returned {response.status}")
-    except (URLError, TimeoutError) as exc:  # pragma: no cover - network dependent
+    except OSError as exc:  # pragma: no cover - network dependent; URLError is an OSError
         pytest.skip(f"cannot reach {url}: {exc}")
+
+
+def _probe(call: Callable[[str], ProbeResponse], url: str) -> ProbeResponse:
+    """Run one probe, skipping when the connection drops mid-test."""
+    try:
+        return call(url)
+    except OSError as exc:  # pragma: no cover - network dependent
+        pytest.skip(f"probe of {url} failed in transport: {exc}")
 
 
 def test_prober_reads_range_and_head() -> None:
     _require_reachable(_URL)
     prober = _UrllibProber()
 
-    ranged = prober.get_range(_URL)
+    ranged = _probe(prober.get_range, _URL)
     assert ranged.status == 206
     assert (ranged.header("accept-ranges") or "").lower() == "bytes"
     assert ranged.header("content-range") is not None
 
-    headed = prober.head(_URL)
+    headed = _probe(prober.head, _URL)
     length = headed.header("content-length")
     assert length is not None and length.isdigit() and int(length) > 0
 
@@ -50,7 +58,7 @@ def test_prober_survives_a_preflight() -> None:
     # The preflight must come back as a ProbeResponse whatever the server's
     # CORS verdict is — HTTPError (405, 403) folds into status, never raises.
     _require_reachable(_URL)
-    response = _UrllibProber().preflight(_URL)
+    response = _probe(_UrllibProber().preflight, _URL)
     assert isinstance(response.status, int)
 
 
