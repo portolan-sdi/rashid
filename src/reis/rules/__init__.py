@@ -10,6 +10,7 @@ from reis.rules.assets import (
     ChecksumMultihashRule,
 )
 from reis.rules.bbox import BboxValidRule
+from reis.rules.collections import SingleFileCollectionRule
 from reis.rules.conformance import SchemaUriConsistencyRule, SchemaUriDeclaredRule
 from reis.rules.files import AgentsLinkRule, ReadmeLinkRule, RequiredFilesRule
 from reis.rules.license import (
@@ -79,6 +80,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     PMTilesRegistrationRule(),
     LargeVectorWithoutVisualRule(),
     PartitionGlobRule(),
+    SingleFileCollectionRule(),
 )
 
 __all__ = ["DEFAULT_RULES"]

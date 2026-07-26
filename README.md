@@ -76,6 +76,7 @@ Findings carry a stable rule id (`PTL-<GROUP>-<NNN>`), a severity, a message, an
 - `PTL-TTL-002` (title looks machine-generated) is a **warning** by default because it is heuristic; promote it with a severity override.
 - `PTL-PRO-002` (mirror without a `canonical` link) is **info**, since whether the upstream publishes STAC is unknowable from metadata.
 - `PTL-VIZ-004` (large vector without a visual derivative) is **info**: the spec's render-path MUST hinges on whether render-from-source is viable, which metadata cannot prove; the size threshold (100 MB) is heuristic.
+- `PTL-COL-001` fires only on the exact shape the spec rules out: one item, one data asset on it, and no data asset on the collection. Several items, several data files, or a partitioned collection are all legitimate, and a collection whose assets omit `roles` is undecidable, so `PTL-AST-001` reports it instead.
 - `PTL-VIZ-001` skips collections whose geospatial-vs-tabular nature is undecidable from metadata (the spec identifies tabular by the Parquet's geometry column — a data-pass fact); positive signals are item geometries, a `table:columns` geometry column, or spatial media types.
 
 | Group | Rules | Checks |
@@ -96,6 +97,7 @@ Findings carry a stable rule id (`PTL-<GROUP>-<NNN>`), a severity, a message, an
 | `PTL-DAT` | 000–011 | asset bytes vs metadata and the format MUSTs: `file:checksum`, `file:size`, format magic, bbox/CRS; valid COG with internal overviews, embedded band statistics, and valid percent (a MUST on nodata bands); GeoParquet spatial ordering, per-row-group statistics (bbox covering column or native 2.x `GeospatialStatistics`), and row-group size; `000` warns when the `reis[data]` extra is absent. Source/alternate assets are exempt from the format MUSTs; plain (non-geo) Parquet is skipped |
 | `PTL-LIV` | 000–005 | the hosting server's Data Storage MUSTs, probed per host over absolute `https` asset hrefs: ranged GET honored (`206`, `Accept-Ranges: bytes`), HEAD `Content-Length` present and matching `file:size`, CORS origin allowed, required headers exposed, preflight accepting `GET`/`HEAD` with `Range`; source/alternate assets are exempt; `000` warns when nothing is probeable or a host is unreachable |
 | `PTL-PRT` | 001 | a partitioned collection advertises a glob pattern for its partitions |
+| `PTL-COL` | 001 | a single-file collection exposes its data as a collection-level asset, not wrapped in a lone item |
 
 The catalog tree is loaded from a local directory. `CatalogGraph` (`src/reis/catalog.py`) is the single I/O layer for the metadata, loaded in one pass, so a remote (HTTP) catalog loader can slot in later; the data pass already reads asset bytes over `https`.
 

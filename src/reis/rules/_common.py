@@ -20,6 +20,14 @@ def links_of(node: Node) -> list[dict[str, Any]]:
     return [link for link in raw if isinstance(link, dict)]
 
 
+def roles_of(asset: dict[str, Any]) -> list[str]:
+    """The asset's roles, tolerating a missing or malformed field."""
+    raw = asset.get("roles")
+    if not isinstance(raw, list):
+        return []
+    return [role for role in raw if isinstance(role, str)]
+
+
 def parse_rfc3339(value: object) -> datetime | None:
     """Parse an RFC 3339 date-time; None when invalid or offset-less."""
     if not isinstance(value, str):

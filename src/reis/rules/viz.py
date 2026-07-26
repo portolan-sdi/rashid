@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from reis.catalog import CatalogGraph, Node
 from reis.model import Finding, Severity
 from reis.rule import Rule
-from reis.rules._common import links_of
+from reis.rules._common import links_of, roles_of
 from reis.rules.assets import _assets_of
 
 PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
@@ -23,13 +23,6 @@ _WEB_MAP_LINKS_PREFIX = "https://stac-extensions.github.io/web-map-links/"
 # Render-from-source is plausible for small files; above this, a missing
 # visual derivative is worth a nudge. Deliberately conservative.
 _LARGE_VECTOR_BYTES = 100_000_000
-
-
-def _roles(asset: dict[str, object]) -> list[str]:
-    raw = asset.get("roles")
-    if not isinstance(raw, list):
-        return []
-    return [r for r in raw if isinstance(r, str)]
 
 
 def is_geospatial(node: Node, graph: CatalogGraph) -> bool | None:
@@ -89,7 +82,7 @@ class ThumbnailRule(Rule):
         thumbnails = [
             (pointer, key, asset)
             for pointer, key, asset in _assets_of(node)
-            if "thumbnail" in _roles(asset)
+            if "thumbnail" in roles_of(asset)
         ]
         if not thumbnails:
             yield self.finding(
@@ -123,11 +116,11 @@ class StylesForDerivativeRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        has_visual = any("visual" in _roles(asset) for _p, _k, asset in _assets_of(node))
+        has_visual = any("visual" in roles_of(asset) for _p, _k, asset in _assets_of(node))
         has_pmtiles_asset, has_pmtiles_link = _pmtiles_registration(node)
         if not (has_visual or has_pmtiles_asset or has_pmtiles_link):
             return
-        if not any("style" in _roles(asset) for _p, _k, asset in _assets_of(node)):
+        if not any("style" in roles_of(asset) for _p, _k, asset in _assets_of(node)):
             yield self.finding(
                 node,
                 "collection has a visualization derivative but no asset with the 'style' role",
@@ -202,12 +195,12 @@ class LargeVectorWithoutVisualRule(Rule):
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         if is_geospatial(node, graph) is not True:
             return
-        has_visual = any("visual" in _roles(asset) for _p, _k, asset in _assets_of(node))
+        has_visual = any("visual" in roles_of(asset) for _p, _k, asset in _assets_of(node))
         has_pmtiles_asset, has_pmtiles_link = _pmtiles_registration(node)
         if has_visual or has_pmtiles_asset or has_pmtiles_link:
             return
         for _pointer, key, asset in _assets_of(node):
-            if "data" not in _roles(asset):
+            if "data" not in roles_of(asset):
                 continue
             if asset.get("type") != "application/vnd.apache.parquet":
                 continue
