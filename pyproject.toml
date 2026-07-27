@@ -10,7 +10,7 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [{ name = "Portolan contributors" }]
-dependencies = ["click>=8.4", "jsonschema>=4.26", "stac-valid>=4.4"]
+dependencies = ["click>=8.4", "jsonschema>=4.26", "referencing>=0.30"]
 
 # The data pass (rashid check --data) reads asset bytes to verify checksum, size,
 # format, and extent. Its geospatial stack is heavy and optional; the core
@@ -72,11 +72,6 @@ known-first-party = ["rashid"]
 strict = true
 python_version = "3.10"
 files = ["src/rashid"]
-
-# stac-valid ships no type stubs / py.typed marker.
-[[tool.mypy.overrides]]
-module = "stac_validator.*"
-ignore_missing_imports = true
 
 # jsonschema ships no py.typed marker; stubs live in the separate types-jsonschema.
 [[tool.mypy.overrides]]
@@ -184,11 +179,7 @@ exclude_dirs = ["tests", ".venv"]
 known_first_party = ["rashid"]
 exclude = [".venv", "tests", "mutants"]
 
-# stac-valid (the maintained successor to the deprecated stac-validator
-# distribution) ships the module as `stac_validator`; map it so deptry does
-# not read the import as a missing dependency.
 [tool.deptry.package_module_name_map]
-stac-valid = ["stac_validator"]
 # rio-cogeo installs as the `rio_cogeo` import package.
 rio-cogeo = ["rio_cogeo"]
 

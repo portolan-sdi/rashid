@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from rashid._jsonschema import SchemaError
 from rashid.catalog import ROOT_CATALOG, CatalogGraph
 from rashid.config import RulesConfig
 from rashid.data import (
@@ -89,7 +90,8 @@ _LIVE_RULE_IDS = frozenset(
     }
 )
 
-_Validator = Callable[[dict[str, Any]], list[str]]
+# Structural/schema validators map one object's raw JSON to schema errors.
+_Validator = Callable[[dict[str, Any]], list[SchemaError]]
 
 
 def _optional_passes(
@@ -130,10 +132,10 @@ def validate(
     rules: Sequence[Rule] | None = None,
     config: RulesConfig | None = None,
     *,
-    structural: bool = False,
-    structural_validator: Callable[[dict[str, Any]], list[str]] | None = None,
+    structural: bool = True,
+    structural_validator: Callable[[dict[str, Any]], list[SchemaError]] | None = None,
     schema: bool = False,
-    schema_validator: Callable[[dict[str, Any]], list[str]] | None = None,
+    schema_validator: Callable[[dict[str, Any]], list[SchemaError]] | None = None,
     schema_allow_network: bool = False,
     data: bool = False,
     data_validator: DataValidator | None = None,
@@ -142,12 +144,12 @@ def validate(
 ) -> Report:
     """Validate a local Portolan catalog tree.
 
-    The metadata pass always runs. When ``structural`` is true the STAC 1.1.0
-    structural pass runs too, delegated to stac-validator (see
-    :mod:`rashid.structural`); it is off by default here because it reaches the
-    network, and on by default in the CLI. Disabling ``PTL-STR-001`` via
-    ``config`` skips the structural pass. ``structural_validator`` injects an
-    alternate validator, chiefly for offline testing.
+    The metadata pass always runs. The STAC 1.1.0 structural pass runs by
+    default too, against the core schemas shipped in the wheel (see
+    :mod:`rashid.structural`) — fully offline. ``structural=False`` skips it,
+    as does disabling ``PTL-STR-001`` via ``config``.
+    ``structural_validator`` injects an alternate validator, chiefly for
+    testing.
 
     When ``schema`` is true the Portolan profile schema pass runs too, applying
     the published JSON Schema to every object (see :mod:`rashid.schema`). The

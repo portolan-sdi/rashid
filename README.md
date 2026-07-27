@@ -43,7 +43,7 @@ Validation runs as five separable passes.
 
 **Metadata.** Every spec requirement rashid can check from the catalog's JSON, without reading asset bytes.
 
-**Structural.** STAC 1.1.0 core validity, delegated to [stac-validator](https://github.com/stac-utils/stac-validator). Only the core schema applies. Declared extensions belong to the metadata pass, which keeps an unpublished extension schema from failing the tree.
+**Structural.** STAC 1.1.0 core validity, checked offline against the schemas vendored in the wheel. Only the core schema applies. Declared extensions belong to the metadata pass, which keeps an unpublished extension schema from failing the tree.
 
 **Schema.** The published [Portolan profile schema](https://schemas.portolan-sdi.org/portolan/), applied to every object. rashid also implements those requirements in code, which yields precise messages and fix hints. Running both catches drift between them, at the cost of reporting some defects twice. Opt in with `--schema`.
 
