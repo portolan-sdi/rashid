@@ -689,7 +689,7 @@ def _check_tabular(
     if _geo_metadata(parquet) is not None:
         return []  # GeoParquet: the geospatial storage rules own it
     defects: list[DataDefect] = []
-    if not _has_table_columns(node):
+    if not _has_table_columns(node, asset):
         defects.append(
             DataDefect(
                 DAT_TABULAR,
@@ -719,9 +719,13 @@ def _asset_roles(asset: dict[str, Any]) -> list[str]:
     return [role for role in raw if isinstance(role, str)]
 
 
-def _has_table_columns(node: Node) -> bool:
-    columns = node.data.get("table:columns")
-    return isinstance(columns, list) and len(columns) > 0
+def _has_table_columns(node: Node, asset: dict[str, Any]) -> bool:
+    """The table extension allows ``table:columns`` on the collection or on
+    the asset itself; the reference catalog uses the asset."""
+    for columns in (node.data.get("table:columns"), asset.get("table:columns")):
+        if isinstance(columns, list) and len(columns) > 0:
+            return True
+    return False
 
 
 def _has_temporal_column(parquet: Any) -> bool:

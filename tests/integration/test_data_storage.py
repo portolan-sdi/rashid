@@ -450,6 +450,19 @@ def test_tabular_with_table_columns_is_clean(tmp_path: Path) -> None:
     assert _tabular(node, path) == []
 
 
+def test_tabular_with_asset_level_table_columns_is_clean(tmp_path: Path) -> None:
+    # The table extension allows table:columns on the asset; the reference
+    # catalog declares them there rather than on the collection.
+    path = tmp_path / "plain.parquet"
+    assets.write_geoparquet(path, geo=False)
+    asset = {
+        "href": "./data.parquet",
+        "roles": ["data"],
+        "table:columns": [{"name": "value", "type": "int64", "description": "a value"}],
+    }
+    assert checks._check_tabular(_tabular_collection(), "data", asset, _loc(path)) == []
+
+
 def test_tabular_temporal_column_without_extent_flags_dat_015(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False, columns=_timestamp_column())
