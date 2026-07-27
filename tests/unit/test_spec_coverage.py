@@ -41,12 +41,16 @@ _TESTS_DIR = Path(__file__).resolve().parent.parent
 _MANIFEST = _TESTS_DIR / "fixtures" / "requirements.yaml"
 
 # Manifest entries keep a fixed field order (id, severity, enforcement, file,
-# quote); the spec repo's check_requirements.py validates the file upstream,
-# so a plain scan is reliable and keeps reis free of a YAML dependency.
+# quote), possibly with comment lines between fields; the spec repo's
+# check_requirements.py validates the file upstream, so a plain scan is
+# reliable and keeps reis free of a YAML dependency.
+_COMMENTS = r"(?:\s*#[^\n]*\n)*"
 _ENTRY = re.compile(
     r"- id: (PORTO-(?:CORE|FMT)-\d{3})\s*\n"
-    r"\s+severity: (MUST|SHOULD|MAY)\s*\n"
-    r"\s+enforcement: (validator|process)\s*\n"
+    + _COMMENTS
+    + r"\s+severity: (MUST|SHOULD|MAY)\s*\n"
+    + _COMMENTS
+    + r"\s+enforcement: (validator|process)\s*\n"
 )
 
 # The strongest severity each non-Rule check can emit; metadata rules carry
