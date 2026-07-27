@@ -37,6 +37,14 @@ class Finding:
         object_id: STAC ``id`` of the offending object, when known.
         json_pointer: Optional locator within the file, e.g. ``/links/3/href``.
         fix_hint: Optional suggestion for fixing the issue.
+        expected: The correct value at that location per the authoritative
+            source (e.g. the recomputed checksum, the served byte count), when
+            the rule compares two concrete values. JSON-serializable.
+        actual: What the object currently declares there. JSON-serializable.
+        data: Optional rule-specific machine-usable context for automated
+            remediation. JSON-serializable. ``expected``/``actual``/``data``
+            make findings actionable without parsing prose; note they also make
+            a Finding unhashable in practice when they hold mutable values.
     """
 
     rule_id: str
@@ -46,6 +54,9 @@ class Finding:
     object_id: str | None = None
     json_pointer: str | None = None
     fix_hint: str | None = None
+    expected: Any | None = None
+    actual: Any | None = None
+    data: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dict, omitting empty optionals."""
@@ -61,6 +72,12 @@ class Finding:
             d["json_pointer"] = self.json_pointer
         if self.fix_hint is not None:
             d["fix_hint"] = self.fix_hint
+        if self.expected is not None:
+            d["expected"] = self.expected
+        if self.actual is not None:
+            d["actual"] = self.actual
+        if self.data is not None:
+            d["data"] = self.data
         return d
 
 

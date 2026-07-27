@@ -66,3 +66,29 @@ def test_report_to_dict_counts() -> None:
     assert d["warning_count"] == 1
     assert d["info_count"] == 0
     assert len(d["findings"]) == 2
+
+
+def test_to_dict_omits_unset_structured_fields() -> None:
+    payload = _finding(Severity.ERROR).to_dict()
+    for key in ("expected", "actual", "data"):
+        assert key not in payload
+
+
+def test_to_dict_round_trips_structured_fields() -> None:
+    finding = Finding(
+        rule_id="PTL-TST-001",
+        severity=Severity.ERROR,
+        message="file:size is wrong",
+        path="roads/collection.json",
+        json_pointer="/assets/data/file:size",
+        expected=2048,
+        actual=1024,
+        data={"asset_key": "data"},
+    )
+    payload = finding.to_dict()
+    assert payload["expected"] == 2048
+    assert payload["actual"] == 1024
+    assert payload["data"] == {"asset_key": "data"}
+    import json
+
+    json.dumps(payload)  # the contract: every field JSON-serializable

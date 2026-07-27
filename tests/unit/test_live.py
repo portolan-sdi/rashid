@@ -219,8 +219,12 @@ def test_head_length_mismatching_declared_size_is_error(catalog: CatalogBuilder)
     graph = _graph_with_remote(catalog, size=999)
     findings = validate_live(graph, FakeProber(head_response=_good_head("1234")))
     assert LIV_HEAD_LENGTH in _ids(findings)
-    message = next(f.message for f in findings if f.rule_id == LIV_HEAD_LENGTH)
-    assert "999" in message and "1234" in message
+    finding = next(f for f in findings if f.rule_id == LIV_HEAD_LENGTH)
+    assert "999" in finding.message and "1234" in finding.message
+    # structured mirror of the prose, data-pass convention: expected is the
+    # authoritative value (the served bytes), actual is what the object declares
+    assert finding.expected == 1234
+    assert finding.actual == 999
 
 
 def test_head_without_declared_size_only_requires_presence(catalog: CatalogBuilder) -> None:

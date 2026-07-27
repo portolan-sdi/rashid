@@ -200,7 +200,13 @@ def _header_set(value: str | None) -> set[str]:
 
 
 def _server_finding(
-    rule_id: str, host: str, rep: _Target, message: str, fix_hint: str | None = None
+    rule_id: str,
+    host: str,
+    rep: _Target,
+    message: str,
+    fix_hint: str | None = None,
+    expected: object | None = None,
+    actual: object | None = None,
 ) -> Finding:
     return Finding(
         rule_id=rule_id,
@@ -210,6 +216,8 @@ def _server_finding(
         object_id=rep.node.id,
         json_pointer=f"/assets/{rep.key}/href",
         fix_hint=fix_hint,
+        expected=expected,
+        actual=actual,
     )
 
 
@@ -228,6 +236,8 @@ def _check_range(host: str, rep: _Target, response: ProbeResponse) -> list[Findi
             rep,
             "range requests unsupported: " + "; ".join(problems),
             fix_hint="serve assets from storage that honors the Range header with 206 responses",
+            expected=206,
+            actual=response.status,
         )
     ]
 
@@ -300,6 +310,7 @@ def _check_head(target: _Target, response: ProbeResponse) -> list[Finding]:
                 object_id=target.node.id,
                 json_pointer=pointer,
                 fix_hint="HEAD requests MUST return an accurate Content-Length",
+                actual=length,
             )
         ]
     if target.declared_size is not None and int(length) != target.declared_size:
@@ -315,6 +326,8 @@ def _check_head(target: _Target, response: ProbeResponse) -> list[Finding]:
                 object_id=target.node.id,
                 json_pointer=pointer,
                 fix_hint="regenerate file:size at publish time so it matches the hosted bytes",
+                expected=int(length),
+                actual=target.declared_size,
             )
         ]
     return []
