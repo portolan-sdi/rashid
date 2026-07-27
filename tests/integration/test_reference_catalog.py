@@ -52,6 +52,12 @@ def test_reference_catalog_metadata_pass_is_clean() -> None:
     assert report.passed
 
 
+def test_single_cog_collection_models_its_raster_the_way_the_spec_prescribes() -> None:
+    """raster/sample-cog is the single-COG shape PORTO-CORE-072 prescribes."""
+    report = validate(CATALOG, structural=False, schema=False)
+    assert [f for f in report.findings if f.rule_id == "PTL-COL-004"] == []
+
+
 def test_reference_catalog_schema_pass_is_clean() -> None:
     local = validator_from_schema(_schema_for_catalog())
     report = validate(CATALOG, structural=False, schema=True, schema_validator=local)

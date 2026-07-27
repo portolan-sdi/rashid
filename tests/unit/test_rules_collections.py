@@ -1,4 +1,4 @@
-"""Tests for the PTL-COL rules: single-file shape, no nesting, ID conventions."""
+"""Tests for the PTL-COL rules: single-file shape, raster scenes, no nesting, IDs."""
 
 from __future__ import annotations
 
@@ -110,6 +110,130 @@ def test_collection_data_asset_alongside_an_item_is_clean(catalog: CatalogBuilde
     catalog.collection("roads").item("seg1")
     root = catalog.write()
     assert findings_for(validate(root), "PTL-COL-001") == []
+
+
+# --- PTL-COL-004: raster scenes belong on items -----------------------------
+
+_COG_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
+
+
+def _cog_asset(href: str) -> dict[str, Any]:
+    asset = default_asset()
+    asset["href"] = href
+    asset["type"] = _COG_TYPE
+    return asset
+
+
+def _make_cog(path: Path, key: str = "data", href: str = "./scene.tif") -> None:
+    """Turn a node's data asset into a COG asset."""
+    mutate_json(path, lambda d: d["assets"].__setitem__(key, _cog_asset(href)))
+
+
+def _item_json(root: Path, item_id: str) -> Path:
+    return root / "roads" / item_id / f"{item_id}.json"
+
+
+def test_single_collection_level_cog_is_clean(catalog: CatalogBuilder) -> None:
+    """PORTO-CORE-072's prescribed shape: one COG, no item directory."""
+    catalog.collection("roads")
+    root = catalog.write()
+    _make_cog(_collection(root))
+    assert findings_for(validate(root), "PTL-COL-004") == []
+
+
+def test_multiple_collection_level_cogs_are_flagged(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _make_cog(_collection(root), href="./scene-a.tif")
+    mutate_json(
+        _collection(root),
+        lambda d: d["assets"].__setitem__("scene-b", _cog_asset("./scene-b.tif")),
+    )
+    findings = findings_for(validate(root), "PTL-COL-004")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+    assert findings[0].path == "roads/collection.json"
+    assert "2 scene COGs" in findings[0].message
+
+
+def test_scenes_modelled_as_items_are_clean(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection("roads")
+    collection.item("scene-a")
+    collection.item("scene-b")
+    root = catalog.write()
+    _drop_collection_data(root)
+    _make_cog(_item_json(root, "scene-a"), href="./scene-a.tif")
+    _make_cog(_item_json(root, "scene-b"), href="./scene-b.tif")
+    assert findings_for(validate(root), "PTL-COL-004") == []
+
+
+def test_collection_level_cog_alongside_scene_items_is_flagged(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads").item("scene-b")
+    root = catalog.write()
+    _make_cog(_collection(root), href="./scene-a.tif")
+    _make_cog(_item_json(root, "scene-b"), href="./scene-b.tif")
+    findings = findings_for(validate(root), "PTL-COL-004")
+    assert len(findings) == 1
+    assert "scene-b" in findings[0].message
+
+
+def test_lone_item_wrapping_a_cog_is_left_to_the_single_file_rule(
+    catalog: CatalogBuilder,
+) -> None:
+    """The complementary shape is PTL-COL-001's; the two never double-report."""
+    catalog.collection("roads").item("scene-a")
+    root = catalog.write()
+    _drop_collection_data(root)
+    _make_cog(_item_json(root, "scene-a"), href="./scene-a.tif")
+    report = validate(root)
+    assert findings_for(report, "PTL-COL-004") == []
+    assert len(findings_for(report, "PTL-COL-001")) == 1
+
+
+def test_several_non_raster_collection_assets_are_out_of_scope(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+
+    def add_second_parquet(data: dict[str, Any]) -> None:
+        second = default_asset()
+        second["href"] = "./data-b.parquet"
+        data["assets"]["data-b"] = second
+
+    mutate_json(_collection(root), add_second_parquet)
+    assert findings_for(validate(root), "PTL-COL-004") == []
+
+
+def test_upstream_geotiff_original_is_not_a_scene(catalog: CatalogBuilder) -> None:
+    """A plain GeoTIFF carrying the 'source' role is provenance, not a scene."""
+    catalog.collection("roads")
+    root = catalog.write()
+    _make_cog(_collection(root), href="./scene-a.tif")
+
+    def add_source_original(data: dict[str, Any]) -> None:
+        asset = _cog_asset("https://example.org/original.tif")
+        asset["type"] = "image/tiff"
+        asset["roles"] = ["data", "source"]
+        data["assets"]["source"] = asset
+
+    mutate_json(_collection(root), add_source_original)
+    assert findings_for(validate(root), "PTL-COL-004") == []
+
+
+def test_roleless_raster_assets_are_out_of_scope(catalog: CatalogBuilder) -> None:
+    """Roles identify the data asset; PTL-AST-001 owns the missing-roles finding."""
+    catalog.collection("roads")
+    root = catalog.write()
+    _make_cog(_collection(root), href="./scene-a.tif")
+
+    def add_roleless_raster(data: dict[str, Any]) -> None:
+        asset = _cog_asset("./scene-b.tif")
+        asset.pop("roles")
+        data["assets"]["scene-b"] = asset
+
+    mutate_json(_collection(root), add_roleless_raster)
+    report = validate(root)
+    assert findings_for(report, "PTL-COL-004") == []
+    assert findings_for(report, "PTL-AST-001") != []
 
 
 # --- PTL-COL-002: no nested collections ------------------------------------

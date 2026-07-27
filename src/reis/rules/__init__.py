@@ -14,6 +14,7 @@ from reis.rules.bbox import BboxValidRule
 from reis.rules.collections import (
     CollectionIdRule,
     NestedCollectionRule,
+    RasterSceneItemRule,
     SingleFileCollectionRule,
 )
 from reis.rules.conformance import (
@@ -102,6 +103,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     LargeVectorWithoutVisualRule(),
     PartitionFieldsRule(),
     SingleFileCollectionRule(),
+    RasterSceneItemRule(),
     NestedCollectionRule(),
     CollectionIdRule(),
 )
