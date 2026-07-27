@@ -16,12 +16,17 @@ and the real bytes into a :class:`reis.data.DataDefect`:
 - ``PTL-DAT-009`` COG bands lack embedded statistics (MUST, formats.md:95)
 - ``PTL-DAT-010`` a band lacks embedded valid percent (SHOULD; MUST — and thus
   an ERROR — when the band has a nodata value, formats.md:121)
-- ``PTL-DAT-011`` a raster larger than one 512px tile has no internal
+- ``PTL-DAT-011`` a raster larger than its own internal tile has no internal
   overviews. OGC 21-026 makes overviews optional in base COG but a SHALL in
   its Optimized GeoTIFF conformance class (/req/optimized_geotiff) — the class
   Portolan's efficient-range-request mandate targets. ``cog_validate`` checks
   base COG, so it accepts such a file with only a warning; without overviews a
   zoomed-out render reads every full-resolution byte.
+- ``PTL-DAT-012`` GeoParquet version is not 1.1 or 2.x (MUST, formats.md:25)
+- ``PTL-DAT-013`` internal tiles are not square or exceed 512px (MUST,
+  OGC 21-026 /req/optimized_geotiff/small-sizes via formats.md:121)
+- ``PTL-DAT-014`` partition files diverge in Parquet schema (MUST,
+  formats.md:91: "validated by tooling reading file footers")
 
 The ``STATISTICS_APPROXIMATE`` MUST-when-estimated cannot be checked from the
 bytes: whether the statistics were estimated is not knowable after the fact.
@@ -34,12 +39,15 @@ failure the way a wrong one is.
 
 from __future__ import annotations
 
+import glob as globmodule
 import hashlib
 import json
 import math
+import posixpath
 import struct
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import pyarrow.parquet as pq
 import rasterio
@@ -54,11 +62,14 @@ from reis.data import (
     DAT_COG_STATS,
     DAT_CONSISTENCY,
     DAT_FORMAT,
+    DAT_GEOPARQUET_VERSION,
     DAT_ORDERING,
     DAT_OVERVIEWS,
+    DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
     DAT_SIZE,
+    DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
     DataDefect,
 )
@@ -145,6 +156,7 @@ class _Wgs84Bounds:
 def check_node(node: Node, reader: AssetReader) -> list[DataDefect]:
     """Verify every asset on ``node`` against its declared metadata."""
     defects: list[DataDefect] = []
+    defects.extend(_check_partition_schemas(node))
     for key, asset in _assets_of(node):
         href = asset.get("href")
         if not isinstance(href, str) or not href:
@@ -334,26 +346,47 @@ def _check_raster(key: str, located: Locator) -> list[DataDefect]:
         )
     defects.extend(_check_cog_stats(key, located))
     defects.extend(_check_overviews(key, located))
+    defects.extend(_check_tile_size(key, located))
     return defects
 
 
-# rio-cogeo's validation threshold: a raster within one 512px tile renders from
-# full resolution; anything larger needs overviews for zoomed-out reads.
-_MAX_UNOVERVIEWED = 512
+# OGC 21-026 /req/optimized_geotiff/small-sizes: square internal tiles "sized
+# no larger than a common screen viewport. 512×512 is the usual choice"
+# (formats.md:121). Also the overview cutoff for untiled rasters, where no
+# internal tile size exists to compare against.
+_MAX_TILE = 512
+
+
+def _tile_shape(src: Any) -> tuple[int, int] | None:
+    """The internal tile's (height, width), or None for a striped file.
+
+    Reads the profile's ``tiled`` flag directly (rasterio's ``is_tiled``
+    convenience is pending deprecation); a striped file's blocks are rows,
+    not tiles, so it has no tile shape.
+    """
+    if not src.profile.get("tiled", False):
+        return None
+    height, width = src.block_shapes[0]
+    return height, width
 
 
 def _check_overviews(key: str, located: Locator) -> list[DataDefect]:
-    """A raster larger than one tile MUST carry internal overviews.
+    """A raster larger than one internal tile MUST carry internal overviews.
 
     A SHALL of OGC 21-026's Optimized GeoTIFF conformance class (optional in
     base COG, which is why ``cog_validate`` reports the absence as a warning
-    only). Checked directly: the decimation list of band 1, on a file whose
-    either dimension exceeds one 512px tile. External ``.ovr`` sidecars are
-    already an error inside ``cog_validate``.
+    only). formats.md:133: "A raster larger than a single internal tile needs
+    internal overviews … one that already fits within a tile is exempt, since
+    it is its own overview." The cutoff is the file's own tile size — a
+    400px raster with 256px tiles needs overviews — falling back to 512 for
+    untiled files (already a COG error, but reported by ``cog_validate``).
+    External ``.ovr`` sidecars are already an error inside ``cog_validate``.
     """
     try:
         with rasterio.Env(GDAL_PAM_ENABLED="NO"), rasterio.open(located.gdal_path()) as src:
-            oversized = max(src.width, src.height) > _MAX_UNOVERVIEWED
+            shape = _tile_shape(src)
+            tile = max(shape) if shape is not None else _MAX_TILE
+            oversized = max(src.width, src.height) > tile
             has_overviews = bool(src.overviews(1))
     except Exception:  # noqa: BLE001 - unreadable raster: the COG check owns reporting it
         return []
@@ -362,8 +395,49 @@ def _check_overviews(key: str, located: Locator) -> list[DataDefect]:
             DataDefect(
                 DAT_OVERVIEWS,
                 Severity.ERROR,
-                f"asset '{key}' raster is {_MAX_UNOVERVIEWED}px-plus in at least one "
-                "dimension but carries no internal overviews",
+                f"asset '{key}' raster exceeds its own {tile}px internal tile "
+                "but carries no internal overviews",
+                key,
+            )
+        ]
+    return []
+
+
+def _check_tile_size(key: str, located: Locator) -> list[DataDefect]:
+    """Internal tiles MUST be square and no larger than 512×512.
+
+    OGC 21-026 /req/optimized_geotiff/small-sizes ("square internal tiles,
+    sized no larger than a common screen viewport. 512×512 is the usual
+    choice", formats.md:121), checked directly rather than delegated to
+    ``rio-cogeo``, which enforces no explicit bound. Untiled rasters are
+    skipped: tiling itself is a base-COG requirement that ``cog_validate``
+    already reports through PTL-DAT-004.
+    """
+    try:
+        with rasterio.Env(GDAL_PAM_ENABLED="NO"), rasterio.open(located.gdal_path()) as src:
+            shape = _tile_shape(src)
+            if shape is None:
+                return []
+            tile_height, tile_width = shape
+    except Exception:  # noqa: BLE001 - unreadable raster: the COG check owns reporting it
+        return []
+    if tile_height != tile_width:
+        return [
+            DataDefect(
+                DAT_TILE_SIZE,
+                Severity.ERROR,
+                f"asset '{key}' internal tiles are {tile_width}x{tile_height}; "
+                "tiles must be square",
+                key,
+            )
+        ]
+    if tile_width > _MAX_TILE:
+        return [
+            DataDefect(
+                DAT_TILE_SIZE,
+                Severity.ERROR,
+                f"asset '{key}' internal tiles are {tile_width}x{tile_height}, "
+                f"over the {_MAX_TILE}x{_MAX_TILE} limit",
                 key,
             )
         ]
@@ -510,6 +584,7 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
         return []  # plain Parquet, not GeoParquet — nothing to enforce here
 
     defects: list[DataDefect] = []
+    defects.extend(_check_geoparquet_version(key, geo))
     meta = parquet.metadata
     row_counts = [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
     if any(n > _MAX_ROW_GROUP_ROWS for n in row_counts):
@@ -547,6 +622,29 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
             )
         )
     return defects
+
+
+def _check_geoparquet_version(key: str, geo: dict[str, Any]) -> list[DataDefect]:
+    """The ``geo`` metadata MUST declare GeoParquet 1.1 or 2.x.
+
+    formats.md:25: "Data MUST be provided in GeoParquet 1.1 or 2.0". A file
+    with ``geo`` metadata but an older version (1.0, the common legacy case)
+    lacks the covering-column machinery the rest of the format MUSTs assume.
+    """
+    version = geo.get("version")
+    if isinstance(version, str) and (
+        version == "1.1" or version.startswith("1.1.") or version.startswith("2.")
+    ):
+        return []
+    described = repr(version) if version is not None else "no version"
+    return [
+        DataDefect(
+            DAT_GEOPARQUET_VERSION,
+            Severity.ERROR,
+            f"asset '{key}' geo metadata declares {described}; data must be GeoParquet 1.1 or 2.x",
+            key,
+        )
+    ]
 
 
 def _geo_metadata(parquet: Any) -> dict[str, Any] | None:
@@ -689,6 +787,76 @@ def _bbox_union(
         max(b[2] for b in bboxes),
         max(b[3] for b in bboxes),
     )
+
+
+# --- partition schema consistency ------------------------------------------
+
+
+def _check_partition_schemas(node: Node) -> list[DataDefect]:
+    """Every partition file MUST share a single Parquet schema.
+
+    formats.md:91: "Every partition file MUST share a single Parquet schema —
+    the same columns, names, and types — so the glob can be queried as one
+    table. This is validated by tooling reading file footers, not by JSON
+    schema." A local relative ``partition:glob`` is expanded against the
+    collection's own directory and every matched footer is compared to the
+    first; a remote or absolute glob (``s3://``, ``https://``) cannot be
+    listed from the local tree, so it is skipped. Unreadable files degrade to
+    silence — the byte checks own reporting broken assets.
+    """
+    pattern = node.data.get("partition:glob")
+    if not isinstance(pattern, str) or not pattern.strip():
+        return []
+    if urlparse(pattern).scheme or pattern.startswith("/"):
+        return []  # remote or absolute: not listable from here
+    normalized = posixpath.normpath(pattern)
+    if normalized.startswith(".."):
+        return []  # escapes the catalog tree
+    base = node.abs_path.parent
+    schemas: list[tuple[str, dict[str, str]]] = []
+    for match in sorted(globmodule.glob(normalized, root_dir=str(base))):
+        try:
+            parquet = pq.ParquetFile(str(base / match))
+        except Exception:  # noqa: BLE001 - unreadable partition: the byte checks own it
+            continue
+        arrow = parquet.schema_arrow
+        schemas.append((match, {field.name: str(field.type) for field in arrow}))
+    if len(schemas) < 2:
+        return []  # nothing to compare
+    reference_name, reference = schemas[0]
+    defects: list[DataDefect] = []
+    for name, schema in schemas[1:]:
+        difference = _schema_difference(reference, schema)
+        if difference is None:
+            continue
+        defects.append(
+            DataDefect(
+                DAT_PARTITION_SCHEMA,
+                Severity.ERROR,
+                f"partition file '{name}' does not share '{reference_name}'s "
+                f"Parquet schema: {difference}",
+                "",
+                json_pointer="/partition:glob",
+            )
+        )
+    return defects
+
+
+def _schema_difference(reference: dict[str, str], other: dict[str, str]) -> str | None:
+    """A one-line description of how two column maps diverge, or None if equal."""
+    missing = sorted(set(reference) - set(other))
+    extra = sorted(set(other) - set(reference))
+    if missing or extra:
+        parts = []
+        if missing:
+            parts.append(f"missing column(s) {missing}")
+        if extra:
+            parts.append(f"extra column(s) {extra}")
+        return ", ".join(parts)
+    for name in reference:
+        if reference[name] != other[name]:
+            return f"column '{name}' is {other[name]}, expected {reference[name]}"
+    return None
 
 
 # --- format probing --------------------------------------------------------

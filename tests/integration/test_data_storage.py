@@ -22,10 +22,13 @@ from reis.catalog import Node  # noqa: E402
 from reis.data import (  # noqa: E402
     DAT_COG,
     DAT_COG_STATS,
+    DAT_GEOPARQUET_VERSION,
     DAT_ORDERING,
     DAT_OVERVIEWS,
+    DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
+    DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
 )
 from reis.data.reader import Locator  # noqa: E402
@@ -262,3 +265,130 @@ def test_primary_non_cog_tiff_is_still_flagged(tmp_path: Path) -> None:
     reader = _FileReader("./primary.tif", path)
     ids = [d.rule_id for d in checks.check_node(_node_with_asset(asset), reader)]
     assert DAT_COG in ids
+
+
+# --- GeoParquet version (PTL-DAT-012) ---------------------------------------
+
+
+def test_geoparquet_1_0_flags_dat_012(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.parquet"
+    assets.write_geoparquet(path, version="1.0.0", covering=False)
+    defects = _gpq(path)
+    ids = [d.rule_id for d in defects]
+    assert DAT_GEOPARQUET_VERSION in ids
+    flagged = next(d for d in defects if d.rule_id == DAT_GEOPARQUET_VERSION)
+    assert flagged.severity is Severity.ERROR
+    assert "1.0.0" in flagged.message
+
+
+def test_geoparquet_2_x_version_is_accepted(tmp_path: Path) -> None:
+    path = tmp_path / "v2.parquet"
+    assets.write_geoparquet(path, version="2.0.0")
+    assert DAT_GEOPARQUET_VERSION not in [d.rule_id for d in _gpq(path)]
+
+
+def test_missing_geo_version_flags_dat_012(tmp_path: Path) -> None:
+    path = tmp_path / "unversioned.parquet"
+    assets.write_geoparquet(path, version="")
+    ids = [d.rule_id for d in _gpq(path)]
+    assert DAT_GEOPARQUET_VERSION in ids
+
+
+# --- internal tile size (PTL-DAT-013) ---------------------------------------
+
+
+def _tiles(path: Path) -> list:
+    return checks._check_tile_size("data", _loc(path))
+
+
+def test_default_512_tiles_are_clean(tmp_path: Path) -> None:
+    path = tmp_path / "ok.tif"
+    assets.write_cog(path)
+    assert _tiles(path) == []
+
+
+def test_oversized_tiles_flag_dat_013(tmp_path: Path) -> None:
+    path = tmp_path / "big_tiles.tif"
+    assets.write_cog(path, size=2048, blocksize=1024)
+    defects = [d for d in _raster(path) if d.rule_id == DAT_TILE_SIZE]
+    assert len(defects) == 1
+    assert defects[0].severity is Severity.ERROR
+    assert "1024x1024" in defects[0].message
+
+
+def test_non_square_tiles_flag_dat_013(tmp_path: Path) -> None:
+    path = tmp_path / "oblong_tiles.tif"
+    assets.write_tiled_tiff(path, blockx=512, blocky=256)
+    defects = _tiles(path)
+    assert [d.rule_id for d in defects] == [DAT_TILE_SIZE]
+    assert "square" in defects[0].message
+
+
+def test_untiled_raster_is_skipped_by_the_tile_check(tmp_path: Path) -> None:
+    # Tiling itself is a base-COG requirement; cog_validate owns reporting it.
+    path = tmp_path / "striped.tif"
+    assets.write_plain_tiff(path)
+    assert _tiles(path) == []
+
+
+# --- overview cutoff uses the file's own tile size (PTL-DAT-011) -------------
+
+
+def test_raster_larger_than_its_own_small_tile_needs_overviews(tmp_path: Path) -> None:
+    # 400px with 256px tiles: within the old fixed 512px cutoff, but larger
+    # than its own tile, so overviews are required (formats.md:133).
+    path = tmp_path / "small_tiles.tif"
+    assets.write_cog(path, size=400, blocksize=256, overviews=False)
+    defects = [d for d in _raster(path) if d.rule_id == DAT_OVERVIEWS]
+    assert len(defects) == 1
+    assert "256px" in defects[0].message
+
+
+# --- partition schema consistency (PTL-DAT-014) ------------------------------
+
+
+def _partitioned_collection(directory: Path, glob: str = "parts/*.parquet") -> Node:
+    return Node(
+        path=PurePosixPath("buildings/collection.json"),
+        abs_path=directory / "collection.json",
+        kind="collection",
+        id="buildings",
+        data={"type": "Collection", "partition:glob": glob},
+    )
+
+
+def test_consistent_partition_schemas_are_clean(tmp_path: Path) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assets.write_geoparquet(parts / "b.parquet")
+    assert checks._check_partition_schemas(_partitioned_collection(tmp_path)) == []
+
+
+def test_diverging_partition_schemas_flag_dat_014(tmp_path: Path) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assets.write_geoparquet(parts / "b.parquet", columns={"extra": list(range(6))})
+    defects = checks._check_partition_schemas(_partitioned_collection(tmp_path))
+    assert [d.rule_id for d in defects] == [DAT_PARTITION_SCHEMA]
+    assert defects[0].severity is Severity.ERROR
+    assert "extra" in defects[0].message
+    assert defects[0].json_pointer == "/partition:glob"
+
+
+def test_remote_partition_glob_is_skipped(tmp_path: Path) -> None:
+    node = _partitioned_collection(tmp_path, glob="s3://bucket/parts/*.parquet")
+    assert checks._check_partition_schemas(node) == []
+
+
+def test_escaping_partition_glob_is_skipped(tmp_path: Path) -> None:
+    node = _partitioned_collection(tmp_path, glob="../elsewhere/*.parquet")
+    assert checks._check_partition_schemas(node) == []
+
+
+def test_single_partition_file_has_nothing_to_compare(tmp_path: Path) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assert checks._check_partition_schemas(_partitioned_collection(tmp_path)) == []

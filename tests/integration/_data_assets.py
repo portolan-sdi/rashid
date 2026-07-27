@@ -55,6 +55,8 @@ def write_geoparquet(
     covering: bool = True,
     row_group_size: int = 2,
     geo: bool = True,
+    version: str = "1.1.0",
+    columns: dict[str, list[object]] | None = None,
 ) -> None:
     pts = points if points is not None else ordered_points()
     xs = [p[0] for p in pts]
@@ -64,8 +66,10 @@ def write_geoparquet(
         "geometry": pa.array(wkb, type=pa.binary()),
         "value": list(range(len(pts))),
     }
+    if columns:
+        cols.update(columns)
     meta: dict[str, object] = {
-        "version": "1.1.0",
+        "version": version,
         "primary_column": "geometry",
         "columns": {
             "geometry": {
@@ -108,12 +112,14 @@ def write_cog(
     nodata: float | None = None,
     overviews: bool = True,
     size: int = 1024,
+    blocksize: int | None = None,
 ) -> None:
     """A valid COG (COG driver) with, by default, embedded per-band statistics.
 
     ``overviews=False`` sets the COG driver's ``OVERVIEWS=NONE``: the file stays
     a structurally valid COG (cog_validate passes it with only a warning) but
-    carries no internal overviews.
+    carries no internal overviews. ``blocksize`` overrides the internal tile
+    size (default: 512, clamped to the image).
     """
     arr = (np.arange(size * size, dtype="uint8") % 251).reshape(1, size, size)
     with rasterio.open(
@@ -127,7 +133,7 @@ def write_cog(
         crs="EPSG:4326",
         transform=from_bounds(*BBOX, size, size),
         compress="deflate",
-        blocksize=min(512, size),
+        blocksize=blocksize if blocksize is not None else min(512, size),
         nodata=nodata,
         overviews="AUTO" if overviews else "NONE",
     ) as dst:
@@ -143,6 +149,30 @@ def write_cog(
             if valid_percent:
                 tags["STATISTICS_VALID_PERCENT"] = "100"
             dst.update_tags(1, **tags)
+
+
+def write_tiled_tiff(path: Path, *, size: int = 1024, blockx: int = 512, blocky: int = 256) -> None:
+    """A tiled GeoTIFF with (by default, non-square) internal tiles.
+
+    Uses the plain GTiff driver: the COG driver only writes square tiles, and
+    the tile-size check inspects tiling regardless of COG validity.
+    """
+    arr = (np.arange(size * size, dtype="uint8") % 251).reshape(1, size, size)
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=size,
+        width=size,
+        count=1,
+        dtype="uint8",
+        crs="EPSG:4326",
+        transform=from_bounds(*BBOX, size, size),
+        tiled=True,
+        blockxsize=blockx,
+        blockysize=blocky,
+    ) as dst:
+        dst.write(arr)
 
 
 def write_plain_tiff(path: Path, *, size: int = 1024) -> None:
