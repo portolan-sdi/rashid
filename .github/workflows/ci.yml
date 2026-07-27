@@ -55,7 +55,8 @@ jobs:
       # error, so leaving this on would break every build. The 90%
       # diff-cover gate still runs.
       codecov: false
-      # Nightly sweep. Recent full runs finish in 7 to 9 minutes, so 30
-      # catches a hang without cutting a slow one short.
+      # Nightly sweep. Two measured runs took 15 and 16 minutes, both
+      # scoring 75.08% on 4650 testable mutants. 45 leaves room for the
+      # suite to grow without a timeout masquerading as a regression.
       mutation: true
-      mutation-timeout: 30
+      mutation-timeout: 45
