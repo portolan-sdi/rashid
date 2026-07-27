@@ -1,0 +1,14 @@
+# zizmor requires a hash pin on every `uses:` clause by default. The CI
+# caller in .github/workflows/ci.yml names a tag instead, and it has to:
+# `@v1` is a moving major tag, and pinning it to a hash would freeze this
+# repo on one commit of the shared workflow and defeat the release
+# mechanism (portolan-sdi/portolan-ops, norms/ci.md).
+#
+# Supplying any policy replaces zizmor's default outright, so the
+# wildcard below restores hash-pinning for everything else.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        portolan-sdi/portolan-ops/*: ref-pin
+        "*": hash-pin

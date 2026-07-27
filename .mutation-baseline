@@ -1,5 +1,19 @@
-# Minimum mutation kill rate (%) enforced by nightly.yml.
-# Ratchet UP as test quality improves; lowering requires justification in the PR.
-# Rate = killed / (killed + survived) from `mutmut results --all true`.
-# Initial full run (2026-07-20) scored 71% (1287 killed / 524 survived).
-65
+# Minimum mutation kill rate (%), enforced by the mutation job in the
+# shared Python CI workflow through scripts/mutation_score.py.
+#
+# Rate = (killed + timeout + suspicious) / testable, where testable
+# excludes mutants no test covers. A timeout or a suspicious result still
+# means the suite reacted, so both count as kills. Uncovered mutants are
+# excluded rather than counted as failures, because coverage measures
+# that gap already.
+#
+# Measured 2026-07-27 at 75.08%: 3491 killed of 4650 testable, with no
+# uncovered mutants. Run 30280640824.
+#
+# The previous value of 65 came from a different formula, killed over
+# killed plus survived, and the two numbers are not comparable.
+#
+# Ratchet UP as the suite improves. Lowering it requires a justification
+# in the pull request that does so. First non-comment, non-blank line
+# wins.
+72
