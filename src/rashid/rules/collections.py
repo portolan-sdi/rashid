@@ -224,6 +224,9 @@ class CollectionIdRule(Rule):
                 f"collection id '{node.id}' does not follow the naming convention"
                 " (lowercase letters, numbers, hyphens, underscores; starts with a letter)",
                 json_pointer="/id",
+                fix_hint="rename the id to lowercase, replacing spaces and other characters"
+                " with hyphens, e.g. 'road-centerlines-2024'",
+                actual=node.id,
             )
         # Report a duplicate on every collection after the first, so the first
         # occurrence (in path order) stays clean and each clash is flagged once.
@@ -234,6 +237,9 @@ class CollectionIdRule(Rule):
                     f"collection id '{node.id}' is not unique within the catalog"
                     f" (also used by '{other.path}')",
                     json_pointer="/id",
+                    fix_hint="give this collection a distinct id, e.g. prefix it with its"
+                    " parent catalog's name",
+                    actual=node.id,
                 )
                 return
 

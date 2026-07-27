@@ -140,4 +140,7 @@ class ItemMirrorRegistrationRule(Rule):
                     f"mirror asset '{key}' has type {asset.get('type')!r},"
                     f" expected '{PARQUET_MEDIA_TYPE}'",
                     json_pointer=f"{pointer}/type",
+                    fix_hint=f"set the mirror asset's type to '{PARQUET_MEDIA_TYPE}'",
+                    expected=PARQUET_MEDIA_TYPE,
+                    actual=asset.get("type"),
                 )

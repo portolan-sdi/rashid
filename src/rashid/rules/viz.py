@@ -102,6 +102,10 @@ class ThumbnailRule(Rule):
                     f"thumbnail asset '{key}' has type {media_type!r}, expected image/png"
                     " or image/jpeg",
                     json_pointer=f"{pointer}/type",
+                    fix_hint="set the thumbnail's type to the media type of the file it points"
+                    " at, 'image/png' or 'image/jpeg'",
+                    expected="image/png",
+                    actual=media_type,
                 )
 
 
@@ -151,6 +155,9 @@ class PMTilesRegistrationRule(Rule):
                 node,
                 "PMTiles asset is not registered through a rel:'pmtiles' link",
                 json_pointer="/links",
+                fix_hint='add {"rel": "pmtiles", "href": <the PMTiles href>, "type":'
+                f' "{PMTILES_MEDIA_TYPE}", "pmtiles:layers": [<default-visible layers>]}}'
+                " to links",
             )
             return
         for index, link in enumerate(links_of(node)):
@@ -162,6 +169,9 @@ class PMTilesRegistrationRule(Rule):
                     f"rel:'pmtiles' link has type {link.get('type')!r},"
                     f" expected '{PMTILES_MEDIA_TYPE}'",
                     json_pointer=f"/links/{index}/type",
+                    fix_hint=f"set the link's type to '{PMTILES_MEDIA_TYPE}'",
+                    expected=PMTILES_MEDIA_TYPE,
+                    actual=link.get("type"),
                 )
             layers = link.get("pmtiles:layers")
             if not isinstance(layers, list) or not layers:
@@ -169,6 +179,8 @@ class PMTilesRegistrationRule(Rule):
                     node,
                     "rel:'pmtiles' link has no pmtiles:layers array of default-visible layers",
                     json_pointer=f"/links/{index}",
+                    fix_hint="add pmtiles:layers to the link, naming the tile layers a client"
+                    ' should show by default, e.g. ["roads"]',
                 )
         extensions = node.data.get("stac_extensions")
         declared = isinstance(extensions, list) and any(
@@ -180,6 +192,7 @@ class PMTilesRegistrationRule(Rule):
                 "rel:'pmtiles' link used without declaring the web-map-links extension"
                 " schema in stac_extensions",
                 json_pointer="/stac_extensions",
+                fix_hint=f"add '{_WEB_MAP_LINKS_PREFIX}v1.3.0/schema.json' to stac_extensions",
             )
 
 
@@ -214,6 +227,9 @@ class StyleMediaTypeRule(Rule):
                     node,
                     f"style asset '{key}' has type {media_type!r}, expected '{STYLE_MEDIA_TYPE}'",
                     json_pointer=f"{pointer}/type",
+                    fix_hint=f"set the style asset's type to '{STYLE_MEDIA_TYPE}'",
+                    expected=STYLE_MEDIA_TYPE,
+                    actual=media_type,
                 )
 
 

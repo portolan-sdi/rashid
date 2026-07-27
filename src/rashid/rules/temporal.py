@@ -36,6 +36,8 @@ class DatetimePresentRule(Rule):
                 node,
                 "item has no datetime and no complete start_datetime/end_datetime interval",
                 json_pointer="/properties",
+                fix_hint="add properties.datetime, or both properties.start_datetime and"
+                " properties.end_datetime, as RFC 3339 date-times",
             )
 
 
@@ -61,6 +63,9 @@ class DatetimeValidRule(Rule):
                     node,
                     f"'{field}' value {value!r} is not an RFC 3339 date-time",
                     json_pointer=f"/properties/{field}",
+                    fix_hint=f"rewrite '{field}' as an RFC 3339 date-time,"
+                    " e.g. '2024-01-01T00:00:00Z'",
+                    actual=value,
                 )
         start = parsed.get("start_datetime")
         end = parsed.get("end_datetime")
@@ -69,4 +74,8 @@ class DatetimeValidRule(Rule):
                 node,
                 "start_datetime is after end_datetime",
                 json_pointer="/properties/start_datetime",
+                fix_hint="swap the two values, or correct whichever one is wrong, so"
+                " start_datetime is the earlier date-time",
+                expected=props.get("end_datetime"),
+                actual=props.get("start_datetime"),
             )

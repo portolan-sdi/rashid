@@ -68,6 +68,9 @@ def _check_markdown_link(
                 node,
                 f"rel:{rel!r} link has type {link.get('type')!r}, expected 'text/markdown'",
                 json_pointer=f"/links/{index}/type",
+                fix_hint=f"set the rel:{rel!r} link type to 'text/markdown'",
+                expected=_MARKDOWN,
+                actual=link.get("type"),
             )
         href = link.get("href")
         if not isinstance(href, str) or not href or is_absolute_href(href):
@@ -75,6 +78,9 @@ def _check_markdown_link(
                 node,
                 f"rel:{rel!r} link href must be a relative path, got {href!r}",
                 json_pointer=f"/links/{index}/href",
+                fix_hint=f'set the href to "./{target}"',
+                expected=f"./{target}",
+                actual=href,
             )
             continue
         resolved = graph.resolve_path(node, href)
@@ -83,6 +89,10 @@ def _check_markdown_link(
                 node,
                 f"rel:{rel!r} link href {href!r} does not resolve to the sibling {target}",
                 json_pointer=f"/links/{index}/href",
+                fix_hint=f'set the href to "./{target}" and make sure that file exists next to'
+                " this object",
+                expected=f"./{target}",
+                actual=href,
             )
 
 
@@ -105,14 +115,19 @@ class RequiredFilesRule(Rule):
                 variant = next(
                     (name for name in listing if name.casefold() == required.casefold()), None
                 )
+                hint = f"create {required} in this object's directory"
                 if variant is not None:
                     message += f" (found '{variant}'; filenames are case-sensitive)"
+                    hint = f"rename '{variant}' to '{required}'"
                 yield Finding(
                     rule_id=self.id,
                     severity=self.default_severity,
                     message=message,
                     path=str(node.path),
                     object_id=node.id,
+                    fix_hint=hint,
+                    expected=required,
+                    actual=variant,
                 )
 
 
