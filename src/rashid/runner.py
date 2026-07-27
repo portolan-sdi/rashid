@@ -140,7 +140,7 @@ def validate(
     schema: bool = False,
     schema_validator: Callable[[dict[str, Any]], list[SchemaError]] | None = None,
     schema_allow_network: bool = False,
-    data: bool = False,
+    data: bool = True,
     data_validator: DataValidator | None = None,
     live: bool = False,
     live_prober: LiveProber | None = None,
@@ -164,13 +164,16 @@ def validate(
     otherwise. Disabling ``PTL-SCH-001`` via ``config`` skips the pass.
     ``schema_validator`` injects an alternate validator, chiefly for testing.
 
-    When ``data`` is true the data pass runs too, reading each asset's bytes
-    (local files and remote ``https`` URLs) to verify checksum, size, format,
-    and spatial metadata (see :mod:`rashid.data`); it is off by default because it
-    reaches the network and needs the ``rashid[data]`` extra. Disabling every
-    ``PTL-DAT-00x`` rule via ``config`` skips the pass; disabling a subset just
-    silences those findings. ``data_validator`` injects an alternate validator,
-    chiefly for offline testing.
+    The data pass runs by default too, reading each asset's bytes (local
+    files and remote ``https`` URLs) to verify checksum, size, format, and
+    spatial metadata (see :mod:`rashid.data`) — byte verification is the core
+    of what a catalog validator is for. ``data=False`` skips it, worth doing
+    when the assets are huge or remote and only the metadata verdict is
+    needed. Disabling every ``PTL-DAT-00x`` rule via ``config`` also skips the
+    pass; disabling a subset just silences those findings. ``data_validator``
+    injects an alternate validator, chiefly for offline testing. If the
+    geospatial stack cannot import (broken GDAL, wheel-less platform), the
+    pass degrades to a single ``PTL-DAT-000`` warning.
 
     When ``live`` is true the live-hosting pass runs too, probing the servers
     behind the catalog's assets for HTTP range support and CORS (see

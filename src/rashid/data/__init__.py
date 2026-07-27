@@ -15,7 +15,7 @@ it is off by default (CLI ``--data``; ``validate(..., data=True)``), reaches the
 network, and downgrades to a single WARNING when it cannot run.
 
 The heavy geospatial dependencies (``pyarrow``, ``rasterio``, ``rio-cogeo``,
-``pyproj``, ``pmtiles``) live behind the ``rashid[data]`` extra and are imported
+``pyproj``) are core dependencies but are imported
 lazily by :func:`default_validator`, so the core package stays stdlib-only and a
 catalog with no data pass installs nothing new.
 """
@@ -119,7 +119,7 @@ def default_validator(graph: CatalogGraph | None = None) -> Validator:
     """Build the byte-verifying validator, importing the geospatial deps lazily.
 
     The metadata pass never needs these packages; importing :mod:`rashid.data.checks`
-    pulls ``pyarrow``/``rasterio``/``pyproj``/``pmtiles``/``rio_cogeo``. A missing
+    pulls ``pyarrow``/``rasterio``/``pyproj``/``rio_cogeo``. A missing
     extra surfaces here as ``ImportError`` and is downgraded to one WARNING.
 
     ``graph`` is bound into the returned validator for the one check that needs
@@ -152,7 +152,8 @@ def validate_data(graph: CatalogGraph, validator: Validator | None = None) -> li
                     severity=Severity.WARNING,
                     message=(
                         "data validation skipped: the 'rashid[data]' extra is not installed "
-                        "(needs pyarrow, rasterio, rio-cogeo, pyproj, pmtiles)"
+                        "(needs pyarrow, rasterio, rio-cogeo, and pyproj; pass data=False "
+                        "or --no-data to skip byte checks)"
                     ),
                     path=".",
                 )

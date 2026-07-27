@@ -2135,16 +2135,12 @@ source = { editable = "." }
 dependencies = [
     { name = "click" },
     { name = "jsonschema" },
-    { name = "referencing" },
-]
-
-[package.optional-dependencies]
-data = [
     { name = "pyarrow" },
     { name = "pyproj", version = "3.7.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pyproj", version = "3.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "rasterio", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "referencing" },
     { name = "rio-cogeo", version = "6.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "rio-cogeo", version = "7.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
@@ -2175,11 +2171,11 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.4" },
     { name = "jsonschema", specifier = ">=4.26" },
-    { name = "pyarrow", marker = "extra == 'data'", specifier = ">=25" },
-    { name = "pyproj", marker = "extra == 'data'", specifier = ">=3.7.1" },
-    { name = "rasterio", marker = "extra == 'data'", specifier = ">=1.4.4" },
+    { name = "pyarrow", specifier = ">=21" },
+    { name = "pyproj", specifier = ">=3.7.1" },
+    { name = "rasterio", specifier = ">=1.4.4" },
     { name = "referencing", specifier = ">=0.30" },
-    { name = "rio-cogeo", marker = "extra == 'data'", specifier = ">=6" },
+    { name = "rio-cogeo", specifier = ">=6" },
 ]
 provides-extras = ["data"]
 
