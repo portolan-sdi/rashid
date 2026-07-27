@@ -2184,7 +2184,7 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.4" },
     { name = "jsonschema", specifier = ">=4.26" },
-    { name = "pyarrow", marker = "extra == 'data'", specifier = ">=25" },
+    { name = "pyarrow", marker = "extra == 'data'", specifier = ">=21" },
     { name = "pyproj", marker = "extra == 'data'", specifier = ">=3.7.1" },
     { name = "rasterio", marker = "extra == 'data'", specifier = ">=1.4.4" },
     { name = "rio-cogeo", marker = "extra == 'data'", specifier = ">=6" },
