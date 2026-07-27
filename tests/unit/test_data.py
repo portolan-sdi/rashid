@@ -4,7 +4,7 @@ These exercise :func:`rashid.data.validate_data` and its runner/CLI wiring with 
 fake validator, exactly as ``test_schema.py`` does for the schema pass: the
 byte-reading and geospatial stack are not touched here (that is
 ``test_data_checks``/``test_data_catalog``), so these run without the
-``rashid[data]`` extra.
+geospatial stack (now a core dependency, still lazily imported).
 """
 
 from __future__ import annotations
@@ -99,7 +99,7 @@ def test_systemic_failure_reported_once(catalog: CatalogBuilder) -> None:
     assert "reader exploded" in findings[0].message
 
 
-def test_missing_extra_downgrades_to_warning(
+def test_missing_geospatial_stack_downgrades_to_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def raise_import(graph: CatalogGraph | None = None) -> data_pass.Validator:
@@ -111,7 +111,8 @@ def test_missing_extra_downgrades_to_warning(
 
     assert len(findings) == 1
     assert findings[0].rule_id == DAT_UNAVAILABLE
-    assert "rashid[data]" in findings[0].message
+    assert "geospatial stack" in findings[0].message
+    assert "--no-data" in findings[0].message
 
 
 def test_data_pass_surfaces_by_default(catalog: CatalogBuilder) -> None:
