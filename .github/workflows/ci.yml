@@ -1,0 +1,61 @@
+# Thin caller — synced from portolan-sdi/portolan-ops (ci/python-package/).
+# CI logic lives in ops' reusable-python-ci.yml; change it there.
+#
+# This file carries repo-specific inputs, so it is not managed by ops sync.
+# The workflow it calls is, through the @v1 tag.
+#
+# Replaces tests.yml (lint, security, matrix) and nightly.yml (mutation).
+# security-audit.yml stays: it files a tracking issue on pip-audit
+# findings, which the shared security job does not do
+# (portolan-sdi/portolan-ops#14).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # One nightly run replaces the separate test and mutation crons.
+    # Distinct minute so the fleet doesn't fire at once.
+    - cron: "19 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    # v1 is a moving major tag. Compatible changes arrive when ops moves
+    # it; a breaking change ships as v2 and reaches this repo as a
+    # Dependabot PR.
+    uses: portolan-sdi/portolan-ops/.github/workflows/reusable-python-ci.yml@v1
+    permissions:
+      contents: read
+      # The reusable test job requests this for Codecov OIDC even when the
+      # upload is off, and a caller must grant what the called workflow
+      # requests.
+      id-token: write
+    with:
+      # reis reads and writes files, and path handling is where Windows
+      # breaks. The shared default is ubuntu alone.
+      os: '["ubuntu", "macos", "windows"]'
+      # The data pass needs rasterio, pyproj, and the rest of the
+      # geospatial stack.
+      sync-args: "--extra data"
+      # Package path, not package name: coverage accepts either, and wily
+      # reads this as a directory to walk.
+      coverage-target: src/reis
+      bandit-target: src/reis
+      # reis has no Codecov project. The upload step fails the run on
+      # error, so leaving this on would break every build. The 90%
+      # diff-cover gate still runs.
+      codecov: false
+      # Nightly sweep. Recent full runs finish in 7 to 9 minutes, so 30
+      # catches a hang without cutting a slow one short.
+      mutation: true
+      mutation-timeout: 30
