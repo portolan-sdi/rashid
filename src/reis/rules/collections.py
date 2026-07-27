@@ -1,14 +1,20 @@
-"""Collection-modeling rules (spec: core.md, Single-File Collections).
+"""Collection-modeling rules (spec: core.md, Core Structure / Collections /
+Single-File Collections).
 
 A collection holding one data file MUST expose that file as a collection-level
 asset, with no item directory and no item JSON (core.md:139-141). The tabular
 section restates the same requirement for Parquet (formats.md:163-166). The
 check is structural: one item wrapping the collection's only data asset is the
 shape the spec rules out.
+
+Collections are also leaves: "collections MUST be one level deep, containing
+only items or assets, never nested collections" (core.md, Core Structure), and
+their IDs follow naming conventions (core.md, Collections).
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 from reis.catalog import CatalogGraph, Node
@@ -20,6 +26,12 @@ from reis.rules.assets import _assets_of
 _HAS_DATA_ASSET = "has-data-asset"
 _NO_DATA_ASSET = "no-data-asset"
 _UNKNOWN = "unknown"
+
+# core.md, Collections: "Collection IDs SHOULD contain only lowercase letters,
+# numbers, hyphens, and underscores, start with a letter". A nested collection's
+# ID is a POSIX path (e.g. environment/air-quality), so each path segment is
+# held to the convention.
+_ID_SEGMENT = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 
 class SingleFileCollectionRule(Rule):
@@ -40,6 +52,7 @@ class SingleFileCollectionRule(Rule):
     """
 
     id = "PTL-COL-001"
+    spec_ids = ("PORTO-CORE-017", "PORTO-FMT-034")
     default_severity = Severity.ERROR
     description = "a single-file collection must expose its data as a collection-level asset"
     kinds = ("collection",)
@@ -67,6 +80,79 @@ class SingleFileCollectionRule(Rule):
             fix_hint=f"move the item's '{key}' asset into the collection's assets, then delete"
             f" the item JSON, its directory, and the collection's rel:'item' link to it",
         )
+
+
+class NestedCollectionRule(Rule):
+    """Collections are leaves; a collection inside a collection is forbidden.
+
+    core.md, Core Structure: "collections MUST be one level deep, containing
+    only items or assets, never nested collections", restated under Nested
+    Catalogs, Flat Collections as "A collection MUST NOT contain a child
+    collection." A catalog below a collection is legitimate (the spec allows
+    one to organize many items), so the check walks the containment chain
+    looking for a collection ancestor, whatever sits in between.
+    """
+
+    id = "PTL-COL-002"
+    spec_ids = ("PORTO-CORE-004", "PORTO-CORE-014", "PORTO-CORE-018")
+    default_severity = Severity.ERROR
+    description = "collections must never nest: no collection may contain another collection"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        ancestor = graph.parent_of(node)
+        while ancestor is not None:
+            if ancestor.kind == "collection":
+                yield self.finding(
+                    node,
+                    f"collection is nested inside collection"
+                    f" '{ancestor.id or ancestor.path!s}'; collections must be one level deep",
+                    fix_hint="restructure so intermediate levels are catalogs"
+                    " and collections are leaves",
+                )
+                return
+            ancestor = graph.parent_of(ancestor)
+
+
+class CollectionIdRule(Rule):
+    """Collection IDs follow the naming convention and are unique.
+
+    core.md, Collections: "Collection IDs SHOULD contain only lowercase
+    letters, numbers, hyphens, and underscores, start with a letter, and be
+    unique within the catalog." A nested collection's ID is a POSIX path from
+    the catalog root (core.md, Nested Catalogs, Flat Collections), so the
+    convention applies per path segment. SHOULD-level, so a WARNING.
+    """
+
+    id = "PTL-COL-003"
+    spec_ids = ("PORTO-CORE-016",)
+    default_severity = Severity.WARNING
+    description = (
+        "collection IDs should be lowercase [a-z0-9_-], start with a letter, and be unique"
+    )
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        if node.id is None:
+            return  # the structural pass reports a missing id
+        if not all(_ID_SEGMENT.match(segment) for segment in node.id.split("/")):
+            yield self.finding(
+                node,
+                f"collection id '{node.id}' does not follow the naming convention"
+                " (lowercase letters, numbers, hyphens, underscores; starts with a letter)",
+                json_pointer="/id",
+            )
+        # Report a duplicate on every collection after the first, so the first
+        # occurrence (in path order) stays clean and each clash is flagged once.
+        for other in graph.iter("collection"):
+            if other is not node and other.id == node.id and other.path < node.path:
+                yield self.finding(
+                    node,
+                    f"collection id '{node.id}' is not unique within the catalog"
+                    f" (also used by '{other.path}')",
+                    json_pointer="/id",
+                )
+                return
 
 
 def _is_partitioned(node: Node) -> bool:

@@ -21,6 +21,7 @@ class TitleDescriptionRule(Rule):
     """Every catalog and collection has a non-empty title and description."""
 
     id = "PTL-TTL-001"
+    spec_ids = ("PORTO-CORE-037",)
     default_severity = Severity.ERROR
     description = "catalog.json and collection.json need a non-empty title and description"
     kinds = ("catalog", "collection")
@@ -41,6 +42,7 @@ class HumanReadableTitleRule(Rule):
     """
 
     id = "PTL-TTL-002"
+    spec_ids = ("PORTO-CORE-038", "PORTO-CORE-040")
     default_severity = Severity.WARNING
     description = "titles must be human-readable, not raw slugs or ns:LayerName identifiers"
     kinds = ("catalog", "collection")
@@ -70,6 +72,7 @@ class LinkTitleRule(Rule):
     """Every child and item link carries a title."""
 
     id = "PTL-TTL-003"
+    spec_ids = ("PORTO-CORE-039",)
     default_severity = Severity.ERROR
     description = "every child and item link must include a title"
     kinds = ("catalog", "collection")

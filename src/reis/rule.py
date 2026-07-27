@@ -22,6 +22,13 @@ class Rule(ABC):
     default_severity: ClassVar[Severity]
     description: ClassVar[str]
     kinds: ClassVar[tuple[Kind, ...]] = ()
+    #: Requirement IDs from the spec's requirements manifest
+    #: (``specs/portolan/requirements.yaml``) that this rule enforces.
+    #: ``tests/unit/test_spec_coverage.py`` gates on these: every
+    #: ``enforcement: validator`` MUST/SHOULD in the manifest must be cited
+    #: by at least one check. Empty only when a rule enforces spec text that
+    #: carries no RFC 2119 keyword.
+    spec_ids: ClassVar[tuple[str, ...]] = ()
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         return ()

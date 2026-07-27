@@ -25,6 +25,7 @@ class SchemaUriDeclaredRule(Rule):
     """Every catalog and collection declares exactly one Portolan schema URI."""
 
     id = "PTL-CNF-001"
+    spec_ids = ("PORTO-CORE-006", "PORTO-CORE-007")
     default_severity = Severity.ERROR
     description = "catalogs and collections must declare the versioned Portolan schema URI"
     kinds = ("catalog", "collection")
@@ -55,6 +56,7 @@ class SchemaUriConsistencyRule(Rule):
     """
 
     id = "PTL-CNF-002"
+    spec_ids = ("PORTO-CORE-009", "PORTO-CORE-010")
     default_severity = Severity.WARNING
     description = "objects whose Portolan schema URI differs from the root's are flagged"
     kinds = ()  # graph-level: compares everything against the root
@@ -84,3 +86,56 @@ class SchemaUriConsistencyRule(Rule):
                     object_id=node.id,
                     json_pointer="/stac_extensions",
                 )
+
+
+# The STAC version extension, the one place dataset versioning may live.
+# Version-tolerant prefix, matching how other extension declarations are
+# checked (web-map-links in viz, partition in partitions).
+_VERSION_EXTENSION_PREFIX = "https://stac-extensions.github.io/version/"
+
+# Fields the version extension defines on catalogs, collections, and items.
+_VERSION_FIELDS = ("version", "deprecated", "experimental")
+
+
+class VersionExtensionRule(Rule):
+    """Dataset versioning, where used, declares the STAC version extension.
+
+    core.md, Conformance and Versioning: "The specification version MUST NOT
+    be conflated with the dataset version. Dataset versioning, where used,
+    MUST use the STAC version extension." The specification version's only
+    home is the Portolan schema URI (PTL-CNF-001); a dataset version's only
+    home is the version extension's fields, and using those fields without
+    declaring the extension's schema in ``stac_extensions`` is the
+    machine-checkable violation.
+    """
+
+    id = "PTL-CNF-003"
+    spec_ids = ("PORTO-CORE-007", "PORTO-CORE-008")
+    default_severity = Severity.ERROR
+    description = "dataset versioning must declare the STAC version extension"
+    kinds = ("catalog", "collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        container = node.data.get("properties") if node.kind == "item" else node.data
+        if not isinstance(container, dict):
+            return
+        used = [field for field in _VERSION_FIELDS if field in container]
+        if not used or _declares_version_extension(node):
+            return
+        prefix = "/properties/" if node.kind == "item" else "/"
+        yield self.finding(
+            node,
+            f"dataset version field(s) {used} used without declaring the STAC"
+            " version extension in stac_extensions",
+            json_pointer=f"{prefix}{used[0]}",
+            fix_hint=f"add '{_VERSION_EXTENSION_PREFIX}v1.2.0/schema.json' to stac_extensions",
+        )
+
+
+def _declares_version_extension(node: Node) -> bool:
+    extensions = node.data.get("stac_extensions")
+    if not isinstance(extensions, list):
+        return False
+    return any(
+        isinstance(uri, str) and uri.startswith(_VERSION_EXTENSION_PREFIX) for uri in extensions
+    )

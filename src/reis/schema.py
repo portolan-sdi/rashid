@@ -36,6 +36,16 @@ from reis.rules.conformance import declared_schema_uris
 SCH_INVALID = "PTL-SCH-001"
 SCH_UNAVAILABLE = "PTL-SCH-000"
 
+# Requirement IDs from the spec's requirements manifest
+# (specs/portolan/requirements.yaml) enforced by each check;
+# gated by tests/unit/test_spec_coverage.py.
+SPEC_IDS: dict[str, tuple[str, ...]] = {
+    # The published profile schema is the machine-checkable aggregate of
+    # the same requirements the metadata rules cite individually; the
+    # declared-URI MUST is the one it enforces beyond that overlap.
+    SCH_INVALID: ("PORTO-CORE-006",),
+}
+
 # The pinned v0.1 profile schema, used when the root declares no single URI.
 DEFAULT_SCHEMA_URI = "https://schemas.portolan-sdi.org/portolan/v0.1.0/schema.json"
 

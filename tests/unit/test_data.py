@@ -22,11 +22,15 @@ from reis.data import (
     DAT_COG_STATS,
     DAT_CONSISTENCY,
     DAT_FORMAT,
+    DAT_GEOPARQUET_VERSION,
     DAT_ORDERING,
     DAT_OVERVIEWS,
+    DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
     DAT_SIZE,
+    DAT_TABULAR,
+    DAT_TILE_SIZE,
     DAT_UNAVAILABLE,
     DAT_VALID_PERCENT,
     DataDefect,
@@ -166,6 +170,10 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
             DAT_COG_STATS,
             DAT_VALID_PERCENT,
             DAT_OVERVIEWS,
+            DAT_GEOPARQUET_VERSION,
+            DAT_TILE_SIZE,
+            DAT_PARTITION_SCHEMA,
+            DAT_TABULAR,
         }
     )
     validate(graph_root, config=RulesConfig(disabled=all_ids), data=True, data_validator=spy)
@@ -187,3 +195,26 @@ def test_parse_error_nodes_are_skipped(catalog: CatalogBuilder, tmp_path: Path) 
 
     validate_data(graph, record)
     assert "unknown" not in seen  # the unparseable collection is not handed to the validator
+
+
+def test_defect_with_explicit_pointer_keeps_it(catalog: CatalogBuilder) -> None:
+    # Node-level defects (the partition-schema check) bind to no asset and
+    # carry their own pointer instead of the /assets/<key> construction.
+    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+        if node.kind != "collection":
+            return []
+        return [
+            DataDefect(
+                DAT_PARTITION_SCHEMA,
+                Severity.ERROR,
+                "partition schemas diverge",
+                "",
+                json_pointer="/partition:glob",
+            )
+        ]
+
+    findings = validate_data(_graph(catalog), check)
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == DAT_PARTITION_SCHEMA
+    assert findings[0].json_pointer == "/partition:glob"

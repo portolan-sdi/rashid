@@ -125,3 +125,26 @@ def test_item_asset_defaults_pass(catalog: CatalogBuilder) -> None:
     report = validate(catalog.write())
     for rule in ("PTL-AST-001", "PTL-AST-002", "PTL-AST-003", "PTL-AST-004"):
         assert findings_for(report, rule) == []
+
+
+def test_catalog_with_assets_is_flagged(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    catalog.overrides["assets"] = {"data": default_asset()}
+    findings = findings_for(validate(catalog.write()), "PTL-AST-005")
+    assert len(findings) == 1
+    assert findings[0].json_pointer == "/assets"
+    assert findings[0].path == "catalog.json"
+
+
+def test_subcatalog_with_assets_is_flagged(catalog: CatalogBuilder) -> None:
+    sub = catalog.subcatalog("regions")
+    sub.collection("roads")
+    sub.overrides["assets"] = {}  # even an empty assets field is the wrong level
+    findings = findings_for(validate(catalog.write()), "PTL-AST-005")
+    assert len(findings) == 1
+    assert findings[0].path == "regions/catalog.json"
+
+
+def test_catalog_without_assets_is_clean(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    assert findings_for(validate(catalog.write()), "PTL-AST-005") == []

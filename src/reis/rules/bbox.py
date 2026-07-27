@@ -37,6 +37,7 @@ class BboxValidRule(Rule):
     """Every bbox is finite, sentinel-free, in WGS84 range, with south <= north."""
 
     id = "PTL-BBX-001"
+    spec_ids = ("PORTO-CORE-041",)
     default_severity = Severity.ERROR
     description = "bboxes must be finite WGS84 coordinates with south <= north"
     kinds = ("catalog", "collection", "item")

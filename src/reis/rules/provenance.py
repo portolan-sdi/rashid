@@ -54,6 +54,7 @@ class MirrorViaLinkRule(Rule):
     """A mirror links back to its original source."""
 
     id = "PTL-PRO-001"
+    spec_ids = ("PORTO-CORE-053",)
     default_severity = Severity.ERROR
     description = "a mirror must include a rel:'via' link (type text/html) to the original source"
     kinds = ("collection",)
@@ -86,6 +87,7 @@ class MirrorCanonicalLinkRule(Rule):
     """
 
     id = "PTL-PRO-002"
+    spec_ids = ("PORTO-CORE-054", "PORTO-CORE-055")
     default_severity = Severity.INFO
     description = "a mirror should link the upstream STAC with rel:'canonical' when one exists"
     kinds = ("collection",)
@@ -110,6 +112,7 @@ class MirrorUpdatedRule(Rule):
     """
 
     id = "PTL-PRO-003"
+    spec_ids = ("PORTO-CORE-057",)
     default_severity = Severity.ERROR
     description = "a mirror must record sync time in a top-level RFC 3339 'updated' field"
     kinds = ()  # graph-level: the root-catalog part needs the whole tree
@@ -150,6 +153,8 @@ class OfficialNoUpstreamLinksRule(Rule):
     """An official catalog carries no via/canonical links to an upstream."""
 
     id = "PTL-PRO-004"
+    # No manifest ID: the official-carries-no-upstream-links sentence in
+    # core.md, Source Provenance, carries no RFC 2119 keyword.
     default_severity = Severity.ERROR
     description = "an official collection must not carry via or canonical upstream links"
     kinds = ("collection",)

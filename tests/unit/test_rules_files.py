@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from reis import validate
+from reis.model import Severity
 from tests.conftest import CatalogBuilder, findings_for, mutate_json
 
 pytestmark = pytest.mark.unit
@@ -157,3 +158,81 @@ def test_readme_link_on_collection(catalog: CatalogBuilder) -> None:
     findings = findings_for(validate(root), "PTL-FIL-003")
     assert len(findings) == 1
     assert findings[0].path == "roads/collection.json"
+
+
+def _readme(root, *parts):  # type: ignore[no-untyped-def]
+    path = root
+    for part in parts:
+        path = path / part
+    return path / "README.md"
+
+
+def test_default_readme_content_is_clean(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    report = validate(catalog.write())
+    assert findings_for(report, "PTL-FIL-004") == []
+    assert findings_for(report, "PTL-FIL-005") == []
+
+
+def test_empty_readme_is_an_error(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _readme(root, "roads").write_text("   \n", encoding="utf-8")
+    findings = findings_for(validate(root), "PTL-FIL-004")
+    assert len(findings) == 1
+    assert "empty" in findings[0].message
+    assert findings[0].path == "roads/collection.json"
+
+
+def test_readme_without_heading_is_an_error(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _readme(root, "roads").write_text(
+        "Road centerlines. License: CC-BY-4.0. Source: city GIS.\n", encoding="utf-8"
+    )
+    findings = findings_for(validate(root), "PTL-FIL-004")
+    assert len(findings) == 1
+    assert "heading" in findings[0].message
+
+
+def test_missing_readme_is_not_a_content_finding(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _readme(root, "roads").unlink()
+    report = validate(root)
+    assert findings_for(report, "PTL-FIL-004") == []
+    assert findings_for(report, "PTL-FIL-005") == []
+    assert len(findings_for(report, "PTL-FIL-001")) == 1
+
+
+def test_readme_without_license_mention_is_a_warning(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _readme(root, "roads").write_text(
+        "# Roads\n\nCenterlines produced by the city GIS office.\n", encoding="utf-8"
+    )
+    findings = findings_for(validate(root), "PTL-FIL-005")
+    assert len(findings) == 1
+    assert "license" in findings[0].message
+    assert findings[0].severity is Severity.WARNING
+
+
+def test_readme_without_provenance_mention_is_a_warning(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _readme(root, "roads").write_text(
+        "# Roads\n\nCenterlines for the metro area. License: CC-BY-4.0.\n", encoding="utf-8"
+    )
+    findings = findings_for(validate(root), "PTL-FIL-005")
+    assert len(findings) == 1
+    assert "provenance" in findings[0].message
+
+
+def test_catalog_readme_sections_are_not_graded(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    # An organizing catalog's README describes structure, not licensing.
+    (root / "README.md").write_text("# Demo Catalog\n\nThematic groupings.\n", encoding="utf-8")
+    report = validate(root)
+    assert findings_for(report, "PTL-FIL-004") == []
+    assert findings_for(report, "PTL-FIL-005") == []

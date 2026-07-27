@@ -6,7 +6,7 @@ against. Both live upstream in ``portolan-spec`` and drift as the spec evolves,
 so a hand-copied snapshot rots — that rot is exactly the schema-URI-namespace
 break this script exists to catch early.
 
-Running it against a spec checkout refreshes three fixture sets and records the
+Running it against a spec checkout refreshes four fixture sets and records the
 spec commit they came from in ``SPEC_REF``:
 
 - ``tests/fixtures/reference-catalog/`` — the JSON and Markdown of the reference
@@ -15,6 +15,10 @@ spec commit they came from in ``SPEC_REF``:
   schema version, discovered on disk, never hardcoded.
 - ``tests/fixtures/profile-examples/`` — the profile's own hand-authored STAC
   example objects (the micro-cases its ``check-portolan`` runs).
+- ``tests/fixtures/requirements.yaml`` — the spec's requirements manifest, the
+  per-requirement ID/severity/enforcement register that
+  ``tests/unit/test_spec_coverage.py`` gates every check's ``spec_ids``
+  against.
 
 Nothing here assumes a single schema version: the schema set is enumerated from
 ``stac/json-schema/v*/`` so a new version is vendored the moment it exists.
@@ -44,6 +48,7 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures"
 CATALOG_SRC = Path("examples/catalog/reference")
 SCHEMA_GLOB = "stac/json-schema/v*/schema.json"
 PROFILE_EXAMPLES_SRC = Path("stac/examples")
+REQUIREMENTS_SRC = Path("specs/portolan/requirements.yaml")
 
 # Only these extensions are copied out of the catalog tree; the parquet, COG,
 # PMTiles, and PNG assets (tens of MB) are never read by the validator.
@@ -114,6 +119,15 @@ def _vendor_profile_examples(spec: Path) -> int:
     return count
 
 
+def _vendor_requirements(spec: Path) -> int:
+    src = spec / REQUIREMENTS_SRC
+    if not src.is_file():
+        sys.exit(f"requirements manifest not found at {src}")
+    dest = FIXTURES / "requirements.yaml"
+    shutil.copyfile(src, dest)
+    return sum(1 for line in src.read_text(encoding="utf-8").splitlines() if "- id:" in line)
+
+
 def _spec_ref(spec: Path) -> str:
     return subprocess.run(
         ["git", "-C", str(spec), "rev-parse", "HEAD"],
@@ -132,6 +146,7 @@ def main() -> None:
     files = _vendor_catalog(spec)
     versions = _vendor_schemas(spec)
     examples = _vendor_profile_examples(spec)
+    requirements = _vendor_requirements(spec)
     ref = _spec_ref(spec)
 
     (REPO_ROOT / "SPEC_REF").write_text(
@@ -145,6 +160,7 @@ def main() -> None:
     print(f"  reference-catalog: {files} json/md files")
     print(f"  schema versions:   {', '.join(versions)}")
     print(f"  profile-examples:  {examples} objects")
+    print(f"  requirements:      {requirements} manifest entries")
 
 
 if __name__ == "__main__":

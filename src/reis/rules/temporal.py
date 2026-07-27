@@ -20,6 +20,7 @@ class DatetimePresentRule(Rule):
     """Items carry a datetime or a start/end interval (SHOULD)."""
 
     id = "PTL-TMP-001"
+    spec_ids = ("PORTO-CORE-042",)
     default_severity = Severity.WARNING
     description = "items should carry a datetime or a start/end interval"
     kinds = ("item",)
@@ -42,6 +43,7 @@ class DatetimeValidRule(Rule):
     """Temporal values that are present parse as RFC 3339, with start <= end."""
 
     id = "PTL-TMP-002"
+    spec_ids = ("PORTO-CORE-019",)
     default_severity = Severity.ERROR
     description = "datetime fields must be RFC 3339 with start_datetime <= end_datetime"
     kinds = ("item",)

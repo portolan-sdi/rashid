@@ -26,6 +26,22 @@ from reis.model import Finding, Severity
 STR_INVALID = "PTL-STR-001"
 STR_UNAVAILABLE = "PTL-STR-000"
 
+# Requirement IDs from the spec's requirements manifest
+# (specs/portolan/requirements.yaml) enforced by each check;
+# gated by tests/unit/test_spec_coverage.py.
+SPEC_IDS: dict[str, tuple[str, ...]] = {
+    # STAC 1.1.0 validity of the entrypoint and every object, including
+    # the Item MUSTs (id, geometry/bbox, datetime, assets, links) and the
+    # STAC-required collection extent that a tabular collection still
+    # carries (PORTO-FMT-036).
+    STR_INVALID: (
+        "PORTO-CORE-001",
+        "PORTO-CORE-013",
+        "PORTO-CORE-019",
+        "PORTO-FMT-036",
+    ),
+}
+
 # A validator maps one object's raw JSON to a list of structural error messages;
 # an empty list means the object is structurally valid STAC.
 Validator = Callable[[dict[str, Any]], list[str]]
