@@ -5,7 +5,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from reis.catalog import CatalogGraph
+from rashid.catalog import CatalogGraph
 from tests.conftest import CatalogBuilder
 
 pytestmark = pytest.mark.unit

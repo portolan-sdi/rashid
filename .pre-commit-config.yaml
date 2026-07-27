@@ -73,7 +73,7 @@ repos:
 
       - id: xenon
         name: xenon (complexity ceiling)
-        entry: uv run xenon --max-absolute=D --max-modules=C --max-average=B src/reis tests
+        entry: uv run xenon --max-absolute=D --max-modules=C --max-average=B src/rashid tests
         language: system
         pass_filenames: false
         stages: [pre-push]

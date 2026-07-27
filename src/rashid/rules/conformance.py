@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from reis.catalog import CatalogGraph, Node
-from reis.model import Finding, Severity
-from reis.rule import Rule
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
 
 SCHEMA_URI_PATTERN = re.compile(
     r"^https://schemas\.portolan-sdi\.org/portolan/v\d+\.\d+\.\d+/schema\.json$"

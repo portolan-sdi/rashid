@@ -2,40 +2,40 @@
 
 from __future__ import annotations
 
-from reis.rule import Rule
-from reis.rules.assets import (
+from rashid.rule import Rule
+from rashid.rules.assets import (
     AssetFieldsRule,
     AssetFileFieldsRule,
     AssetHrefSchemeRule,
     CatalogAssetsRule,
     ChecksumMultihashRule,
 )
-from reis.rules.bbox import BboxValidRule
-from reis.rules.collections import (
+from rashid.rules.bbox import BboxValidRule
+from rashid.rules.collections import (
     CollectionIdRule,
     NestedCollectionRule,
     RasterSceneItemRule,
     SingleFileCollectionRule,
 )
-from reis.rules.conformance import (
+from rashid.rules.conformance import (
     SchemaUriConsistencyRule,
     SchemaUriDeclaredRule,
     VersionExtensionRule,
 )
-from reis.rules.files import (
+from rashid.rules.files import (
     AgentsLinkRule,
     ReadmeContentRule,
     ReadmeLinkRule,
     ReadmeSectionsRule,
     RequiredFilesRule,
 )
-from reis.rules.item_mirror import ItemMirrorPresentRule, ItemMirrorRegistrationRule
-from reis.rules.license import (
+from rashid.rules.item_mirror import ItemMirrorPresentRule, ItemMirrorRegistrationRule
+from rashid.rules.license import (
     LicenseDeclaredRule,
     NoProprietaryLicenseRule,
     OtherLicenseLinkRule,
 )
-from reis.rules.links import (
+from rashid.rules.links import (
     ChildLinkCompletenessRule,
     LinkResolutionRule,
     NoSelfLinkRule,
@@ -43,17 +43,17 @@ from reis.rules.links import (
     RequiredLinksRule,
     StructuralLinkTypeRule,
 )
-from reis.rules.partitions import PartitionFieldsRule
-from reis.rules.provenance import (
+from rashid.rules.partitions import PartitionFieldsRule
+from rashid.rules.provenance import (
     MirrorCanonicalLinkRule,
     MirrorUpdatedRule,
     MirrorViaLinkRule,
     OfficialNoUpstreamLinksRule,
 )
-from reis.rules.providers import HostContactRule, ProducerPresentRule, SingleHostRule
-from reis.rules.temporal import DatetimePresentRule, DatetimeValidRule
-from reis.rules.titles import HumanReadableTitleRule, LinkTitleRule, TitleDescriptionRule
-from reis.rules.viz import (
+from rashid.rules.providers import HostContactRule, ProducerPresentRule, SingleHostRule
+from rashid.rules.temporal import DatetimePresentRule, DatetimeValidRule
+from rashid.rules.titles import HumanReadableTitleRule, LinkTitleRule, TitleDescriptionRule
+from rashid.rules.viz import (
     LargeVectorWithoutVisualRule,
     PMTilesRegistrationRule,
     StyleMediaTypeRule,

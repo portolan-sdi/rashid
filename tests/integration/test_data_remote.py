@@ -16,15 +16,15 @@ from urllib.request import urlopen
 
 import pytest
 
-from reis.catalog import CatalogGraph
-from reis.data import DAT_CHECKSUM, DAT_SIZE, validate_data
-from reis.model import Severity
+from rashid.catalog import CatalogGraph
+from rashid.data import DAT_CHECKSUM, DAT_SIZE, validate_data
+from rashid.model import Severity
 from tests.conftest import CatalogBuilder, skip_if_network_flaked
 
 pytestmark = [pytest.mark.integration, pytest.mark.network]
 
 # An immutable blob: this repo's README at a merged commit. Public, range-capable.
-_URL = "https://raw.githubusercontent.com/portolan-sdi/reis/312ff6e/README.md"
+_URL = "https://raw.githubusercontent.com/portolan-sdi/rashid/312ff6e/README.md"
 
 
 def _fetch(url: str) -> bytes:

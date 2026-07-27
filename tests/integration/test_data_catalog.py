@@ -8,7 +8,7 @@ data pass cleanly; each test then mutates one metadata field and asserts the one
 finding it should raise. Byte-structure rules (COG validity, spatial ordering,
 statistics) are covered in ``test_data_storage``.
 
-Needs the ``reis[data]`` extra; skips without it. Fully local — no network.
+Needs the ``rashid[data]`` extra; skips without it. Fully local — no network.
 """
 
 from __future__ import annotations
@@ -24,9 +24,9 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
-from reis import validate  # noqa: E402
-from reis.catalog import CatalogGraph  # noqa: E402
-from reis.data import (  # noqa: E402
+from rashid import validate  # noqa: E402
+from rashid.catalog import CatalogGraph  # noqa: E402
+from rashid.data import (  # noqa: E402
     DAT_CHECKSUM,
     DAT_CONSISTENCY,
     DAT_FORMAT,

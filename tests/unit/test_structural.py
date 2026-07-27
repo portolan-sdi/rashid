@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-from reis import RulesConfig, validate, validate_structural
-from reis.catalog import CatalogGraph
-from reis.model import Severity
-from reis.structural import default_validator
+from rashid import RulesConfig, validate, validate_structural
+from rashid.catalog import CatalogGraph
+from rashid.model import Severity
+from rashid.structural import default_validator
 from tests.conftest import CatalogBuilder, skip_if_network_flaked
 
 pytestmark = pytest.mark.unit
@@ -60,7 +60,7 @@ def test_validator_failure_is_a_single_warning(catalog: CatalogBuilder) -> None:
 def test_missing_package_is_a_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import reis.structural as structural
+    import rashid.structural as structural
 
     def raise_import() -> None:
         raise ImportError("No module named 'stac_validator'")
@@ -75,7 +75,7 @@ def test_missing_package_is_a_warning(
 def test_default_validator_used_when_none(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import reis.structural as structural
+    import rashid.structural as structural
 
     monkeypatch.setattr(structural, "default_validator", lambda: lambda data: [])
     assert structural.validate_structural(_graph(catalog), None) == []

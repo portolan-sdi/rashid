@@ -6,8 +6,8 @@ from abc import ABC
 from collections.abc import Iterable
 from typing import ClassVar
 
-from reis.catalog import CatalogGraph, Kind, Node
-from reis.model import Finding, Severity
+from rashid.catalog import CatalogGraph, Kind, Node
+from rashid.model import Finding, Severity
 
 
 class Rule(ABC):

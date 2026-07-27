@@ -15,12 +15,12 @@ from urllib.request import urlopen
 
 import pytest
 
-from reis.live import ProbeResponse, _UrllibProber
+from rashid.live import ProbeResponse, _UrllibProber
 
 pytestmark = [pytest.mark.integration, pytest.mark.network]
 
 # An immutable blob: this repo's README at a merged commit. Public, range-capable.
-_URL = "https://raw.githubusercontent.com/portolan-sdi/reis/312ff6e/README.md"
+_URL = "https://raw.githubusercontent.com/portolan-sdi/rashid/312ff6e/README.md"
 
 
 def _require_reachable(url: str) -> None:

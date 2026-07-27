@@ -4,8 +4,8 @@ from typing import Any
 
 import pytest
 
-from reis import validate
-from reis.model import Severity
+from rashid import validate
+from rashid.model import Severity
 from tests.conftest import (
     CatalogBuilder,
     findings_for,

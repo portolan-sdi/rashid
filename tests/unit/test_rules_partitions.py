@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from reis import validate
+from rashid import validate
 from tests.conftest import CatalogBuilder, findings_for, mutate_json
 
 pytestmark = pytest.mark.unit

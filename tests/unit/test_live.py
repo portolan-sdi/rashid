@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from reis import RulesConfig, validate, validate_live
-from reis.catalog import CatalogGraph
-from reis.live import (
+from rashid import RulesConfig, validate, validate_live
+from rashid.catalog import CatalogGraph
+from rashid.live import (
     LIV_CORS_EXPOSE,
     LIV_CORS_ORIGIN,
     LIV_CORS_PREFLIGHT,
@@ -20,7 +20,7 @@ from reis.live import (
     LIV_UNAVAILABLE,
     ProbeResponse,
 )
-from reis.model import Severity
+from rashid.model import Severity
 from tests.conftest import VALID_MULTIHASH, CatalogBuilder
 
 pytestmark = pytest.mark.unit
@@ -146,7 +146,7 @@ def test_missing_allow_origin_is_cors_error(catalog: CatalogBuilder) -> None:
 def test_any_allow_origin_value_passes(catalog: CatalogBuilder) -> None:
     # A server that echoes the probe origin permitted an arbitrary origin: pass.
     graph = _graph_with_remote(catalog)
-    response = _good_range(**{"access-control-allow-origin": "https://reis-live-probe.invalid"})
+    response = _good_range(**{"access-control-allow-origin": "https://rashid-live-probe.invalid"})
     findings = validate_live(graph, FakeProber(range_response=response))
     assert LIV_CORS_ORIGIN not in _ids(findings)
 

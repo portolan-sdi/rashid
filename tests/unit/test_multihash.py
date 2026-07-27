@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from reis._multihash import is_well_formed_multihash
+from rashid._multihash import is_well_formed_multihash
 from tests.conftest import VALID_MULTIHASH
 
 pytestmark = pytest.mark.unit

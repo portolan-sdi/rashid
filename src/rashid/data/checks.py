@@ -1,9 +1,9 @@
 """Byte-level checks: does an asset's data match what its metadata declares?
 
-Reached only through :func:`reis.data.default_validator`, so importing this
+Reached only through :func:`rashid.data.default_validator`, so importing this
 module (and the geospatial stack it pulls) happens only when the opt-in data
 pass actually runs. Each check turns a divergence between the declared metadata
-and the real bytes into a :class:`reis.data.DataDefect`:
+and the real bytes into a :class:`rashid.data.DataDefect`:
 
 - ``PTL-DAT-001`` recomputed multihash ≠ ``file:checksum`` (MUST)
 - ``PTL-DAT-002`` byte length ≠ ``file:size`` (MUST)
@@ -67,9 +67,9 @@ import rasterio
 from pyproj import CRS, Transformer
 from rio_cogeo.cogeo import cog_validate
 
-from reis._multihash import decode_multihash
-from reis.catalog import CatalogGraph, Node
-from reis.data import (
+from rashid._multihash import decode_multihash
+from rashid.catalog import CatalogGraph, Node
+from rashid.data import (
     DAT_CHECKSUM,
     DAT_COG,
     DAT_COG_STATS,
@@ -88,9 +88,9 @@ from reis.data import (
     DAT_VALID_PERCENT,
     DataDefect,
 )
-from reis.data.reader import AssetReader, Locator
-from reis.model import Severity
-from reis.rules.item_mirror import is_mirror_asset
+from rashid.data.reader import AssetReader, Locator
+from rashid.model import Severity
+from rashid.rules.item_mirror import is_mirror_asset
 
 # Multihash function code -> hashlib algorithm name.
 _HASH_ALGOS = {
@@ -304,7 +304,7 @@ def _verify_checksum(
                 DAT_CHECKSUM,
                 Severity.INFO,
                 f"asset '{key}' file:checksum uses hash function 0x{code:x}, "
-                "which reis cannot compute; not verified",
+                "which rashid cannot compute; not verified",
                 key,
                 "file:checksum",
             )

@@ -1,4 +1,4 @@
-"""Thin Click CLI over the reis validation library.
+"""Thin Click CLI over the rashid validation library.
 
 Exit codes: 0 when validation passed, 1 when errors were found,
 2 on usage errors (Click's default).
@@ -11,8 +11,8 @@ from pathlib import Path
 
 import click
 
-from reis.model import Report, Severity
-from reis.runner import validate
+from rashid.model import Report, Severity
+from rashid.runner import validate
 
 _SEVERITY_TAGS = {
     Severity.ERROR: "error",
@@ -22,9 +22,9 @@ _SEVERITY_TAGS = {
 
 
 @click.group()
-@click.version_option(package_name="reis")
+@click.version_option(package_name="rashid")
 def main() -> None:
-    """reis — validator and linter for Portolan catalogs."""
+    """rashid — validator and linter for Portolan catalogs."""
 
 
 @main.command()
@@ -48,7 +48,7 @@ def main() -> None:
     "--data/--no-data",
     "data",
     default=False,
-    help="Also verify asset bytes: checksum, size, format, extent (needs reis[data], network).",
+    help="Also verify asset bytes: checksum, size, format, extent (needs rashid[data], network).",
 )
 @click.option(
     "--live/--no-live",

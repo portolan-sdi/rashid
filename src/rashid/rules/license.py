@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from reis._spdx import SPDX_LICENSE_IDS
-from reis.catalog import CatalogGraph, Node
-from reis.model import Finding, Severity
-from reis.rule import Rule
-from reis.rules._common import links_of
+from rashid._spdx import SPDX_LICENSE_IDS
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
+from rashid.rules._common import links_of
 
 _SPDX_BY_CASEFOLD = {license_id.casefold(): license_id for license_id in SPDX_LICENSE_IDS}
 

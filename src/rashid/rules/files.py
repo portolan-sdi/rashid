@@ -12,10 +12,10 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from reis.catalog import CatalogGraph, Node, is_absolute_href
-from reis.model import Finding, Severity
-from reis.rule import Rule
-from reis.rules._common import links_of
+from rashid.catalog import CatalogGraph, Node, is_absolute_href
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
+from rashid.rules._common import links_of
 
 _REQUIRED = ("AGENTS.md", "README.md")
 _MARKDOWN = "text/markdown"

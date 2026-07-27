@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from reis.catalog import CatalogGraph, Node
-from reis.model import Finding, Severity
-from reis.rule import Rule
-from reis.rules._common import parse_rfc3339
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
+from rashid.rules._common import parse_rfc3339
 
 
 def _properties(node: Node) -> dict[str, Any]:

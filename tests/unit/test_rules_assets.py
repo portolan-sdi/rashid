@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from reis import validate
+from rashid import validate
 from tests.conftest import (
     VALID_MULTIHASH,
     CatalogBuilder,

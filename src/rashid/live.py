@@ -33,8 +33,8 @@ from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from reis.catalog import CatalogGraph, Kind, Node
-from reis.model import Finding, Severity
+from rashid.catalog import CatalogGraph, Kind, Node
+from rashid.model import Finding, Severity
 
 LIV_UNAVAILABLE = "PTL-LIV-000"
 LIV_RANGE = "PTL-LIV-001"
@@ -61,7 +61,7 @@ _TIMEOUT = 30  # seconds per request
 
 # An arbitrary origin: a read-permitting CORS policy answers any origin, and a
 # restrictive one will not match this, correctly failing the check.
-_PROBE_ORIGIN = "https://reis-live-probe.invalid"
+_PROBE_ORIGIN = "https://rashid-live-probe.invalid"
 
 # core.md, Data Storage — the response headers a server MUST expose to browsers.
 _REQUIRED_EXPOSED = ("Content-Range", "Content-Length", "Accept-Ranges", "ETag")

@@ -10,7 +10,7 @@
 ## Reporting a Vulnerability
 
 Please report vulnerabilities privately via
-[GitHub Security Advisories](https://github.com/portolan-sdi/reis/security/advisories/new).
+[GitHub Security Advisories](https://github.com/portolan-sdi/rashid/security/advisories/new).
 Do not open a public issue for security problems.
 
 You can expect an acknowledgment within 7 days and a fix or mitigation plan
@@ -18,7 +18,7 @@ within 30 days for confirmed issues.
 
 ## Scope
 
-reis reads and validates catalog metadata (JSON) from local disk. It makes no
+rashid reads and validates catalog metadata (JSON) from local disk. It makes no
 network requests and executes no code from the catalogs it validates. Reports
 about crashes or resource exhaustion triggered by malicious catalog files are
 in scope.

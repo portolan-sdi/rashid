@@ -1,6 +1,6 @@
 """Byte-check logic — fake readers with in-memory bytes, no network.
 
-Needs the ``reis[data]`` extra (importing :mod:`reis.data.checks` pulls the
+Needs the ``rashid[data]`` extra (importing :mod:`rashid.data.checks` pulls the
 geospatial stack), so it lives under integration and skips when the extra is
 absent. Covers the checksum, size, and format checks with synthetic bytes plus
 the PMTiles header parse and the reprojection helper; the parquet-geo and COG
@@ -23,15 +23,15 @@ import pyarrow as pa  # noqa: E402
 import pyarrow.parquet as pq  # noqa: E402
 from pyproj import CRS, Transformer  # noqa: E402
 
-import reis.data.checks as checks  # noqa: E402
-from reis.catalog import Node  # noqa: E402
-from reis.data import (  # noqa: E402
+import rashid.data.checks as checks  # noqa: E402
+from rashid.catalog import Node  # noqa: E402
+from rashid.data import (  # noqa: E402
     DAT_CHECKSUM,
     DAT_FORMAT,
     DAT_SIZE,
 )
-from reis.data.reader import Locator  # noqa: E402
-from reis.model import Severity  # noqa: E402
+from rashid.data.reader import Locator  # noqa: E402
+from rashid.model import Severity  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -114,7 +114,7 @@ def test_format_mismatch_is_error() -> None:
 
 def test_unsupported_hash_is_info_not_error() -> None:
     payload = b"PAR1data"
-    # 0x18 = keccak-256, valid multihash code reis cannot compute.
+    # 0x18 = keccak-256, valid multihash code rashid cannot compute.
     digest = "00" * 32
     asset = _asset(**{"file:size": len(payload), "file:checksum": "1820" + digest})
     defects = _run(payload, asset)

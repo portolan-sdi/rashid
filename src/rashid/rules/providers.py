@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from reis.catalog import CatalogGraph, Node
-from reis.model import Finding, Severity
-from reis.rule import Rule
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
 
 
 def providers_of(node: Node) -> list[dict[str, Any]]:

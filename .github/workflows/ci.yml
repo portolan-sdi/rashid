@@ -41,7 +41,7 @@ jobs:
       # requests.
       id-token: write
     with:
-      # reis reads and writes files, and path handling is where Windows
+      # rashid reads and writes files, and path handling is where Windows
       # breaks. The shared default is ubuntu alone.
       os: '["ubuntu", "macos", "windows"]'
       # The data pass needs rasterio, pyproj, and the rest of the
@@ -49,9 +49,9 @@ jobs:
       sync-args: "--extra data"
       # Package path, not package name: coverage accepts either, and wily
       # reads this as a directory to walk.
-      coverage-target: src/reis
-      bandit-target: src/reis
-      # reis has no Codecov project. The upload step fails the run on
+      coverage-target: src/rashid
+      bandit-target: src/rashid
+      # rashid has no Codecov project. The upload step fails the run on
       # error, so leaving this on would break every build. The 90%
       # diff-cover gate still runs.
       codecov: false

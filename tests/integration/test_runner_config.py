@@ -7,8 +7,8 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from reis import RulesConfig, Severity, validate
-from reis.cli import main
+from rashid import RulesConfig, Severity, validate
+from rashid.cli import main
 from tests.conftest import CatalogBuilder, findings_for, rule_ids
 
 pytestmark = pytest.mark.integration

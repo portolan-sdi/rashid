@@ -1,6 +1,6 @@
 """Structural pass: STAC 1.1.0 core validation, delegated to stac-validator.
 
-The metadata pass (``reis.rules``) checks Portolan requirements over raw JSON
+The metadata pass (``rashid.rules``) checks Portolan requirements over raw JSON
 and is deliberately stdlib-only. STAC *structural* validity — that each object
 satisfies the STAC 1.1.0 core schema for its type — is a separable pass the
 Portolan spec explicitly delegates to a STAC validator (profile: Validation,
@@ -20,8 +20,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from reis.catalog import CatalogGraph, Kind
-from reis.model import Finding, Severity
+from rashid.catalog import CatalogGraph, Kind
+from rashid.model import Finding, Severity
 
 STR_INVALID = "PTL-STR-001"
 STR_UNAVAILABLE = "PTL-STR-000"
@@ -61,7 +61,7 @@ def default_validator() -> Validator:
     def _validate(data: dict[str, Any]) -> list[str]:
         # core=True validates against the STAC 1.1.0 core schema only. The
         # extension schemas an object declares — including the Portolan profile
-        # itself — are the metadata pass's domain (reis implements the profile's
+        # itself — are the metadata pass's domain (rashid implements the profile's
         # requirements by hand), so the structural pass must not try to fetch
         # and apply them.
         validator = stac_validator.StacValidate(core=True)

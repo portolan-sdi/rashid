@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from reis.model import Report
+from rashid.model import Report
 
 PORTOLAN_URI = "https://schemas.portolan-sdi.org/portolan/v0.1.0/schema.json"
 # multihash: varint(0x12 sha2-256) + varint(0x20) + sha256(b"")

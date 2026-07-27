@@ -15,7 +15,7 @@ it is off by default (CLI ``--data``; ``validate(..., data=True)``), reaches the
 network, and downgrades to a single WARNING when it cannot run.
 
 The heavy geospatial dependencies (``pyarrow``, ``rasterio``, ``rio-cogeo``,
-``pyproj``, ``pmtiles``) live behind the ``reis[data]`` extra and are imported
+``pyproj``, ``pmtiles``) live behind the ``rashid[data]`` extra and are imported
 lazily by :func:`default_validator`, so the core package stays stdlib-only and a
 catalog with no data pass installs nothing new.
 """
@@ -26,9 +26,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 
-from reis.catalog import CatalogGraph, Kind, Node
-from reis.data.reader import AssetReader, FilesystemHttpReader
-from reis.model import Finding, Severity
+from rashid.catalog import CatalogGraph, Kind, Node
+from rashid.data.reader import AssetReader, FilesystemHttpReader
+from rashid.model import Finding, Severity
 
 DAT_UNAVAILABLE = "PTL-DAT-000"
 DAT_CHECKSUM = "PTL-DAT-001"
@@ -115,7 +115,7 @@ Validator = Callable[[Node, AssetReader], list[DataDefect]]
 def default_validator(graph: CatalogGraph | None = None) -> Validator:
     """Build the byte-verifying validator, importing the geospatial deps lazily.
 
-    The metadata pass never needs these packages; importing :mod:`reis.data.checks`
+    The metadata pass never needs these packages; importing :mod:`rashid.data.checks`
     pulls ``pyarrow``/``rasterio``/``pyproj``/``pmtiles``/``rio_cogeo``. A missing
     extra surfaces here as ``ImportError`` and is downgraded to one WARNING.
 
@@ -124,7 +124,7 @@ def default_validator(graph: CatalogGraph | None = None) -> Validator:
     items, which means reading the collection's children (``PTL-DAT-016``).
     Called without it, that check is skipped and the rest run unchanged.
     """
-    from reis.data import checks
+    from rashid.data import checks
 
     if graph is None:
         return checks.check_node
@@ -135,7 +135,7 @@ def validate_data(graph: CatalogGraph, validator: Validator | None = None) -> li
     """Verify every asset's bytes against its declared metadata.
 
     Returns ``PTL-DAT-00x`` findings for each mismatch. If the validator is
-    unavailable (the ``reis[data]`` extra is not installed) or a call fails
+    unavailable (the ``rashid[data]`` extra is not installed) or a call fails
     systemically, returns a single ``PTL-DAT-000`` warning instead of failing the
     run — a systemic failure is reported once, not once per object.
     """
@@ -148,7 +148,7 @@ def validate_data(graph: CatalogGraph, validator: Validator | None = None) -> li
                     rule_id=DAT_UNAVAILABLE,
                     severity=Severity.WARNING,
                     message=(
-                        "data validation skipped: the 'reis[data]' extra is not installed "
+                        "data validation skipped: the 'rashid[data]' extra is not installed "
                         "(needs pyarrow, rasterio, rio-cogeo, pyproj, pmtiles)"
                     ),
                     path=".",

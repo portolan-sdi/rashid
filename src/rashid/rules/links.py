@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from reis.catalog import CatalogGraph, Node, is_absolute_href
-from reis.model import Finding, Severity
-from reis.rule import Rule
-from reis.rules._common import STRUCTURAL_RELS, links_of
+from rashid.catalog import CatalogGraph, Node, is_absolute_href
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
+from rashid.rules._common import STRUCTURAL_RELS, links_of
 
 
 class RequiredLinksRule(Rule):

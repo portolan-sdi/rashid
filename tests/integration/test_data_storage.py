@@ -1,6 +1,6 @@
 """Cloud-native storage rules: COG validity/statistics and GeoParquet layout.
 
-Needs the ``reis[data]`` extra; skips without it. Drives the check functions
+Needs the ``rashid[data]`` extra; skips without it. Drives the check functions
 directly on generated assets — a spec-compliant asset produces no findings, and
 each non-compliant variant raises exactly the rule it violates (formats.md:30/39/
 50/91/95).
@@ -18,9 +18,9 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
-import reis.data.checks as checks  # noqa: E402
-from reis.catalog import Node  # noqa: E402
-from reis.data import (  # noqa: E402
+import rashid.data.checks as checks  # noqa: E402
+from rashid.catalog import Node  # noqa: E402
+from rashid.data import (  # noqa: E402
     DAT_COG,
     DAT_COG_STATS,
     DAT_GEOPARQUET_VERSION,
@@ -33,8 +33,8 @@ from reis.data import (  # noqa: E402
     DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
 )
-from reis.data.reader import Locator  # noqa: E402
-from reis.model import Severity  # noqa: E402
+from rashid.data.reader import Locator  # noqa: E402
+from rashid.model import Severity  # noqa: E402
 from tests.integration import _data_assets as assets  # noqa: E402
 
 pytestmark = pytest.mark.integration
