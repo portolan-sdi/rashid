@@ -104,6 +104,31 @@ def write_geoparquet(
     pq.write_table(table, path, row_group_size=row_group_size)
 
 
+def write_item_rollup(
+    path: Path,
+    ids: list[str] | None,
+    *,
+    covering: bool = False,
+    row_group_size: int = 1,
+) -> None:
+    """A stac-geoparquet item rollup: one row per item, keyed by item id.
+
+    Written deliberately as the kind of file the GeoParquet data rules would
+    reject — interleaved geometries, no covering column, tiny row groups — so a
+    test can show that a rollup is exempt from them (PORTO-FMT-043). ``ids=None``
+    omits the ``id`` column, which is the shape PTL-DAT-016 rejects outright.
+    """
+    pts = interleaved_points()[: len(ids)] if ids else interleaved_points()[:1]
+    columns = {"id": pa.array(ids, type=pa.string())} if ids is not None else None
+    write_geoparquet(
+        path,
+        points=pts,
+        covering=covering,
+        row_group_size=row_group_size,
+        columns=columns,
+    )
+
+
 def write_cog(
     path: Path,
     *,

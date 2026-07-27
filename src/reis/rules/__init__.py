@@ -50,6 +50,7 @@ from reis.rules.provenance import (
     OfficialNoUpstreamLinksRule,
 )
 from reis.rules.providers import HostContactRule, ProducerPresentRule, SingleHostRule
+from reis.rules.rollup import ItemRollupPresentRule, ItemRollupRegistrationRule
 from reis.rules.temporal import DatetimePresentRule, DatetimeValidRule
 from reis.rules.titles import HumanReadableTitleRule, LinkTitleRule, TitleDescriptionRule
 from reis.rules.viz import (
@@ -106,6 +107,8 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     RasterSceneItemRule(),
     NestedCollectionRule(),
     CollectionIdRule(),
+    ItemRollupPresentRule(),
+    ItemRollupRegistrationRule(),
 )
 
 __all__ = ["DEFAULT_RULES"]

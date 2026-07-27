@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 
 from reis.catalog import CatalogGraph, Kind, Node
 from reis.data.reader import AssetReader, FilesystemHttpReader
@@ -45,6 +46,7 @@ DAT_GEOPARQUET_VERSION = "PTL-DAT-012"
 DAT_TILE_SIZE = "PTL-DAT-013"
 DAT_PARTITION_SCHEMA = "PTL-DAT-014"
 DAT_TABULAR = "PTL-DAT-015"
+DAT_ROLLUP = "PTL-DAT-016"
 
 # Requirement IDs from the spec's requirements manifest
 # (specs/portolan/requirements.yaml) enforced by each check;
@@ -76,6 +78,10 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     DAT_TILE_SIZE: ("PORTO-FMT-024",),
     DAT_PARTITION_SCHEMA: ("PORTO-FMT-021",),
     DAT_TABULAR: ("PORTO-FMT-037",),
+    # Rollup rows must match the collection's items (PORTO-FMT-042). The same
+    # check discharges the rollup exemption (PORTO-FMT-043): reaching it means
+    # the asset was routed away from the GeoParquet data checks.
+    DAT_ROLLUP: ("PORTO-FMT-042", "PORTO-FMT-043"),
 }
 
 # Assets are declared on collections and items; catalogs carry none.
@@ -106,16 +112,23 @@ class DataDefect:
 Validator = Callable[[Node, AssetReader], list[DataDefect]]
 
 
-def default_validator() -> Validator:
+def default_validator(graph: CatalogGraph | None = None) -> Validator:
     """Build the byte-verifying validator, importing the geospatial deps lazily.
 
     The metadata pass never needs these packages; importing :mod:`reis.data.checks`
     pulls ``pyarrow``/``rasterio``/``pyproj``/``pmtiles``/``rio_cogeo``. A missing
     extra surfaces here as ``ImportError`` and is downgraded to one WARNING.
+
+    ``graph`` is bound into the returned validator for the one check that needs
+    more than a single object: the item rollup must agree with the collection's
+    items, which means reading the collection's children (``PTL-DAT-016``).
+    Called without it, that check is skipped and the rest run unchanged.
     """
     from reis.data import checks
 
-    return checks.check_node
+    if graph is None:
+        return checks.check_node
+    return partial(checks.check_node, graph=graph)
 
 
 def validate_data(graph: CatalogGraph, validator: Validator | None = None) -> list[Finding]:
@@ -128,7 +141,7 @@ def validate_data(graph: CatalogGraph, validator: Validator | None = None) -> li
     """
     if validator is None:
         try:
-            validator = default_validator()
+            validator = default_validator(graph)
         except ImportError:
             return [
                 Finding(

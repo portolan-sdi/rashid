@@ -102,7 +102,7 @@ def test_systemic_failure_reported_once(catalog: CatalogBuilder) -> None:
 def test_missing_extra_downgrades_to_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def raise_import() -> data_pass.Validator:
+    def raise_import(graph: CatalogGraph | None = None) -> data_pass.Validator:
         raise ImportError("No module named 'pyarrow'")
 
     monkeypatch.setattr(data_pass, "default_validator", raise_import)
