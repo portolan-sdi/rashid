@@ -46,7 +46,7 @@ DAT_GEOPARQUET_VERSION = "PTL-DAT-012"
 DAT_TILE_SIZE = "PTL-DAT-013"
 DAT_PARTITION_SCHEMA = "PTL-DAT-014"
 DAT_TABULAR = "PTL-DAT-015"
-DAT_ROLLUP = "PTL-DAT-016"
+DAT_MIRROR = "PTL-DAT-016"
 
 # Requirement IDs from the spec's requirements manifest
 # (specs/portolan/requirements.yaml) enforced by each check;
@@ -61,11 +61,13 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     # The footprint comparison is scoped to geospatial data only, which is
     # how a tabular bbox stays informational (PORTO-FMT-036).
     DAT_CONSISTENCY: ("PORTO-FMT-036",),
-    DAT_ORDERING: ("PORTO-FMT-006",),
+    # FMT-043 binds an item mirror to the same three GeoParquet MUSTs as
+    # vector data, so the checks that enforce them carry it too.
+    DAT_ORDERING: ("PORTO-FMT-006", "PORTO-FMT-043"),
     # ERROR when neither statistics source exists; WARNING when a 2.x file
     # relies on native statistics without the RECOMMENDED covering column.
-    DAT_ROWGROUP_STATS: ("PORTO-FMT-007", "PORTO-FMT-008"),
-    DAT_ROWGROUP_SIZE: ("PORTO-FMT-009",),
+    DAT_ROWGROUP_STATS: ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043"),
+    DAT_ROWGROUP_SIZE: ("PORTO-FMT-009", "PORTO-FMT-043"),
     DAT_COG_STATS: (
         "PORTO-FMT-026",
         "PORTO-FMT-027",
@@ -78,10 +80,8 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     DAT_TILE_SIZE: ("PORTO-FMT-024",),
     DAT_PARTITION_SCHEMA: ("PORTO-FMT-021",),
     DAT_TABULAR: ("PORTO-FMT-037",),
-    # Rollup rows must match the collection's items (PORTO-FMT-042). The same
-    # check discharges the rollup exemption (PORTO-FMT-043): reaching it means
-    # the asset was routed away from the GeoParquet data checks.
-    DAT_ROLLUP: ("PORTO-FMT-042", "PORTO-FMT-043"),
+    # A mirror must reproduce the collection's items (PORTO-FMT-042).
+    DAT_MIRROR: ("PORTO-FMT-042",),
 }
 
 # Assets are declared on collections and items; catalogs carry none.
@@ -120,7 +120,7 @@ def default_validator(graph: CatalogGraph | None = None) -> Validator:
     extra surfaces here as ``ImportError`` and is downgraded to one WARNING.
 
     ``graph`` is bound into the returned validator for the one check that needs
-    more than a single object: the item rollup must agree with the collection's
+    more than a single object: the item mirror must agree with the collection's
     items, which means reading the collection's children (``PTL-DAT-016``).
     Called without it, that check is skipped and the rest run unchanged.
     """

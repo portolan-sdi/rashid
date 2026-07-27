@@ -104,21 +104,26 @@ def write_geoparquet(
     pq.write_table(table, path, row_group_size=row_group_size)
 
 
-def write_item_rollup(
+def write_item_mirror(
     path: Path,
     ids: list[str] | None,
     *,
-    covering: bool = False,
-    row_group_size: int = 1,
+    covering: bool = True,
+    row_group_size: int = 2,
+    ordered: bool = True,
 ) -> None:
-    """A stac-geoparquet item rollup: one row per item, keyed by item id.
+    """A stac-geoparquet item mirror: one row per item, keyed by item id.
 
-    Written deliberately as the kind of file the GeoParquet data rules would
-    reject — interleaved geometries, no covering column, tiny row groups — so a
-    test can show that a rollup is exempt from them (PORTO-FMT-043). ``ids=None``
-    omits the ``id`` column, which is the shape PTL-DAT-016 rejects outright.
+    Conformant by default, because the GeoParquet storage rules bind a mirror
+    as they bind vector data (PORTO-FMT-043): rows on the bbox diagonal, a
+    covering column, row groups under the ceiling. ``ordered=False`` and
+    ``covering=False`` produce the shapes PTL-DAT-006 and PTL-DAT-007 reject.
+    ``ids=None`` omits the ``id`` column, which is the shape PTL-DAT-016
+    rejects outright.
     """
-    pts = interleaved_points()[: len(ids)] if ids else interleaved_points()[:1]
+    count = len(ids) if ids else 1
+    source = ordered_points(max(count, 2)) if ordered else interleaved_points()
+    pts = source[:count]
     columns = {"id": pa.array(ids, type=pa.string())} if ids is not None else None
     write_geoparquet(
         path,

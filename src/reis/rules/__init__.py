@@ -29,6 +29,7 @@ from reis.rules.files import (
     ReadmeSectionsRule,
     RequiredFilesRule,
 )
+from reis.rules.item_mirror import ItemMirrorPresentRule, ItemMirrorRegistrationRule
 from reis.rules.license import (
     LicenseDeclaredRule,
     NoProprietaryLicenseRule,
@@ -50,7 +51,6 @@ from reis.rules.provenance import (
     OfficialNoUpstreamLinksRule,
 )
 from reis.rules.providers import HostContactRule, ProducerPresentRule, SingleHostRule
-from reis.rules.rollup import ItemRollupPresentRule, ItemRollupRegistrationRule
 from reis.rules.temporal import DatetimePresentRule, DatetimeValidRule
 from reis.rules.titles import HumanReadableTitleRule, LinkTitleRule, TitleDescriptionRule
 from reis.rules.viz import (
@@ -107,8 +107,8 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     RasterSceneItemRule(),
     NestedCollectionRule(),
     CollectionIdRule(),
-    ItemRollupPresentRule(),
-    ItemRollupRegistrationRule(),
+    ItemMirrorPresentRule(),
+    ItemMirrorRegistrationRule(),
 )
 
 __all__ = ["DEFAULT_RULES"]

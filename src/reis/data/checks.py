@@ -30,9 +30,10 @@ and the real bytes into a :class:`reis.data.DataDefect`:
 - ``PTL-DAT-015`` a tabular (plain Parquet) collection is missing the SHOULDs
   of formats.md, Tabular Data: ``table:columns`` documenting the columns, and
   ``extent.temporal`` when the file carries a temporal column (WARNING)
-- ``PTL-DAT-016`` an item rollup's ids diverge from the collection's items
-  (MUST, formats.md, Raster § Item rollup). Rollups are routed here instead of
-  through the GeoParquet checks, which bind data assets only.
+- ``PTL-DAT-016`` an item mirror's ids diverge from the collection's items
+  (MUST, formats.md, Raster § Item mirror). A mirror runs the GeoParquet
+  checks above as well: the spec binds it to them like any other spatial
+  table.
 
 ``PTL-DAT-007`` also carries formats.md's covering-column recommendation: a
 GeoParquet 2.x file that satisfies the statistics MUST through native
@@ -75,10 +76,10 @@ from reis.data import (
     DAT_CONSISTENCY,
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
+    DAT_MIRROR,
     DAT_ORDERING,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
-    DAT_ROLLUP,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
     DAT_SIZE,
@@ -89,7 +90,7 @@ from reis.data import (
 )
 from reis.data.reader import AssetReader, Locator
 from reis.model import Severity
-from reis.rules.rollup import is_rollup_asset
+from reis.rules.item_mirror import is_mirror_asset
 
 # Multihash function code -> hashlib algorithm name.
 _HASH_ALGOS = {
@@ -173,7 +174,7 @@ def check_node(
 ) -> list[DataDefect]:
     """Verify every asset on ``node`` against its declared metadata.
 
-    ``graph`` is optional because one check, the item rollup's agreement with
+    ``graph`` is optional because one check, the item mirror's agreement with
     the collection's items, needs the object's children. Without it that check
     is skipped.
     """
@@ -214,15 +215,14 @@ def _check_asset(
         # alongside the primary) is exempt from the cloud-native format MUSTs;
         # its bytes are still checksum/size/format-verified above.
         return defects
-    if is_rollup_asset(asset):
-        # formats.md, Raster § Item rollup: the GeoParquet requirements bind
-        # data assets, and a validator MUST NOT hold a rollup to them
-        # (PORTO-FMT-043). An item index is not queried by extent, so spatial
-        # ordering, row-group statistics, and the row-group ceiling do not
-        # apply, and neither does the tabular pair of SHOULDs. What does apply
-        # is agreement with the items it indexes.
-        defects.extend(_check_rollup(node, key, located, graph))
-        return defects
+    if is_mirror_asset(asset):
+        # formats.md, Raster § Item mirror: a mirror must reproduce the items
+        # it mirrors (PORTO-FMT-042). It then falls through to the GeoParquet
+        # checks below, which bind it as they bind vector data
+        # (PORTO-FMT-043) — an item index is queried by extent like any other
+        # spatial table. The tabular SHOULDs skip it on their own, being
+        # scoped to assets with the 'data' role.
+        defects.extend(_check_mirror(node, key, located, graph))
     if expected == "tiff":
         defects.extend(_check_raster(key, located))
     if expected == "parquet":
@@ -687,22 +687,22 @@ def _geo_metadata(parquet: Any) -> dict[str, Any] | None:
     return geo if isinstance(geo, dict) else None
 
 
-# --- item rollups -----------------------------------------------------------
+# --- item mirrors -----------------------------------------------------------
 
 
-def _check_rollup(
+def _check_mirror(
     node: Node, key: str, located: Locator, graph: CatalogGraph | None
 ) -> list[DataDefect]:
-    """A rollup's rows MUST match the collection's items (PORTO-FMT-042).
+    """A mirror MUST reproduce the collection's items (PORTO-FMT-042).
 
     The comparison is on item ids, the one field both representations carry and
-    the only one a client uses to join them. A rollup that has fallen behind
+    the only one a client uses to join them. A mirror that has fallen behind
     reports items that no longer exist, or omits items that do, and the client
     reading it cannot tell either way.
 
     Skipped when the graph is unavailable, when the collection has no items to
-    compare against, or when the rollup carries no ``id`` column to read. The
-    last of those is reported: a file registered as a stac-geoparquet rollup
+    compare against, or when the mirror carries no ``id`` column to read. The
+    last of those is reported: a file registered as a stac-geoparquet mirror
     without item ids is not one.
     """
     if graph is None:
@@ -723,9 +723,9 @@ def _check_rollup(
     if "id" not in parquet.schema_arrow.names:
         return [
             DataDefect(
-                DAT_ROLLUP,
+                DAT_MIRROR,
                 Severity.ERROR,
-                f"rollup asset '{key}' has no 'id' column, so its rows cannot be matched"
+                f"mirror asset '{key}' has no 'id' column, so its rows cannot be matched"
                 " to the collection's items",
                 key,
             )
@@ -744,14 +744,14 @@ def _check_rollup(
 
     parts = []
     if missing:
-        parts.append(f"{len(missing)} item(s) absent from the rollup ({_sample(missing)})")
+        parts.append(f"{len(missing)} item(s) absent from the mirror ({_sample(missing)})")
     if extra:
-        parts.append(f"{len(extra)} rollup row(s) with no item ({_sample(extra)})")
+        parts.append(f"{len(extra)} mirror row(s) with no item ({_sample(extra)})")
     return [
         DataDefect(
-            DAT_ROLLUP,
+            DAT_MIRROR,
             Severity.ERROR,
-            f"rollup asset '{key}' disagrees with the collection's items: " + ", ".join(parts),
+            f"mirror asset '{key}' disagrees with the collection's items: " + ", ".join(parts),
             key,
         )
     ]
