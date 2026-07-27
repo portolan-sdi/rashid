@@ -15,11 +15,15 @@ from reis.data import (
     DAT_COG_STATS,
     DAT_CONSISTENCY,
     DAT_FORMAT,
+    DAT_GEOPARQUET_VERSION,
     DAT_ORDERING,
     DAT_OVERVIEWS,
+    DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
     DAT_SIZE,
+    DAT_TABULAR,
+    DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
     validate_data,
 )
@@ -41,6 +45,16 @@ from reis.structural import STR_INVALID, validate_structural
 GEN_MISSING_ROOT = "PTL-GEN-000"
 GEN_UNPARSEABLE = "PTL-GEN-001"
 
+# Requirement IDs from the spec's requirements manifest
+# (specs/portolan/requirements.yaml) enforced by each check;
+# gated by tests/unit/test_spec_coverage.py.
+SPEC_IDS: dict[str, tuple[str, ...]] = {
+    # A missing/invalid root catalog.json breaks the always-required
+    # entrypoint; an unparseable object cannot be a valid STAC catalog.
+    GEN_MISSING_ROOT: ("PORTO-CORE-001", "PORTO-CORE-013"),
+    GEN_UNPARSEABLE: ("PORTO-CORE-001",),
+}
+
 # Every rule the data pass can raise; disabling all of them skips the (networked)
 # pass entirely, while disabling any subset just silences those findings.
 _DATA_RULE_IDS = frozenset(
@@ -56,6 +70,10 @@ _DATA_RULE_IDS = frozenset(
         DAT_COG_STATS,
         DAT_VALID_PERCENT,
         DAT_OVERVIEWS,
+        DAT_GEOPARQUET_VERSION,
+        DAT_TILE_SIZE,
+        DAT_PARTITION_SCHEMA,
+        DAT_TABULAR,
     }
 )
 

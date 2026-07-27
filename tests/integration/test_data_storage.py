@@ -9,6 +9,7 @@ each non-compliant variant raises exactly the rule it violates (formats.md:30/39
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -28,6 +29,7 @@ from reis.data import (  # noqa: E402
     DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
+    DAT_TABULAR,
     DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
 )
@@ -128,7 +130,7 @@ class _FakeRowGroup:
 
 
 class _FakeParquet:
-    """Duck-types what _row_group_bboxes touches: itself its own .metadata."""
+    """Duck-types what _rowgroup_stat_defects touches: itself its own .metadata."""
 
     def __init__(self, groups: list[_FakeRowGroup]) -> None:
         self.metadata = self
@@ -145,13 +147,21 @@ _GEO_2X = {"version": "2.0.0", "primary_column": "geometry", "columns": {"geomet
 def test_native_geo_statistics_satisfy_dat_007() -> None:
     ordered = [(0.0, 0.0, 1.0, 1.0), (1.0, 1.0, 2.0, 2.0), (2.0, 2.0, 3.0, 3.0)]
     groups = [_FakeRowGroup([_FakeColumn("geometry", _FakeGeoStats(b))]) for b in ordered]
-    boxes = checks._row_group_bboxes(_FakeParquet(groups), _GEO_2X)
+    boxes, defects = checks._rowgroup_stat_defects("data", _FakeParquet(groups), _GEO_2X)
     assert boxes == ordered
+    # The MUST is satisfied, but the covering column stays RECOMMENDED for
+    # 2.x files even where native statistics exist (formats.md) — a WARNING.
+    assert [d.severity for d in defects] == [Severity.WARNING]
+    assert defects[0].rule_id == DAT_ROWGROUP_STATS
+    assert "covering column" in defects[0].message
 
 
-def test_absent_native_statistics_still_return_none() -> None:
+def test_absent_native_statistics_still_error() -> None:
     groups = [_FakeRowGroup([_FakeColumn("geometry", None)])]
-    assert checks._row_group_bboxes(_FakeParquet(groups), _GEO_2X) is None
+    boxes, defects = checks._rowgroup_stat_defects("data", _FakeParquet(groups), _GEO_2X)
+    assert boxes is None
+    assert [d.severity for d in defects] == [Severity.ERROR]
+    assert defects[0].rule_id == DAT_ROWGROUP_STATS
 
 
 def test_oversized_rowgroup_flags_dat_008(tmp_path: Path) -> None:
@@ -392,3 +402,95 @@ def test_single_partition_file_has_nothing_to_compare(tmp_path: Path) -> None:
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
     assert checks._check_partition_schemas(_partitioned_collection(tmp_path)) == []
+
+
+# --- tabular collections (PTL-DAT-015) --------------------------------------
+
+
+def _tabular_collection(**overrides: object) -> Node:
+    data: dict = {
+        "type": "Collection",
+        "id": "tables",
+        "extent": {"spatial": {"bbox": [[4.0, 50.0, 6.0, 52.0]]}},
+    }
+    data.update(overrides)
+    return Node(
+        path=PurePosixPath("tables/collection.json"),
+        abs_path=Path("/nowhere/collection.json"),
+        kind="collection",
+        id="tables",
+        data=data,
+    )
+
+
+def _tabular(node: Node, path: Path) -> list:
+    asset = {"href": "./data.parquet", "roles": ["data"]}
+    return checks._check_tabular(node, "data", asset, _loc(path))
+
+
+def _timestamp_column() -> dict[str, list[object]]:
+    return {"observed": [datetime(2024, 1, 1) + timedelta(days=i) for i in range(6)]}
+
+
+def test_tabular_without_table_columns_flags_dat_015(tmp_path: Path) -> None:
+    path = tmp_path / "plain.parquet"
+    assets.write_geoparquet(path, geo=False)
+    defects = _tabular(_tabular_collection(), path)
+    assert [d.rule_id for d in defects] == [DAT_TABULAR]
+    assert defects[0].severity is Severity.WARNING
+    assert "table:columns" in defects[0].message
+
+
+def test_tabular_with_table_columns_is_clean(tmp_path: Path) -> None:
+    path = tmp_path / "plain.parquet"
+    assets.write_geoparquet(path, geo=False)
+    node = _tabular_collection(
+        **{"table:columns": [{"name": "value", "type": "int64", "description": "a value"}]}
+    )
+    assert _tabular(node, path) == []
+
+
+def test_tabular_temporal_column_without_extent_flags_dat_015(tmp_path: Path) -> None:
+    path = tmp_path / "plain.parquet"
+    assets.write_geoparquet(path, geo=False, columns=_timestamp_column())
+    node = _tabular_collection(**{"table:columns": [{"name": "observed"}]})
+    defects = _tabular(node, path)
+    assert [d.rule_id for d in defects] == [DAT_TABULAR]
+    assert "extent.temporal" in defects[0].message
+
+
+def test_tabular_temporal_column_with_extent_is_clean(tmp_path: Path) -> None:
+    path = tmp_path / "plain.parquet"
+    assets.write_geoparquet(path, geo=False, columns=_timestamp_column())
+    node = _tabular_collection(
+        **{
+            "table:columns": [{"name": "observed"}],
+            "extent": {
+                "spatial": {"bbox": [[4.0, 50.0, 6.0, 52.0]]},
+                "temporal": {"interval": [["2024-01-01T00:00:00Z", None]]},
+            },
+        }
+    )
+    assert _tabular(node, path) == []
+
+
+def test_geoparquet_is_not_tabular(tmp_path: Path) -> None:
+    # A 'geo' metadata key marks GeoParquet: the geospatial rules own it and
+    # the tabular SHOULDs stay silent.
+    path = tmp_path / "geo.parquet"
+    assets.write_geoparquet(path)
+    assert _tabular(_tabular_collection(), path) == []
+
+
+def test_non_data_roles_are_not_tabular(tmp_path: Path) -> None:
+    path = tmp_path / "plain.parquet"
+    assets.write_geoparquet(path, geo=False)
+    asset = {"href": "./data.parquet", "roles": ["metadata"]}
+    assert checks._check_tabular(_tabular_collection(), "data", asset, _loc(path)) == []
+
+
+def test_item_level_parquet_is_not_tabular(tmp_path: Path) -> None:
+    path = tmp_path / "plain.parquet"
+    assets.write_geoparquet(path, geo=False)
+    node = _node_with_asset({"href": "./data.parquet", "roles": ["data"]})
+    assert checks._check_tabular(node, "data", node.data["assets"]["a"], _loc(path)) == []

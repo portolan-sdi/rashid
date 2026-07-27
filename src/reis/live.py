@@ -43,6 +43,17 @@ LIV_CORS_ORIGIN = "PTL-LIV-003"
 LIV_CORS_EXPOSE = "PTL-LIV-004"
 LIV_CORS_PREFLIGHT = "PTL-LIV-005"
 
+# Requirement IDs from the spec's requirements manifest
+# (specs/portolan/requirements.yaml) enforced by each check;
+# gated by tests/unit/test_spec_coverage.py.
+SPEC_IDS: dict[str, tuple[str, ...]] = {
+    LIV_RANGE: ("PORTO-CORE-043",),
+    LIV_HEAD_LENGTH: ("PORTO-CORE-043",),
+    LIV_CORS_ORIGIN: ("PORTO-CORE-045",),
+    LIV_CORS_EXPOSE: ("PORTO-CORE-045",),
+    LIV_CORS_PREFLIGHT: ("PORTO-CORE-045",),
+}
+
 # Assets are declared on collections and items; catalogs carry none.
 _LIVE_KINDS: tuple[Kind, ...] = ("collection", "item")
 

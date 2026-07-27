@@ -44,6 +44,39 @@ DAT_OVERVIEWS = "PTL-DAT-011"
 DAT_GEOPARQUET_VERSION = "PTL-DAT-012"
 DAT_TILE_SIZE = "PTL-DAT-013"
 DAT_PARTITION_SCHEMA = "PTL-DAT-014"
+DAT_TABULAR = "PTL-DAT-015"
+
+# Requirement IDs from the spec's requirements manifest
+# (specs/portolan/requirements.yaml) enforced by each check;
+# gated by tests/unit/test_spec_coverage.py.
+SPEC_IDS: dict[str, tuple[str, ...]] = {
+    # Checksum/size verification is the observable half of the
+    # regenerated-at-publish-time process MUST (PORTO-CORE-030).
+    DAT_CHECKSUM: ("PORTO-CORE-030",),
+    DAT_SIZE: ("PORTO-CORE-030",),
+    DAT_FORMAT: ("PORTO-CORE-026", "PORTO-FMT-001"),
+    DAT_COG: ("PORTO-FMT-001", "PORTO-FMT-023", "PORTO-FMT-024"),
+    # The footprint comparison is scoped to geospatial data only, which is
+    # how a tabular bbox stays informational (PORTO-FMT-036).
+    DAT_CONSISTENCY: ("PORTO-FMT-036",),
+    DAT_ORDERING: ("PORTO-FMT-006",),
+    # ERROR when neither statistics source exists; WARNING when a 2.x file
+    # relies on native statistics without the RECOMMENDED covering column.
+    DAT_ROWGROUP_STATS: ("PORTO-FMT-007", "PORTO-FMT-008"),
+    DAT_ROWGROUP_SIZE: ("PORTO-FMT-009",),
+    DAT_COG_STATS: (
+        "PORTO-FMT-026",
+        "PORTO-FMT-027",
+        "PORTO-FMT-028",
+        "PORTO-FMT-030",
+    ),
+    DAT_VALID_PERCENT: ("PORTO-FMT-031",),
+    DAT_OVERVIEWS: ("PORTO-FMT-024", "PORTO-FMT-025"),
+    DAT_GEOPARQUET_VERSION: ("PORTO-FMT-004",),
+    DAT_TILE_SIZE: ("PORTO-FMT-024",),
+    DAT_PARTITION_SCHEMA: ("PORTO-FMT-021",),
+    DAT_TABULAR: ("PORTO-FMT-037",),
+}
 
 # Assets are declared on collections and items; catalogs carry none.
 _DATA_KINDS: tuple[Kind, ...] = ("collection", "item")

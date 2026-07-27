@@ -17,6 +17,7 @@ class LicenseDeclaredRule(Rule):
     """Every collection declares an SPDX license identifier or 'other'."""
 
     id = "PTL-LIC-001"
+    spec_ids = ("PORTO-CORE-058", "PORTO-CORE-059")
     default_severity = Severity.ERROR
     description = "collections must declare license as an SPDX identifier or 'other'"
     kinds = ("collection",)
@@ -46,6 +47,7 @@ class OtherLicenseLinkRule(Rule):
     """license 'other' requires a rel:license link to the license text."""
 
     id = "PTL-LIC-002"
+    spec_ids = ("PORTO-CORE-059",)
     default_severity = Severity.ERROR
     description = "license 'other' requires a rel:'license' link to the license text"
     kinds = ("collection",)
@@ -65,6 +67,7 @@ class NoProprietaryLicenseRule(Rule):
     """The deprecated STAC value 'proprietary' is forbidden."""
 
     id = "PTL-LIC-003"
+    spec_ids = ("PORTO-CORE-060",)
     default_severity = Severity.ERROR
     description = "the deprecated license value 'proprietary' must not be used"
     kinds = ("collection",)

@@ -41,6 +41,7 @@ class AssetFieldsRule(Rule):
     """Every asset carries an href, a media type, and at least one role."""
 
     id = "PTL-AST-001"
+    spec_ids = ("PORTO-CORE-022", "PORTO-CORE-025", "PORTO-CORE-027")
     default_severity = Severity.ERROR
     description = "every asset needs an href, a type (media type), and at least one role"
     kinds = ("collection", "item")
@@ -75,6 +76,7 @@ class AssetHrefSchemeRule(Rule):
     """Absolute asset hrefs use https, never s3 or plain http."""
 
     id = "PTL-AST-002"
+    spec_ids = ("PORTO-CORE-023",)
     default_severity = Severity.ERROR
     description = "absolute asset hrefs must use https (browsers cannot fetch s3 URLs)"
     kinds = ("collection", "item")
@@ -106,6 +108,7 @@ class AssetFileFieldsRule(Rule):
     """Every asset carries file:size and file:checksum."""
 
     id = "PTL-AST-003"
+    spec_ids = ("PORTO-CORE-028",)
     default_severity = Severity.ERROR
     description = "every asset must carry file:size and file:checksum"
     kinds = ("collection", "item")
@@ -141,6 +144,7 @@ class CatalogAssetsRule(Rule):
     """
 
     id = "PTL-AST-005"
+    spec_ids = ("PORTO-CORE-002",)
     default_severity = Severity.ERROR
     description = "assets must sit at collection or item level; catalogs organize only"
     kinds = ("catalog",)
@@ -159,6 +163,7 @@ class ChecksumMultihashRule(Rule):
     """file:checksum values are multihash-encoded."""
 
     id = "PTL-AST-004"
+    spec_ids = ("PORTO-CORE-029",)
     default_severity = Severity.ERROR
     description = "file:checksum must be multihash-encoded, not a raw digest string"
     kinds = ("collection", "item")

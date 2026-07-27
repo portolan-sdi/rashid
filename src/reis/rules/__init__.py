@@ -16,7 +16,11 @@ from reis.rules.collections import (
     NestedCollectionRule,
     SingleFileCollectionRule,
 )
-from reis.rules.conformance import SchemaUriConsistencyRule, SchemaUriDeclaredRule
+from reis.rules.conformance import (
+    SchemaUriConsistencyRule,
+    SchemaUriDeclaredRule,
+    VersionExtensionRule,
+)
 from reis.rules.files import (
     AgentsLinkRule,
     ReadmeContentRule,
@@ -86,6 +90,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     CatalogAssetsRule(),
     SchemaUriDeclaredRule(),
     SchemaUriConsistencyRule(),
+    VersionExtensionRule(),
     MirrorViaLinkRule(),
     MirrorCanonicalLinkRule(),
     MirrorUpdatedRule(),

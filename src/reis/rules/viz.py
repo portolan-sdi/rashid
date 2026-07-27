@@ -73,6 +73,7 @@ class ThumbnailRule(Rule):
     """Every geospatial collection carries a thumbnail asset."""
 
     id = "PTL-VIZ-001"
+    spec_ids = ("PORTO-CORE-067", "PORTO-FMT-033")
     default_severity = Severity.ERROR
     description = "geospatial collections must include a thumbnail asset (png or jpeg)"
     kinds = ("collection",)
@@ -112,6 +113,7 @@ class StylesForDerivativeRule(Rule):
     """
 
     id = "PTL-VIZ-002"
+    spec_ids = ("PORTO-CORE-067", "PORTO-CORE-068", "PORTO-CORE-069", "PORTO-FMT-014")
     default_severity = Severity.ERROR
     description = "collections with a visual derivative must register style assets"
     kinds = ("collection",)
@@ -135,6 +137,7 @@ class PMTilesRegistrationRule(Rule):
     """A provided PMTiles file is registered per web-map-links."""
 
     id = "PTL-VIZ-003"
+    spec_ids = ("PORTO-FMT-011", "PORTO-FMT-012")
     default_severity = Severity.ERROR
     description = "PMTiles must be registered via a rel:'pmtiles' link (web-map-links v1.3.0)"
     kinds = ("collection",)
@@ -191,6 +194,7 @@ class StyleMediaTypeRule(Rule):
     """
 
     id = "PTL-VIZ-005"
+    spec_ids = ("PORTO-FMT-015",)
     default_severity = Severity.ERROR
     description = (
         "style assets in PMTiles collections must be typed application/vnd.mapbox.style+json"
@@ -222,6 +226,7 @@ class LargeVectorWithoutVisualRule(Rule):
     """
 
     id = "PTL-VIZ-004"
+    spec_ids = ("PORTO-CORE-066",)
     default_severity = Severity.INFO
     description = "large vector collections likely need a visual derivative (PMTiles)"
     kinds = ("collection",)

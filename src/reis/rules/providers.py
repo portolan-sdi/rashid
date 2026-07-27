@@ -28,6 +28,7 @@ class ProducerPresentRule(Rule):
     """At least one provider carries the producer role."""
 
     id = "PTL-PRV-001"
+    spec_ids = ("PORTO-CORE-046", "PORTO-CORE-047")
     default_severity = Severity.ERROR
     description = "every collection needs at least one provider with the producer role"
     kinds = ("collection",)
@@ -49,6 +50,7 @@ class SingleHostRule(Rule):
     """Exactly one host provider, listed last."""
 
     id = "PTL-PRV-002"
+    spec_ids = ("PORTO-CORE-047",)
     default_severity = Severity.ERROR
     description = "exactly one provider with the host role, listed as the last element"
     kinds = ("collection",)
@@ -77,6 +79,7 @@ class HostContactRule(Rule):
     """The host provider is reachable through a url or an email."""
 
     id = "PTL-PRV-003"
+    spec_ids = ("PORTO-CORE-051",)
     default_severity = Severity.ERROR
     description = "the host provider must include a url or an email"
     kinds = ("collection",)

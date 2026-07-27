@@ -22,12 +22,15 @@ from reis.data import (
     DAT_COG_STATS,
     DAT_CONSISTENCY,
     DAT_FORMAT,
+    DAT_GEOPARQUET_VERSION,
     DAT_ORDERING,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
     DAT_SIZE,
+    DAT_TABULAR,
+    DAT_TILE_SIZE,
     DAT_UNAVAILABLE,
     DAT_VALID_PERCENT,
     DataDefect,
@@ -167,6 +170,10 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
             DAT_COG_STATS,
             DAT_VALID_PERCENT,
             DAT_OVERVIEWS,
+            DAT_GEOPARQUET_VERSION,
+            DAT_TILE_SIZE,
+            DAT_PARTITION_SCHEMA,
+            DAT_TABULAR,
         }
     )
     validate(graph_root, config=RulesConfig(disabled=all_ids), data=True, data_validator=spy)

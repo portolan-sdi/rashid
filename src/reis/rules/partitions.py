@@ -35,6 +35,7 @@ class PartitionFieldsRule(Rule):
     """
 
     id = "PTL-PRT-001"
+    spec_ids = ("PORTO-FMT-017",)
     default_severity = Severity.ERROR
     description = (
         "a partitioned collection must declare the partition extension and carry"

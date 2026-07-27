@@ -52,6 +52,7 @@ class SingleFileCollectionRule(Rule):
     """
 
     id = "PTL-COL-001"
+    spec_ids = ("PORTO-CORE-017", "PORTO-FMT-034")
     default_severity = Severity.ERROR
     description = "a single-file collection must expose its data as a collection-level asset"
     kinds = ("collection",)
@@ -93,6 +94,7 @@ class NestedCollectionRule(Rule):
     """
 
     id = "PTL-COL-002"
+    spec_ids = ("PORTO-CORE-004", "PORTO-CORE-014", "PORTO-CORE-018")
     default_severity = Severity.ERROR
     description = "collections must never nest: no collection may contain another collection"
     kinds = ("collection",)
@@ -123,6 +125,7 @@ class CollectionIdRule(Rule):
     """
 
     id = "PTL-COL-003"
+    spec_ids = ("PORTO-CORE-016",)
     default_severity = Severity.WARNING
     description = (
         "collection IDs should be lowercase [a-z0-9_-], start with a letter, and be unique"

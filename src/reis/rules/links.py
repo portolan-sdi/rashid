@@ -14,6 +14,7 @@ class RequiredLinksRule(Rule):
     """Every object carries its required structural links."""
 
     id = "PTL-LNK-001"
+    spec_ids = ("PORTO-CORE-019", "PORTO-CORE-032")
     default_severity = Severity.ERROR
     description = "catalogs/collections need root+parent links; items need root, parent, collection"
     kinds = ("catalog", "collection", "item")
@@ -36,6 +37,7 @@ class ChildLinkCompletenessRule(Rule):
     """A child or item link exists for every object the node contains."""
 
     id = "PTL-LNK-002"
+    spec_ids = ("PORTO-CORE-032",)
     default_severity = Severity.ERROR
     description = "every contained object is reachable through a child or item link"
     kinds = ("catalog", "collection")
@@ -66,6 +68,7 @@ class StructuralLinkTypeRule(Rule):
     """Structural links declare the correct media type."""
 
     id = "PTL-LNK-003"
+    spec_ids = ("PORTO-CORE-033",)
     default_severity = Severity.ERROR
     description = "structural links carry application/json (application/geo+json for item links)"
     kinds = ("catalog", "collection", "item")
@@ -89,6 +92,7 @@ class RelativeLinksRule(Rule):
     """Structural links are relative."""
 
     id = "PTL-LNK-004"
+    spec_ids = ("PORTO-CORE-034",)
     default_severity = Severity.ERROR
     description = "structural links must be relative for catalog portability"
     kinds = ("catalog", "collection", "item")
@@ -117,6 +121,7 @@ class NoSelfLinkRule(Rule):
     """Objects carry no self link."""
 
     id = "PTL-LNK-005"
+    spec_ids = ("PORTO-CORE-034",)
     default_severity = Severity.ERROR
     description = "objects must not include a self link (pystac SELF_CONTAINED convention)"
     kinds = ("catalog", "collection", "item")
@@ -136,6 +141,7 @@ class LinkResolutionRule(Rule):
     """Every relative structural link resolves to the correct object."""
 
     id = "PTL-LNK-006"
+    spec_ids = ("PORTO-CORE-015", "PORTO-CORE-035", "PORTO-CORE-036")
     default_severity = Severity.ERROR
     description = "structural links must resolve against the file tree to the correct object"
     kinds = ("catalog", "collection", "item")

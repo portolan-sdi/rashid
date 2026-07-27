@@ -27,6 +27,14 @@ and the real bytes into a :class:`reis.data.DataDefect`:
   OGC 21-026 /req/optimized_geotiff/small-sizes via formats.md:121)
 - ``PTL-DAT-014`` partition files diverge in Parquet schema (MUST,
   formats.md:91: "validated by tooling reading file footers")
+- ``PTL-DAT-015`` a tabular (plain Parquet) collection is missing the SHOULDs
+  of formats.md, Tabular Data: ``table:columns`` documenting the columns, and
+  ``extent.temporal`` when the file carries a temporal column (WARNING)
+
+``PTL-DAT-007`` also carries formats.md's covering-column recommendation: a
+GeoParquet 2.x file that satisfies the statistics MUST through native
+``GeospatialStatistics`` alone, without the RECOMMENDED ``bbox`` covering
+column, gets a WARNING rather than an ERROR.
 
 The ``STATISTICS_APPROXIMATE`` MUST-when-estimated cannot be checked from the
 bytes: whether the statistics were estimated is not knowable after the fact.
@@ -49,6 +57,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 import rasterio
 from pyproj import CRS, Transformer
@@ -69,6 +78,7 @@ from reis.data import (
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
     DAT_SIZE,
+    DAT_TABULAR,
     DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
     DataDefect,
@@ -191,6 +201,7 @@ def _check_asset(
         defects.extend(_check_raster(key, located))
     if expected == "parquet":
         defects.extend(_check_geoparquet(key, located))
+        defects.extend(_check_tabular(node, key, asset, located))
     if expected in {"parquet", "tiff", "pmtiles"}:
         defects.extend(_check_consistency(node, key, asset, expected, located))
     return defects
@@ -598,17 +609,9 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
             )
         )
 
-    bboxes = _row_group_bboxes(parquet, geo)
+    bboxes, stat_defects = _rowgroup_stat_defects(key, parquet, geo)
+    defects.extend(stat_defects)
     if bboxes is None:
-        defects.append(
-            DataDefect(
-                DAT_ROWGROUP_STATS,
-                Severity.ERROR,
-                f"asset '{key}' provides no per-row-group spatial statistics "
-                "(no bbox covering column with min/max stats, nor native GeospatialStatistics)",
-                key,
-            )
-        )
         return defects  # without per-row-group boxes, ordering cannot be judged
 
     if not _is_spatially_ordered(bboxes):
@@ -658,22 +661,123 @@ def _geo_metadata(parquet: Any) -> dict[str, Any] | None:
     return geo if isinstance(geo, dict) else None
 
 
-def _row_group_bboxes(
-    parquet: Any, geo: dict[str, Any]
-) -> list[tuple[float, float, float, float]] | None:
-    """Per-row-group [minx, miny, maxx, maxy], from either statistics source.
+# --- tabular collections ----------------------------------------------------
+
+
+def _check_tabular(
+    node: Node, key: str, asset: dict[str, Any], located: Locator
+) -> list[DataDefect]:
+    """The Tabular Data SHOULDs for a plain-Parquet collection-level data asset.
+
+    formats.md, Tabular Data: "Tabular collections SHOULD populate
+    ``extent.temporal`` when the data has a time dimension, and SHOULD document
+    their columns with the STAC table extension (``table:columns`` with names,
+    types, and descriptions)." A tabular collection is a Parquet data asset
+    with no ``geo`` metadata key, exposed at collection level (the single-file
+    collection pattern the same section mandates); non-data Parquet and
+    item-level assets are out of scope. The time dimension is read from the
+    file itself: a temporal (timestamp/date) column is the machine-detectable
+    signal, so its absence keeps the extent SHOULD silent rather than guessed.
+    """
+    if node.kind != "collection" or "data" not in _asset_roles(asset):
+        return []
+    try:
+        source: Any = located.open_binary() if located.is_remote else located.source
+        parquet = pq.ParquetFile(source)
+    except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
+        return []
+    if _geo_metadata(parquet) is not None:
+        return []  # GeoParquet: the geospatial storage rules own it
+    defects: list[DataDefect] = []
+    if not _has_table_columns(node):
+        defects.append(
+            DataDefect(
+                DAT_TABULAR,
+                Severity.WARNING,
+                f"tabular asset '{key}': the collection does not document its columns "
+                "with the table extension (table:columns)",
+                key,
+            )
+        )
+    if _has_temporal_column(parquet) and not _has_temporal_extent(node):
+        defects.append(
+            DataDefect(
+                DAT_TABULAR,
+                Severity.WARNING,
+                f"tabular asset '{key}' carries a temporal column but the collection "
+                "does not populate extent.temporal",
+                key,
+            )
+        )
+    return defects
+
+
+def _asset_roles(asset: dict[str, Any]) -> list[str]:
+    raw = asset.get("roles")
+    if not isinstance(raw, list):
+        return []
+    return [role for role in raw if isinstance(role, str)]
+
+
+def _has_table_columns(node: Node) -> bool:
+    columns = node.data.get("table:columns")
+    return isinstance(columns, list) and len(columns) > 0
+
+
+def _has_temporal_column(parquet: Any) -> bool:
+    return any(pa.types.is_temporal(field.type) for field in parquet.schema_arrow)
+
+
+def _has_temporal_extent(node: Node) -> bool:
+    extent = node.data.get("extent")
+    temporal = extent.get("temporal") if isinstance(extent, dict) else None
+    intervals = temporal.get("interval") if isinstance(temporal, dict) else None
+    if not isinstance(intervals, list):
+        return False
+    return any(
+        isinstance(interval, list) and any(bound is not None for bound in interval)
+        for interval in intervals
+    )
+
+
+def _rowgroup_stat_defects(
+    key: str, parquet: Any, geo: dict[str, Any]
+) -> tuple[list[tuple[float, float, float, float]] | None, list[DataDefect]]:
+    """Per-row-group [minx, miny, maxx, maxy] boxes, plus statistics defects.
 
     formats.md:39 accepts two satisfiers: a 1.1 ``bbox`` covering column whose
     leaf fields carry Parquet min/max, or — for GeoParquet 2.x / Parquet
-    ``GEOMETRY`` — native ``GeospatialStatistics`` per row group. The covering
-    column is preferred (it is RECOMMENDED even where native statistics exist);
-    the native statistics are the fallback. Returns None when neither source
-    yields a box for every row group.
+    ``GEOMETRY`` — native ``GeospatialStatistics`` per row group. Neither
+    source yielding a box for every row group is the MUST failure (ERROR).
+    Native statistics alone still satisfy the MUST, but formats.md keeps the
+    covering column "RECOMMENDED even where native statistics exist, since it
+    adds page-level min/max stats that enable finer-grained pruning" — that
+    SHOULD surfaces as a WARNING.
     """
     boxes = _covering_bboxes(parquet, geo)
+    if boxes is not None:
+        return boxes, []
+    boxes = _native_bboxes(parquet, geo)
     if boxes is None:
-        boxes = _native_bboxes(parquet, geo)
-    return boxes
+        return None, [
+            DataDefect(
+                DAT_ROWGROUP_STATS,
+                Severity.ERROR,
+                f"asset '{key}' provides no per-row-group spatial statistics "
+                "(no bbox covering column with min/max stats, nor native GeospatialStatistics)",
+                key,
+            )
+        ]
+    return boxes, [
+        DataDefect(
+            DAT_ROWGROUP_STATS,
+            Severity.WARNING,
+            f"asset '{key}' relies on native GeospatialStatistics without a bbox "
+            "covering column; a covering column remains recommended for "
+            "page-level pruning",
+            key,
+        )
+    ]
 
 
 def _native_bboxes(

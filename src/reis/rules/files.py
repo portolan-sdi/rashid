@@ -90,6 +90,7 @@ class RequiredFilesRule(Rule):
     """Every catalog and collection directory carries its required files."""
 
     id = "PTL-FIL-001"
+    spec_ids = ("PORTO-CORE-005",)
     default_severity = Severity.ERROR
     description = "catalog and collection directories must contain AGENTS.md and README.md"
     kinds = ()  # graph-level: needs the directory listings
@@ -119,6 +120,7 @@ class AgentsLinkRule(Rule):
     """AGENTS.md is referenced through a rel:'agents' markdown link."""
 
     id = "PTL-FIL-002"
+    spec_ids = ("PORTO-CORE-061",)
     default_severity = Severity.ERROR
     description = "AGENTS.md must be linked with rel:'agents' and type text/markdown"
     kinds = ("catalog", "collection")
@@ -131,6 +133,7 @@ class ReadmeLinkRule(Rule):
     """README.md is referenced through a rel:'describedby' markdown link."""
 
     id = "PTL-FIL-003"
+    spec_ids = ("PORTO-CORE-062",)
     default_severity = Severity.ERROR
     description = "README.md must be linked with rel:'describedby' and type text/markdown"
     kinds = ("catalog", "collection")
@@ -150,6 +153,7 @@ class ReadmeContentRule(Rule):
     """
 
     id = "PTL-FIL-004"
+    spec_ids = ("PORTO-CORE-063",)
     default_severity = Severity.ERROR
     description = "README.md must not be empty and must carry a title heading"
     kinds = ("catalog", "collection")
@@ -187,6 +191,7 @@ class ReadmeSectionsRule(Rule):
     """
 
     id = "PTL-FIL-005"
+    spec_ids = ("PORTO-CORE-063",)
     default_severity = Severity.WARNING
     description = "a collection's README.md should mention its license and data provenance"
     kinds = ("collection",)
