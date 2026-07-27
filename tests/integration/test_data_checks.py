@@ -208,6 +208,7 @@ def test_wgs84_bounds_bracket_the_true_envelope() -> None:
     bounds = checks._wgs84_bounds(_rd_new_geo())
 
     assert bounds is not None
+    assert bounds.inner is not None
     minx, miny, maxx, maxy = _RD_NEW_ENVELOPE
     # outer contains the true envelope, inner is contained by it, strictly on
     # every side — a non-affine projection admits no tighter claim
@@ -225,12 +226,30 @@ def test_projected_bbox_accepts_its_true_envelope() -> None:
     assert checks._bbox_within(_RD_NEW_ENVELOPE, bounds)
 
 
-def test_projected_bbox_rejects_an_over_claimed_declaration() -> None:
+@pytest.mark.parametrize(
+    "over",
+    [
+        [3.0, 50.75, 7.22, 53.57],  # west of any longitude the data can reach
+        [3.31, 50.5, 7.22, 53.9],  # south and north of any latitude it can reach
+    ],
+)
+def test_projected_bbox_rejects_an_over_claimed_declaration(over: list[float]) -> None:
     bounds = checks._wgs84_bounds(_rd_new_geo())
 
     assert bounds is not None
-    over = [3.0, 50.5, 7.5, 53.9]  # reaches outside what the data can cover
     assert not checks._bbox_within(over, bounds)
+
+
+def test_projected_mismatch_names_both_bounds() -> None:
+    bounds = checks._wgs84_bounds(_rd_new_geo())
+
+    assert bounds is not None
+    assert bounds.inner is not None
+    message = checks._bbox_mismatch_message("data", [4.0, 51.0, 6.0, 53.0], bounds, 28992)
+
+    assert "EPSG:28992" in message
+    assert checks._fmt_bbox(bounds.inner) in message
+    assert checks._fmt_bbox(bounds.outer) in message
 
 
 def test_projected_bbox_rejects_an_under_claimed_declaration() -> None:
@@ -240,6 +259,36 @@ def test_projected_bbox_rejects_an_under_claimed_declaration() -> None:
     assert bounds is not None
     under = [4.0, 51.0, 6.0, 53.0]
     assert not checks._bbox_within(under, bounds)
+
+
+@pytest.mark.parametrize("epsg", [4326, 28992])
+def test_wgs84_bounds_of_an_untight_bbox_have_no_inner_side(epsg: int) -> None:
+    """A raster grid only contains its data, so no side is pinned from inside."""
+    bbox = [4.0, 50.0, 6.0, 52.0] if epsg == 4326 else list(_RD_NEW_BBOX)
+    geo = checks._Geo(bbox=bbox, epsg=epsg, crs=CRS.from_epsg(epsg), tight=False)
+
+    bounds = checks._wgs84_bounds(geo)
+
+    assert bounds is not None
+    assert bounds.inner is None
+
+
+def test_untight_bbox_accepts_a_declaration_inside_the_collar() -> None:
+    """A nodata collar puts the real footprint well inside the grid extent."""
+    grid = checks._Geo(bbox=[4.0, 50.0, 6.0, 52.0], epsg=4326, crs=CRS.from_epsg(4326), tight=False)
+    bounds = checks._wgs84_bounds(grid)
+
+    assert bounds is not None
+    assert checks._bbox_within([4.8, 50.9, 5.1, 51.2], bounds)
+    assert not checks._bbox_within([3.5, 50.9, 5.1, 51.2], bounds)
+
+
+def test_untight_mismatch_names_the_containing_extent() -> None:
+    bounds = checks._Wgs84Bounds(outer=[4.0, 50.0, 6.0, 52.0], inner=None)
+
+    message = checks._bbox_mismatch_message("data", [3.5, 50.9, 5.1, 51.2], bounds, 4326)
+
+    assert "is not contained by the asset's extent" in message
 
 
 def test_wgs84_bounds_skip_an_antimeridian_crossing() -> None:
