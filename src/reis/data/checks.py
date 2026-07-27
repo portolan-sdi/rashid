@@ -921,7 +921,7 @@ def _check_partition_schemas(node: Node) -> list[DataDefect]:
     for match in sorted(globmodule.glob(normalized, root_dir=str(base))):
         try:
             parquet = pq.ParquetFile(str(base / match))
-        except Exception:  # noqa: BLE001 - unreadable partition: the byte checks own it
+        except Exception:  # noqa: BLE001 # nosec B112 - unreadable partition: the byte checks own it
             continue
         arrow = parquet.schema_arrow
         schemas.append((match, {field.name: str(field.type) for field in arrow}))
