@@ -29,8 +29,8 @@ uv run pre-commit run --all-files --hook-stage pre-push
 ```
 
 CI runs these with [prek](https://github.com/j178/prek) rather than
-pre-commit. It reads the same `.pre-commit-config.yaml`, so an unhooked
-clone meets the same bar as a hooked one.
+pre-commit. Both read the same `.pre-commit-config.yaml`. A clone without
+hooks installed therefore faces the same checks.
 
 ## Tests
 
@@ -50,8 +50,8 @@ tests to the pre-push hook.
 
 ## Mutation testing
 
-Coverage shows which lines run. Mutation testing shows whether the tests
-would notice if those lines changed.
+Coverage measures which lines run. Mutation testing measures whether the
+tests notice when those lines change.
 
 ```bash
 uv run mutmut run
@@ -82,6 +82,6 @@ uv run python scripts/vendor_spec_fixtures.py --spec ../portolan-spec
 ```
 
 `spec-sync.yml` runs this nightly and opens a pull request when the spec
-moves. That pull request's own test run is the verdict. A red
+moves. Read that pull request's test run before merging it. A red
 `test_schema_uri_invariant` means reis needs a code change rather than a
 fixture refresh.
