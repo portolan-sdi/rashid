@@ -1,6 +1,6 @@
 """Vendor test fixtures from a portolan-spec checkout, reproducibly.
 
-reis is a validator; its strongest regression guard is a real, spec-authored
+rashid is a validator; its strongest regression guard is a real, spec-authored
 catalog that it must accept, plus the published profile schema it validates
 against. Both live upstream in ``portolan-spec`` and drift as the spec evolves,
 so a hand-copied snapshot rots — that rot is exactly the schema-URI-namespace
@@ -10,7 +10,7 @@ Running it against a spec checkout refreshes four fixture sets and records the
 spec commit they came from in ``SPEC_REF``:
 
 - ``tests/fixtures/reference-catalog/`` — the JSON and Markdown of the reference
-  catalog, binaries stripped (reis validates metadata, never asset bytes).
+  catalog, binaries stripped (rashid validates metadata, never asset bytes).
 - ``tests/fixtures/schema/<vX.Y.Z>/schema.json`` — every published profile
   schema version, discovered on disk, never hardcoded.
 - ``tests/fixtures/profile-examples/`` — the profile's own hand-authored STAC
@@ -29,7 +29,7 @@ Usage::
 
 The nightly spec-sync canary runs this into a temp dir against a fresh clone of
 ``main`` and diffs the result against the committed fixtures; a non-empty diff
-means the spec moved and reis has not caught up.
+means the spec moved and rashid has not caught up.
 """
 
 from __future__ import annotations

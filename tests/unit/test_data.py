@@ -1,10 +1,10 @@
 """Unit tests for the data pass wiring — validator injection, no bytes, no deps.
 
-These exercise :func:`reis.data.validate_data` and its runner/CLI wiring with a
+These exercise :func:`rashid.data.validate_data` and its runner/CLI wiring with a
 fake validator, exactly as ``test_schema.py`` does for the schema pass: the
 byte-reading and geospatial stack are not touched here (that is
 ``test_data_checks``/``test_data_catalog``), so these run without the
-``reis[data]`` extra.
+``rashid[data]`` extra.
 """
 
 from __future__ import annotations
@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-import reis.data as data_pass
-from reis.catalog import CatalogGraph, Node
-from reis.config import RulesConfig
-from reis.data import (
+import rashid.data as data_pass
+from rashid.catalog import CatalogGraph, Node
+from rashid.config import RulesConfig
+from rashid.data import (
     DAT_CHECKSUM,
     DAT_COG,
     DAT_COG_STATS,
@@ -36,9 +36,9 @@ from reis.data import (
     DataDefect,
     validate_data,
 )
-from reis.data.reader import AssetReader
-from reis.model import Severity
-from reis.runner import validate
+from rashid.data.reader import AssetReader
+from rashid.model import Severity
+from rashid.runner import validate
 from tests.conftest import CatalogBuilder
 
 pytestmark = pytest.mark.unit
@@ -111,7 +111,7 @@ def test_missing_extra_downgrades_to_warning(
 
     assert len(findings) == 1
     assert findings[0].rule_id == DAT_UNAVAILABLE
-    assert "reis[data]" in findings[0].message
+    assert "rashid[data]" in findings[0].message
 
 
 def test_data_off_by_default(catalog: CatalogBuilder) -> None:

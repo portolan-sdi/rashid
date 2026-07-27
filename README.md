@@ -1,28 +1,28 @@
-# reis
+# rashid
 
-[![CI](https://github.com/portolan-sdi/reis/actions/workflows/ci.yml/badge.svg)](https://github.com/portolan-sdi/reis/actions/workflows/ci.yml)
+[![CI](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml/badge.svg)](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Validator and linter for [Portolan](https://www.portolan-sdi.org/) catalogs. Named after the cartographer [Piri Reis](https://www.unesco.org/en/memory-world/piri-reis-world-map-1513).
+Validator and linter for [Portolan](https://www.portolan-sdi.org/) catalogs. The name comes from the Arabic root ر ش د, whose participles رَاشِدٌ and رَشِيدٌ Lane's Lexicon glosses as ["Taking, or following, a right way or course or direction."](https://arabiclexicon.hawramani.com/?p=5472#205af1)
 
-reis reads a catalog directory and reports every rule it breaks.
+rashid reads a catalog directory and reports every rule it breaks.
 
 ## Install
 
 ```bash
-uv tool install reis
+uv tool install rashid
 ```
 
 The data pass reads asset bytes and needs a geospatial stack. Install the extra when you plan to run it.
 
 ```bash
-uv tool install "reis[data]"
+uv tool install "rashid[data]"
 ```
 
 ## Check a catalog
 
 ```bash
-reis check path/to/catalog
+rashid check path/to/catalog
 ```
 
 An exit code of 0 means the catalog broke no MUST. An exit code of 1 means it broke at least one.
@@ -30,22 +30,22 @@ An exit code of 0 means the catalog broke no MUST. An exit code of 1 means it br
 Three passes are off by default.
 
 ```bash
-reis check path/to/catalog --schema --data --live
+rashid check path/to/catalog --schema --data --live
 ```
 
-Each of those reaches the network, and `--data` also needs `reis[data]`. Add `--json` for a machine-readable report.
+Each of those reaches the network, and `--data` also needs `rashid[data]`. Add `--json` for a machine-readable report.
 
 ## What it checks
 
 Validation runs as five separable passes.
 
-**Metadata.** Every spec requirement reis can check from the catalog's JSON, without reading asset bytes.
+**Metadata.** Every spec requirement rashid can check from the catalog's JSON, without reading asset bytes.
 
 **Structural.** STAC 1.1.0 core validity, delegated to [stac-validator](https://github.com/stac-utils/stac-validator). Only the core schema applies. Declared extensions belong to the metadata pass, which keeps an unpublished extension schema from failing the tree.
 
-**Schema.** The published [Portolan profile schema](https://schemas.portolan-sdi.org/portolan/), applied to every object. reis also implements those requirements in code, which yields precise messages and fix hints. Running both catches drift between them, at the cost of reporting some defects twice. Opt in with `--schema`.
+**Schema.** The published [Portolan profile schema](https://schemas.portolan-sdi.org/portolan/), applied to every object. rashid also implements those requirements in code, which yields precise messages and fix hints. Running both catches drift between them, at the cost of reporting some defects twice. Opt in with `--schema`.
 
-**Data.** Asset bytes, local files and remote https URLs alike, checked against the declared metadata and the format rules. reis recomputes checksum and size, confirms media type by magic number, and enforces storage rules a metadata reader cannot see. Expect a real catalog to fail here on rules its metadata satisfies, because this pass is stricter than what current tooling emits. Opt in with `--data`.
+**Data.** Asset bytes, local files and remote https URLs alike, checked against the declared metadata and the format rules. rashid recomputes checksum and size, confirms media type by magic number, and enforces storage rules a metadata reader cannot see. Expect a real catalog to fail here on rules its metadata satisfies, because this pass is stricter than what current tooling emits. Opt in with `--data`.
 
 **Live hosting.** The servers behind remote https assets, probed for HTTP range support and CORS. Those are properties of the server rather than of any file. Range and CORS cost one probe per host, and each asset costs one HEAD. Opt in with `--live`.
 
@@ -54,7 +54,7 @@ A pass that cannot run reports a warning rather than passing quietly.
 ## Use it as a library
 
 ```python
-from reis import validate
+from rashid import validate
 
 report = validate("path/to/catalog")
 for finding in report.errors:
@@ -66,7 +66,7 @@ for finding in report.errors:
 `RulesConfig` skips rules or changes their severity.
 
 ```python
-from reis import RulesConfig, Severity, validate
+from rashid import RulesConfig, Severity, validate
 
 config = RulesConfig(
     disabled=frozenset({"PTL-VIZ-004"}),
@@ -81,7 +81,7 @@ report = validate("path/to/catalog", config=config)
 
 Every finding carries a stable id shaped `PTL-GROUP-NNN`, a severity, a message, and the file path. MUST requirements become errors, and SHOULD requirements become warnings.
 
-[docs/rules.md](docs/rules.md) lists the rule groups, the severity exceptions, and the codes reis emits when a pass degrades.
+[docs/rules.md](docs/rules.md) lists the rule groups, the severity exceptions, and the codes rashid emits when a pass degrades.
 
 ## Contributing
 

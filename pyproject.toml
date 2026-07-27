@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "reis"
+name = "rashid"
 version = "0.1.0"
 description = "Validator and linter for Portolan catalogs"
 readme = "README.md"
@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 authors = [{ name = "Portolan contributors" }]
 dependencies = ["click>=8.4", "jsonschema>=4.26", "stac-valid>=4.4"]
 
-# The data pass (reis check --data) reads asset bytes to verify checksum, size,
+# The data pass (rashid check --data) reads asset bytes to verify checksum, size,
 # format, and extent. Its geospatial stack is heavy and optional; the core
 # validator installs none of it and imports it only when the pass runs.
 [project.optional-dependencies]
@@ -27,10 +27,10 @@ data = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/portolan-sdi/reis"
+Homepage = "https://github.com/portolan-sdi/rashid"
 
 [project.scripts]
-reis = "reis.cli:main"
+rashid = "rashid.cli:main"
 
 [dependency-groups]
 dev = [
@@ -55,7 +55,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/reis"]
+packages = ["src/rashid"]
 
 [tool.ruff]
 line-length = 100
@@ -66,12 +66,12 @@ select = ["E", "W", "F", "I", "B", "C4", "UP"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["reis"]
+known-first-party = ["rashid"]
 
 [tool.mypy]
 strict = true
 python_version = "3.10"
-files = ["src/reis"]
+files = ["src/rashid"]
 
 # stac-valid ships no type stubs / py.typed marker.
 [[tool.mypy.overrides]]
@@ -83,7 +83,7 @@ ignore_missing_imports = true
 module = "jsonschema.*"
 ignore_missing_imports = true
 
-# The data-pass geospatial stack (reis[data]) ships no usable type information.
+# The data-pass geospatial stack (rashid[data]) ships no usable type information.
 [[tool.mypy.overrides]]
 module = ["pyarrow.*", "rasterio.*", "pyproj.*", "rio_cogeo.*"]
 ignore_missing_imports = true
@@ -95,7 +95,7 @@ python_files = "test_*.py"
 addopts = [
     "--tb=short",
     "--strict-markers",
-    "--cov=reis",
+    "--cov=rashid",
     "--cov-report=term-missing",
     "--cov-fail-under=90",
 ]
@@ -114,48 +114,48 @@ exclude_lines = [
 ]
 
 [tool.importlinter]
-root_package = "reis"
+root_package = "rashid"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "validation core must not import a CLI framework"
 type = "forbidden"
 source_modules = [
-    "reis.model",
-    "reis.catalog",
-    "reis.rule",
-    "reis.runner",
-    "reis.config",
-    "reis.rules",
-    "reis.live",
+    "rashid.model",
+    "rashid.catalog",
+    "rashid.rule",
+    "rashid.runner",
+    "rashid.config",
+    "rashid.rules",
+    "rashid.live",
 ]
 forbidden_modules = ["click"]
 
-# Only reis.data.checks may touch the geospatial stack; the core validator and
+# Only rashid.data.checks may touch the geospatial stack; the core validator and
 # the data-pass glue (entry point, byte reader) stay stdlib-only, so `import
-# reis` never pulls pyarrow/rasterio/pyproj. The lazy reis.data -> checks edge is
+# rashid` never pulls pyarrow/rasterio/pyproj. The lazy rashid.data -> checks edge is
 # severed here because it fires only inside default_validator(), on demand; the
-# runner -> reis.data chain then still catches any direct geo import in the glue.
-# reis.data itself is not a source module: it is a package, so listing it would
-# pull in reis.data.checks (the one module allowed to import the stack).
+# runner -> rashid.data chain then still catches any direct geo import in the glue.
+# rashid.data itself is not a source module: it is a package, so listing it would
+# pull in rashid.data.checks (the one module allowed to import the stack).
 [[tool.importlinter.contracts]]
-name = "only reis.data.checks may import the geospatial stack"
+name = "only rashid.data.checks may import the geospatial stack"
 type = "forbidden"
 source_modules = [
-    "reis.model",
-    "reis.catalog",
-    "reis.rule",
-    "reis.runner",
-    "reis.config",
-    "reis.rules",
-    "reis.schema",
-    "reis.structural",
-    "reis.cli",
-    "reis.live",
-    "reis.data.reader",
+    "rashid.model",
+    "rashid.catalog",
+    "rashid.rule",
+    "rashid.runner",
+    "rashid.config",
+    "rashid.rules",
+    "rashid.schema",
+    "rashid.structural",
+    "rashid.cli",
+    "rashid.live",
+    "rashid.data.reader",
 ]
 forbidden_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo"]
-ignore_imports = ["reis.data -> reis.data.checks"]
+ignore_imports = ["rashid.data -> rashid.data.checks"]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
@@ -174,14 +174,14 @@ check-filenames = true
 
 [tool.vulture]
 min_confidence = 80
-paths = ["src/reis", "tests"]
+paths = ["src/rashid", "tests"]
 sort_by_size = true
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
 
 [tool.deptry]
-known_first_party = ["reis"]
+known_first_party = ["rashid"]
 exclude = [".venv", "tests", "mutants"]
 
 # stac-valid (the maintained successor to the deprecated stac-validator
@@ -193,7 +193,7 @@ stac-valid = ["stac_validator"]
 rio-cogeo = ["rio_cogeo"]
 
 [tool.mutmut]
-source_paths = ["src/reis/"]
+source_paths = ["src/rashid/"]
 # --no-cov drops the coverage overhead and the global --cov-fail-under gate
 # from addopts; mutmut 3 runs pytest in-process, so extra args must go here
 # rather than in a `runner` setting (which mutmut 3 ignores).

@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from reis.catalog import CatalogGraph, Node
-from reis.model import Finding, Severity
-from reis.rule import Rule
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
 
 # Version-tolerant prefix of the partition extension's schema URI, matching
 # how the web-map-links declaration is checked in the viz rules.

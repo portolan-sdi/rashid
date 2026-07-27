@@ -7,9 +7,9 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from reis.catalog import ROOT_CATALOG, CatalogGraph
-from reis.config import RulesConfig
-from reis.data import (
+from rashid.catalog import ROOT_CATALOG, CatalogGraph
+from rashid.config import RulesConfig
+from rashid.data import (
     DAT_CHECKSUM,
     DAT_COG,
     DAT_COG_STATS,
@@ -27,8 +27,8 @@ from reis.data import (
     DAT_VALID_PERCENT,
     validate_data,
 )
-from reis.data import Validator as DataValidator
-from reis.live import (
+from rashid.data import Validator as DataValidator
+from rashid.live import (
     LIV_CORS_EXPOSE,
     LIV_CORS_ORIGIN,
     LIV_CORS_PREFLIGHT,
@@ -36,11 +36,11 @@ from reis.live import (
     LIV_RANGE,
     validate_live,
 )
-from reis.live import Prober as LiveProber
-from reis.model import Finding, Report, Severity
-from reis.rule import Rule
-from reis.schema import SCH_INVALID, validate_schema
-from reis.structural import STR_INVALID, validate_structural
+from rashid.live import Prober as LiveProber
+from rashid.model import Finding, Report, Severity
+from rashid.rule import Rule
+from rashid.schema import SCH_INVALID, validate_schema
+from rashid.structural import STR_INVALID, validate_structural
 
 GEN_MISSING_ROOT = "PTL-GEN-000"
 GEN_UNPARSEABLE = "PTL-GEN-001"
@@ -140,34 +140,34 @@ def validate(
 
     The metadata pass always runs. When ``structural`` is true the STAC 1.1.0
     structural pass runs too, delegated to stac-validator (see
-    :mod:`reis.structural`); it is off by default here because it reaches the
+    :mod:`rashid.structural`); it is off by default here because it reaches the
     network, and on by default in the CLI. Disabling ``PTL-STR-001`` via
     ``config`` skips the structural pass. ``structural_validator`` injects an
     alternate validator, chiefly for offline testing.
 
     When ``schema`` is true the Portolan profile schema pass runs too, applying
-    the published JSON Schema to every object (see :mod:`reis.schema`); it is
+    the published JSON Schema to every object (see :mod:`rashid.schema`); it is
     off by default because it reaches the network and overlaps the metadata
     pass. Disabling ``PTL-SCH-001`` via ``config`` skips it. ``schema_validator``
     injects an alternate validator, chiefly for offline testing.
 
     When ``data`` is true the data pass runs too, reading each asset's bytes
     (local files and remote ``https`` URLs) to verify checksum, size, format,
-    and spatial metadata (see :mod:`reis.data`); it is off by default because it
-    reaches the network and needs the ``reis[data]`` extra. Disabling every
+    and spatial metadata (see :mod:`rashid.data`); it is off by default because it
+    reaches the network and needs the ``rashid[data]`` extra. Disabling every
     ``PTL-DAT-00x`` rule via ``config`` skips the pass; disabling a subset just
     silences those findings. ``data_validator`` injects an alternate validator,
     chiefly for offline testing.
 
     When ``live`` is true the live-hosting pass runs too, probing the servers
     behind absolute ``https`` asset hrefs for HTTP range support and CORS (see
-    :mod:`reis.live`); it is off by default because it reaches the network.
+    :mod:`rashid.live`); it is off by default because it reaches the network.
     Disabling every ``PTL-LIV-00x`` rule via ``config`` skips the pass;
     disabling a subset just silences those findings. ``live_prober`` injects an
     alternate prober, chiefly for offline testing.
     """
     if rules is None:
-        from reis.rules import DEFAULT_RULES
+        from rashid.rules import DEFAULT_RULES
 
         rules = DEFAULT_RULES
     config = config or RulesConfig()

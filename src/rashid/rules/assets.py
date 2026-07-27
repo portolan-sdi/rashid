@@ -10,10 +10,10 @@ from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urlparse
 
-from reis._multihash import is_well_formed_multihash
-from reis.catalog import CatalogGraph, Node
-from reis.model import Finding, Severity
-from reis.rule import Rule
+from rashid._multihash import is_well_formed_multihash
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
 
 
 def _assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:

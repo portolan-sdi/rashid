@@ -5,7 +5,7 @@ The data pass needs an asset's actual bytes two ways: a whole-object stream
 footer or COG/PMTiles header is a small read at a known offset). This module
 provides both over the two href kinds a conformant catalog uses: relative paths
 resolved against the catalog tree, and absolute ``https`` URLs. It is
-stdlib-only (``urllib``); the geospatial parsing lives in :mod:`reis.data.checks`.
+stdlib-only (``urllib``); the geospatial parsing lives in :mod:`rashid.data.checks`.
 
 Non-fetchable hrefs — ``s3``/``http``/``file`` or a relative path that escapes
 the tree — resolve to ``None``; the metadata pass already reports those
@@ -23,7 +23,7 @@ from typing import Protocol
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from reis.catalog import CatalogGraph, Node, is_absolute_href
+from rashid.catalog import CatalogGraph, Node, is_absolute_href
 
 _CHUNK = 1 << 16  # 64 KiB
 _TIMEOUT = 30  # seconds per request

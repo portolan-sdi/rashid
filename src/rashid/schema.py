@@ -1,12 +1,12 @@
 """Schema pass: Portolan profile validation, delegated to the published schema.
 
-The metadata pass (:mod:`reis.rules`) checks Portolan requirements by hand over
+The metadata pass (:mod:`rashid.rules`) checks Portolan requirements by hand over
 raw JSON, deliberately stdlib-only, so it can emit precise per-rule findings with
 fix hints. The Portolan STAC Profile publishes those same requirements as a
 single machine-checkable JSON Schema — the spec calls it "the machine-checkable
 core of the metadata pass". This pass applies that published schema directly to
 every object, exactly as the profile's own ``check-portolan`` test does: an
-authoritative oracle that catches any drift between reis's hand rules and the
+authoritative oracle that catches any drift between rashid's hand rules and the
 canonical schema, and any requirement the hand rules do not yet cover.
 
 Because it overlaps the hand rules by design, the pass is opt-in (CLI
@@ -29,9 +29,9 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
-from reis.catalog import CatalogGraph, Kind
-from reis.model import Finding, Severity
-from reis.rules.conformance import declared_schema_uris
+from rashid.catalog import CatalogGraph, Kind
+from rashid.model import Finding, Severity
+from rashid.rules.conformance import declared_schema_uris
 
 SCH_INVALID = "PTL-SCH-001"
 SCH_UNAVAILABLE = "PTL-SCH-000"

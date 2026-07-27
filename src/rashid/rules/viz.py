@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from reis.catalog import CatalogGraph, Node
-from reis.model import Finding, Severity
-from reis.rule import Rule
-from reis.rules._common import links_of, roles_of
-from reis.rules.assets import _assets_of
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
+from rashid.rules._common import links_of, roles_of
+from rashid.rules.assets import _assets_of
 
 PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
 STYLE_MEDIA_TYPE = "application/vnd.mapbox.style+json"

@@ -8,9 +8,9 @@ from typing import Any
 
 import pytest
 
-from reis import validate
-from reis.model import Severity
-from reis.rules.item_mirror import MIRROR_ROLE, PARQUET_MEDIA_TYPE
+from rashid import validate
+from rashid.model import Severity
+from rashid.rules.item_mirror import MIRROR_ROLE, PARQUET_MEDIA_TYPE
 from tests.conftest import CatalogBuilder, findings_for, mutate_json
 
 pytestmark = pytest.mark.unit

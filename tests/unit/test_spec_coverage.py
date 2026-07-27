@@ -4,7 +4,7 @@ The spec's requirements manifest (``specs/portolan/requirements.yaml``,
 vendored to ``tests/fixtures/requirements.yaml`` by
 ``scripts/vendor_spec_fixtures.py``) assigns every normative statement a
 stable ID, an RFC 2119 severity, and an enforcement class: ``validator``
-(reis must cite it) or ``process`` (not machine-checkable). Each reis check
+(rashid must cite it) or ``process`` (not machine-checkable). Each rashid check
 declares the manifest IDs it enforces — ``Rule.spec_ids`` for metadata rules,
 a module-level ``SPEC_IDS`` registry for the structural, schema, runner,
 data, and live checks.
@@ -27,13 +27,13 @@ from pathlib import Path
 
 import pytest
 
-import reis.data as data_pass
-import reis.live as live_pass
-import reis.runner as runner
-import reis.schema as schema_pass
-import reis.structural as structural_pass
-from reis.model import Severity
-from reis.rules import DEFAULT_RULES
+import rashid.data as data_pass
+import rashid.live as live_pass
+import rashid.runner as runner
+import rashid.schema as schema_pass
+import rashid.structural as structural_pass
+from rashid.model import Severity
+from rashid.rules import DEFAULT_RULES
 
 pytestmark = pytest.mark.unit
 
@@ -43,7 +43,7 @@ _MANIFEST = _TESTS_DIR / "fixtures" / "requirements.yaml"
 # Manifest entries keep a fixed field order (id, severity, enforcement, file,
 # quote), possibly with comment lines between fields; the spec repo's
 # check_requirements.py validates the file upstream, so a plain scan is
-# reliable and keeps reis free of a YAML dependency.
+# reliable and keeps rashid free of a YAML dependency.
 _COMMENTS = r"(?:\s*#[^\n]*\n)*"
 _ENTRY = re.compile(
     r"- id: (PORTO-(?:CORE|FMT)-\d{3})\s*\n"

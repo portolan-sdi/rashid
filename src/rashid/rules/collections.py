@@ -21,11 +21,11 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from reis.catalog import CatalogGraph, Node
-from reis.model import Finding, Severity
-from reis.rule import Rule
-from reis.rules._common import roles_of
-from reis.rules.assets import _assets_of
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
+from rashid.rules._common import roles_of
+from rashid.rules.assets import _assets_of
 
 _HAS_DATA_ASSET = "has-data-asset"
 _NO_DATA_ASSET = "no-data-asset"

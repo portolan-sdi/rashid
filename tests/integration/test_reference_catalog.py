@@ -1,10 +1,10 @@
-"""The spec's reference catalog, vendored, must pass reis with zero errors.
+"""The spec's reference catalog, vendored, must pass rashid with zero errors.
 
 This is the dogfood guard. ``portolan-spec``'s ``examples/catalog/reference`` is
 the canonical example of a valid Portolan catalog; it is vendored here (JSON and
 Markdown only) by ``scripts/vendor_spec_fixtures.py`` and validated by both the
 metadata pass and the profile schema pass. The only findings allowed are the two
-INFO mirror-canonical nudges. A regression here means reis has diverged from the
+INFO mirror-canonical nudges. A regression here means rashid has diverged from the
 spec it validates — exactly the schema-URI drift these guards exist to catch.
 
 The schema pass runs against the *vendored* schema matching the catalog's own
@@ -19,11 +19,11 @@ from pathlib import Path
 
 import pytest
 
-from reis import validate
-from reis.catalog import CatalogGraph
-from reis.model import Severity
-from reis.rules.conformance import declared_schema_uris
-from reis.schema import validator_from_schema
+from rashid import validate
+from rashid.catalog import CatalogGraph
+from rashid.model import Severity
+from rashid.rules.conformance import declared_schema_uris
+from rashid.schema import validator_from_schema
 
 pytestmark = pytest.mark.integration
 

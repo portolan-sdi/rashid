@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from reis.catalog import CatalogGraph, Node
-from reis.model import Finding, Severity
-from reis.rule import Rule
-from reis.rules._common import links_of
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
+from rashid.rules._common import links_of
 
 # A "raw slug": word characters chained with _ or . and no spaces at all,
 # e.g. road_centerlines_2024. Single words without separators are allowed.

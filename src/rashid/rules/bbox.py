@@ -6,9 +6,9 @@ import math
 from collections.abc import Iterable
 from typing import Any
 
-from reis.catalog import CatalogGraph, Node
-from reis.model import Finding, Severity
-from reis.rule import Rule
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
 
 # DBL_MAX and friends written out by broken exporters as "effectively
 # infinite" sentinels. Anything at or beyond this magnitude is garbage.

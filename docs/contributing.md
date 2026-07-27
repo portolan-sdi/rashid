@@ -83,5 +83,5 @@ uv run python scripts/vendor_spec_fixtures.py --spec ../portolan-spec
 
 `spec-sync.yml` runs this nightly and opens a pull request when the spec
 moves. Read that pull request's test run before merging it. A red
-`test_schema_uri_invariant` means reis needs a code change rather than a
+`test_schema_uri_invariant` means rashid needs a code change rather than a
 fixture refresh.

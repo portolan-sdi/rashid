@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import pytest
 
-from reis import RulesConfig, validate, validate_schema
-from reis.catalog import CatalogGraph
-from reis.model import Severity
-from reis.schema import DEFAULT_SCHEMA_URI, _schema_uri_for, default_validator
+from rashid import RulesConfig, validate, validate_schema
+from rashid.catalog import CatalogGraph
+from rashid.model import Severity
+from rashid.schema import DEFAULT_SCHEMA_URI, _schema_uri_for, default_validator
 from tests.conftest import (
     PORTOLAN_URI,
     CatalogBuilder,
@@ -80,7 +80,7 @@ def test_validator_failure_is_a_single_warning(catalog: CatalogBuilder) -> None:
 def test_missing_package_is_a_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import reis.schema as schema
+    import rashid.schema as schema
 
     def raise_import(uri: str) -> None:
         raise ImportError("No module named 'jsonschema'")
@@ -95,7 +95,7 @@ def test_missing_package_is_a_warning(
 def test_schema_fetch_failure_is_a_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import reis.schema as schema
+    import rashid.schema as schema
 
     def raise_fetch(uri: str) -> None:
         raise OSError("connection refused")
@@ -110,7 +110,7 @@ def test_schema_fetch_failure_is_a_warning(
 def test_default_validator_used_when_none(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import reis.schema as schema
+    import rashid.schema as schema
 
     monkeypatch.setattr(schema, "default_validator", lambda uri: lambda data: [])
     assert schema.validate_schema(_graph(catalog), None) == []
@@ -144,7 +144,7 @@ def test_schema_uri_falls_back_to_default(catalog: CatalogBuilder) -> None:
 
 
 def test_default_validator_formats_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    import reis.schema as schema
+    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -163,7 +163,7 @@ def test_default_validator_formats_errors(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_oneof_reports_the_matched_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     """A type-discriminated oneOf failure names the real cause, not the wrong branch."""
-    import reis.schema as schema
+    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -184,7 +184,7 @@ def test_oneof_reports_the_matched_branch(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_oneof_unknown_type_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     """A type matching no branch still yields a finding rather than crashing."""
-    import reis.schema as schema
+    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -201,7 +201,7 @@ def test_oneof_unknown_type_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_long_messages_are_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
-    import reis.schema as schema
+    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -217,7 +217,7 @@ def test_long_messages_are_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_non_https_schema_uri_is_rejected() -> None:
     """A file:// or other non-https schema URI must not be fetched (CWE-22 / SSRF)."""
-    from reis.schema import _fetch_schema
+    from rashid.schema import _fetch_schema
 
     with pytest.raises(ValueError, match="https"):
         _fetch_schema("file:///etc/passwd")

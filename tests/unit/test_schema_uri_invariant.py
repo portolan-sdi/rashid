@@ -1,9 +1,9 @@
-"""reis's schema-URI pattern must match every vendored profile schema's ``$id``.
+"""rashid's schema-URI pattern must match every vendored profile schema's ``$id``.
 
 The keystone regression guard for spec drift. ``SCHEMA_URI_PATTERN`` (behind
-``PTL-CNF-001``) encodes what reis considers a valid Portolan schema URI; the
+``PTL-CNF-001``) encodes what rashid considers a valid Portolan schema URI; the
 authority for that shape is each published schema's own ``$id``. When the spec
-renamespaced its schema host, this invariant broke silently and reis began
+renamespaced its schema host, this invariant broke silently and rashid began
 rejecting every conformant catalog. Asserting it over every vendored version
 turns the next such move into a failing test the moment the schema is
 re-vendored — and does so version-agnostically: a new ``vX.Y.Z`` is covered as
@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from reis.rules.conformance import SCHEMA_URI_PATTERN
-from reis.schema import DEFAULT_SCHEMA_URI
+from rashid.rules.conformance import SCHEMA_URI_PATTERN
+from rashid.schema import DEFAULT_SCHEMA_URI
 
 pytestmark = pytest.mark.unit
 
@@ -45,8 +45,8 @@ def test_schemas_are_vendored() -> None:
 def test_pattern_matches_published_schema_id(schema_path: Path) -> None:
     schema_id = _schema_id(schema_path)
     assert SCHEMA_URI_PATTERN.match(schema_id), (
-        f"reis SCHEMA_URI_PATTERN rejects the spec's own $id {schema_id!r}; "
-        "reis has drifted from the published schema URI"
+        f"rashid SCHEMA_URI_PATTERN rejects the spec's own $id {schema_id!r}; "
+        "rashid has drifted from the published schema URI"
     )
 
 

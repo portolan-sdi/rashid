@@ -1,7 +1,7 @@
 """Unit tests for the asset reader — local resolution and stubbed HTTP.
 
 Stdlib-only: the real ``urlopen`` is monkeypatched, so these need no network and
-no ``reis[data]`` extra. They cover href classification, local streaming, and the
+no ``rashid[data]`` extra. They cover href classification, local streaming, and the
 HTTP range/stream fallbacks the remote path relies on.
 """
 
@@ -13,9 +13,9 @@ from typing import Any
 
 import pytest
 
-import reis.data.reader as reader_mod
-from reis.catalog import CatalogGraph, Node
-from reis.data.reader import FilesystemHttpReader, Locator, _HttpRangeFile
+import rashid.data.reader as reader_mod
+from rashid.catalog import CatalogGraph, Node
+from rashid.data.reader import FilesystemHttpReader, Locator, _HttpRangeFile
 from tests.conftest import CatalogBuilder
 
 pytestmark = pytest.mark.unit

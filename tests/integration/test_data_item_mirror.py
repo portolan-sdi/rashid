@@ -6,7 +6,7 @@ These tests cover both halves: a conformant mirror whose ids match is clean, a
 divergent one earns ``PTL-DAT-016``, and an unordered or statistics-less one
 earns the findings a vector asset would.
 
-Needs the ``reis[data]`` extra; skips without it. Fully local — no network.
+Needs the ``rashid[data]`` extra; skips without it. Fully local — no network.
 """
 
 from __future__ import annotations
@@ -21,15 +21,15 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
-from reis.catalog import CatalogGraph  # noqa: E402
-from reis.data import (  # noqa: E402
+from rashid.catalog import CatalogGraph  # noqa: E402
+from rashid.data import (  # noqa: E402
     DAT_MIRROR,
     DAT_ORDERING,
     DAT_ROWGROUP_STATS,
     DAT_TABULAR,
     validate_data,
 )
-from reis.model import Severity  # noqa: E402
+from rashid.model import Severity  # noqa: E402
 from tests.conftest import CatalogBuilder, mutate_json  # noqa: E402
 from tests.integration import _data_assets as assets  # noqa: E402
 

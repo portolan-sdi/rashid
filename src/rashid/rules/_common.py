@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from reis.catalog import Node
+from rashid.catalog import Node
 
 # Rels that make the tree navigable; every one carries type requirements and
 # must be relative and resolvable.

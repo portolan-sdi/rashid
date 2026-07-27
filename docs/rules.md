@@ -1,6 +1,6 @@
 # Rules
 
-Reference for every rule reis applies. The README covers what each
+Reference for every rule rashid applies. The README covers what each
 validation pass does; this file lists the rules themselves.
 
 Findings carry a stable rule id (`PTL-<GROUP>-<NNN>`), a severity, a message, and the offending file path. Severities follow the spec: MUST maps to `error`, SHOULD to `warning`, with three deliberate exceptions:
@@ -27,13 +27,13 @@ Findings carry a stable rule id (`PTL-<GROUP>-<NNN>`), a severity, a message, an
 | `PTL-PRO` | 001–004 | mirror `via`/`canonical` links and `updated` sync time; officials carry no upstream links |
 | `PTL-VIZ` | 001–005 | thumbnail on geospatial collections, style assets for visual derivatives, PMTiles `rel:"pmtiles"` registration, large-vector-without-visual nudge, MapLibre style media type in PMTiles collections |
 | `PTL-STR` | 000–001 | STAC 1.1.0 core structural validity (`stac-validator`); `000` warns when the pass could not run |
-| `PTL-DAT` | 000–016 | asset bytes vs metadata and the format MUSTs: `file:checksum`, `file:size`, format magic, bbox/CRS; valid COG with internal overviews, embedded band statistics, and valid percent (a MUST on nodata bands); GeoParquet version (1.1/2.x), spatial ordering, per-row-group statistics (bbox covering column or native 2.x `GeospatialStatistics`), and row-group size; square internal tiles within 512px; a single Parquet schema across local partition files; the tabular SHOULDs (`table:columns`, `extent.temporal` when the file carries a temporal column) on plain-Parquet collection assets; an item mirror whose ids diverge from the collection's items; `000` warns when the `reis[data]` extra is absent. Source/alternate assets are exempt from the format MUSTs; plain (non-geo) Parquet is exempt from the GeoParquet rules, which bind an item mirror like any other spatial table |
+| `PTL-DAT` | 000–016 | asset bytes vs metadata and the format MUSTs: `file:checksum`, `file:size`, format magic, bbox/CRS; valid COG with internal overviews, embedded band statistics, and valid percent (a MUST on nodata bands); GeoParquet version (1.1/2.x), spatial ordering, per-row-group statistics (bbox covering column or native 2.x `GeospatialStatistics`), and row-group size; square internal tiles within 512px; a single Parquet schema across local partition files; the tabular SHOULDs (`table:columns`, `extent.temporal` when the file carries a temporal column) on plain-Parquet collection assets; an item mirror whose ids diverge from the collection's items; `000` warns when the `rashid[data]` extra is absent. Source/alternate assets are exempt from the format MUSTs; plain (non-geo) Parquet is exempt from the GeoParquet rules, which bind an item mirror like any other spatial table |
 | `PTL-LIV` | 000–005 | the hosting server's Data Storage MUSTs, probed per host over absolute `https` asset hrefs: ranged GET honored (`206`, `Accept-Ranges: bytes`), HEAD `Content-Length` present and matching `file:size`, CORS origin allowed, required headers exposed, preflight accepting `GET`/`HEAD` with `Range`; source/alternate assets are exempt; `000` warns when nothing is probeable or a host is unreachable |
 | `PTL-PRT` | 001 | a partitioned collection declares the partition extension and carries `partition:scheme`, `partition:keys`, and `partition:glob` |
 | `PTL-COL` | 001–004 | a single-file collection exposes its data as a collection-level asset, not wrapped in a lone item; collections never nest; collection IDs follow the naming convention and are unique; raster scenes sit on items rather than on the collection |
 | `PTL-MIR` | 001–002 | a raster collection with scene items publishes an `items.parquet` mirror (a warning, per the SHOULD), and a published mirror is registered as a collection-level asset with the `collection-mirror` role and type `application/vnd.apache.parquet`, per the stac-geoparquet spec |
 
-The catalog tree is loaded from a local directory. `CatalogGraph` (`src/reis/catalog.py`) is the single I/O layer for the metadata, loaded in one pass, so a remote (HTTP) catalog loader can slot in later; the data pass already reads asset bytes over `https`.
+The catalog tree is loaded from a local directory. `CatalogGraph` (`src/rashid/catalog.py`) is the single I/O layer for the metadata, loaded in one pass, so a remote (HTTP) catalog loader can slot in later; the data pass already reads asset bytes over `https`.
 
 ## Development
 
