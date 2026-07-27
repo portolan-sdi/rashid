@@ -1,11 +1,15 @@
 """Collection-modeling rules (spec: core.md, Core Structure / Collections /
-Single-File Collections).
+Single-File Collections / Raster Collections).
 
 A collection holding one data file MUST expose that file as a collection-level
 asset, with no item directory and no item JSON (core.md:139-141). The tabular
 section restates the same requirement for Parquet (formats.md:163-166). The
 check is structural: one item wrapping the collection's only data asset is the
 shape the spec rules out.
+
+Raster Collections turns the same structural question the other way round: a
+collection of several scenes MUST carry each scene's COG on an item rather than
+on the collection.
 
 Collections are also leaves: "collections MUST be one level deep, containing
 only items or assets, never nested collections" (core.md, Core Structure), and
@@ -32,6 +36,16 @@ _UNKNOWN = "unknown"
 # ID is a POSIX path (e.g. environment/air-quality), so each path segment is
 # held to the convention.
 _ID_SEGMENT = re.compile(r"^[a-z][a-z0-9_-]*$")
+
+# formats.md, Raster: a COG is published as
+# "image/tiff; application=geotiff; profile=cloud-optimized". The profile
+# parameter is what makes an asset a COG, and matching on it rather than on
+# the bare image/tiff prefix keeps an upstream original (a plain GeoTIFF
+# carrying the 'source' role) out of the scene count — that is provenance,
+# not a scene. A raster asset typed without the profile is PTL-DAT-004's and
+# PTL-FMT territory, not a modelling question.
+_COG_MEDIA_PREFIX = "image/tiff"
+_COG_MEDIA_PROFILE = "profile=cloud-optimized"
 
 
 class SingleFileCollectionRule(Rule):
@@ -79,6 +93,75 @@ class SingleFileCollectionRule(Rule):
             json_pointer="/assets",
             fix_hint=f"move the item's '{key}' asset into the collection's assets, then delete"
             f" the item JSON, its directory, and the collection's rel:'item' link to it",
+        )
+
+
+class RasterSceneItemRule(Rule):
+    """Scene COGs belong on items; only a lone COG sits at collection level.
+
+    core.md, Raster Collections: "A collection holding multiple raster scenes
+    MUST model each scene as an item carrying its COG as an item-level asset;
+    scene COGs MUST NOT be listed as collection-level assets"
+    (``PORTO-CORE-071``), and "A collection holding a single COG follows the
+    single-file rule above: it MUST expose that COG as a collection-level asset
+    with no item directory" (``PORTO-CORE-072``).
+
+    Two shapes are wrong, and both put a scene COG on the collection:
+
+    - two or more COG data assets on the collection — a multi-scene collection
+      flattened into one asset list, where per-scene footprints and acquisition
+      times have nowhere to live;
+    - one COG on the collection alongside items that carry COGs of their own —
+      a multi-scene collection with one scene left behind at collection level,
+      which is also the item directory ``PORTO-CORE-072`` rules out for the
+      single-COG case.
+
+    The complementary shape — a lone COG wrapped in the collection's only item,
+    with nothing at collection level — is ``PTL-COL-001``'s, which fires for any
+    data format; this rule stays off it so the two never double-report. A
+    collection whose only COG sits at collection level with no raster items is
+    exactly what ``PORTO-CORE-072`` prescribes, and a collection whose scenes
+    all live on items carries no collection-level COG at all: both stay clean.
+    """
+
+    id = "PTL-COL-004"
+    spec_ids = ("PORTO-CORE-071", "PORTO-CORE-072")
+    default_severity = Severity.ERROR
+    description = "raster scenes belong on items; only a single-COG collection carries one itself"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        keys = _cog_asset_keys(node)
+        if len(keys) > 1:
+            listed = ", ".join(f"'{key}'" for key in keys)
+            yield self.finding(
+                node,
+                f"collection lists {len(keys)} scene COGs as collection-level assets"
+                f" ({listed}); each raster scene belongs on its own item",
+                json_pointer="/assets",
+                fix_hint="create one item per scene, move each COG onto its item as an"
+                " item-level asset with that scene's geometry and datetime, and link the"
+                " items from the collection with rel:'item'",
+            )
+            return
+        if not keys:
+            return
+        scene_items = [
+            item
+            for item in graph.children_of(node)
+            if item.kind == "item" and _cog_asset_keys(item)
+        ]
+        if not scene_items:
+            return
+        names = ", ".join(str(item.id or item.path) for item in scene_items[:3])
+        yield self.finding(
+            node,
+            f"collection exposes COG asset '{keys[0]}' at collection level while items"
+            f" ({names}) carry scene COGs; a collection-level COG is only for a"
+            " single-COG collection, which has no item directory",
+            json_pointer=f"/assets/{keys[0]}",
+            fix_hint=f"move the '{keys[0]}' asset onto an item of its own alongside the"
+            " other scenes",
         )
 
 
@@ -157,6 +240,21 @@ class CollectionIdRule(Rule):
 
 def _is_partitioned(node: Node) -> bool:
     return any(key.startswith("partition:") for key in node.data)
+
+
+def _cog_asset_keys(node: Node) -> list[str]:
+    """Keys of the node's COG data assets, in declaration order."""
+    keys: list[str] = []
+    for _pointer, key, asset in _assets_of(node):
+        media_type = asset.get("type")
+        if not isinstance(media_type, str):
+            continue
+        normalized = media_type.strip().lower()
+        if not normalized.startswith(_COG_MEDIA_PREFIX) or _COG_MEDIA_PROFILE not in normalized:
+            continue
+        if "data" in roles_of(asset):
+            keys.append(key)
+    return keys
 
 
 def _data_asset_state(node: Node) -> str:
