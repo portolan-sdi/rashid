@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import struct
 from dataclasses import dataclass
 from typing import Any
@@ -83,6 +84,11 @@ _HEAD_BYTES = 16  # enough for every magic-number probe below
 # reprojection gridding so only genuine divergence trips PTL-DAT-005.
 _BBOX_TOL = 0.01
 
+# Intermediate points per bbox edge when reprojecting. A projected rectangle's
+# edges curve in WGS84, and their extremes usually fall between the corners, so
+# every edge is walked rather than sampled at its ends.
+_DENSIFY_PTS = 21
+
 # formats.md:50 — a GeoParquet row group MUST hold no more than this many rows.
 _MAX_ROW_GROUP_ROWS = 150_000
 
@@ -109,6 +115,31 @@ class _Geo:
     bbox: list[float] | None
     epsg: int | None
     crs: Any | None  # pyproj CRS, when EPSG alone doesn't capture it
+    # Whether ``bbox`` is the tight envelope of the data or merely contains it.
+    # A geometry column's bbox is tight, so the data reaches every edge; a raster
+    # grid only contains its data, and a nodata collar can be wide.
+    tight: bool = True
+
+
+@dataclass(frozen=True)
+class _Wgs84Bounds:
+    """Where the WGS84 envelope of an asset's data must lie.
+
+    ``outer`` contains that envelope. ``inner``, when known, is contained by it,
+    so together they pin each side from opposite directions. A bracket is the
+    most a header-only check can say about a projected asset: under a non-affine
+    projection the native rectangle maps to a curved quadrilateral, whose
+    bounding box is a strict superset of the envelope of the data inside it, so
+    neither box alone is the answer. An unprojected asset has no distortion to
+    absorb and the two boxes coincide.
+
+    ``inner`` is ``None`` when the native bbox was not tight to begin with, which
+    leaves plain containment in ``outer`` as the only sound assertion.
+    """
+
+    outer: list[float]
+    inner: list[float] | None
+    reprojected: bool = False
 
 
 def check_node(node: Node, reader: AssetReader) -> list[DataDefect]:
@@ -428,19 +459,32 @@ def _check_consistency(
         )
 
     declared_bbox = _declared_bbox(node)
-    actual_wgs84 = _to_wgs84(geo)
-    if declared_bbox is not None and actual_wgs84 is not None:
-        if not _bbox_close(declared_bbox, actual_wgs84):
-            defects.append(
-                DataDefect(
-                    DAT_CONSISTENCY,
-                    Severity.WARNING,
-                    f"asset '{key}' data bbox {_fmt_bbox(actual_wgs84)} does not match the "
-                    f"declared bbox {_fmt_bbox(declared_bbox)}",
-                    key,
-                )
-            )
+    bounds = _wgs84_bounds(geo)
+    if declared_bbox is not None and bounds is not None and not _bbox_within(declared_bbox, bounds):
+        message = _bbox_mismatch_message(key, declared_bbox, bounds, geo.epsg)
+        defects.append(DataDefect(DAT_CONSISTENCY, Severity.WARNING, message, key))
     return defects
+
+
+def _bbox_mismatch_message(
+    key: str, declared: list[float], bounds: _Wgs84Bounds, epsg: int | None
+) -> str:
+    """Say what the declared bbox had to satisfy, not just that it failed."""
+    if bounds.inner is None:
+        return (
+            f"asset '{key}' declared bbox {_fmt_bbox(declared)} is not contained by the "
+            f"asset's extent {_fmt_bbox(bounds.outer)}"
+        )
+    if not bounds.reprojected:
+        return (
+            f"asset '{key}' data bbox {_fmt_bbox(bounds.outer)} does not match the "
+            f"declared bbox {_fmt_bbox(declared)}"
+        )
+    return (
+        f"asset '{key}' declared bbox {_fmt_bbox(declared)} is inconsistent with its "
+        f"EPSG:{epsg} data, whose envelope contains {_fmt_bbox(bounds.inner)} and "
+        f"lies within {_fmt_bbox(bounds.outer)}"
+    )
 
 
 # --- GeoParquet cloud-native structure -------------------------------------
@@ -715,6 +759,8 @@ def _geo_from_raster(located: Locator) -> _Geo | None:
             bbox=[bounds.left, bounds.bottom, bounds.right, bounds.top],
             epsg=crs.to_epsg() if crs else None,
             crs=crs,
+            # the grid extent, which a nodata collar can hold well inside it
+            tight=False,
         )
 
 
@@ -742,26 +788,82 @@ def _as_bbox(bbox: Any) -> list[float] | None:
     return values[:4]
 
 
-def _to_wgs84(geo: _Geo) -> list[float] | None:
+def _wgs84_bounds(geo: _Geo) -> _Wgs84Bounds | None:
+    """Bracket the WGS84 envelope of the data behind a native bbox."""
     if geo.bbox is None:
         return None
     if geo.crs is None or geo.epsg == 4326:
-        return geo.bbox
+        return _Wgs84Bounds(outer=geo.bbox, inner=geo.bbox if geo.tight else None)
     transformer = Transformer.from_crs(geo.crs, CRS.from_epsg(4326), always_xy=True)
-    minx, miny, maxx, maxy = geo.bbox
-    xs: list[float] = []
-    ys: list[float] = []
-    # Sample the four corners; a rectangle in a projected CRS is not a rectangle
-    # in WGS84, so corners bound the reprojected extent well enough for the tol.
-    for x, y in ((minx, miny), (minx, maxy), (maxx, miny), (maxx, maxy)):
-        lon, lat = transformer.transform(x, y)
-        xs.append(lon)
-        ys.append(lat)
-    return [min(xs), min(ys), max(xs), max(ys)]
+    minx, miny, maxx, maxy = geo.bbox[:4]
+    outer = list(transformer.transform_bounds(minx, miny, maxx, maxy, densify_pts=_DENSIFY_PTS))
+    if not all(math.isfinite(v) for v in outer):
+        return None
+    if outer[0] > outer[2]:
+        # transform_bounds signals an antimeridian crossing by returning a box
+        # that wraps; no plain min/max comparison means anything across the seam
+        return None
+    inner = _inner_bounds(transformer, geo.bbox) if geo.tight else None
+    if geo.tight and inner is None:
+        return None
+    return _Wgs84Bounds(outer=outer, inner=inner, reprojected=True)
 
 
-def _bbox_close(a: list[float], b: list[float]) -> bool:
-    return all(abs(x - y) <= _BBOX_TOL for x, y in zip(a[:4], b[:4], strict=False))
+def _inner_bounds(transformer: Transformer, bbox: list[float]) -> list[float] | None:
+    """The largest box the reprojected envelope is guaranteed to *contain*.
+
+    A native bbox is tight, so some geometry touches each of its four edges.
+    Reprojecting one edge therefore pins one side of the true envelope from the
+    inside: the touching point's longitude is at most that edge's largest
+    longitude, so the envelope's own minimum longitude is at most that too, and
+    symmetrically for the other three sides. Taking the tightest such bound over
+    all four edges holds however the projection reorients the rectangle.
+    """
+    minx, miny, maxx, maxy = bbox[:4]
+    steps = [i / (_DENSIFY_PTS + 1) for i in range(_DENSIFY_PTS + 2)]
+    min_lon_at_most = min_lat_at_most = math.inf
+    max_lon_at_least = max_lat_at_least = -math.inf
+    for x0, y0, x1, y1 in (
+        (minx, miny, minx, maxy),
+        (maxx, miny, maxx, maxy),
+        (minx, miny, maxx, miny),
+        (minx, maxy, maxx, maxy),
+    ):
+        lons, lats = transformer.transform(
+            [x0 + (x1 - x0) * f for f in steps], [y0 + (y1 - y0) * f for f in steps]
+        )
+        if not all(math.isfinite(v) for v in (*lons, *lats)):
+            return None
+        min_lon_at_most = min(min_lon_at_most, max(lons))
+        min_lat_at_most = min(min_lat_at_most, max(lats))
+        max_lon_at_least = max(max_lon_at_least, min(lons))
+        max_lat_at_least = max(max_lat_at_least, min(lats))
+    return [min_lon_at_most, min_lat_at_most, max_lon_at_least, max_lat_at_least]
+
+
+def _bbox_within(declared: list[float], bounds: _Wgs84Bounds) -> bool:
+    """Does a declared bbox sit inside the bracket, side by side?
+
+    Every side must land inside ``outer``. When ``inner`` is known each side must
+    also reach at least that far, which is what keeps an under-declared bbox
+    detectable; where the two boxes coincide the pair collapses to plain equality
+    within the tolerance.
+    """
+    minx, miny, maxx, maxy = declared[:4]
+    west, south, east, north = bounds.outer
+    if not all(west - _BBOX_TOL <= v <= east + _BBOX_TOL for v in (minx, maxx)):
+        return False
+    if not all(south - _BBOX_TOL <= v <= north + _BBOX_TOL for v in (miny, maxy)):
+        return False
+    if bounds.inner is None:
+        return True
+    reach_w, reach_s, reach_e, reach_n = bounds.inner
+    return (
+        minx <= reach_w + _BBOX_TOL
+        and miny <= reach_s + _BBOX_TOL
+        and maxx >= reach_e - _BBOX_TOL
+        and maxy >= reach_n - _BBOX_TOL
+    )
 
 
 def _fmt_bbox(bbox: list[float]) -> str:

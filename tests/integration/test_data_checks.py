@@ -163,21 +163,164 @@ def test_pmtiles_header_bbox(tmp_path: Path) -> None:
     assert geo.bbox == pytest.approx([4.0, 50.0, 6.0, 52.0])
 
 
-def test_to_wgs84_reprojects_projected_bbox() -> None:
+# The netherlands-provinces GeoParquet of the spec's reference catalog: a native
+# EPSG:28992 (RD New) bbox and the exact WGS84 envelope of its geometries, taken
+# by reprojecting every geometry. RD New is oblique stereographic, so a constant
+# northing bows north toward the projection origin and the corners of the native
+# rectangle are the *lowest* points on its north edge.
+_RD_NEW_BBOX = [10425.156, 306846.198, 278026.09, 621876.3]
+_RD_NEW_ENVELOPE = [3.307938, 50.750367, 7.227498, 53.576423]
+
+
+def _rd_new_geo() -> checks._Geo:
+    return checks._Geo(bbox=list(_RD_NEW_BBOX), epsg=28992, crs=CRS.from_epsg(28992))
+
+
+def test_wgs84_bounds_of_unprojected_bbox_are_exact() -> None:
+    bbox = [4.0, 50.0, 6.0, 52.0]
+    geo = checks._Geo(bbox=bbox, epsg=4326, crs=CRS.from_epsg(4326))
+
+    bounds = checks._wgs84_bounds(geo)
+
+    assert bounds is not None
+    assert not bounds.reprojected
+    assert bounds.outer == pytest.approx(bbox)
+    assert bounds.inner == pytest.approx(bbox)
+
+
+def test_wgs84_bounds_reproject_a_projected_bbox() -> None:
     to_mercator = Transformer.from_crs(CRS.from_epsg(4326), CRS.from_epsg(3857), always_xy=True)
     minx, miny = to_mercator.transform(4.0, 50.0)
     maxx, maxy = to_mercator.transform(6.0, 52.0)
     geo = checks._Geo(bbox=[minx, miny, maxx, maxy], epsg=3857, crs=CRS.from_epsg(3857))
 
-    result = checks._to_wgs84(geo)
+    bounds = checks._wgs84_bounds(geo)
 
-    assert result is not None
-    assert result == pytest.approx([4.0, 50.0, 6.0, 52.0], abs=1e-6)
+    assert bounds is not None
+    assert bounds.reprojected
+    # web mercator keeps meridians and parallels straight, so both bounds close
+    # in on the same box from either side
+    assert bounds.outer == pytest.approx([4.0, 50.0, 6.0, 52.0], abs=1e-6)
+    assert bounds.inner == pytest.approx([4.0, 50.0, 6.0, 52.0], abs=1e-6)
 
 
-def test_bbox_close_tolerance() -> None:
-    assert checks._bbox_close([4.0, 50.0, 6.0, 52.0], [4.005, 50.0, 6.0, 52.0])
-    assert not checks._bbox_close([4.0, 50.0, 6.0, 52.0], [4.5, 50.0, 6.0, 52.0])
+def test_wgs84_bounds_bracket_the_true_envelope() -> None:
+    bounds = checks._wgs84_bounds(_rd_new_geo())
+
+    assert bounds is not None
+    assert bounds.inner is not None
+    minx, miny, maxx, maxy = _RD_NEW_ENVELOPE
+    # outer contains the true envelope, inner is contained by it, strictly on
+    # every side — a non-affine projection admits no tighter claim
+    assert bounds.outer[0] < minx < bounds.inner[0]
+    assert bounds.outer[1] < miny < bounds.inner[1]
+    assert bounds.inner[2] < maxx < bounds.outer[2]
+    assert bounds.inner[3] < maxy < bounds.outer[3]
+
+
+def test_projected_bbox_accepts_its_true_envelope() -> None:
+    """Reprojecting only the corners under-claims the north edge here (#26)."""
+    bounds = checks._wgs84_bounds(_rd_new_geo())
+
+    assert bounds is not None
+    assert checks._bbox_within(_RD_NEW_ENVELOPE, bounds)
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        [3.0, 50.75, 7.22, 53.57],  # west of any longitude the data can reach
+        [3.31, 50.5, 7.22, 53.9],  # south and north of any latitude it can reach
+    ],
+)
+def test_projected_bbox_rejects_an_over_claimed_declaration(over: list[float]) -> None:
+    bounds = checks._wgs84_bounds(_rd_new_geo())
+
+    assert bounds is not None
+    assert not checks._bbox_within(over, bounds)
+
+
+def test_projected_mismatch_names_both_bounds() -> None:
+    bounds = checks._wgs84_bounds(_rd_new_geo())
+
+    assert bounds is not None
+    assert bounds.inner is not None
+    message = checks._bbox_mismatch_message("data", [4.0, 51.0, 6.0, 53.0], bounds, 28992)
+
+    assert "EPSG:28992" in message
+    assert checks._fmt_bbox(bounds.inner) in message
+    assert checks._fmt_bbox(bounds.outer) in message
+
+
+def test_projected_bbox_rejects_an_under_claimed_declaration() -> None:
+    """A stale bbox covering part of the data must still warn."""
+    bounds = checks._wgs84_bounds(_rd_new_geo())
+
+    assert bounds is not None
+    under = [4.0, 51.0, 6.0, 53.0]
+    assert not checks._bbox_within(under, bounds)
+
+
+@pytest.mark.parametrize("epsg", [4326, 28992])
+def test_wgs84_bounds_of_an_untight_bbox_have_no_inner_side(epsg: int) -> None:
+    """A raster grid only contains its data, so no side is pinned from inside."""
+    bbox = [4.0, 50.0, 6.0, 52.0] if epsg == 4326 else list(_RD_NEW_BBOX)
+    geo = checks._Geo(bbox=bbox, epsg=epsg, crs=CRS.from_epsg(epsg), tight=False)
+
+    bounds = checks._wgs84_bounds(geo)
+
+    assert bounds is not None
+    assert bounds.inner is None
+
+
+def test_untight_bbox_accepts_a_declaration_inside_the_collar() -> None:
+    """A nodata collar puts the real footprint well inside the grid extent."""
+    grid = checks._Geo(bbox=[4.0, 50.0, 6.0, 52.0], epsg=4326, crs=CRS.from_epsg(4326), tight=False)
+    bounds = checks._wgs84_bounds(grid)
+
+    assert bounds is not None
+    assert checks._bbox_within([4.8, 50.9, 5.1, 51.2], bounds)
+    assert not checks._bbox_within([3.5, 50.9, 5.1, 51.2], bounds)
+
+
+def test_untight_mismatch_names_the_containing_extent() -> None:
+    bounds = checks._Wgs84Bounds(outer=[4.0, 50.0, 6.0, 52.0], inner=None)
+
+    message = checks._bbox_mismatch_message("data", [3.5, 50.9, 5.1, 51.2], bounds, 4326)
+
+    assert "is not contained by the asset's extent" in message
+
+
+def test_wgs84_bounds_skip_an_antimeridian_crossing() -> None:
+    """Straddling the seam, min/max in degrees describes no box at all."""
+    # PDC Mercator, central meridian 150E; the seam sits near x=3.34e6.
+    geo = checks._Geo(bbox=[3.0e6, -1.0e6, 5.0e6, 1.0e6], epsg=3832, crs=CRS.from_epsg(3832))
+
+    assert checks._wgs84_bounds(geo) is None
+
+
+@pytest.mark.parametrize("epsg", [3035, 32631])
+def test_wgs84_bounds_skip_an_unprojectable_bbox(epsg: int) -> None:
+    """Coordinates outside the projection's domain reproject to infinity."""
+    geo = checks._Geo(bbox=[-1e9, -1e9, 1e9, 1e9], epsg=epsg, crs=CRS.from_epsg(epsg))
+
+    assert checks._wgs84_bounds(geo) is None
+
+
+def test_consistency_skips_the_bbox_it_cannot_reproject(monkeypatch: pytest.MonkeyPatch) -> None:
+    geo = checks._Geo(bbox=[3.0e6, -1.0e6, 5.0e6, 1.0e6], epsg=3832, crs=CRS.from_epsg(3832))
+    monkeypatch.setattr(checks, "_extract_geo", lambda expected, located: geo)
+    located = Locator(is_remote=False, source="unused")
+
+    defects = checks._check_consistency(_item(_asset()), "data", _asset(), "parquet", located)
+
+    assert defects == []
+
+
+def test_bbox_within_tolerance() -> None:
+    exact = checks._Wgs84Bounds(outer=[4.0, 50.0, 6.0, 52.0], inner=[4.0, 50.0, 6.0, 52.0])
+    assert checks._bbox_within([4.005, 50.0, 6.0, 52.0], exact)
+    assert not checks._bbox_within([4.5, 50.0, 6.0, 52.0], exact)
 
 
 @pytest.mark.parametrize(
