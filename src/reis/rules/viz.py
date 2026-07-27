@@ -18,6 +18,7 @@ from reis.rules._common import links_of, roles_of
 from reis.rules.assets import _assets_of
 
 PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
+STYLE_MEDIA_TYPE = "application/vnd.mapbox.style+json"
 _THUMBNAIL_TYPES = ("image/png", "image/jpeg")
 _WEB_MAP_LINKS_PREFIX = "https://stac-extensions.github.io/web-map-links/"
 # Render-from-source is plausible for small files; above this, a missing
@@ -177,6 +178,39 @@ class PMTilesRegistrationRule(Rule):
                 " schema in stac_extensions",
                 json_pointer="/stac_extensions",
             )
+
+
+class StyleMediaTypeRule(Rule):
+    """Style assets in a PMTiles collection carry the MapLibre media type.
+
+    formats.md, PMTiles: "For PMTiles the style is a MapLibre GL style file
+    (MapLibre GL style spec v8) in a `styles/` subdirectory, with media type
+    `application/vnd.mapbox.style+json`". Scoped to collections that provide
+    PMTiles, where the spec pins the style format; the style's presence is
+    PTL-VIZ-002's finding.
+    """
+
+    id = "PTL-VIZ-005"
+    default_severity = Severity.ERROR
+    description = (
+        "style assets in PMTiles collections must be typed application/vnd.mapbox.style+json"
+    )
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        has_asset, has_link = _pmtiles_registration(node)
+        if not has_asset and not has_link:
+            return
+        for pointer, key, asset in _assets_of(node):
+            if "style" not in roles_of(asset):
+                continue
+            media_type = asset.get("type")
+            if media_type != STYLE_MEDIA_TYPE:
+                yield self.finding(
+                    node,
+                    f"style asset '{key}' has type {media_type!r}, expected '{STYLE_MEDIA_TYPE}'",
+                    json_pointer=f"{pointer}/type",
+                )
 
 
 class LargeVectorWithoutVisualRule(Rule):

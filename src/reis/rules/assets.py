@@ -131,6 +131,30 @@ class AssetFileFieldsRule(Rule):
                 )
 
 
+class CatalogAssetsRule(Rule):
+    """Catalogs carry no assets.
+
+    core.md, Core Structure: "catalogs and collections are internal nodes,
+    items are leaves, and assets (data files) MUST sit at collection or item
+    level. Catalogs organize only". An ``assets`` field on a catalog puts data
+    at the wrong level, so its mere presence is the defect.
+    """
+
+    id = "PTL-AST-005"
+    default_severity = Severity.ERROR
+    description = "assets must sit at collection or item level; catalogs organize only"
+    kinds = ("catalog",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        if "assets" in node.data:
+            yield self.finding(
+                node,
+                "catalog declares assets; assets (data files) must sit at collection or item level",
+                json_pointer="/assets",
+                fix_hint="move the assets onto the collection (or item) that owns the data",
+            )
+
+
 class ChecksumMultihashRule(Rule):
     """file:checksum values are multihash-encoded."""
 

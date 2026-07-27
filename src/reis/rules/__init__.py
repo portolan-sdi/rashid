@@ -7,12 +7,23 @@ from reis.rules.assets import (
     AssetFieldsRule,
     AssetFileFieldsRule,
     AssetHrefSchemeRule,
+    CatalogAssetsRule,
     ChecksumMultihashRule,
 )
 from reis.rules.bbox import BboxValidRule
-from reis.rules.collections import SingleFileCollectionRule
+from reis.rules.collections import (
+    CollectionIdRule,
+    NestedCollectionRule,
+    SingleFileCollectionRule,
+)
 from reis.rules.conformance import SchemaUriConsistencyRule, SchemaUriDeclaredRule
-from reis.rules.files import AgentsLinkRule, ReadmeLinkRule, RequiredFilesRule
+from reis.rules.files import (
+    AgentsLinkRule,
+    ReadmeContentRule,
+    ReadmeLinkRule,
+    ReadmeSectionsRule,
+    RequiredFilesRule,
+)
 from reis.rules.license import (
     LicenseDeclaredRule,
     NoProprietaryLicenseRule,
@@ -26,7 +37,7 @@ from reis.rules.links import (
     RequiredLinksRule,
     StructuralLinkTypeRule,
 )
-from reis.rules.partitions import PartitionGlobRule
+from reis.rules.partitions import PartitionFieldsRule
 from reis.rules.provenance import (
     MirrorCanonicalLinkRule,
     MirrorUpdatedRule,
@@ -39,6 +50,7 @@ from reis.rules.titles import HumanReadableTitleRule, LinkTitleRule, TitleDescri
 from reis.rules.viz import (
     LargeVectorWithoutVisualRule,
     PMTilesRegistrationRule,
+    StyleMediaTypeRule,
     StylesForDerivativeRule,
     ThumbnailRule,
 )
@@ -47,6 +59,8 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     RequiredFilesRule(),
     AgentsLinkRule(),
     ReadmeLinkRule(),
+    ReadmeContentRule(),
+    ReadmeSectionsRule(),
     TitleDescriptionRule(),
     HumanReadableTitleRule(),
     LinkTitleRule(),
@@ -69,6 +83,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     AssetHrefSchemeRule(),
     AssetFileFieldsRule(),
     ChecksumMultihashRule(),
+    CatalogAssetsRule(),
     SchemaUriDeclaredRule(),
     SchemaUriConsistencyRule(),
     MirrorViaLinkRule(),
@@ -78,9 +93,12 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     ThumbnailRule(),
     StylesForDerivativeRule(),
     PMTilesRegistrationRule(),
+    StyleMediaTypeRule(),
     LargeVectorWithoutVisualRule(),
-    PartitionGlobRule(),
+    PartitionFieldsRule(),
     SingleFileCollectionRule(),
+    NestedCollectionRule(),
+    CollectionIdRule(),
 )
 
 __all__ = ["DEFAULT_RULES"]

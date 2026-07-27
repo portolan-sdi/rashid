@@ -179,3 +179,67 @@ def test_clean_default_collection_has_no_viz_findings(catalog: CatalogBuilder) -
     report = validate(catalog.write())
     for rule in ("PTL-VIZ-001", "PTL-VIZ-002", "PTL-VIZ-003", "PTL-VIZ-004"):
         assert findings_for(report, rule) == []
+
+
+def test_style_with_wrong_type_in_pmtiles_collection(catalog: CatalogBuilder) -> None:
+    style = _style_asset()
+    style["type"] = "application/json"
+    collection = catalog.collection(
+        "roads",
+        assets={
+            "data": default_asset(),
+            "thumbnail": thumbnail_asset(),
+            "tiles": _pmtiles_asset(),
+            "default-style": style,
+        },
+    )
+    collection.item("roads-2024")
+    root = catalog.write()
+    mutate_json(
+        root / "roads" / "collection.json",
+        lambda d: (
+            d["links"].append(dict(_PMTILES_LINK)),
+            d["stac_extensions"].append(_WEB_MAP_LINKS_URI),
+        ),
+    )
+    findings = findings_for(validate(root), "PTL-VIZ-005")
+    assert len(findings) == 1
+    assert findings[0].json_pointer == "/assets/default-style/type"
+    assert "application/vnd.mapbox.style+json" in findings[0].message
+
+
+def test_style_with_correct_type_in_pmtiles_collection_passes(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection(
+        "roads",
+        assets={
+            "data": default_asset(),
+            "thumbnail": thumbnail_asset(),
+            "tiles": _pmtiles_asset(),
+            "default-style": _style_asset(),
+        },
+    )
+    collection.item("roads-2024")
+    root = catalog.write()
+    mutate_json(
+        root / "roads" / "collection.json",
+        lambda d: (
+            d["links"].append(dict(_PMTILES_LINK)),
+            d["stac_extensions"].append(_WEB_MAP_LINKS_URI),
+        ),
+    )
+    assert findings_for(validate(root), "PTL-VIZ-005") == []
+
+
+def test_style_type_unchecked_without_pmtiles(catalog: CatalogBuilder) -> None:
+    style = _style_asset()
+    style["type"] = "application/json"
+    collection = catalog.collection(
+        "roads",
+        assets={
+            "data": default_asset(),
+            "thumbnail": thumbnail_asset(),
+            "default-style": style,
+        },
+    )
+    collection.item("roads-2024")
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-005") == []
