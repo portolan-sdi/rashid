@@ -100,6 +100,7 @@ def _optional_passes(
     structural_validator: _Validator | None,
     schema: bool,
     schema_validator: _Validator | None,
+    schema_allow_network: bool,
     data: bool,
     data_validator: DataValidator | None,
     live: bool,
@@ -110,7 +111,9 @@ def _optional_passes(
     if structural and STR_INVALID not in config.disabled:
         findings.extend(validate_structural(graph, structural_validator))
     if schema and SCH_INVALID not in config.disabled:
-        findings.extend(validate_schema(graph, schema_validator))
+        findings.extend(
+            validate_schema(graph, schema_validator, allow_network=schema_allow_network)
+        )
     if data and not _DATA_RULE_IDS <= config.disabled:
         findings.extend(
             f for f in validate_data(graph, data_validator) if f.rule_id not in config.disabled
@@ -131,6 +134,7 @@ def validate(
     structural_validator: Callable[[dict[str, Any]], list[str]] | None = None,
     schema: bool = False,
     schema_validator: Callable[[dict[str, Any]], list[str]] | None = None,
+    schema_allow_network: bool = False,
     data: bool = False,
     data_validator: DataValidator | None = None,
     live: bool = False,
@@ -146,10 +150,13 @@ def validate(
     alternate validator, chiefly for offline testing.
 
     When ``schema`` is true the Portolan profile schema pass runs too, applying
-    the published JSON Schema to every object (see :mod:`rashid.schema`); it is
-    off by default because it reaches the network and overlaps the metadata
-    pass. Disabling ``PTL-SCH-001`` via ``config`` skips it. ``schema_validator``
-    injects an alternate validator, chiefly for offline testing.
+    the published JSON Schema to every object (see :mod:`rashid.schema`). The
+    schema comes from the copies bundled in the wheel, so the pass is offline;
+    it is off by default only because it overlaps the metadata pass by design.
+    A schema version this build does not carry is fetched over the network when
+    ``schema_allow_network`` is set, and degrades to a ``PTL-SCH-000`` warning
+    otherwise. Disabling ``PTL-SCH-001`` via ``config`` skips the pass.
+    ``schema_validator`` injects an alternate validator, chiefly for testing.
 
     When ``data`` is true the data pass runs too, reading each asset's bytes
     (local files and remote ``https`` URLs) to verify checksum, size, format,
@@ -237,6 +244,7 @@ def validate(
             structural_validator=structural_validator,
             schema=schema,
             schema_validator=schema_validator,
+            schema_allow_network=schema_allow_network,
             data=data,
             data_validator=data_validator,
             live=live,
