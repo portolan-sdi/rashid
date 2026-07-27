@@ -30,6 +30,10 @@ and the real bytes into a :class:`reis.data.DataDefect`:
 - ``PTL-DAT-015`` a tabular (plain Parquet) collection is missing the SHOULDs
   of formats.md, Tabular Data: ``table:columns`` documenting the columns, and
   ``extent.temporal`` when the file carries a temporal column (WARNING)
+- ``PTL-DAT-016`` an item mirror's ids diverge from the collection's items
+  (MUST, formats.md, Raster § Item mirror). A mirror runs the GeoParquet
+  checks above as well: the spec binds it to them like any other spatial
+  table.
 
 ``PTL-DAT-007`` also carries formats.md's covering-column recommendation: a
 GeoParquet 2.x file that satisfies the statistics MUST through native
@@ -64,7 +68,7 @@ from pyproj import CRS, Transformer
 from rio_cogeo.cogeo import cog_validate
 
 from reis._multihash import decode_multihash
-from reis.catalog import Node
+from reis.catalog import CatalogGraph, Node
 from reis.data import (
     DAT_CHECKSUM,
     DAT_COG,
@@ -72,6 +76,7 @@ from reis.data import (
     DAT_CONSISTENCY,
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
+    DAT_MIRROR,
     DAT_ORDERING,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
@@ -85,6 +90,7 @@ from reis.data import (
 )
 from reis.data.reader import AssetReader, Locator
 from reis.model import Severity
+from reis.rules.item_mirror import is_mirror_asset
 
 # Multihash function code -> hashlib algorithm name.
 _HASH_ALGOS = {
@@ -163,15 +169,22 @@ class _Wgs84Bounds:
     reprojected: bool = False
 
 
-def check_node(node: Node, reader: AssetReader) -> list[DataDefect]:
-    """Verify every asset on ``node`` against its declared metadata."""
+def check_node(
+    node: Node, reader: AssetReader, graph: CatalogGraph | None = None
+) -> list[DataDefect]:
+    """Verify every asset on ``node`` against its declared metadata.
+
+    ``graph`` is optional because one check, the item mirror's agreement with
+    the collection's items, needs the object's children. Without it that check
+    is skipped.
+    """
     defects: list[DataDefect] = []
     defects.extend(_check_partition_schemas(node))
     for key, asset in _assets_of(node):
         href = asset.get("href")
         if not isinstance(href, str) or not href:
             continue  # PTL-AST-001 reports a missing href
-        defects.extend(_check_asset(node, key, asset, href, reader))
+        defects.extend(_check_asset(node, key, asset, href, reader, graph))
     return defects
 
 
@@ -183,7 +196,12 @@ def _assets_of(node: Node) -> list[tuple[str, dict[str, Any]]]:
 
 
 def _check_asset(
-    node: Node, key: str, asset: dict[str, Any], href: str, reader: AssetReader
+    node: Node,
+    key: str,
+    asset: dict[str, Any],
+    href: str,
+    reader: AssetReader,
+    graph: CatalogGraph | None = None,
 ) -> list[DataDefect]:
     defects: list[DataDefect] = []
     media_type = asset.get("type")
@@ -197,6 +215,14 @@ def _check_asset(
         # alongside the primary) is exempt from the cloud-native format MUSTs;
         # its bytes are still checksum/size/format-verified above.
         return defects
+    if is_mirror_asset(asset):
+        # formats.md, Raster § Item mirror: a mirror must reproduce the items
+        # it mirrors (PORTO-FMT-042). It then falls through to the GeoParquet
+        # checks below, which bind it as they bind vector data
+        # (PORTO-FMT-043) — an item index is queried by extent like any other
+        # spatial table. The tabular SHOULDs skip it on their own, being
+        # scoped to assets with the 'data' role.
+        defects.extend(_check_mirror(node, key, located, graph))
     if expected == "tiff":
         defects.extend(_check_raster(key, located))
     if expected == "parquet":
@@ -659,6 +685,81 @@ def _geo_metadata(parquet: Any) -> dict[str, Any] | None:
     except (ValueError, TypeError):
         return None
     return geo if isinstance(geo, dict) else None
+
+
+# --- item mirrors -----------------------------------------------------------
+
+
+def _check_mirror(
+    node: Node, key: str, located: Locator, graph: CatalogGraph | None
+) -> list[DataDefect]:
+    """A mirror MUST reproduce the collection's items (PORTO-FMT-042).
+
+    The comparison is on item ids, the one field both representations carry and
+    the only one a client uses to join them. A mirror that has fallen behind
+    reports items that no longer exist, or omits items that do, and the client
+    reading it cannot tell either way.
+
+    Skipped when the graph is unavailable, when the collection has no items to
+    compare against, or when the mirror carries no ``id`` column to read. The
+    last of those is reported: a file registered as a stac-geoparquet mirror
+    without item ids is not one.
+    """
+    if graph is None:
+        return []
+    items = [child for child in graph.children_of(node) if child.kind == "item"]
+    if not items:
+        return []
+    declared = {item.id for item in items if isinstance(item.id, str) and item.id}
+    if not declared:
+        return []  # unidentified items; PTL-STR/PTL-GEN own that gap
+
+    try:
+        source: Any = located.open_binary() if located.is_remote else located.source
+        parquet = pq.ParquetFile(source)
+    except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
+        return []
+
+    if "id" not in parquet.schema_arrow.names:
+        return [
+            DataDefect(
+                DAT_MIRROR,
+                Severity.ERROR,
+                f"mirror asset '{key}' has no 'id' column, so its rows cannot be matched"
+                " to the collection's items",
+                key,
+            )
+        ]
+
+    try:
+        column = parquet.read(columns=["id"]).column("id").to_pylist()
+    except Exception:  # noqa: BLE001 - as above
+        return []
+    present = {value for value in column if isinstance(value, str)}
+
+    missing = sorted(declared - present)
+    extra = sorted(present - declared)
+    if not missing and not extra:
+        return []
+
+    parts = []
+    if missing:
+        parts.append(f"{len(missing)} item(s) absent from the mirror ({_sample(missing)})")
+    if extra:
+        parts.append(f"{len(extra)} mirror row(s) with no item ({_sample(extra)})")
+    return [
+        DataDefect(
+            DAT_MIRROR,
+            Severity.ERROR,
+            f"mirror asset '{key}' disagrees with the collection's items: " + ", ".join(parts),
+            key,
+        )
+    ]
+
+
+def _sample(ids: list[str], limit: int = 3) -> str:
+    shown = ", ".join(ids[:limit])
+    return shown if len(ids) <= limit else f"{shown}, …"
 
 
 # --- tabular collections ----------------------------------------------------

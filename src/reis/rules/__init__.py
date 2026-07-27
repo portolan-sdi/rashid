@@ -29,6 +29,7 @@ from reis.rules.files import (
     ReadmeSectionsRule,
     RequiredFilesRule,
 )
+from reis.rules.item_mirror import ItemMirrorPresentRule, ItemMirrorRegistrationRule
 from reis.rules.license import (
     LicenseDeclaredRule,
     NoProprietaryLicenseRule,
@@ -106,6 +107,8 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     RasterSceneItemRule(),
     NestedCollectionRule(),
     CollectionIdRule(),
+    ItemMirrorPresentRule(),
+    ItemMirrorRegistrationRule(),
 )
 
 __all__ = ["DEFAULT_RULES"]

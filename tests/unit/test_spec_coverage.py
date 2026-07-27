@@ -77,6 +77,7 @@ _NON_RULE_SEVERITIES: dict[str, Severity] = {
     "PTL-DAT-013": Severity.ERROR,
     "PTL-DAT-014": Severity.ERROR,
     "PTL-DAT-015": Severity.WARNING,
+    "PTL-DAT-016": Severity.ERROR,
     "PTL-LIV-001": Severity.ERROR,
     "PTL-LIV-002": Severity.ERROR,
     "PTL-LIV-003": Severity.ERROR,
