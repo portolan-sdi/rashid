@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rashid"
-version = "0.1.1"
+version = "0.2.0"
 description = "Validator and linter for Portolan catalogs"
 readme = "README.md"
 license = "Apache-2.0"
@@ -168,7 +168,7 @@ ignore_imports = ["rashid.data -> rashid.data.checks"]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.1.1"
+version = "0.2.0"
 version_files = ["pyproject.toml:^version"]
 tag_format = "v$version"
 update_changelog_on_bump = true

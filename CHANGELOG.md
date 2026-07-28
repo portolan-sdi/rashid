@@ -1,3 +1,9 @@
+## v0.2.0 (2026-07-28)
+
+### Feat
+
+- **api**: publish the helpers downstream tools were importing privately
+
 ## v0.1.1 (2026-07-28)
 
 ### Feat
