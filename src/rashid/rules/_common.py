@@ -11,11 +11,10 @@ from rashid.catalog import Node
 # must be relative and resolvable.
 STRUCTURAL_RELS = ("root", "parent", "child", "item", "collection")
 
-# formats.md, Raster: a COG is published as
+# core.md, Assets: the required media type for a COG is
 # "image/tiff; application=geotiff; profile=cloud-optimized". The profile
-# parameter is what makes the asset a COG. Matching the bare image/tiff
-# prefix would also count a plain GeoTIFF, such as an upstream original
-# carrying the 'source' role.
+# parameter is part of that type. Matching the bare image/tiff prefix would
+# also count a plain GeoTIFF.
 _COG_MEDIA_PREFIX = "image/tiff"
 _COG_MEDIA_PROFILE = "profile=cloud-optimized"
 
