@@ -51,7 +51,11 @@ class AssetFieldsRule(Rule):
             href = asset.get("href")
             if not isinstance(href, str) or not href.strip():
                 yield self.finding(
-                    node, f"asset '{key}' has no href", json_pointer=f"{pointer}/href"
+                    node,
+                    f"asset '{key}' has no href",
+                    json_pointer=f"{pointer}/href",
+                    fix_hint="set href to the file's path relative to this object,"
+                    " e.g. './data.parquet'",
                 )
             yield from self._check_type_and_roles(node, pointer, key, asset)
         # item_assets entries are templates: no href/size/checksum, but the
@@ -65,11 +69,21 @@ class AssetFieldsRule(Rule):
         media_type = asset.get("type")
         if not isinstance(media_type, str) or not media_type.strip():
             yield self.finding(
-                node, f"asset '{key}' has no type (media type)", json_pointer=f"{pointer}/type"
+                node,
+                f"asset '{key}' has no type (media type)",
+                json_pointer=f"{pointer}/type",
+                fix_hint="add the file's IANA media type, e.g."
+                " 'application/vnd.apache.parquet' for GeoParquet",
             )
         roles = asset.get("roles")
         if not isinstance(roles, list) or not any(isinstance(r, str) and r.strip() for r in roles):
-            yield self.finding(node, f"asset '{key}' has no roles", json_pointer=f"{pointer}/roles")
+            yield self.finding(
+                node,
+                f"asset '{key}' has no roles",
+                json_pointer=f"{pointer}/roles",
+                fix_hint='add a roles array naming what the asset is for, e.g. ["data"],'
+                ' ["thumbnail"], or ["visual"]',
+            )
 
 
 class AssetHrefSchemeRule(Rule):
@@ -95,12 +109,17 @@ class AssetHrefSchemeRule(Rule):
                     f"asset '{key}' href uses s3://; absolute hrefs must use https",
                     json_pointer=f"{pointer}/href",
                     fix_hint="use the https endpoint; expose s3 URLs via the alternate extension",
+                    expected="https",
+                    actual=scheme,
                 )
             else:
                 yield self.finding(
                     node,
                     f"asset '{key}' href uses scheme '{scheme}'; absolute hrefs must use https",
                     json_pointer=f"{pointer}/href",
+                    fix_hint="rewrite the href as the https URL that serves this file",
+                    expected="https",
+                    actual=scheme,
                 )
 
 
@@ -118,19 +137,26 @@ class AssetFileFieldsRule(Rule):
             size = asset.get("file:size")
             if size is None:
                 yield self.finding(
-                    node, f"asset '{key}' has no file:size", json_pointer=f"{pointer}/file:size"
+                    node,
+                    f"asset '{key}' has no file:size",
+                    json_pointer=f"{pointer}/file:size",
+                    fix_hint="add file:size, the asset's size in bytes as an integer",
                 )
             elif isinstance(size, bool) or not isinstance(size, int) or size <= 0:
                 yield self.finding(
                     node,
                     f"asset '{key}' file:size must be a positive integer, got {size!r}",
                     json_pointer=f"{pointer}/file:size",
+                    fix_hint="set file:size to the asset's byte count, unquoted and greater than 0",
+                    actual=size,
                 )
             if asset.get("file:checksum") is None:
                 yield self.finding(
                     node,
                     f"asset '{key}' has no file:checksum",
                     json_pointer=f"{pointer}/file:checksum",
+                    fix_hint="add file:checksum, the multihash of the asset bytes:"
+                    " '1220' followed by the sha256 hex digest",
                 )
 
 
@@ -180,4 +206,5 @@ class ChecksumMultihashRule(Rule):
                     json_pointer=f"{pointer}/file:checksum",
                     fix_hint="prefix the digest with the multihash code and length, "
                     "e.g. '1220' + sha256 hex",
+                    actual=checksum,
                 )

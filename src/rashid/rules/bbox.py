@@ -52,6 +52,9 @@ class BboxValidRule(Rule):
                 node,
                 f"bbox must be an array of 4 or 6 numbers, got {box!r}",
                 json_pointer=pointer,
+                fix_hint="replace the value with [west, south, east, north] in WGS84 degrees"
+                " (or [west, south, min_elev, east, north, max_elev])",
+                actual=box,
             )
             return
         values: list[float] = []
@@ -61,13 +64,19 @@ class BboxValidRule(Rule):
                     node,
                     f"bbox contains a non-numeric value: {value!r}",
                     json_pointer=pointer,
+                    fix_hint="replace the entry with an unquoted WGS84 degree value",
+                    actual=value,
                 )
                 return
             values.append(float(value))
         for value in values:
             if math.isnan(value) or math.isinf(value):
                 yield self.finding(
-                    node, f"bbox contains a NaN or infinite value: {value!r}", json_pointer=pointer
+                    node,
+                    f"bbox contains a NaN or infinite value: {value!r}",
+                    json_pointer=pointer,
+                    fix_hint="recompute the bbox from the data's geometries and write finite"
+                    " WGS84 degrees",
                 )
                 return
             if abs(value) >= _SENTINEL_MAGNITUDE:
@@ -75,6 +84,9 @@ class BboxValidRule(Rule):
                     node,
                     f"bbox contains an effectively-infinite sentinel value: {value!r}",
                     json_pointer=pointer,
+                    fix_hint="recompute the bbox from the data's geometries; the exporter wrote"
+                    " a placeholder instead of a real extent",
+                    actual=value,
                 )
                 return
         if len(values) == 4:
@@ -89,6 +101,9 @@ class BboxValidRule(Rule):
                     node,
                     f"bbox {name} longitude {lon} outside WGS84 range [-180, 180]",
                     json_pointer=pointer,
+                    fix_hint="reproject the extent to EPSG:4326; bbox coordinates are decimal"
+                    " degrees, not projected units",
+                    actual=lon,
                 )
         for name, lat in (("south", south), ("north", north)):
             if not -90 <= lat <= 90:
@@ -96,12 +111,18 @@ class BboxValidRule(Rule):
                     node,
                     f"bbox {name} latitude {lat} outside WGS84 range [-90, 90]",
                     json_pointer=pointer,
+                    fix_hint="reproject the extent to EPSG:4326; bbox coordinates are decimal"
+                    " degrees, not projected units",
+                    actual=lat,
                 )
         if south > north:
             yield self.finding(
                 node,
                 f"bbox south ({south}) is greater than north ({north})",
                 json_pointer=pointer,
+                fix_hint="swap the two latitudes; bbox order is [west, south, east, north]",
+                expected=[north, south],
+                actual=[south, north],
             )
         # west > east is legal: it means the bbox crosses the antimeridian.
         if elevations is not None and elevations[0] > elevations[1]:
@@ -109,4 +130,8 @@ class BboxValidRule(Rule):
                 node,
                 f"bbox minimum elevation ({elevations[0]}) exceeds maximum ({elevations[1]})",
                 json_pointer=pointer,
+                fix_hint="swap the two elevations; 6-element bbox order is"
+                " [west, south, min_elev, east, north, max_elev]",
+                expected=[elevations[1], elevations[0]],
+                actual=[elevations[0], elevations[1]],
             )

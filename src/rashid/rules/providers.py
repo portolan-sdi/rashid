@@ -36,13 +36,21 @@ class ProducerPresentRule(Rule):
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         providers = providers_of(node)
         if not providers:
-            yield self.finding(node, "collection declares no providers", json_pointer="/providers")
+            yield self.finding(
+                node,
+                "collection declares no providers",
+                json_pointer="/providers",
+                fix_hint='add a providers array, e.g. [{"name": "Statistics Agency", "roles":'
+                ' ["producer", "host"], "url": "https://example.org"}]',
+            )
             return
         if not any("producer" in _roles(p) for p in providers):
             yield self.finding(
                 node,
                 "no provider carries the 'producer' role",
                 json_pointer="/providers",
+                fix_hint='add "producer" to the roles of the organization that made the data,'
+                " or add that organization as a new provider",
             )
 
 
@@ -65,6 +73,10 @@ class SingleHostRule(Rule):
                 node,
                 f"expected exactly one provider with the 'host' role, found {len(hosts)}",
                 json_pointer="/providers",
+                fix_hint='leave the "host" role on exactly one provider, the organization'
+                " serving these files, and drop it from the rest",
+                expected=1,
+                actual=len(hosts),
             )
             return
         if "host" not in _roles(providers[-1]):
@@ -72,6 +84,7 @@ class SingleHostRule(Rule):
                 node,
                 "the host provider must be the last element of the providers list",
                 json_pointer="/providers",
+                fix_hint="move the host provider to the end of the providers array",
             )
 
 

@@ -16,6 +16,12 @@ _SLUG = re.compile(r"^\w+([_.]\w+)+$")
 # A technical namespace prefix, e.g. ns:LayerName.
 _NAMESPACE = re.compile(r"^[A-Za-z]\w*:\S")
 
+# What each required field should say, for the fix hints.
+_FIELD_HINTS = {
+    "title": "a human-readable name, e.g. 'Road Centerlines 2024'",
+    "description": "a sentence or two saying what the data is and who it is for",
+}
+
 
 class TitleDescriptionRule(Rule):
     """Every catalog and collection has a non-empty title and description."""
@@ -30,7 +36,12 @@ class TitleDescriptionRule(Rule):
         for field in ("title", "description"):
             value = node.data.get(field)
             if not isinstance(value, str) or not value.strip():
-                yield self.finding(node, f"missing or empty '{field}'", json_pointer=f"/{field}")
+                yield self.finding(
+                    node,
+                    f"missing or empty '{field}'",
+                    json_pointer=f"/{field}",
+                    fix_hint=f"add a '{field}': {_FIELD_HINTS[field]}",
+                )
 
 
 class HumanReadableTitleRule(Rule):
@@ -88,4 +99,6 @@ class LinkTitleRule(Rule):
                     node,
                     f"link rel:'{rel}' href '{link.get('href')}' has no title",
                     json_pointer=f"/links/{index}/title",
+                    fix_hint="add a title to the link, matching the title of the object it"
+                    " points at",
                 )
