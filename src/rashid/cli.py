@@ -52,8 +52,9 @@ def main() -> None:
 @click.option(
     "--data/--no-data",
     "data",
-    default=False,
-    help="Also verify asset bytes: checksum, size, format, extent (needs rashid[data], network).",
+    default=True,
+    help="Verify asset bytes: checksum, size, format, extent (reads every asset; "
+    "network for remote hrefs). On by default; --no-data skips.",
 )
 @click.option(
     "--live/--no-live",

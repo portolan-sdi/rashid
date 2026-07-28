@@ -10,21 +10,33 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [{ name = "Portolan contributors" }]
-dependencies = ["click>=8.4", "jsonschema>=4.26", "referencing>=0.30"]
-
-# The data pass (rashid check --data) reads asset bytes to verify checksum, size,
-# format, and extent. Its geospatial stack is heavy and optional; the core
-# validator installs none of it and imports it only when the pass runs.
-[project.optional-dependencies]
+# The data pass reads asset bytes to verify checksum, size, format, and extent —
+# the core of what a catalog validator is for — so its geospatial stack is a
+# core dependency and the pass runs by default. The import-linter contracts
+# keep `import rashid` cheap: the heavy imports stay confined to
+# rashid.data.checks and load only when the pass runs.
+#
 # Floors sit at the newest release that still resolves on Python 3.10; rasterio,
 # rio-cogeo, and pyproj all dropped 3.10 in their latest majors, and 3.11+ picks
-# those up through the lock.
-data = [
-    "pyarrow>=25",
+# those up through the lock. pyarrow is the exception: 21 is the oldest release
+# whose reader exposes native GeospatialStatistics (checks._native_bboxes
+# feature-detects it either way), and consumers cap pyarrow below 25 over an
+# abseil ABI break, so a >=25 floor would make rashid uninstallable next to them
+# (#36; also fixed on main by #49 — the floors agree whichever merges first).
+dependencies = [
+    "click>=8.4",
+    "jsonschema>=4.26",
+    "referencing>=0.30",
+    "pyarrow>=21",
     "rasterio>=1.4.4",
     "rio-cogeo>=6",
     "pyproj>=3.7.1",
 ]
+
+[project.optional-dependencies]
+# Back-compat: the data pass's stack moved into the core dependencies, so the
+# extra is an intentional no-op; `pip install rashid[data]` keeps working.
+data = []
 
 [project.urls]
 Homepage = "https://github.com/portolan-sdi/rashid"
