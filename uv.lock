@@ -581,15 +581,6 @@ wheels = [
 ]
 
 [[package]]
-name = "fastjsonschema"
-version = "2.22.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f1/11/c802f752919c1fd83d44b3b955c6e7120c79f355d4a448c358198a11178c/fastjsonschema-2.22.0.tar.gz", hash = "sha256:6eb12e8f9900db6166c3d396d178ebdf6a4215fe22a06e19792edd612a20035a", size = 382291, upload-time = "2026-07-25T20:32:35.561Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a4/9d/4a0f9355ca3e540b2d22d5f269212e2f227b8f277835b02d8908355245d1/fastjsonschema-2.22.0-py3-none-any.whl", hash = "sha256:60f4c92fda6f93efe3b3261638836478e1e11abc01c647e36e478199f7a86a37", size = 26248, upload-time = "2026-07-25T20:32:33.616Z" },
-]
-
-[[package]]
 name = "filelock"
 version = "3.32.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2144,7 +2135,7 @@ source = { editable = "." }
 dependencies = [
     { name = "click" },
     { name = "jsonschema" },
-    { name = "stac-valid" },
+    { name = "referencing" },
 ]
 
 [package.optional-dependencies]
@@ -2187,8 +2178,8 @@ requires-dist = [
     { name = "pyarrow", marker = "extra == 'data'", specifier = ">=25" },
     { name = "pyproj", marker = "extra == 'data'", specifier = ">=3.7.1" },
     { name = "rasterio", marker = "extra == 'data'", specifier = ">=1.4.4" },
+    { name = "referencing", specifier = ">=0.30" },
     { name = "rio-cogeo", marker = "extra == 'data'", specifier = ">=6" },
-    { name = "stac-valid", specifier = ">=4.4" },
 ]
 provides-extras = ["data"]
 
@@ -2810,24 +2801,6 @@ wheels = [
 ]
 
 [[package]]
-name = "stac-valid"
-version = "4.4.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click" },
-    { name = "fastjsonschema" },
-    { name = "jsonschema" },
-    { name = "pyyaml" },
-    { name = "referencing" },
-    { name = "requests" },
-    { name = "tqdm" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/9c/44e5ba0b15c590c41e49d3860fd70cb150da63c6871a72054f02a2bfc6f4/stac_valid-4.4.0.tar.gz", hash = "sha256:4cbc9791dbf8b93c489ab76709de848dcc272586806c0fec5b15d5dd8ed47404", size = 90262, upload-time = "2026-05-13T06:03:42.229Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/11/a1a1df59b806b0a2985897f58a9203c42377b42c304399dd5c1a9ba8221a/stac_valid-4.4.0-py3-none-any.whl", hash = "sha256:c07465dbe70f0985ace856a98a18a6d086a3a220d7e26eb62b48290333aec990", size = 52585, upload-time = "2026-05-13T06:03:40.837Z" },
-]
-
-[[package]]
 name = "stevedore"
 version = "5.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2960,18 +2933,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/96/e07752635b98536177fa1f37671c8f3cdde2e724c6bcf6034b2cfb571565/tomlkit-0.15.1.tar.gz", hash = "sha256:e25bbf38843005246210a12982776f27f99cb9be67160e14434d0c0d21ee1e97", size = 180129, upload-time = "2026-07-17T01:48:04.562Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/13/bc/8c13eb66537dce1d2bd3a57132902f38d0e7f5bb46fa9f4daed9fe9d76ee/tomlkit-0.15.1-py3-none-any.whl", hash = "sha256:177a05aece5a8ca5266fd3c448abb47b8d352f09d477d3ca8332db4d89b24304", size = 49449, upload-time = "2026-07-17T01:48:05.728Z" },
-]
-
-[[package]]
-name = "tqdm"
-version = "4.69.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/dd/84/da0e5038228fa34dfd77c5026b173ed035d2a3ba31f1077590c013de2bff/tqdm-4.69.1.tar.gz", hash = "sha256:2be21080a0ce17e902c2f1baeb6a74bf551b67bbdfa4bc0109fad471d0b4cb0d", size = 793046, upload-time = "2026-07-24T14:22:02.08Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/50/5817619a0fca56aff06383dbfde7ae017b3ca383915b3f1e4713164273cf/tqdm-4.69.1-py3-none-any.whl", hash = "sha256:0a654b96f7a2660cceb615b56f307ec2bef96c515409014a429a561981ab52b4", size = 675452, upload-time = "2026-07-24T14:22:00.048Z" },
 ]
 
 [[package]]

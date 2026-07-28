@@ -49,7 +49,9 @@ def test_kitchen_sink(catalog: CatalogBuilder) -> None:
         ),  # LNK-005
     )
 
-    report = validate(root)
+    # Metadata-pass fixture: structural off so the expected set stays exactly
+    # the hand rules (the same mutations legitimately trip STAC core too).
+    report = validate(root, structural=False)
     assert not report.passed
     assert rule_ids(report) == {
         "PTL-TTL-002",

@@ -32,6 +32,7 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
+from rashid._jsonschema import SchemaError
 from rashid.catalog import CatalogGraph, Kind
 from rashid.model import Finding, Severity
 from rashid.rules.conformance import declared_schema_uris
@@ -52,9 +53,9 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
 # The pinned v0.1 profile schema, used when the root declares no single URI.
 DEFAULT_SCHEMA_URI = "https://schemas.portolan-sdi.org/portolan/v0.1.0/schema.json"
 
-# A validator maps one object's raw JSON to a list of schema-error messages;
+# A validator maps one object's raw JSON to a list of schema errors;
 # an empty list means the object satisfies the Portolan profile schema.
-Validator = Callable[[dict[str, Any]], list[str]]
+Validator = Callable[[dict[str, Any]], list[SchemaError]]
 
 _SCHEMA_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
 
@@ -72,28 +73,6 @@ def _schema_uri_for(graph: CatalogGraph) -> str:
         if len(uris) == 1:
             return uris[0]
     return DEFAULT_SCHEMA_URI
-
-
-def _is_discriminator(error: Any) -> bool:
-    """True when ``error`` is a ``type`` const/enum failure — the oneOf discriminator."""
-    return error.validator in {"const", "enum"} and list(error.absolute_path) == ["type"]
-
-
-def _matched_branch(context: list[Any]) -> list[Any]:
-    """Restrict a oneOf's sub-errors to the branch the object's ``type`` selected.
-
-    Each sub-error's ``schema_path`` begins with its branch index. A branch that
-    failed only on the ``type`` discriminator is the wrong shape (e.g. the
-    Catalog branch for a Collection object); the matched branch is the one that
-    produced no discriminator error. Returns that branch's errors, or the whole
-    context if the discriminator matched no branch (an unknown ``type``).
-    """
-    by_branch: dict[Any, list[Any]] = {}
-    for error in context:
-        branch = error.schema_path[0] if error.schema_path else None
-        by_branch.setdefault(branch, []).append(error)
-    matched = [errors for errors in by_branch.values() if not any(map(_is_discriminator, errors))]
-    return min(matched, key=len) if matched else list(context)
 
 
 def _fetch_schema(schema_uri: str) -> dict[str, Any]:
@@ -141,35 +120,21 @@ def bundled_schema(schema_uri: str) -> dict[str, Any] | None:
 def validator_from_schema(schema: dict[str, Any]) -> Validator:
     """Build the ``jsonschema``-backed Portolan profile validator from a schema.
 
-    Split from :func:`default_validator` so the schema can come from disk — the
-    hermetic tests validate the vendored reference catalog against the vendored
-    profile schema with no network. ``jsonschema`` is imported lazily because the
-    metadata pass never needs it. Draft-07 is pinned because the published
-    Portolan schema declares ``$schema`` draft-07.
+    Split from :func:`default_validator` so the schema can come from anywhere —
+    the bundled copies, a fetched document, or a test's inline dict.
+    ``jsonschema`` is imported lazily because the metadata pass never needs it.
+    Draft-07 is pinned because the published Portolan schema declares
+    ``$schema`` draft-07. Error narrowing (the oneOf discriminator dance) lives
+    in :func:`rashid._jsonschema.describe`, shared with the structural pass.
     """
     from jsonschema import Draft7Validator
-    from jsonschema.exceptions import best_match
+
+    from rashid._jsonschema import describe
 
     validator = Draft7Validator(schema)
 
-    def _describe(error: Any) -> str:
-        # The profile schema is a top-level oneOf discriminated by `type`
-        # (Catalog/Collection/Item). A raw oneOf failure reports the whole
-        # instance and best_match may drill into the wrong branch — telling a
-        # Collection it "was expected" to be a Catalog. Restrict to the branch
-        # whose `type` the object matched (the one with no discriminator error),
-        # then surface its most relevant cause.
-        while error.context:
-            error = best_match(_matched_branch(error.context))
-        # RFC 6901 JSON pointer: "" at the document root, "/links/0/type" below.
-        pointer = "".join(f"/{part}" for part in error.absolute_path)
-        message = error.message
-        if len(message) > 300:
-            message = message[:297] + "..."
-        return f"{message} (at {pointer})"
-
-    def _validate(data: dict[str, Any]) -> list[str]:
-        return [_describe(error) for error in sorted(validator.iter_errors(data), key=str)]
+    def _validate(data: dict[str, Any]) -> list[SchemaError]:
+        return [describe(error) for error in sorted(validator.iter_errors(data), key=str)]
 
     return _validate
 
@@ -258,9 +223,10 @@ def validate_schema(
                 Finding(
                     rule_id=SCH_INVALID,
                     severity=Severity.ERROR,
-                    message=f"Portolan profile schema validation failed: {error}",
+                    message=f"Portolan profile schema validation failed: {error.message}",
                     path=str(node.path),
                     object_id=node.id,
+                    json_pointer=error.json_pointer,
                 )
             )
     return findings

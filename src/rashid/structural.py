@@ -1,18 +1,17 @@
-"""Structural pass: STAC 1.1.0 core validation, delegated to stac-validator.
+"""Structural pass: STAC 1.1.0 core validation against the vendored schemas.
 
 The metadata pass (``rashid.rules``) checks Portolan requirements over raw JSON
 and is deliberately stdlib-only. STAC *structural* validity — that each object
 satisfies the STAC 1.1.0 core schema for its type — is a separable pass the
 Portolan spec explicitly delegates to a STAC validator (profile: Validation,
-pass 1). This module runs that pass by calling ``stac-validator`` (published as
-the maintained ``stac-valid`` distribution, imported as ``stac_validator``) over
-every object in the graph.
+pass 1). This module runs that pass by compiling the STAC core schemas shipped
+in the wheel (``rashid/_schemas/stac``, plus the GeoJSON geometry schemas
+``item.json`` references) and validating every object against the schema its
+``type`` selects. No network is involved.
 
-The validator is injectable so the pass can be exercised offline in tests; the
-default implementation reaches ``schemas.stacspec.org`` to fetch core schemas
-(results are cached in-process). A validator that cannot run — the package is
-absent, or the schemas are unreachable — downgrades to a single WARNING so the
-offline metadata findings still surface.
+The validator is injectable so tests can substitute their own. A validator that
+cannot run — ``jsonschema`` absent, or a schema failure — downgrades to a
+single WARNING so the offline metadata findings still surface.
 """
 
 from __future__ import annotations
@@ -20,20 +19,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from rashid._jsonschema import SchemaError, stac_registry
 from rashid.catalog import CatalogGraph, Kind
 from rashid.model import Finding, Severity
 
 STR_INVALID = "PTL-STR-001"
 STR_UNAVAILABLE = "PTL-STR-000"
 
-# Requirement IDs from the spec's requirements manifest
-# (specs/portolan/requirements.yaml) enforced by each check;
-# gated by tests/unit/test_spec_coverage.py.
 SPEC_IDS: dict[str, tuple[str, ...]] = {
-    # STAC 1.1.0 validity of the entrypoint and every object, including
-    # the Item MUSTs (id, geometry/bbox, datetime, assets, links) and the
-    # STAC-required collection extent that a tabular collection still
-    # carries (PORTO-FMT-036).
     STR_INVALID: (
         "PORTO-CORE-001",
         "PORTO-CORE-013",
@@ -42,42 +35,50 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# A validator maps one object's raw JSON to a list of structural error messages;
-# an empty list means the object is structurally valid STAC.
-Validator = Callable[[dict[str, Any]], list[str]]
+Validator = Callable[[dict[str, Any]], list[SchemaError]]
 
 _STRUCTURAL_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
 
+# STAC discriminates objects by their `type`; each maps to one core root schema.
+_ROOT_SCHEMAS: dict[str, str] = {
+    "Catalog": "catalog-spec/json-schema/catalog.json",
+    "Collection": "collection-spec/json-schema/collection.json",
+    "Feature": "item-spec/json-schema/item.json",
+}
+
 
 def default_validator() -> Validator:
-    """Build the stac-validator-backed structural validator.
+    """Build the structural validator over the vendored STAC 1.1.0 closure.
 
-    Imported lazily: the metadata pass never needs ``stac_validator``, and the
-    import both pulls a third-party dependency and, on first use, fetches STAC
-    core schemas over the network.
+    ``jsonschema`` is imported lazily: the metadata pass never needs it. Each
+    object is validated against the core schema its ``type`` selects; an
+    unknown or missing ``type`` is itself the structural error.
     """
-    from stac_validator import stac_validator
+    from jsonschema import Draft7Validator
 
-    def _validate(data: dict[str, Any]) -> list[str]:
-        # core=True validates against the STAC 1.1.0 core schema only. The
-        # extension schemas an object declares — including the Portolan profile
-        # itself — are the metadata pass's domain (rashid implements the profile's
-        # requirements by hand), so the structural pass must not try to fetch
-        # and apply them.
-        validator = stac_validator.StacValidate(core=True)
-        validator.validate_dict(data)
-        errors: list[str] = []
-        for message in validator.message:
-            if message.get("valid_stac"):
-                continue
-            detail = (
-                message.get("error_message")
-                or message.get("error_type")
-                or "object is not structurally valid STAC"
-            )
-            schema = message.get("failed_schema")
-            errors.append(f"{detail} (schema: {schema})" if schema else str(detail))
-        return errors
+    from rashid._jsonschema import _STAC_BASE, STAC_VERSION, describe
+
+    registry = stac_registry()
+    validators = {
+        stac_type: Draft7Validator({"$ref": f"{_STAC_BASE}{path}"}, registry=registry)
+        for stac_type, path in _ROOT_SCHEMAS.items()
+    }
+
+    def _validate(data: dict[str, Any]) -> list[SchemaError]:
+        stac_type = data.get("type")
+        validator = validators.get(stac_type) if isinstance(stac_type, str) else None
+        if validator is None:
+            expected = ", ".join(sorted(_ROOT_SCHEMAS))
+            return [
+                SchemaError(
+                    message=(
+                        f"'type' must be one of {expected} for STAC {STAC_VERSION}, "
+                        f"got {stac_type!r}"
+                    ),
+                    json_pointer="/type",
+                )
+            ]
+        return [describe(error) for error in sorted(validator.iter_errors(data), key=str)]
 
     return _validate
 
@@ -85,11 +86,11 @@ def default_validator() -> Validator:
 def validate_structural(graph: CatalogGraph, validator: Validator | None = None) -> list[Finding]:
     """Validate every catalog, collection, and item against STAC 1.1.0 core.
 
-    Returns ``PTL-STR-001`` errors for each structural failure. If the validator
-    is unavailable (missing package) or a call fails (typically the schema fetch
-    could not reach the network), returns a single ``PTL-STR-000`` warning
-    instead of failing the run — a systemic failure is reported once, not once
-    per object.
+    Returns ``PTL-STR-001`` errors for each structural failure, each carrying
+    the JSON pointer of the violation. If the validator is unavailable
+    (``jsonschema`` missing) or a call fails, returns a single ``PTL-STR-000``
+    warning instead of failing the run — a systemic failure is reported once,
+    not once per object.
     """
     if validator is None:
         try:
@@ -100,7 +101,7 @@ def validate_structural(graph: CatalogGraph, validator: Validator | None = None)
                     rule_id=STR_UNAVAILABLE,
                     severity=Severity.WARNING,
                     message=(
-                        "structural validation skipped: the 'stac-valid' package is not installed"
+                        "structural validation skipped: the 'jsonschema' package is not installed"
                     ),
                     path=".",
                 )
@@ -127,9 +128,10 @@ def validate_structural(graph: CatalogGraph, validator: Validator | None = None)
                 Finding(
                     rule_id=STR_INVALID,
                     severity=Severity.ERROR,
-                    message=f"STAC 1.1.0 structural validation failed: {error}",
+                    message=f"STAC 1.1.0 structural validation failed: {error.message}",
                     path=str(node.path),
                     object_id=node.id,
+                    json_pointer=error.json_pointer,
                 )
             )
     return findings

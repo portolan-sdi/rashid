@@ -36,6 +36,9 @@ repos:
     hooks:
       - id: codespell
         additional_dependencies: [tomli]
+        # Vendored upstream schemas must stay byte-identical (their typos
+        # included) so the vendoring scripts' --check stays an honest diff.
+        exclude: ^src/rashid/_schemas/
 
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.12

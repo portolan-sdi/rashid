@@ -44,8 +44,9 @@ uv run pytest -m unit         # fast, isolated tests only
 ```
 
 Markers are `unit`, `integration`, and `network`. The `network` tests
-drive the real stac-validator against `schemas.stacspec.org` and skip
-themselves when offline. Setting `ENABLE_PRE_PUSH_TESTS=1` adds the fast
+probe live servers (the live pass and remote data checks) and skip
+themselves when offline; structural and schema validation run against
+the closures vendored in `src/rashid/_schemas/`, no network involved. Setting `ENABLE_PRE_PUSH_TESTS=1` adds the fast
 tests to the pre-push hook.
 
 ## Mutation testing

@@ -43,6 +43,9 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Check the vendored STAC closure against upstream
+        run: uv run python scripts/vendor_stac_schemas.py --check
+
       - name: Re-vendor fixtures from spec main
         run: |
           uv run python scripts/vendor_spec_fixtures.py \

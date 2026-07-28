@@ -36,7 +36,7 @@ def main() -> None:
 @click.option(
     "--structural/--no-structural",
     default=True,
-    help="Run the STAC 1.1.0 structural pass via stac-validator (needs network).",
+    help="Run the STAC 1.1.0 structural pass against the bundled schemas (offline).",
 )
 @click.option(
     "--schema/--no-schema",
