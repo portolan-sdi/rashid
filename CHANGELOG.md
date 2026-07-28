@@ -1,3 +1,19 @@
+## v0.1.1 (2026-07-28)
+
+### Feat
+
+- **data**: run the data pass by default
+- **rules**: give every finding a fix hint and structured values
+- **live**: probe relative hrefs against a publish base URL
+- carry structured expected/actual values on findings
+- validate STAC structure offline from vendored schemas, drop stac-valid
+- bundle the profile schema and validate offline by default
+- ship the py.typed marker in the wheel
+
+### Fix
+
+- lower the pyarrow floor to 21 so consumers capped below 25 can install
+
 ## v0.1.0 (2026-07-27)
 
 ### Feat
