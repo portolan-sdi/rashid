@@ -102,6 +102,7 @@ _COVERED: frozenset[str] = frozenset(
         "PTL-VIZ-002",
         "PTL-VIZ-003",
         "PTL-VIZ-005",
+        "PTL-VIZ-006",
     }
 )
 
@@ -166,6 +167,22 @@ def _add_collections(catalog: CatalogBuilder) -> None:
             "thumbnail": thumbnail_asset(),
             "tiles": _asset(href="./tiles.pmtiles", type=_PMTILES_TYPE, roles=["visual"]),
             "style": _asset(href="./styles/default.json", type="application/json", roles=["style"]),
+        },
+    )
+
+    # Two styles, neither keyed 'style-default': the default is unidentifiable.
+    _STYLE_TYPE = "application/vnd.mapbox.style+json"
+    catalog.collection(
+        "unmarked-styles",
+        assets={
+            "data": default_asset(),
+            "thumbnail": thumbnail_asset(),
+            "style-categorical": _asset(
+                href="./styles/categorical.json", type=_STYLE_TYPE, roles=["style"]
+            ),
+            "style-labeled": _asset(
+                href="./styles/labeled.json", type=_STYLE_TYPE, roles=["style"]
+            ),
         },
     )
 

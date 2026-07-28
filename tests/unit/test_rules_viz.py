@@ -243,3 +243,53 @@ def test_style_type_unchecked_without_pmtiles(catalog: CatalogBuilder) -> None:
     )
     collection.item("roads-2024")
     assert findings_for(validate(catalog.write()), "PTL-VIZ-005") == []
+
+
+def _named_style(href: str) -> dict:
+    asset = _style_asset()
+    asset["href"] = href
+    return asset
+
+
+def test_multiple_styles_without_style_default_key(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection(
+        "roads",
+        assets={
+            "data": default_asset(),
+            "thumbnail": thumbnail_asset(),
+            "style-categorical": _named_style("./styles/categorical.json"),
+            "style-labeled": _named_style("./styles/labeled.json"),
+        },
+    )
+    collection.item("roads-2024")
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-006")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+    assert "style-default" in findings[0].message
+
+
+def test_multiple_styles_with_style_default_key_passes(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection(
+        "roads",
+        assets={
+            "data": default_asset(),
+            "thumbnail": thumbnail_asset(),
+            "style-default": _named_style("./styles/categorical.json"),
+            "style-labeled": _named_style("./styles/labeled.json"),
+        },
+    )
+    collection.item("roads-2024")
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-006") == []
+
+
+def test_single_style_needs_no_default_key(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection(
+        "roads",
+        assets={
+            "data": default_asset(),
+            "thumbnail": thumbnail_asset(),
+            "style-categorical": _named_style("./styles/categorical.json"),
+        },
+    )
+    collection.item("roads-2024")
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-006") == []

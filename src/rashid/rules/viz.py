@@ -233,6 +233,35 @@ class StyleMediaTypeRule(Rule):
                 )
 
 
+class DefaultStyleKeyRule(Rule):
+    """A collection with multiple styles marks its default with `style-default`.
+
+    core.md, Visualization Styles: "when a collection provides more than one
+    style, exactly one style asset MUST use the key `style-default`". STAC
+    assets are an unordered JSON object, so the default cannot be read off
+    position; the reserved key names it. A lone style is the default
+    implicitly, so this only bites when more than one style is registered.
+    """
+
+    id = "PTL-VIZ-006"
+    spec_ids = ("PORTO-CORE-070",)
+    default_severity = Severity.ERROR
+    description = "collections with multiple styles must key the default 'style-default'"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        style_keys = [key for _p, key, asset in _assets_of(node) if "style" in roles_of(asset)]
+        if len(style_keys) < 2 or "style-default" in style_keys:
+            return
+        yield self.finding(
+            node,
+            f"collection registers {len(style_keys)} style assets but none is keyed"
+            " 'style-default', so the default cannot be identified",
+            json_pointer="/assets",
+            fix_hint="rename the default style asset's key to 'style-default'",
+        )
+
+
 class LargeVectorWithoutVisualRule(Rule):
     """Large vector data without a visual derivative gets a nudge.
 
