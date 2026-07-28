@@ -6,13 +6,14 @@ against. Both live upstream in ``portolan-spec`` and drift as the spec evolves,
 so a hand-copied snapshot rots — that rot is exactly the schema-URI-namespace
 break this script exists to catch early.
 
-Running it against a spec checkout refreshes four fixture sets and records the
-spec commit they came from in ``SPEC_REF``:
+Running it against a spec checkout refreshes the bundled schemas and three
+fixture sets, and records the spec commit they came from in ``SPEC_REF``:
 
 - ``tests/fixtures/reference-catalog/`` — the JSON and Markdown of the reference
   catalog, binaries stripped (rashid validates metadata, never asset bytes).
-- ``tests/fixtures/schema/<vX.Y.Z>/schema.json`` — every published profile
-  schema version, discovered on disk, never hardcoded.
+- ``src/rashid/_schemas/portolan/<vX.Y.Z>/schema.json`` — every published
+  profile schema version, discovered on disk, never hardcoded. These ship in
+  the wheel: the schema pass validates against them offline.
 - ``tests/fixtures/profile-examples/`` — the profile's own hand-authored STAC
   example objects (the micro-cases its ``check-portolan`` runs).
 - ``tests/fixtures/requirements.yaml`` — the spec's requirements manifest, the
@@ -43,6 +44,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
+BUNDLED_SCHEMAS = REPO_ROOT / "src" / "rashid" / "_schemas" / "portolan"
 
 # Relative to the spec checkout root.
 CATALOG_SRC = Path("examples/catalog/reference")
@@ -96,7 +98,7 @@ def _vendor_schemas(spec: Path) -> list[str]:
     schemas = sorted(spec.glob(SCHEMA_GLOB))
     if not schemas:
         sys.exit(f"no profile schemas found under {spec / 'stac/json-schema'}")
-    dest_root = FIXTURES / "schema"
+    dest_root = BUNDLED_SCHEMAS
     _reset_dir(dest_root)
     versions = []
     for schema in schemas:

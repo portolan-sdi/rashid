@@ -12,3 +12,11 @@ pytestmark = pytest.mark.unit
 def test_py_typed_marker_is_present() -> None:
     marker = resources.files("rashid").joinpath("py.typed")
     assert marker.is_file()
+
+
+def test_bundled_profile_schema_is_present() -> None:
+    root = resources.files("rashid").joinpath("_schemas/portolan")
+    versions = [entry.name for entry in root.iterdir() if entry.name.startswith("v")]
+    assert versions, "no bundled profile schema under rashid/_schemas/portolan"
+    for version in versions:
+        assert root.joinpath(version, "schema.json").is_file()

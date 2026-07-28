@@ -82,7 +82,7 @@ def test_missing_package_is_a_warning(
 ) -> None:
     import rashid.schema as schema
 
-    def raise_import(uri: str) -> None:
+    def raise_import(uri: str, allow_network: bool = False) -> None:
         raise ImportError("No module named 'jsonschema'")
 
     monkeypatch.setattr(schema, "default_validator", raise_import)
@@ -97,7 +97,7 @@ def test_schema_fetch_failure_is_a_warning(
 ) -> None:
     import rashid.schema as schema
 
-    def raise_fetch(uri: str) -> None:
+    def raise_fetch(uri: str, allow_network: bool = False) -> None:
         raise OSError("connection refused")
 
     monkeypatch.setattr(schema, "default_validator", raise_fetch)
@@ -112,7 +112,9 @@ def test_default_validator_used_when_none(
 ) -> None:
     import rashid.schema as schema
 
-    monkeypatch.setattr(schema, "default_validator", lambda uri: lambda data: [])
+    monkeypatch.setattr(
+        schema, "default_validator", lambda uri, allow_network=False: lambda data: []
+    )
     assert schema.validate_schema(_graph(catalog), None) == []
 
 
@@ -153,7 +155,7 @@ def test_default_validator_formats_errors(monkeypatch: pytest.MonkeyPatch) -> No
         "required": ["id"],
     }
     monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
-    validate_object = default_validator("https://example.org/schema.json")
+    validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     assert validate_object({"id": "ok", "links": []}) == []
     messages = validate_object({"links": "not-an-array"})
@@ -173,7 +175,7 @@ def test_oneof_reports_the_matched_branch(monkeypatch: pytest.MonkeyPatch) -> No
         ],
     }
     monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
-    validate_object = default_validator("https://example.org/schema.json")
+    validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     messages = validate_object({"type": "Collection"})
     assert len(messages) == 1
@@ -194,7 +196,7 @@ def test_oneof_unknown_type_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
         ],
     }
     monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
-    validate_object = default_validator("https://example.org/schema.json")
+    validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     messages = validate_object({"type": "Feature"})
     assert len(messages) == 1  # no branch matched; the whole context is reported
@@ -209,7 +211,7 @@ def test_long_messages_are_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
         "required": ["x"],
     }
     monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
-    validate_object = default_validator("https://example.org/schema.json")
+    validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     (message,) = validate_object({"x": "B"})
     assert message.endswith("... (at /x)")
@@ -274,3 +276,57 @@ def test_real_schema_accepts_the_builder(catalog: CatalogBuilder) -> None:
     # Fetching the profile schema can fail after the reachability probe passed.
     skip_if_network_flaked(f.message for f in schema_errors)
     assert schema_errors == []  # the builder's tree satisfies the profile schema
+
+
+def test_bundled_schema_is_used_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default URI resolves against the wheel's bundled copy; no fetch happens."""
+    import rashid.schema as schema
+
+    def explode(uri: str) -> dict:
+        raise AssertionError(f"network fetch attempted for {uri}")
+
+    monkeypatch.setattr(schema, "_fetch_schema", explode)
+    validate_object = default_validator(DEFAULT_SCHEMA_URI)
+    assert validate_object({"type": "Catalog"}) != []  # real schema, real verdict
+
+
+def test_bundled_versions_are_discovered() -> None:
+    from rashid.schema import bundled_schema, bundled_schema_versions
+
+    versions = bundled_schema_versions()
+    assert versions, "wheel bundles no profile schema"
+    assert all(v.startswith("v") for v in versions)
+    assert bundled_schema(DEFAULT_SCHEMA_URI) is not None
+
+
+def test_unbundled_version_raises_offline() -> None:
+    with pytest.raises(LookupError, match="allow_network"):
+        default_validator("https://schemas.portolan-sdi.org/portolan/v99.0.0/schema.json")
+
+
+def test_unbundled_version_warns_offline(catalog: CatalogBuilder) -> None:
+    """An unbundled declared version degrades to one PTL-SCH-000 warning."""
+    findings = validate_schema(
+        _graph(catalog),
+        schema_uri="https://schemas.portolan-sdi.org/portolan/v99.0.0/schema.json",
+    )
+    assert [f.rule_id for f in findings] == ["PTL-SCH-000"]
+    assert findings[0].severity is Severity.WARNING
+
+
+def test_unbundled_version_fetches_when_allowed(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import rashid.schema as schema
+
+    fetched: list[str] = []
+
+    def fake_fetch(uri: str) -> dict:
+        fetched.append(uri)
+        return {"$schema": "http://json-schema.org/draft-07/schema#", "type": "object"}
+
+    monkeypatch.setattr(schema, "_fetch_schema", fake_fetch)
+    uri = "https://schemas.portolan-sdi.org/portolan/v99.0.0/schema.json"
+    findings = validate_schema(_graph(catalog), schema_uri=uri, allow_network=True)
+    assert fetched == [uri]
+    assert findings == []

@@ -14,12 +14,13 @@ Because it overlaps the hand rules by design, the pass is opt-in (CLI
 reported twice — once by a hand rule with a fix hint, once here with the schema's
 own message; the second is the canonical verdict.
 
-The validator is injectable so the pass can be exercised offline in tests. The
-default implementation fetches the schema over the network (cached in-process)
-from the URI the root catalog declares, falling back to the pinned v0.1 URI. A
-validator that cannot run — the ``jsonschema`` package is absent, or the schema
-is unreachable — downgrades to a single WARNING so the offline metadata findings
-still surface.
+The published schema versions ship inside the wheel (``rashid/_schemas/portolan``),
+so the default validator resolves the URI the root catalog declares against the
+bundled copies and runs offline. The network is reached only for a schema version
+this build does not carry, and only when the caller passes ``allow_network=True``;
+without it, an unbundled version downgrades to a single WARNING so the offline
+metadata findings still surface. The validator is injectable so tests can
+substitute their own.
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ from __future__ import annotations
 import json
 import urllib.request
 from collections.abc import Callable
+from functools import lru_cache
+from importlib import resources
 from typing import Any
 
 from rashid.catalog import CatalogGraph, Kind
@@ -104,6 +107,37 @@ def _fetch_schema(schema_uri: str) -> dict[str, Any]:
     return schema
 
 
+@lru_cache(maxsize=1)
+def _bundled_schemas() -> dict[str, dict[str, Any]]:
+    """Every profile schema shipped in the wheel, keyed by its ``$id`` sans ``#``.
+
+    Versions are discovered from ``rashid/_schemas/portolan/<vX.Y.Z>/schema.json``,
+    never hardcoded, so a re-vendor picks up a new spec release with no code
+    change (mirroring the fixture-discovery convention in
+    ``tests/unit/test_schema_uri_invariant.py``).
+    """
+    schemas: dict[str, dict[str, Any]] = {}
+    root = resources.files("rashid").joinpath("_schemas/portolan")
+    for version_dir in root.iterdir():
+        schema_file = version_dir.joinpath("schema.json")
+        if not schema_file.is_file():
+            continue
+        schema: dict[str, Any] = json.loads(schema_file.read_text(encoding="utf-8"))
+        schemas[str(schema["$id"]).rstrip("#")] = schema
+    return schemas
+
+
+def bundled_schema_versions() -> tuple[str, ...]:
+    """The profile schema versions this build carries, e.g. ``("v0.1.0",)``."""
+    versions = (uri.split("/portolan/")[1].split("/")[0] for uri in _bundled_schemas())
+    return tuple(sorted(versions, key=lambda v: tuple(int(p) for p in v.lstrip("v").split("."))))
+
+
+def bundled_schema(schema_uri: str) -> dict[str, Any] | None:
+    """The bundled profile schema whose ``$id`` matches ``schema_uri``, if carried."""
+    return _bundled_schemas().get(schema_uri.rstrip("#"))
+
+
 def validator_from_schema(schema: dict[str, Any]) -> Validator:
     """Build the ``jsonschema``-backed Portolan profile validator from a schema.
 
@@ -140,33 +174,48 @@ def validator_from_schema(schema: dict[str, Any]) -> Validator:
     return _validate
 
 
-def default_validator(schema_uri: str = DEFAULT_SCHEMA_URI) -> Validator:
-    """Build the profile validator by fetching the schema over the network.
+def default_validator(
+    schema_uri: str = DEFAULT_SCHEMA_URI, *, allow_network: bool = False
+) -> Validator:
+    """Build the profile validator for ``schema_uri``, offline first.
 
-    The first use fetches the profile schema from ``schema_uri`` (the URI the
-    root catalog declares, or the pinned default). Offline callers should build
-    a validator with :func:`validator_from_schema` from a local schema instead.
+    A bundled copy of the schema (shipped in the wheel) is preferred. For a
+    version this build does not carry, ``allow_network=True`` fetches it from
+    ``schema_uri``; without it a ``LookupError`` names the bundled versions.
+    Callers with a local schema in hand can build a validator directly with
+    :func:`validator_from_schema`.
     """
-    return validator_from_schema(_fetch_schema(schema_uri))
+    schema = bundled_schema(schema_uri)
+    if schema is not None:
+        return validator_from_schema(schema)
+    if allow_network:
+        return validator_from_schema(_fetch_schema(schema_uri))
+    raise LookupError(
+        f"no bundled schema for {schema_uri}; this build carries "
+        f"{', '.join(bundled_schema_versions())} (pass allow_network=True to fetch)"
+    )
 
 
 def validate_schema(
     graph: CatalogGraph,
     validator: Validator | None = None,
     schema_uri: str | None = None,
+    *,
+    allow_network: bool = False,
 ) -> list[Finding]:
     """Validate every catalog, collection, and item against the profile schema.
 
-    Returns ``PTL-SCH-001`` errors for each schema failure. If the validator is
-    unavailable (missing package) or a call fails (typically the schema fetch
-    could not reach the network), returns a single ``PTL-SCH-000`` warning
-    instead of failing the run — a systemic failure is reported once, not once
-    per object.
+    Returns ``PTL-SCH-001`` errors for each schema failure. The schema comes
+    from the bundled copies in the wheel; a version this build does not carry
+    is fetched over the network only when ``allow_network`` is set. If the
+    validator is unavailable (missing package, unbundled version offline, or a
+    failed fetch), returns a single ``PTL-SCH-000`` warning instead of failing
+    the run — a systemic failure is reported once, not once per object.
     """
     if validator is None:
         uri = schema_uri if schema_uri is not None else _schema_uri_for(graph)
         try:
-            validator = default_validator(uri)
+            validator = default_validator(uri, allow_network=allow_network)
         except ImportError:
             return [
                 Finding(

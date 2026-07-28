@@ -7,14 +7,13 @@ metadata pass and the profile schema pass. The only findings allowed are the two
 INFO mirror-canonical nudges. A regression here means rashid has diverged from the
 spec it validates — exactly the schema-URI drift these guards exist to catch.
 
-The schema pass runs against the *vendored* schema matching the catalog's own
+The schema pass runs against the *bundled* schema matching the catalog's own
 declared version, so it is hermetic: no network, and version-correct however many
 schema versions are vendored.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -23,7 +22,7 @@ from rashid import validate
 from rashid.catalog import CatalogGraph
 from rashid.model import Severity
 from rashid.rules.conformance import declared_schema_uris
-from rashid.schema import validator_from_schema
+from rashid.schema import bundled_schema, validator_from_schema
 
 pytestmark = pytest.mark.integration
 
@@ -37,10 +36,11 @@ def _schema_for_catalog() -> dict:
     assert graph.root is not None, "reference catalog has no root; re-vendor fixtures"
     uris = declared_schema_uris(graph.root)
     assert len(uris) == 1, f"root declares {len(uris)} Portolan URIs: {uris}"
-    version = uris[0].split("/portolan/")[1].split("/")[0]  # e.g. v0.1.0
-    path = FIXTURES / "schema" / version / "schema.json"
-    assert path.exists(), f"schema {version} not vendored; run scripts/vendor_spec_fixtures.py"
-    return json.loads(path.read_text(encoding="utf-8"))
+    schema = bundled_schema(uris[0])
+    assert schema is not None, (
+        f"schema for {uris[0]} not bundled; run scripts/vendor_spec_fixtures.py"
+    )
+    return schema
 
 
 def test_reference_catalog_metadata_pass_is_clean() -> None:

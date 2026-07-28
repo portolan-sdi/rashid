@@ -42,7 +42,12 @@ def main() -> None:
     "--schema/--no-schema",
     "schema",
     default=False,
-    help="Also validate against the published Portolan profile schema (needs network).",
+    help="Also validate against the bundled Portolan profile schema (offline).",
+)
+@click.option(
+    "--schema-allow-network",
+    is_flag=True,
+    help="Fetch a schema version this build does not bundle over https.",
 )
 @click.option(
     "--data/--no-data",
@@ -57,13 +62,26 @@ def main() -> None:
     help="Also probe the servers behind https assets: HTTP range and CORS (needs network).",
 )
 def check(
-    catalog_path: Path, as_json: bool, structural: bool, schema: bool, data: bool, live: bool
+    catalog_path: Path,
+    as_json: bool,
+    structural: bool,
+    schema: bool,
+    schema_allow_network: bool,
+    data: bool,
+    live: bool,
 ) -> None:
     """Validate CATALOG_PATH: the Portolan metadata pass, the STAC 1.1.0
     structural pass (unless --no-structural), and — with --schema / --data /
-    --live — the published Portolan profile schema, the asset bytes, and the
+    --live — the bundled Portolan profile schema, the asset bytes, and the
     hosting servers."""
-    report = validate(catalog_path, structural=structural, schema=schema, data=data, live=live)
+    report = validate(
+        catalog_path,
+        structural=structural,
+        schema=schema,
+        schema_allow_network=schema_allow_network,
+        data=data,
+        live=live,
+    )
     if as_json:
         click.echo(json_module.dumps(report.to_dict(), indent=2))
     else:
