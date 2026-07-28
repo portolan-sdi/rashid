@@ -8,8 +8,8 @@ job, so no hashing happens here and no dependency is needed.
 
 from __future__ import annotations
 
-# Hash-function codes from the multiformats table. sha2-256 is the one
-# Portolan tooling writes; the decoder reads whatever a producer used.
+# Hash-function code from the multiformats table. Portolan tooling writes
+# sha2-256. The decoder accepts whatever code a producer used.
 SHA2_256 = 0x12
 
 
@@ -71,13 +71,13 @@ def decode_multihash(value: object) -> tuple[int, bytes] | None:
 def encode_multihash(code: int, digest: bytes) -> str:
     """Encode a hash-function code and digest as a hex multihash.
 
-    The inverse of :func:`decode_multihash`, for tooling that writes
-    ``file:checksum`` rather than checking it. Pass :data:`SHA2_256` and the
-    output of ``hashlib.sha256(...).digest()`` for the usual case.
+    This is the inverse of :func:`decode_multihash`, for tools that write
+    ``file:checksum`` rather than check it. The usual call passes
+    :data:`SHA2_256` and the output of ``hashlib.sha256(...).digest()``.
 
     Raises:
         ValueError: When ``code`` is negative or ``digest`` is empty. Neither
-            round-trips, so producing one would write an invalid checksum.
+            decodes again, and encoding one would write an invalid checksum.
     """
     if code < 0:
         raise ValueError(f"hash-function code must be non-negative, got {code}")

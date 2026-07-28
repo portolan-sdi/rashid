@@ -62,9 +62,9 @@ def is_mirror_asset(asset: dict[str, object]) -> bool:
 def has_cog(node: Node) -> bool:
     """Whether the node carries at least one cloud-optimized GeoTIFF asset.
 
-    This is what makes an item a scene, so anything deciding whether a
+    A COG asset is what makes an item a scene. Any tool deciding whether a
     collection owes an items.parquet mirror needs the same answer rashid
-    gives (``PTL-MIR-001``).
+    uses for ``PTL-MIR-001``.
     """
     return any(is_cog_media_type(asset.get("type")) for _pointer, _key, asset in _assets_of(node))
 

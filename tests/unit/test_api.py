@@ -1,8 +1,8 @@
-"""The rashid.api surface: what it exports, and that it stays bound.
+"""Tests for the rashid.api surface.
 
-The module exists so downstream tooling stops importing private names, so
-these tests guard the promise rather than the implementations. Each helper's
-behaviour is covered where it is defined.
+These tests check what the module exports and that each export still
+resolves to its implementation. The behaviour of each helper is tested in
+the module that defines it.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from rashid.catalog import Node
 
 pytestmark = pytest.mark.unit
 
-# Every name the module promises, paired with where it is implemented. A
-# re-export that stops pointing at its definition is the failure this catches.
+# Every exported name, paired with the module that defines it. This catches
+# a re-export that no longer resolves to its implementation.
 EXPORTS = {
     "SHA2_256": "rashid._multihash",
     "STRUCTURAL_RELS": "rashid.rules._common",
@@ -64,7 +64,7 @@ def test_cog_media_type_needs_the_profile_parameter() -> None:
 
 
 def test_plain_geotiff_is_not_a_cog() -> None:
-    # the bug this export exists to prevent: matching the prefix alone
+    # the bug this export exists to prevent, matching the prefix alone
     assert not api.is_cog_media_type("image/tiff; application=geotiff")
 
 

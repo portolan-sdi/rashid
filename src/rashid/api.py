@@ -1,17 +1,16 @@
-"""Helpers rashid's own rules use, published for tooling built on rashid.
+"""Public helpers for tools built on rashid.
 
-Everything here is re-exported from a module whose internals move freely.
-Import it from ``rashid.api`` and the name stays put across 0.x releases;
-import it from its defining module and a refactor can break you.
+These names are re-exported from private modules. A name imported from
+``rashid.api`` stays available across 0.x releases. The same name imported
+from the module that defines it can break in any patch release.
 
-The point is agreement rather than convenience. A fixer that rewrites what
-rashid checks has to read metadata the same way rashid reads it, and a
-reimplemented predicate drifts silently — it keeps passing its own tests
-while disagreeing with the rule it was written against.
+A tool that rewrites catalog metadata has to read that metadata the way
+rashid reads it. Reimplementing a check produces code that passes its own
+tests and still disagrees with the rule it was written against.
 
     from rashid.api import has_cog, links_of, roles_of
 
-For running validation, use the top-level package instead:
+To run validation, use the top-level package:
 
     from rashid import validate
 """

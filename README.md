@@ -73,9 +73,9 @@ report = validate("path/to/catalog", config=config)
 
 `Report` also carries `passed`, `warnings`, `infos`, and `to_dict()`.
 
-### Helpers for tools that fix what rashid checks
+### Helpers for tools that fix what rashid reports
 
-A tool that rewrites catalog metadata has to read it the way rashid reads it. Reimplementing a predicate looks harmless and drifts silently: it keeps passing its own tests while disagreeing with the rule it was written against. `rashid.api` publishes the helpers rashid's own rules use, so the two agree by construction.
+A tool that rewrites catalog metadata has to read that metadata the way rashid reads it. Reimplementing a check produces code that passes its own tests and still disagrees with the rule it was written against. `rashid.api` publishes the helpers rashid's rules use.
 
 ```python
 from rashid.api import has_cog, is_cog_media_type, links_of, roles_of
@@ -84,7 +84,7 @@ if has_cog(item):  # true only for image/tiff ... profile=cloud-optimized
     ...
 ```
 
-It also exports `STRUCTURAL_RELS` and `parse_rfc3339`, plus the multihash codec behind `file:checksum`: `encode_multihash`, `decode_multihash`, `is_well_formed_multihash`, and the `SHA2_256` code.
+The module also exports `STRUCTURAL_RELS` and `parse_rfc3339`, along with the multihash codec behind `file:checksum`.
 
 ```python
 import hashlib
@@ -93,7 +93,9 @@ from rashid.api import SHA2_256, encode_multihash
 checksum = encode_multihash(SHA2_256, hashlib.sha256(data).digest())
 ```
 
-Names reached through `rashid.api` keep working across 0.x releases. The modules behind it are private, and importing from those directly means a refactor can break you.
+`decode_multihash` and `is_well_formed_multihash` read those values back.
+
+A name imported from `rashid.api` stays available across 0.x releases. The modules behind it are private, and importing from them directly can break in any patch release.
 
 ## Rules
 

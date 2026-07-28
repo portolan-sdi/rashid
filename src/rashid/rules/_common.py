@@ -13,9 +13,9 @@ STRUCTURAL_RELS = ("root", "parent", "child", "item", "collection")
 
 # formats.md, Raster: a COG is published as
 # "image/tiff; application=geotiff; profile=cloud-optimized". The profile
-# parameter is what makes an asset a COG, and matching on it rather than on
-# the bare image/tiff prefix keeps a plain GeoTIFF — an upstream original
-# carrying the 'source' role, say — from counting as one.
+# parameter is what makes the asset a COG. Matching the bare image/tiff
+# prefix would also count a plain GeoTIFF, such as an upstream original
+# carrying the 'source' role.
 _COG_MEDIA_PREFIX = "image/tiff"
 _COG_MEDIA_PROFILE = "profile=cloud-optimized"
 
@@ -39,10 +39,10 @@ def roles_of(asset: dict[str, Any]) -> list[str]:
 def is_cog_media_type(value: object) -> bool:
     """True when a media type names a cloud-optimized GeoTIFF.
 
-    Both halves matter. ``image/tiff`` alone is a plain GeoTIFF, and the
-    ``profile=cloud-optimized`` parameter is what promotes it to a COG.
-    Checking only the prefix counts every GeoTIFF as cloud-optimized;
-    checking only the profile accepts the parameter on a non-TIFF type.
+    Both halves of the type matter. ``image/tiff`` alone is a plain GeoTIFF,
+    and the ``profile=cloud-optimized`` parameter is what makes it a COG.
+    Checking only the prefix counts every GeoTIFF as cloud-optimized.
+    Checking only the profile accepts the parameter on a non-TIFF type.
     """
     if not isinstance(value, str):
         return False

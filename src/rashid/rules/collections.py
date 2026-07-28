@@ -37,11 +37,11 @@ _UNKNOWN = "unknown"
 # held to the convention.
 _ID_SEGMENT = re.compile(r"^[a-z][a-z0-9_-]*$")
 
-# Scene counting matches on the COG profile (is_cog_media_type), which keeps
-# an upstream original — a plain GeoTIFF carrying the 'source' role — out of
-# the count. That asset is provenance, not a scene. A raster asset typed
-# without the profile is PTL-DAT-004's and PTL-FMT territory rather than a
-# modelling question.
+# Scene counting matches on the COG profile through is_cog_media_type. An
+# upstream original, meaning a plain GeoTIFF carrying the 'source' role,
+# stays out of the count because it records provenance rather than a scene.
+# A raster asset typed without the profile belongs to PTL-DAT-004 and
+# PTL-FMT rather than to a modelling rule.
 
 
 class SingleFileCollectionRule(Rule):
