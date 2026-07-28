@@ -24,7 +24,7 @@ from collections.abc import Iterable
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import roles_of
+from rashid.rules._common import is_cog_media_type, roles_of
 from rashid.rules.assets import _assets_of
 
 _HAS_DATA_ASSET = "has-data-asset"
@@ -37,15 +37,10 @@ _UNKNOWN = "unknown"
 # held to the convention.
 _ID_SEGMENT = re.compile(r"^[a-z][a-z0-9_-]*$")
 
-# formats.md, Raster: a COG is published as
-# "image/tiff; application=geotiff; profile=cloud-optimized". The profile
-# parameter is what makes an asset a COG, and matching on it rather than on
-# the bare image/tiff prefix keeps an upstream original (a plain GeoTIFF
-# carrying the 'source' role) out of the scene count — that is provenance,
-# not a scene. A raster asset typed without the profile is PTL-DAT-004's and
-# PTL-FMT territory, not a modelling question.
-_COG_MEDIA_PREFIX = "image/tiff"
-_COG_MEDIA_PROFILE = "profile=cloud-optimized"
+# Scene counting matches on the COG profile through is_cog_media_type,
+# following core.md: a scene is an item carrying its COG. A raster asset
+# typed without the profile is not a scene, and the defect in its media type
+# belongs to PTL-DAT-004 and PTL-FMT rather than to a modelling rule.
 
 
 class SingleFileCollectionRule(Rule):
@@ -252,11 +247,7 @@ def _cog_asset_keys(node: Node) -> list[str]:
     """Keys of the node's COG data assets, in declaration order."""
     keys: list[str] = []
     for _pointer, key, asset in _assets_of(node):
-        media_type = asset.get("type")
-        if not isinstance(media_type, str):
-            continue
-        normalized = media_type.strip().lower()
-        if not normalized.startswith(_COG_MEDIA_PREFIX) or _COG_MEDIA_PROFILE not in normalized:
+        if not is_cog_media_type(asset.get("type")):
             continue
         if "data" in roles_of(asset):
             keys.append(key)

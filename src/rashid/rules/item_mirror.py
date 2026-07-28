@@ -20,14 +20,12 @@ from collections.abc import Iterable
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import roles_of
+from rashid.rules._common import is_cog_media_type, roles_of
 from rashid.rules.assets import _assets_of
 
 PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
 MIRROR_ROLE = "collection-mirror"
 MIRROR_FILENAME = "items.parquet"
-_COG_MEDIA_PREFIX = "image/tiff"
-_COG_MEDIA_PROFILE = "profile=cloud-optimized"
 
 
 def mirror_assets(node: Node) -> list[tuple[str, str, dict[str, object]]]:
@@ -61,19 +59,18 @@ def is_mirror_asset(asset: dict[str, object]) -> bool:
     )
 
 
-def _has_cog(node: Node) -> bool:
-    for _pointer, _key, asset in _assets_of(node):
-        media_type = asset.get("type")
-        if not isinstance(media_type, str):
-            continue
-        normalized = media_type.strip().lower()
-        if normalized.startswith(_COG_MEDIA_PREFIX) and _COG_MEDIA_PROFILE in normalized:
-            return True
-    return False
+def has_cog(node: Node) -> bool:
+    """Whether the node carries at least one cloud-optimized GeoTIFF asset.
+
+    A COG asset is what makes an item a scene. Any tool deciding whether a
+    collection owes an items.parquet mirror needs the same answer rashid
+    uses for ``PTL-MIR-001``.
+    """
+    return any(is_cog_media_type(asset.get("type")) for _pointer, _key, asset in _assets_of(node))
 
 
 def _scene_items(node: Node, graph: CatalogGraph) -> list[Node]:
-    return [child for child in graph.children_of(node) if child.kind == "item" and _has_cog(child)]
+    return [child for child in graph.children_of(node) if child.kind == "item" and has_cog(child)]
 
 
 class ItemMirrorPresentRule(Rule):

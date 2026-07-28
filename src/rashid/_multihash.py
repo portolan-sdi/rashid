@@ -8,6 +8,21 @@ job, so no hashing happens here and no dependency is needed.
 
 from __future__ import annotations
 
+# Hash-function code from the multiformats table. Portolan tooling writes
+# sha2-256. The decoder accepts whatever code a producer used.
+SHA2_256 = 0x12
+
+
+def _write_varint(value: int) -> bytes:
+    """Encode a non-negative int as an unsigned varint."""
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        out.append(byte | 0x80 if value else byte)
+        if not value:
+            return bytes(out)
+
 
 def _read_varint(data: bytes, offset: int) -> tuple[int, int] | None:
     """Decode an unsigned varint at ``offset``; return (value, next_offset)."""
@@ -51,6 +66,24 @@ def decode_multihash(value: object) -> tuple[int, bytes] | None:
     if length <= 0 or len(digest) != length:
         return None
     return code, digest
+
+
+def encode_multihash(code: int, digest: bytes) -> str:
+    """Encode a hash-function code and digest as a hex multihash.
+
+    This is the inverse of :func:`decode_multihash`, for tools that write
+    ``file:checksum`` rather than check it. The usual call passes
+    :data:`SHA2_256` and the output of ``hashlib.sha256(...).digest()``.
+
+    Raises:
+        ValueError: When ``code`` is negative or ``digest`` is empty. Neither
+            decodes again, and encoding one would write an invalid checksum.
+    """
+    if code < 0:
+        raise ValueError(f"hash-function code must be non-negative, got {code}")
+    if not digest:
+        raise ValueError("digest is empty")
+    return (_write_varint(code) + _write_varint(len(digest)) + digest).hex()
 
 
 def is_well_formed_multihash(value: object) -> bool:

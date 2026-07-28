@@ -135,6 +135,7 @@ source_modules = [
     "rashid.config",
     "rashid.rules",
     "rashid.live",
+    "rashid.api",
 ]
 forbidden_modules = ["click"]
 
@@ -160,6 +161,7 @@ source_modules = [
     "rashid.cli",
     "rashid.live",
     "rashid.data.reader",
+    "rashid.api",
 ]
 forbidden_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo"]
 ignore_imports = ["rashid.data -> rashid.data.checks"]
