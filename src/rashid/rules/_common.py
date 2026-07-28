@@ -11,6 +11,14 @@ from rashid.catalog import Node
 # must be relative and resolvable.
 STRUCTURAL_RELS = ("root", "parent", "child", "item", "collection")
 
+# formats.md, Raster: a COG is published as
+# "image/tiff; application=geotiff; profile=cloud-optimized". The profile
+# parameter is what makes an asset a COG, and matching on it rather than on
+# the bare image/tiff prefix keeps a plain GeoTIFF — an upstream original
+# carrying the 'source' role, say — from counting as one.
+_COG_MEDIA_PREFIX = "image/tiff"
+_COG_MEDIA_PROFILE = "profile=cloud-optimized"
+
 
 def links_of(node: Node) -> list[dict[str, Any]]:
     """The node's links array, tolerating a missing or malformed field."""
@@ -26,6 +34,20 @@ def roles_of(asset: dict[str, Any]) -> list[str]:
     if not isinstance(raw, list):
         return []
     return [role for role in raw if isinstance(role, str)]
+
+
+def is_cog_media_type(value: object) -> bool:
+    """True when a media type names a cloud-optimized GeoTIFF.
+
+    Both halves matter. ``image/tiff`` alone is a plain GeoTIFF, and the
+    ``profile=cloud-optimized`` parameter is what promotes it to a COG.
+    Checking only the prefix counts every GeoTIFF as cloud-optimized;
+    checking only the profile accepts the parameter on a non-TIFF type.
+    """
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip().lower()
+    return normalized.startswith(_COG_MEDIA_PREFIX) and _COG_MEDIA_PROFILE in normalized
 
 
 def parse_rfc3339(value: object) -> datetime | None:

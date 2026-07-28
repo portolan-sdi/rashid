@@ -73,6 +73,28 @@ report = validate("path/to/catalog", config=config)
 
 `Report` also carries `passed`, `warnings`, `infos`, and `to_dict()`.
 
+### Helpers for tools that fix what rashid checks
+
+A tool that rewrites catalog metadata has to read it the way rashid reads it. Reimplementing a predicate looks harmless and drifts silently: it keeps passing its own tests while disagreeing with the rule it was written against. `rashid.api` publishes the helpers rashid's own rules use, so the two agree by construction.
+
+```python
+from rashid.api import has_cog, is_cog_media_type, links_of, roles_of
+
+if has_cog(item):  # true only for image/tiff ... profile=cloud-optimized
+    ...
+```
+
+It also exports `STRUCTURAL_RELS` and `parse_rfc3339`, plus the multihash codec behind `file:checksum`: `encode_multihash`, `decode_multihash`, `is_well_formed_multihash`, and the `SHA2_256` code.
+
+```python
+import hashlib
+from rashid.api import SHA2_256, encode_multihash
+
+checksum = encode_multihash(SHA2_256, hashlib.sha256(data).digest())
+```
+
+Names reached through `rashid.api` keep working across 0.x releases. The modules behind it are private, and importing from those directly means a refactor can break you.
+
 ## Rules
 
 Every finding carries a stable id shaped `PTL-GROUP-NNN`, a severity, a message, and the file path. MUST requirements become errors, and SHOULD requirements become warnings.
