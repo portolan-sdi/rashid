@@ -164,6 +164,23 @@ def test_absent_native_statistics_still_error() -> None:
     assert defects[0].rule_id == DAT_ROWGROUP_STATS
 
 
+class _OldPyarrowColumn:
+    """pyarrow < 21 column metadata: no geo_statistics attribute at all."""
+
+    def __init__(self, path: str) -> None:
+        self.path_in_schema = path
+
+
+def test_old_pyarrow_without_geo_statistics_attr_still_errors() -> None:
+    """On pyarrow < 21 the attribute is missing entirely; the reader must fall
+    through to "no native source" (ERROR), not crash on the absent attribute."""
+    groups = [_FakeRowGroup([_OldPyarrowColumn("geometry")])]  # type: ignore[list-item]
+    boxes, defects = checks._rowgroup_stat_defects("data", _FakeParquet(groups), _GEO_2X)
+    assert boxes is None
+    assert [d.severity for d in defects] == [Severity.ERROR]
+    assert defects[0].rule_id == DAT_ROWGROUP_STATS
+
+
 def test_oversized_rowgroup_flags_dat_008(tmp_path: Path) -> None:
     path = tmp_path / "big.parquet"
     assets.write_geoparquet(path, points=assets.ordered_points(150_001), row_group_size=200_000)

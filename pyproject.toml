@@ -18,9 +18,12 @@ dependencies = ["click>=8.4", "jsonschema>=4.26", "stac-valid>=4.4"]
 [project.optional-dependencies]
 # Floors sit at the newest release that still resolves on Python 3.10; rasterio,
 # rio-cogeo, and pyproj all dropped 3.10 in their latest majors, and 3.11+ picks
-# those up through the lock.
+# those up through the lock. pyarrow is the exception: 21 is the oldest release
+# whose reader exposes native GeospatialStatistics (checks._native_bboxes
+# feature-detects it either way), and consumers cap pyarrow below 25 over an
+# abseil ABI break, so a >=25 floor would make rashid uninstallable next to them.
 data = [
-    "pyarrow>=25",
+    "pyarrow>=21",
     "rasterio>=1.4.4",
     "rio-cogeo>=6",
     "pyproj>=3.7.1",
