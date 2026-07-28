@@ -25,6 +25,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
+from typing import Any
 
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.data.reader import AssetReader, FilesystemHttpReader
@@ -105,6 +106,8 @@ class DataDefect:
     asset_key: str
     field: str | None = None
     json_pointer: str | None = None
+    expected: Any | None = None
+    actual: Any | None = None
 
 
 # A validator inspects one object's assets, given a reader for their bytes, and
@@ -186,6 +189,8 @@ def validate_data(graph: CatalogGraph, validator: Validator | None = None) -> li
                     path=str(node.path),
                     object_id=node.id,
                     json_pointer=pointer,
+                    expected=defect.expected,
+                    actual=defect.actual,
                 )
             )
     return findings
