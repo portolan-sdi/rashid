@@ -138,7 +138,7 @@ def validate_data(graph: CatalogGraph, validator: Validator | None = None) -> li
     """Verify every asset's bytes against its declared metadata.
 
     Returns ``PTL-DAT-00x`` findings for each mismatch. If the validator is
-    unavailable (the ``rashid[data]`` extra is not installed) or a call fails
+    unavailable (the geospatial stack cannot import) or a call fails
     systemically, returns a single ``PTL-DAT-000`` warning instead of failing the
     run — a systemic failure is reported once, not once per object.
     """
@@ -151,7 +151,7 @@ def validate_data(graph: CatalogGraph, validator: Validator | None = None) -> li
                     rule_id=DAT_UNAVAILABLE,
                     severity=Severity.WARNING,
                     message=(
-                        "data validation skipped: the 'rashid[data]' extra is not installed "
+                        "data validation skipped: the geospatial stack could not be imported "
                         "(needs pyarrow, rasterio, rio-cogeo, and pyproj; pass data=False "
                         "or --no-data to skip byte checks)"
                     ),
