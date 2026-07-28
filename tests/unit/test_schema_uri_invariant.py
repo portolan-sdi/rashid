@@ -7,12 +7,13 @@ renamespaced its schema host, this invariant broke silently and rashid began
 rejecting every conformant catalog. Asserting it over every vendored version
 turns the next such move into a failing test the moment the schema is
 re-vendored — and does so version-agnostically: a new ``vX.Y.Z`` is covered as
-soon as it lands in the fixtures, no code change.
+soon as it lands in the bundled package data, no code change.
 """
 
 from __future__ import annotations
 
 import json
+from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -22,14 +23,13 @@ from rashid.schema import DEFAULT_SCHEMA_URI
 
 pytestmark = pytest.mark.unit
 
-FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
-
 
 def _version_key(schema_path: Path) -> tuple[int, ...]:
     return tuple(int(part) for part in schema_path.parent.name.lstrip("v").split("."))
 
 
-SCHEMAS = sorted((FIXTURES / "schema").glob("v*/schema.json"), key=_version_key)
+_BUNDLED = Path(str(resources.files("rashid").joinpath("_schemas/portolan")))
+SCHEMAS = sorted(_BUNDLED.glob("v*/schema.json"), key=_version_key)
 
 
 def _schema_id(schema_path: Path) -> str:

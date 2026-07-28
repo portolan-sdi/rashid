@@ -68,6 +68,8 @@ class MirrorViaLinkRule(Rule):
                 node,
                 "mirror collection has no rel:'via' link to its original source",
                 json_pointer="/links",
+                fix_hint='add {"rel": "via", "href": <the upstream download or landing page>,'
+                ' "type": "text/html"} to links',
             )
             return
         for link in via:
@@ -76,6 +78,9 @@ class MirrorViaLinkRule(Rule):
                     node,
                     f"rel:'via' link has type {link.get('type')!r}, expected 'text/html'",
                     json_pointer="/links",
+                    fix_hint="set the rel:'via' link type to 'text/html'",
+                    expected="text/html",
+                    actual=link.get("type"),
                 )
 
 
@@ -101,6 +106,8 @@ class MirrorCanonicalLinkRule(Rule):
                 "mirror collection has no rel:'canonical' link; add one if the upstream"
                 " publishes its own STAC catalog",
                 json_pointer="/links",
+                fix_hint='add {"rel": "canonical", "href": <the upstream collection.json>,'
+                ' "type": "application/json"} to links when the upstream publishes STAC',
             )
 
 
@@ -137,6 +144,8 @@ class MirrorUpdatedRule(Rule):
                 path=str(node.path),
                 object_id=node.id,
                 json_pointer="/updated",
+                fix_hint="add a top-level 'updated' field holding the last sync time as an"
+                " RFC 3339 date-time, e.g. '2024-01-01T00:00:00Z'",
             )
         elif parse_rfc3339(value) is None:
             yield Finding(
@@ -146,6 +155,8 @@ class MirrorUpdatedRule(Rule):
                 path=str(node.path),
                 object_id=node.id,
                 json_pointer="/updated",
+                fix_hint="rewrite 'updated' as an RFC 3339 date-time, e.g. '2024-01-01T00:00:00Z'",
+                actual=value,
             )
 
 
@@ -169,4 +180,7 @@ class OfficialNoUpstreamLinksRule(Rule):
                     f"official collection carries a rel:'{rel}' link; it is the source,"
                     " not a mirror",
                     json_pointer="/links",
+                    fix_hint=f"remove the rel:'{rel}' link, or, if this collection really"
+                    " mirrors someone else's data, name the upstream as the producer in"
+                    " providers",
                 )

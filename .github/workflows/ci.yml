@@ -44,9 +44,7 @@ jobs:
       # rashid reads and writes files, and path handling is where Windows
       # breaks. The shared default is ubuntu alone.
       os: '["ubuntu", "macos", "windows"]'
-      # The data pass needs rasterio, pyproj, and the rest of the
-      # geospatial stack.
-      sync-args: "--extra data"
+      # The geospatial stack is a core dependency now; no extra needed.
       # Package path, not package name: coverage accepts either, and wily
       # reads this as a directory to walk.
       coverage-target: src/rashid

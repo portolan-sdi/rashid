@@ -9,6 +9,13 @@ from rashid.model import Finding, Severity
 from rashid.rule import Rule
 from rashid.rules._common import STRUCTURAL_RELS, links_of
 
+# What each required structural link points at, for the fix hints.
+_REQUIRED_LINK_TARGETS = {
+    "root": "the root catalog.json",
+    "parent": "the JSON of the object that contains this one",
+    "collection": "the item's enclosing collection.json",
+}
+
 
 class RequiredLinksRule(Rule):
     """Every object carries its required structural links."""
@@ -30,6 +37,8 @@ class RequiredLinksRule(Rule):
                     node,
                     f"missing required structural link rel:'{rel}'",
                     json_pointer="/links",
+                    fix_hint=f"add a rel:'{rel}' link to links, with a relative href to"
+                    f" {_REQUIRED_LINK_TARGETS[rel]} and type application/json",
                 )
 
 
@@ -85,6 +94,9 @@ class StructuralLinkTypeRule(Rule):
                     node,
                     f"link rel:'{rel}' has type {actual!r}, expected '{expected}'",
                     json_pointer=f"/links/{index}/type",
+                    fix_hint=f"set the link's type to '{expected}'",
+                    expected=expected,
+                    actual=actual,
                 )
 
 
@@ -108,12 +120,17 @@ class RelativeLinksRule(Rule):
                     node,
                     f"link rel:'{rel}' has no href",
                     json_pointer=f"/links/{index}/href",
+                    fix_hint="set the link's href to the target's path relative to this file,"
+                    " e.g. '../catalog.json'",
                 )
             elif is_absolute_href(href):
                 yield self.finding(
                     node,
                     f"structural link rel:'{rel}' must be relative, got '{href}'",
                     json_pointer=f"/links/{index}/href",
+                    fix_hint="replace the absolute URL with a path relative to this file,"
+                    " e.g. '../catalog.json'",
+                    actual=href,
                 )
 
 
@@ -164,15 +181,24 @@ class LinkResolutionRule(Rule):
                         f"link rel:'{rel}' href '{href}' resolves to a file"
                         " that is not a recognizable STAC object"
                     )
+                    hint = (
+                        "point the href at the target's catalog.json, collection.json, or item JSON"
+                    )
                 else:
                     message = f"link rel:'{rel}' href '{href}' does not resolve to any file"
-                yield self.finding(node, message, json_pointer=pointer)
+                    hint = (
+                        "correct the href to the target's path relative to this file,"
+                        " or restore the missing file"
+                    )
+                yield self.finding(node, message, json_pointer=pointer, fix_hint=hint, actual=href)
                 continue
             if target.parse_error is not None:
                 yield self.finding(
                     node,
                     f"link rel:'{rel}' href '{href}' resolves to an unparseable file",
                     json_pointer=pointer,
+                    fix_hint=f"repair the JSON in {target.path} so it parses",
+                    actual=href,
                 )
                 continue
             wrong: str | None = None
@@ -195,4 +221,6 @@ class LinkResolutionRule(Rule):
                     node,
                     f"link rel:'{rel}' href '{href}' points to the wrong object: {wrong}",
                     json_pointer=pointer,
+                    fix_hint=f"repoint the href: a rel:'{rel}' link {wrong}",
+                    actual=href,
                 )

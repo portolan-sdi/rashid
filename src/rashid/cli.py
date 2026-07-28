@@ -36,19 +36,25 @@ def main() -> None:
 @click.option(
     "--structural/--no-structural",
     default=True,
-    help="Run the STAC 1.1.0 structural pass via stac-validator (needs network).",
+    help="Run the STAC 1.1.0 structural pass against the bundled schemas (offline).",
 )
 @click.option(
     "--schema/--no-schema",
     "schema",
     default=False,
-    help="Also validate against the published Portolan profile schema (needs network).",
+    help="Also validate against the bundled Portolan profile schema (offline).",
+)
+@click.option(
+    "--schema-allow-network",
+    is_flag=True,
+    help="Fetch a schema version this build does not bundle over https.",
 )
 @click.option(
     "--data/--no-data",
     "data",
-    default=False,
-    help="Also verify asset bytes: checksum, size, format, extent (needs rashid[data], network).",
+    default=True,
+    help="Verify asset bytes: checksum, size, format, extent (reads every asset; "
+    "network for remote hrefs). On by default; --no-data skips.",
 )
 @click.option(
     "--live/--no-live",
@@ -56,14 +62,35 @@ def main() -> None:
     default=False,
     help="Also probe the servers behind https assets: HTTP range and CORS (needs network).",
 )
+@click.option(
+    "--live-base-url",
+    metavar="URL",
+    default=None,
+    help="Publish base URL; makes relative asset hrefs probeable with --live.",
+)
 def check(
-    catalog_path: Path, as_json: bool, structural: bool, schema: bool, data: bool, live: bool
+    catalog_path: Path,
+    as_json: bool,
+    structural: bool,
+    schema: bool,
+    schema_allow_network: bool,
+    data: bool,
+    live: bool,
+    live_base_url: str | None,
 ) -> None:
     """Validate CATALOG_PATH: the Portolan metadata pass, the STAC 1.1.0
     structural pass (unless --no-structural), and — with --schema / --data /
-    --live — the published Portolan profile schema, the asset bytes, and the
+    --live — the bundled Portolan profile schema, the asset bytes, and the
     hosting servers."""
-    report = validate(catalog_path, structural=structural, schema=schema, data=data, live=live)
+    report = validate(
+        catalog_path,
+        structural=structural,
+        schema=schema,
+        schema_allow_network=schema_allow_network,
+        data=data,
+        live=live,
+        live_base_url=live_base_url,
+    )
     if as_json:
         click.echo(json_module.dumps(report.to_dict(), indent=2))
     else:

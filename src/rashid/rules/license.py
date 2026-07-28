@@ -25,21 +25,33 @@ class LicenseDeclaredRule(Rule):
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         value = node.data.get("license")
         if not isinstance(value, str) or not value.strip():
-            yield self.finding(node, "collection declares no license", json_pointer="/license")
+            yield self.finding(
+                node,
+                "collection declares no license",
+                json_pointer="/license",
+                fix_hint="add a license with an SPDX identifier, e.g. 'CC-BY-4.0', or 'other'"
+                " plus a rel:'license' link to the license text",
+            )
             return
         if value == "proprietary":
             return  # PTL-LIC-003 reports this specifically
         if value == "other" or value in SPDX_LICENSE_IDS:
             return
-        hint = None
         canonical = _SPDX_BY_CASEFOLD.get(value.casefold())
         if canonical is not None:
-            hint = f"SPDX identifiers are case-sensitive; did you mean '{canonical}'?"
+            hint = f"SPDX identifiers are case-sensitive; write '{canonical}'"
+        else:
+            hint = (
+                "replace it with the SPDX identifier for this license, e.g. 'CC-BY-4.0', or"
+                " with 'other' plus a rel:'license' link to the license text"
+            )
         yield self.finding(
             node,
             f"license '{value}' is not an SPDX identifier or 'other'",
             json_pointer="/license",
             fix_hint=hint,
+            expected=canonical,
+            actual=value,
         )
 
 
@@ -60,6 +72,8 @@ class OtherLicenseLinkRule(Rule):
                 node,
                 "license is 'other' but no rel:'license' link points to the license text",
                 json_pointer="/links",
+                fix_hint='add {"rel": "license", "href": <the license text or landing page>}'
+                " to links, or replace 'other' with an SPDX identifier",
             )
 
 

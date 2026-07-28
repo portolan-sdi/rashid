@@ -43,6 +43,9 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Check the vendored STAC closure against upstream
+        run: uv run python scripts/vendor_stac_schemas.py --check
+
       - name: Re-vendor fixtures from spec main
         run: |
           uv run python scripts/vendor_spec_fixtures.py \
@@ -51,13 +54,13 @@ jobs:
       - name: Detect fixture drift
         id: drift
         run: |
-          if git diff --quiet -- tests/fixtures; then
+          if git diff --quiet -- tests/fixtures src/rashid/_schemas SPEC_REF; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Fixtures already match spec main; nothing to sync."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Spec main has drifted from the vendored fixtures:"
-            git --no-pager diff --stat -- tests/fixtures SPEC_REF
+            git --no-pager diff --stat -- tests/fixtures src/rashid/_schemas SPEC_REF
           fi
 
       - name: Open or update sync PR
@@ -72,7 +75,7 @@ jobs:
           git config user.name "portolan-bot"
           git config user.email "portolan@googlegroups.com"
           git checkout -B "$BRANCH"
-          git add tests/fixtures SPEC_REF
+          git add tests/fixtures src/rashid/_schemas SPEC_REF
           git commit -m "chore: sync spec fixtures to ${SHORT}"
           git push -f origin "$BRANCH"
           cat > "$RUNNER_TEMP/pr-body.md" <<'BODY'

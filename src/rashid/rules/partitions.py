@@ -52,6 +52,7 @@ class PartitionFieldsRule(Rule):
                 node,
                 "partitioned collection declares no partition:scheme",
                 json_pointer="/partition:scheme",
+                fix_hint="add partition:scheme naming the directory layout, e.g. 'hive'",
             )
         keys = node.data.get("partition:keys")
         if not isinstance(keys, list) or not keys:
@@ -59,6 +60,7 @@ class PartitionFieldsRule(Rule):
                 node,
                 "partitioned collection declares no partition:keys",
                 json_pointer="/partition:keys",
+                fix_hint='add partition:keys listing the partition columns, e.g. ["year"]',
             )
         glob = node.data.get("partition:glob")
         if not isinstance(glob, str) or not glob.strip():

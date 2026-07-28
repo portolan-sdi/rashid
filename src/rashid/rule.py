@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC
 from collections.abc import Iterable
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.model import Finding, Severity
@@ -43,6 +43,9 @@ class Rule(ABC):
         *,
         json_pointer: str | None = None,
         fix_hint: str | None = None,
+        expected: Any | None = None,
+        actual: Any | None = None,
+        data: dict[str, Any] | None = None,
     ) -> Finding:
         """Build a finding for ``node`` with this rule's id and severity."""
         return Finding(
@@ -53,4 +56,7 @@ class Rule(ABC):
             object_id=node.id,
             json_pointer=json_pointer,
             fix_hint=fix_hint,
+            expected=expected,
+            actual=actual,
+            data=data,
         )

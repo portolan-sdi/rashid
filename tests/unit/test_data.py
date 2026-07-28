@@ -4,7 +4,7 @@ These exercise :func:`rashid.data.validate_data` and its runner/CLI wiring with 
 fake validator, exactly as ``test_schema.py`` does for the schema pass: the
 byte-reading and geospatial stack are not touched here (that is
 ``test_data_checks``/``test_data_catalog``), so these run without the
-``rashid[data]`` extra.
+geospatial stack (now a core dependency, still lazily imported).
 """
 
 from __future__ import annotations
@@ -99,7 +99,7 @@ def test_systemic_failure_reported_once(catalog: CatalogBuilder) -> None:
     assert "reader exploded" in findings[0].message
 
 
-def test_missing_extra_downgrades_to_warning(
+def test_missing_geospatial_stack_downgrades_to_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def raise_import(graph: CatalogGraph | None = None) -> data_pass.Validator:
@@ -111,18 +111,14 @@ def test_missing_extra_downgrades_to_warning(
 
     assert len(findings) == 1
     assert findings[0].rule_id == DAT_UNAVAILABLE
-    assert "rashid[data]" in findings[0].message
+    assert "geospatial stack" in findings[0].message
+    assert "--no-data" in findings[0].message
 
 
-def test_data_off_by_default(catalog: CatalogBuilder) -> None:
+def test_data_pass_surfaces_by_default(catalog: CatalogBuilder) -> None:
+    """The data pass is on by default; an injected defect surfaces without data=True."""
     root = _graph(catalog).root_path
-    report = validate(root)
-    assert not any(f.rule_id.startswith("PTL-DAT") for f in report.findings)
-
-
-def test_data_pass_surfaces_with_flag(catalog: CatalogBuilder) -> None:
-    root = _graph(catalog).root_path
-    report = validate(root, data=True, data_validator=_defect_on_items())
+    report = validate(root, data_validator=_defect_on_items())
     assert any(f.rule_id == DAT_CHECKSUM for f in report.findings)
 
 
@@ -218,3 +214,30 @@ def test_defect_with_explicit_pointer_keeps_it(catalog: CatalogBuilder) -> None:
     assert len(findings) == 1
     assert findings[0].rule_id == DAT_PARTITION_SCHEMA
     assert findings[0].json_pointer == "/partition:glob"
+
+
+def test_data_pass_runs_by_default(catalog: CatalogBuilder) -> None:
+    """Byte verification is the default; no data=True opt-in required."""
+    catalog.collection("roads")
+    root = catalog.write()
+    calls: list[object] = []
+
+    def spy(node: object, reader: object) -> list:
+        calls.append(node)
+        return []
+
+    validate(root, structural=False, data_validator=spy)
+    assert calls, "the data pass did not run under the default configuration"
+
+
+def test_data_false_skips_the_pass(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    calls: list[object] = []
+
+    def spy(node: object, reader: object) -> list:
+        calls.append(node)
+        return []
+
+    validate(root, structural=False, data=False, data_validator=spy)
+    assert calls == []

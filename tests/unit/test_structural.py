@@ -1,8 +1,8 @@
 """Structural pass tests.
 
-The default validator reaches the network, so every deterministic test injects
-a fake ``Validator`` (or monkeypatches ``default_validator``); one self-skipping
-test exercises the real stac-validator when schemas.stacspec.org is reachable.
+Deterministic tests inject a fake ``Validator``; the real validator runs
+offline against the vendored STAC 1.1.0 closure, so it is exercised directly
+too — including the builder's whole tree, which must be structurally valid.
 """
 
 from __future__ import annotations
@@ -10,16 +10,21 @@ from __future__ import annotations
 import pytest
 
 from rashid import RulesConfig, validate, validate_structural
+from rashid._jsonschema import SchemaError
 from rashid.catalog import CatalogGraph
 from rashid.model import Severity
 from rashid.structural import default_validator
-from tests.conftest import CatalogBuilder, skip_if_network_flaked
+from tests.conftest import CatalogBuilder, mutate_json
 
 pytestmark = pytest.mark.unit
 
 
 def _graph(catalog: CatalogBuilder) -> CatalogGraph:
     return CatalogGraph.load(catalog.write())
+
+
+def _error(message: str, pointer: str = "") -> SchemaError:
+    return SchemaError(message=message, json_pointer=pointer)
 
 
 def test_all_valid_yields_no_findings(catalog: CatalogBuilder) -> None:
@@ -31,8 +36,10 @@ def test_invalid_object_becomes_error(catalog: CatalogBuilder) -> None:
     catalog.collection("roads")
     graph = _graph(catalog)
 
-    def check(data: dict) -> list[str]:
-        return ["'extent' is a required property"] if data.get("type") == "Collection" else []
+    def check(data: dict) -> list[SchemaError]:
+        if data.get("type") == "Collection":
+            return [_error("'extent' is a required property")]
+        return []
 
     findings = validate_structural(graph, check)
     assert len(findings) == 1
@@ -42,19 +49,32 @@ def test_invalid_object_becomes_error(catalog: CatalogBuilder) -> None:
     assert "'extent' is a required property" in findings[0].message
 
 
+def test_findings_carry_the_json_pointer(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    graph = _graph(catalog)
+
+    def check(data: dict) -> list[SchemaError]:
+        if data.get("type") == "Collection":
+            return [_error("bad link type", "/links/0/type")]
+        return []
+
+    (finding,) = validate_structural(graph, check)
+    assert finding.json_pointer == "/links/0/type"
+
+
 def test_validator_failure_is_a_single_warning(catalog: CatalogBuilder) -> None:
     catalog.collection("a")
     catalog.collection("b")
     graph = _graph(catalog)
 
-    def boom(data: dict) -> list[str]:
-        raise RuntimeError("could not reach schemas.stacspec.org")
+    def boom(data: dict) -> list[SchemaError]:
+        raise RuntimeError("registry resolution failed")
 
     findings = validate_structural(graph, boom)
     assert len(findings) == 1
     assert findings[0].rule_id == "PTL-STR-000"
     assert findings[0].severity is Severity.WARNING
-    assert "could not reach" in findings[0].message
+    assert "registry resolution failed" in findings[0].message
 
 
 def test_missing_package_is_a_warning(
@@ -63,7 +83,7 @@ def test_missing_package_is_a_warning(
     import rashid.structural as structural
 
     def raise_import() -> None:
-        raise ImportError("No module named 'stac_validator'")
+        raise ImportError("No module named 'jsonschema'")
 
     monkeypatch.setattr(structural, "default_validator", raise_import)
     findings = structural.validate_structural(_graph(catalog), None)
@@ -89,7 +109,7 @@ def test_unparseable_object_is_skipped(catalog: CatalogBuilder) -> None:
 
     seen: list[str | None] = []
 
-    def check(data: dict) -> list[str]:
+    def check(data: dict) -> list[SchemaError]:
         seen.append(data.get("type"))
         return []
 
@@ -97,51 +117,60 @@ def test_unparseable_object_is_skipped(catalog: CatalogBuilder) -> None:
     assert "Collection" not in seen  # the broken collection never reached the validator
 
 
-def test_default_validator_parses_messages(monkeypatch: pytest.MonkeyPatch) -> None:
-    from stac_validator import stac_validator
+def test_real_validator_accepts_the_builder(catalog: CatalogBuilder) -> None:
+    """The builder's whole tree is valid STAC 1.1.0, verdict from the vendored closure."""
+    catalog.collection("roads")
+    report = validate(catalog.write())
+    assert [f for f in report.findings if f.rule_id == "PTL-STR-001"] == []
 
-    class FakeStacValidate:
-        def __init__(self, **kwargs: object) -> None:
-            self.options = kwargs  # StacValidate(core=True) — accepted, unused
-            self.message: list[dict] = []
 
-        def validate_dict(self, data: dict) -> bool:
-            self.message = data["_messages"]
-            return all(m.get("valid_stac") for m in self.message)
+def test_real_validator_rejects_a_broken_collection(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(root / "roads" / "collection.json", lambda d: d.pop("extent"))
 
-    monkeypatch.setattr(stac_validator, "StacValidate", FakeStacValidate)
+    report = validate(root)
+    structural = [f for f in report.findings if f.rule_id == "PTL-STR-001"]
+    assert structural, "the vendored STAC schema accepted a collection without extent"
+    assert any("extent" in f.message for f in structural)
+    assert all(f.json_pointer is not None for f in structural)
+
+
+def test_real_validator_rejects_an_unknown_type() -> None:
     validate_object = default_validator()
+    (error,) = validate_object({"type": "Banana"})
+    assert error.json_pointer == "/type"
+    assert "Banana" in error.message
 
-    assert validate_object({"_messages": [{"valid_stac": True}]}) == []
-    assert validate_object(
-        {
-            "_messages": [
-                {"valid_stac": False, "error_message": "'x' required", "failed_schema": "S"}
-            ]
-        }
-    ) == ["'x' required (schema: S)"]
-    assert validate_object({"_messages": [{"valid_stac": False, "error_type": "TypeError"}]}) == [
-        "TypeError"
-    ]
-    assert validate_object({"_messages": [{"valid_stac": False}]}) == [
-        "object is not structurally valid STAC"
-    ]
+
+def test_real_validator_validates_items(catalog: CatalogBuilder) -> None:
+    """Items route to item.json, whose GeoJSON refs must resolve offline."""
+    collection = catalog.collection("roads")
+    collection.item("scene-1")
+    report = validate(catalog.write())
+    assert [f for f in report.findings if f.rule_id == "PTL-STR-001"] == []
 
 
 def test_runner_wires_structural_pass(catalog: CatalogBuilder) -> None:
     root = catalog.write()
 
-    def check(data: dict) -> list[str]:
-        return ["bad root"] if data.get("type") == "Catalog" else []
+    def check(data: dict) -> list[SchemaError]:
+        return [_error("bad root")] if data.get("type") == "Catalog" else []
 
     report = validate(root, structural=True, structural_validator=check)
     assert not report.passed
     assert any(f.rule_id == "PTL-STR-001" for f in report.findings)
 
 
-def test_structural_off_by_default(catalog: CatalogBuilder) -> None:
+def test_structural_on_by_default(catalog: CatalogBuilder) -> None:
     root = catalog.write()
-    report = validate(root, structural_validator=lambda data: ["never seen"])
+    report = validate(root, structural_validator=lambda data: [_error("seen")])
+    assert any(f.rule_id == "PTL-STR-001" for f in report.findings)
+
+
+def test_structural_can_be_disabled(catalog: CatalogBuilder) -> None:
+    root = catalog.write()
+    report = validate(root, structural=False, structural_validator=lambda data: [_error("never")])
     assert all(f.rule_id != "PTL-STR-001" for f in report.findings)
 
 
@@ -149,9 +178,9 @@ def test_disabling_str_rule_skips_pass(catalog: CatalogBuilder) -> None:
     root = catalog.write()
     calls: list[dict] = []
 
-    def check(data: dict) -> list[str]:
+    def check(data: dict) -> list[SchemaError]:
         calls.append(data)
-        return ["bad"]
+        return [_error("bad")]
 
     report = validate(
         root,
@@ -161,21 +190,3 @@ def test_disabling_str_rule_skips_pass(catalog: CatalogBuilder) -> None:
     )
     assert all(f.rule_id != "PTL-STR-001" for f in report.findings)
     assert calls == []  # the pass was skipped entirely, validator never invoked
-
-
-@pytest.mark.network
-def test_real_stac_validator_accepts_the_builder(catalog: CatalogBuilder) -> None:
-    import urllib.request
-
-    try:
-        urllib.request.urlopen("https://schemas.stacspec.org/", timeout=5)  # noqa: S310
-    except Exception:  # noqa: BLE001
-        pytest.skip("schemas.stacspec.org unreachable")
-
-    catalog.collection("roads")
-    report = validate(catalog.write(), structural=True)
-    structural_errors = [f for f in report.findings if f.rule_id == "PTL-STR-001"]
-    # The validator resolves remote schemas, so a reset connection reads as an
-    # unresolvable reference rather than a conformance fault.
-    skip_if_network_flaked(f.message for f in structural_errors)
-    assert structural_errors == []  # the builder's tree is valid STAC 1.1.0

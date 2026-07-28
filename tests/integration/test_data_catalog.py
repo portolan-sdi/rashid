@@ -117,7 +117,11 @@ def test_wrong_size_flags_dat_002(catalog_root: Path) -> None:
         _item(catalog_root, "points"),
         lambda d: d["assets"]["data"].__setitem__("file:size", 7),
     )
-    assert DAT_SIZE in [f.rule_id for f in _data_findings(catalog_root)]
+    (finding,) = [f for f in _data_findings(catalog_root) if f.rule_id == DAT_SIZE]
+    # expected carries the true byte count, actual the declared value: enough
+    # for a caller to repair the metadata without re-reading the asset.
+    assert finding.actual == 7
+    assert isinstance(finding.expected, int) and finding.expected != 7
 
 
 def test_wrong_media_type_flags_dat_003(catalog_root: Path) -> None:

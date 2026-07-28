@@ -318,6 +318,8 @@ def _verify_checksum(
                 f"(declared {hasher.name} digest differs from recomputed)",
                 key,
                 "file:checksum",
+                expected=hasher.digest().hex(),
+                actual=decoded[1].hex(),
             )
         ]
     return []
@@ -334,6 +336,8 @@ def _verify_size(key: str, declared: Any, count: int) -> list[DataDefect]:
                 f"asset '{key}' file:size is {declared} but the bytes are {count}",
                 key,
                 "file:size",
+                expected=count,
+                actual=declared,
             )
         ]
     return []

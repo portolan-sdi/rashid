@@ -15,12 +15,6 @@ rashid reads a catalog directory and reports every rule it breaks.
 uv tool install rashid
 ```
 
-The data pass reads asset bytes and needs a geospatial stack. Install the extra when you plan to run it.
-
-```bash
-uv tool install "rashid[data]"
-```
-
 ## Check a catalog
 
 ```bash
@@ -29,13 +23,13 @@ rashid check path/to/catalog
 
 An exit code of 0 means the catalog broke no MUST. An exit code of 1 means it broke at least one.
 
-Three passes are off by default.
+The default run covers the metadata, structural, and data passes, all offline for local assets. Two passes stay opt-in: `--schema` (redundant with the hand rules by construction; useful as a cross-check on catalogs from other tooling) and `--live` (probes the hosting servers, so it needs the network and a published catalog).
 
 ```bash
-rashid check path/to/catalog --schema --data --live
+rashid check path/to/catalog --live --live-base-url https://data.example.org/my-catalog/
 ```
 
-Each of those reaches the network, and `--data` also needs `rashid[data]`. Add `--json` for a machine-readable report.
+`--no-data` skips byte verification when the assets are huge or remote and only the metadata verdict is needed. Add `--json` for a machine-readable report.
 
 ## What it checks
 
@@ -43,11 +37,11 @@ Validation runs as five separable passes.
 
 **Metadata.** Every spec requirement rashid can check from the catalog's JSON, without reading asset bytes.
 
-**Structural.** STAC 1.1.0 core validity, delegated to [stac-validator](https://github.com/stac-utils/stac-validator). Only the core schema applies. Declared extensions belong to the metadata pass, which keeps an unpublished extension schema from failing the tree.
+**Structural.** STAC 1.1.0 core validity, checked offline against the schemas vendored in the wheel. Only the core schema applies. Declared extensions belong to the metadata pass, which keeps an unpublished extension schema from failing the tree.
 
 **Schema.** The published [Portolan profile schema](https://schemas.portolan-sdi.org/portolan/), applied to every object. rashid also implements those requirements in code, which yields precise messages and fix hints. Running both catches drift between them, at the cost of reporting some defects twice. Opt in with `--schema`.
 
-**Data.** Asset bytes, local files and remote https URLs alike, checked against the declared metadata and the format rules. rashid recomputes checksum and size, confirms media type by magic number, and enforces storage rules a metadata reader cannot see. Expect a real catalog to fail here on rules its metadata satisfies, because this pass is stricter than what current tooling emits. Opt in with `--data`.
+**Data.** Asset bytes, local files and remote https URLs alike, checked against the declared metadata and the format rules. rashid recomputes checksum and size, confirms media type by magic number, and enforces storage rules a metadata reader cannot see. Expect a real catalog to fail here on rules its metadata satisfies, because this pass is stricter than what current tooling emits. On by default; `--no-data` skips it.
 
 **Live hosting.** The servers behind remote https assets, probed for HTTP range support and CORS. Those are properties of the server rather than of any file. Range and CORS cost one probe per host, and each asset costs one HEAD. Opt in with `--live`.
 
@@ -63,7 +57,7 @@ for finding in report.errors:
     print(finding.message)
 ```
 
-`validate()` runs the metadata pass alone. The keyword arguments `structural`, `schema`, `data`, and `live` add the others. Note that the CLI runs the structural pass by default while the library does not, since it reaches the network.
+`validate()` runs the metadata, structural, and data passes by default, matching the CLI; `schema` and `live` opt the remaining two in, and `structural=False` / `data=False` opt the defaults out.
 
 `RulesConfig` skips rules or changes their severity.
 

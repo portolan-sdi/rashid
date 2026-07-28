@@ -44,6 +44,10 @@ class SchemaUriDeclaredRule(Rule):
                 node,
                 f"stac_extensions declares {len(uris)} Portolan schema URIs; exactly one expected",
                 json_pointer="/stac_extensions",
+                fix_hint="keep the one Portolan schema URI this object conforms to and remove"
+                " the others from stac_extensions",
+                expected=1,
+                actual=len(uris),
             )
 
 
@@ -85,6 +89,12 @@ class SchemaUriConsistencyRule(Rule):
                     path=str(node.path),
                     object_id=node.id,
                     json_pointer="/stac_extensions",
+                    fix_hint=(
+                        f"replace the declared URI with the root catalog's {root_uri}, or"
+                        " migrate the whole catalog to one schema version"
+                    ),
+                    expected=root_uri,
+                    actual=uris[0],
                 )
 
 

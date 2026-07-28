@@ -219,8 +219,12 @@ def test_head_length_mismatching_declared_size_is_error(catalog: CatalogBuilder)
     graph = _graph_with_remote(catalog, size=999)
     findings = validate_live(graph, FakeProber(head_response=_good_head("1234")))
     assert LIV_HEAD_LENGTH in _ids(findings)
-    message = next(f.message for f in findings if f.rule_id == LIV_HEAD_LENGTH)
-    assert "999" in message and "1234" in message
+    finding = next(f for f in findings if f.rule_id == LIV_HEAD_LENGTH)
+    assert "999" in finding.message and "1234" in finding.message
+    # structured mirror of the prose, data-pass convention: expected is the
+    # authoritative value (the served bytes), actual is what the object declares
+    assert finding.expected == 1234
+    assert finding.actual == 999
 
 
 def test_head_without_declared_size_only_requires_presence(catalog: CatalogBuilder) -> None:
@@ -415,3 +419,94 @@ def test_disabling_one_liv_rule_silences_only_it(catalog: CatalogBuilder) -> Non
     ids = {f.rule_id for f in report.findings}
     assert LIV_RANGE not in ids
     assert LIV_CORS_PREFLIGHT in ids
+
+
+# --- base_url: probing relative hrefs against the publish URL ----------------
+
+
+def _graph_with_relative(catalog: CatalogBuilder) -> CatalogGraph:
+    """The builder's default collection asset href is relative (./data.parquet)."""
+    catalog.collection("roads")
+    return CatalogGraph.load(catalog.write())
+
+
+def test_base_url_makes_relative_hrefs_probeable(catalog: CatalogBuilder) -> None:
+    graph = _graph_with_relative(catalog)
+    prober = FakeProber()
+    findings = validate_live(graph, prober, base_url="https://data.example.org/cat")
+    assert LIV_UNAVAILABLE not in _ids(findings)
+    # every relative asset (data + thumbnail) resolves under the publish base
+    assert "https://data.example.org/cat/roads/data.parquet" in prober.head_calls
+    assert all(u.startswith("https://data.example.org/cat/") for u in prober.head_calls)
+
+
+def test_base_url_trailing_slash_is_normalized(catalog: CatalogBuilder) -> None:
+    graph = _graph_with_relative(catalog)
+    prober = FakeProber()
+    validate_live(graph, prober, base_url="https://data.example.org/cat/")
+    assert "https://data.example.org/cat/roads/data.parquet" in prober.head_calls
+    assert not any("//cat//" in u or u.endswith("//") for u in prober.head_calls)
+
+
+def test_base_url_probes_nested_items(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection("roads")
+    collection.item("seg1")
+    graph = CatalogGraph.load(catalog.write())
+    prober = FakeProber()
+    validate_live(graph, prober, base_url="https://data.example.org/cat")
+    assert any(
+        url.startswith("https://data.example.org/cat/roads/seg1/") for url in prober.head_calls
+    )
+
+
+def test_base_url_skips_hrefs_escaping_the_tree(catalog: CatalogBuilder) -> None:
+    asset = {
+        "href": "../../outside.parquet",
+        "type": "application/vnd.apache.parquet",
+        "roles": ["data"],
+    }
+    catalog.collection("roads", assets={"data": asset})
+    graph = CatalogGraph.load(catalog.write())
+    prober = FakeProber()
+    findings = validate_live(graph, prober, base_url="https://data.example.org/cat")
+    assert prober.head_calls == []
+    assert LIV_UNAVAILABLE in _ids(findings)  # nothing probeable after the skip
+
+
+def test_non_https_base_url_is_rejected(catalog: CatalogBuilder) -> None:
+    graph = _graph_with_relative(catalog)
+    with pytest.raises(ValueError, match="https"):
+        validate_live(graph, FakeProber(), base_url="http://data.example.org/cat")
+
+
+def test_without_base_url_relative_hrefs_stay_skipped(catalog: CatalogBuilder) -> None:
+    """Regression guard: no base_url means byte-identical legacy behavior."""
+    graph = _graph_with_relative(catalog)
+    prober = FakeProber()
+    findings = validate_live(graph, prober)
+    assert prober.head_calls == []
+    assert _ids(findings) == [LIV_UNAVAILABLE]
+
+
+def test_mixed_absolute_and_relative_group_by_host(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")  # relative ./data.parquet
+    catalog.collection("rails", assets={"data": _remote_asset()})  # absolute _URL
+    graph = CatalogGraph.load(catalog.write())
+    prober = FakeProber()
+    validate_live(graph, prober, base_url="https://data.example.org/cat")
+    hosts = {u.split("/")[2] for u in prober.range_calls}
+    assert hosts == {"data.example.org", "data.example.com"}
+
+
+def test_runner_threads_live_base_url(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    prober = FakeProber()
+    validate(
+        root,
+        structural=False,
+        live=True,
+        live_prober=prober,
+        live_base_url="https://data.example.org/cat",
+    )
+    assert "https://data.example.org/cat/roads/data.parquet" in prober.head_calls

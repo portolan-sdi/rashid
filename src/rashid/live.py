@@ -18,11 +18,12 @@ the section's MUSTs:
 
 Range and CORS semantics are server properties, so the GET and OPTIONS probes
 run once per distinct host (via its lexically first asset); only the cheap HEAD
-runs per asset. Only absolute ``https`` hrefs are probeable from a local tree —
-relative hrefs would need a base URL mapping (a planned follow-up); ``s3`` and
-friends are ``PTL-AST-002``'s domain. The pass is stdlib-only and lives in
-core; like every optional pass it degrades to ``PTL-LIV-000`` warnings when it
-cannot probe rather than failing the run.
+runs per asset. Absolute ``https`` hrefs are probed as declared; relative
+hrefs are probed when the caller supplies ``base_url`` — the URL the catalog
+root is published under — by joining the root-relative asset path onto it.
+``s3`` and friends are ``PTL-AST-002``'s domain. The pass is stdlib-only and
+lives in core; like every optional pass it degrades to ``PTL-LIV-000``
+warnings when it cannot probe rather than failing the run.
 """
 
 from __future__ import annotations
@@ -145,12 +146,14 @@ class _UrllibProber:
         )
 
 
-def _targets_by_host(graph: CatalogGraph) -> dict[str, list[_Target]]:
-    """Probeable assets (absolute ``https`` hrefs), grouped by host.
+def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[str, list[_Target]]:
+    """Probeable assets grouped by host: absolute ``https`` hrefs as declared,
+    plus — when ``base_url`` is given — relative hrefs resolved against it.
 
     Node iteration is path-sorted and asset keys are sorted, so each host's
     first target — the probe representative — is deterministic.
     """
+    base = _normalize_base(base_url) if base_url is not None else None
     by_host: dict[str, list[_Target]] = {}
     for node in graph.iter(*_LIVE_KINDS):
         if node.parse_error is not None:
@@ -170,15 +173,22 @@ def _targets_by_host(graph: CatalogGraph) -> dict[str, list[_Target]]:
                 # does not control; the hosting MUSTs bind the servers hosting
                 # the cloud-native primaries. Mirrors the data pass exemption.
                 continue
+            url = href
             parsed = urlparse(href)
             if parsed.scheme.lower() != "https" or not parsed.netloc:
-                continue
+                if base is None:
+                    continue
+                rel = graph.resolve_path(node, href)
+                if rel is None:
+                    continue  # absolute non-https, or a href escaping the tree
+                url = f"{base}{rel}"
+                parsed = urlparse(url)
             size = asset.get("file:size")
             by_host.setdefault(parsed.netloc.lower(), []).append(
                 _Target(
                     node=node,
                     key=key,
-                    url=href,
+                    url=url,
                     declared_size=size if isinstance(size, int) else None,
                 )
             )
@@ -192,6 +202,19 @@ def _is_alternate(asset: dict[str, Any]) -> bool:
     return any(isinstance(role, str) and role in ("source", "alternate") for role in roles)
 
 
+def _normalize_base(base_url: str) -> str:
+    """Validate and normalize a publish base URL to https with one trailing slash.
+
+    https-only for the same reason the data reader is: the base joins with
+    catalog-controlled hrefs into request URLs, so any weaker scheme would let
+    a hostile tree downgrade or redirect the probes.
+    """
+    parsed = urlparse(base_url)
+    if parsed.scheme.lower() != "https" or not parsed.netloc:
+        raise ValueError(f"live base_url must be an https URL, got: {base_url!r}")
+    return base_url.rstrip("/") + "/"
+
+
 def _header_set(value: str | None) -> set[str]:
     """A comma-separated header value as a lowercased set of tokens."""
     if value is None:
@@ -200,7 +223,13 @@ def _header_set(value: str | None) -> set[str]:
 
 
 def _server_finding(
-    rule_id: str, host: str, rep: _Target, message: str, fix_hint: str | None = None
+    rule_id: str,
+    host: str,
+    rep: _Target,
+    message: str,
+    fix_hint: str | None = None,
+    expected: object | None = None,
+    actual: object | None = None,
 ) -> Finding:
     return Finding(
         rule_id=rule_id,
@@ -210,6 +239,8 @@ def _server_finding(
         object_id=rep.node.id,
         json_pointer=f"/assets/{rep.key}/href",
         fix_hint=fix_hint,
+        expected=expected,
+        actual=actual,
     )
 
 
@@ -228,6 +259,8 @@ def _check_range(host: str, rep: _Target, response: ProbeResponse) -> list[Findi
             rep,
             "range requests unsupported: " + "; ".join(problems),
             fix_hint="serve assets from storage that honors the Range header with 206 responses",
+            expected=206,
+            actual=response.status,
         )
     ]
 
@@ -300,6 +333,7 @@ def _check_head(target: _Target, response: ProbeResponse) -> list[Finding]:
                 object_id=target.node.id,
                 json_pointer=pointer,
                 fix_hint="HEAD requests MUST return an accurate Content-Length",
+                actual=length,
             )
         ]
     if target.declared_size is not None and int(length) != target.declared_size:
@@ -315,6 +349,8 @@ def _check_head(target: _Target, response: ProbeResponse) -> list[Finding]:
                 object_id=target.node.id,
                 json_pointer=pointer,
                 fix_hint="regenerate file:size at publish time so it matches the hosted bytes",
+                expected=int(length),
+                actual=target.declared_size,
             )
         ]
     return []
@@ -370,26 +406,33 @@ def _check_host(host: str, targets: list[_Target], prober: Prober) -> list[Findi
     return findings
 
 
-def validate_live(graph: CatalogGraph, prober: Prober | None = None) -> list[Finding]:
-    """Probe the hosts behind every absolute ``https`` asset href.
+def validate_live(
+    graph: CatalogGraph, prober: Prober | None = None, *, base_url: str | None = None
+) -> list[Finding]:
+    """Probe the hosts behind the catalog's assets.
 
-    Returns ``PTL-LIV-00x`` findings for each Data Storage MUST the hosting
-    server violates. When the tree declares nothing probeable, or a host cannot
-    be reached, the pass degrades to ``PTL-LIV-000`` warnings rather than
-    failing the run.
+    Absolute ``https`` hrefs are probed as declared. ``base_url`` — the https
+    URL the catalog root is published under — additionally makes relative
+    hrefs probeable by joining their root-relative paths onto it. Returns
+    ``PTL-LIV-00x`` findings for each Data Storage MUST the hosting server
+    violates. When the tree declares nothing probeable, or a host cannot be
+    reached, the pass degrades to ``PTL-LIV-000`` warnings rather than failing
+    the run.
     """
     if prober is None:
         prober = _UrllibProber()
-    by_host = _targets_by_host(graph)
+    by_host = _targets_by_host(graph, base_url)
     if not by_host:
+        hint = (
+            "no probeable asset hrefs"
+            if base_url is not None
+            else "no absolute https asset hrefs to probe (pass base_url to probe relative hrefs)"
+        )
         return [
             Finding(
                 rule_id=LIV_UNAVAILABLE,
                 severity=Severity.WARNING,
-                message=(
-                    "live pass skipped: no absolute https asset hrefs to probe "
-                    "(probing relative hrefs needs a base URL mapping, not yet supported)"
-                ),
+                message=f"live pass skipped: {hint}",
                 path=".",
             )
         ]
