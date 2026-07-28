@@ -107,6 +107,7 @@ def _optional_passes(
     data_validator: DataValidator | None,
     live: bool,
     live_prober: LiveProber | None,
+    live_base_url: str | None,
 ) -> list[Finding]:
     """Run the opt-in structural, schema, data, and live passes, honouring disable ids."""
     findings: list[Finding] = []
@@ -122,7 +123,9 @@ def _optional_passes(
         )
     if live and not _LIVE_RULE_IDS <= config.disabled:
         findings.extend(
-            f for f in validate_live(graph, live_prober) if f.rule_id not in config.disabled
+            f
+            for f in validate_live(graph, live_prober, base_url=live_base_url)
+            if f.rule_id not in config.disabled
         )
     return findings
 
@@ -141,6 +144,7 @@ def validate(
     data_validator: DataValidator | None = None,
     live: bool = False,
     live_prober: LiveProber | None = None,
+    live_base_url: str | None = None,
 ) -> Report:
     """Validate a local Portolan catalog tree.
 
@@ -169,8 +173,10 @@ def validate(
     chiefly for offline testing.
 
     When ``live`` is true the live-hosting pass runs too, probing the servers
-    behind absolute ``https`` asset hrefs for HTTP range support and CORS (see
-    :mod:`rashid.live`); it is off by default because it reaches the network.
+    behind the catalog's assets for HTTP range support and CORS (see
+    :mod:`rashid.live`) — absolute ``https`` hrefs as declared, relative hrefs
+    when ``live_base_url`` (the https URL the catalog root is published under)
+    is given; it is off by default because it reaches the network.
     Disabling every ``PTL-LIV-00x`` rule via ``config`` skips the pass;
     disabling a subset just silences those findings. ``live_prober`` injects an
     alternate prober, chiefly for offline testing.
@@ -251,6 +257,7 @@ def validate(
             data_validator=data_validator,
             live=live,
             live_prober=live_prober,
+            live_base_url=live_base_url,
         )
     )
 

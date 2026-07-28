@@ -61,6 +61,12 @@ def main() -> None:
     default=False,
     help="Also probe the servers behind https assets: HTTP range and CORS (needs network).",
 )
+@click.option(
+    "--live-base-url",
+    metavar="URL",
+    default=None,
+    help="Publish base URL; makes relative asset hrefs probeable with --live.",
+)
 def check(
     catalog_path: Path,
     as_json: bool,
@@ -69,6 +75,7 @@ def check(
     schema_allow_network: bool,
     data: bool,
     live: bool,
+    live_base_url: str | None,
 ) -> None:
     """Validate CATALOG_PATH: the Portolan metadata pass, the STAC 1.1.0
     structural pass (unless --no-structural), and — with --schema / --data /
@@ -81,6 +88,7 @@ def check(
         schema_allow_network=schema_allow_network,
         data=data,
         live=live,
+        live_base_url=live_base_url,
     )
     if as_json:
         click.echo(json_module.dumps(report.to_dict(), indent=2))
