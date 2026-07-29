@@ -57,10 +57,18 @@ def write_geoparquet(
     geo: bool = True,
     version: str = "1.1.0",
     columns: dict[str, list[object]] | None = None,
+    bboxes: list[tuple[float, float, float, float]] | None = None,
 ) -> None:
+    """A GeoParquet file of WKB points, one per entry in ``points``.
+
+    ``bboxes`` overrides the covering column, which otherwise holds each
+    point's own degenerate box. Passing the two separately lets a test drift
+    the geometry without drifting the covering, and the reverse.
+    """
     pts = points if points is not None else ordered_points()
     xs = [p[0] for p in pts]
     ys = [p[1] for p in pts]
+    boxes = bboxes if bboxes is not None else [(x, y, x, y) for x, y in pts]
     wkb = [struct.pack("<BIdd", 1, 1, x, y) for x, y in pts]
     cols: dict[str, object] = {
         "geometry": pa.array(wkb, type=pa.binary()),
@@ -82,12 +90,7 @@ def write_geoparquet(
     }
     if covering:
         cols["bbox"] = pa.StructArray.from_arrays(
-            [
-                pa.array(xs, pa.float64()),
-                pa.array(ys, pa.float64()),
-                pa.array(xs, pa.float64()),
-                pa.array(ys, pa.float64()),
-            ],
+            [pa.array([box[i] for box in boxes], pa.float64()) for i in range(4)],
             names=["xmin", "ymin", "xmax", "ymax"],
         )
         meta["columns"]["geometry"]["covering"] = {  # type: ignore[index]
@@ -111,6 +114,9 @@ def write_item_mirror(
     covering: bool = True,
     row_group_size: int = 2,
     ordered: bool = True,
+    points: list[tuple[float, float]] | None = None,
+    datetimes: list[str] | None = None,
+    bboxes: list[tuple[float, float, float, float]] | None = None,
 ) -> None:
     """A stac-geoparquet item mirror: one row per item, keyed by item id.
 
@@ -120,17 +126,30 @@ def write_item_mirror(
     ``covering=False`` produce the shapes PTL-DAT-006 and PTL-DAT-007 reject.
     ``ids=None`` omits the ``id`` column, which is the shape PTL-DAT-016
     rejects outright.
+
+    ``points``, ``datetimes``, and ``bboxes`` set the per-row fields
+    PTL-DAT-016 compares against the items, so a test can drift one of them
+    and leave the rest agreeing.
     """
     count = len(ids) if ids else 1
     source = ordered_points(max(count, 2)) if ordered else interleaved_points()
-    pts = source[:count]
-    columns = {"id": pa.array(ids, type=pa.string())} if ids is not None else None
+    pts = points if points is not None else source[:count]
+    columns: dict[str, list[object]] = {}
+    if ids is not None:
+        columns["id"] = pa.array(ids, type=pa.string())
+    if datetimes is not None:
+        # stac-geoparquet stores the instant, not the string: cast so the
+        # column carries a real timestamp with its zone.
+        columns["datetime"] = pa.array(datetimes, type=pa.string()).cast(
+            pa.timestamp("us", tz="UTC")
+        )
     write_geoparquet(
         path,
         points=pts,
         covering=covering,
         row_group_size=row_group_size,
-        columns=columns,
+        columns=columns or None,
+        bboxes=bboxes,
     )
 
 

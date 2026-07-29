@@ -126,7 +126,8 @@ def default_validator(graph: CatalogGraph | None = None) -> Validator:
 
     ``graph`` is bound into the returned validator for the one check that needs
     more than a single object: the item mirror must agree with the collection's
-    items, which means reading the collection's children (``PTL-DAT-016``).
+    items, which means reading every item beneath the collection
+    (``PTL-DAT-016``).
     Called without it, that check is skipped and the rest run unchanged.
     """
     from rashid.data import checks

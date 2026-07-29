@@ -23,6 +23,10 @@ authors = [{ name = "Portolan contributors" }]
 # feature-detects it either way), and consumers cap pyarrow below 25 over an
 # abseil ABI break, so a >=25 floor would make rashid uninstallable next to them
 # (#36; also fixed on main by #49 — the floors agree whichever merges first).
+# shapely joins the stack for the item-mirror comparison in
+# checks._geometry_agrees, which decodes the mirror's WKB and the item's GeoJSON
+# and compares them structurally. Its floor follows the same rule: 2.1 is the
+# newest series shapely ships, and it still resolves on Python 3.10.
 dependencies = [
     "click>=8.4",
     "jsonschema>=4.26",
@@ -31,6 +35,7 @@ dependencies = [
     "rasterio>=1.4.4",
     "rio-cogeo>=6",
     "pyproj>=3.7.1",
+    "shapely>=2.1",
 ]
 
 [project.optional-dependencies]
@@ -92,7 +97,7 @@ ignore_missing_imports = true
 
 # The data-pass geospatial stack (rashid[data]) ships no usable type information.
 [[tool.mypy.overrides]]
-module = ["pyarrow.*", "rasterio.*", "pyproj.*", "rio_cogeo.*"]
+module = ["pyarrow.*", "rasterio.*", "pyproj.*", "rio_cogeo.*", "shapely.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -163,7 +168,7 @@ source_modules = [
     "rashid.data.reader",
     "rashid.api",
 ]
-forbidden_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo"]
+forbidden_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"]
 ignore_imports = ["rashid.data -> rashid.data.checks"]
 
 [tool.commitizen]
