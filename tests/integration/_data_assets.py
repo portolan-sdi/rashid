@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 import struct
 from pathlib import Path
 
@@ -132,6 +133,86 @@ def write_item_mirror(
         row_group_size=row_group_size,
         columns=columns,
     )
+
+
+# --- mirrors from the reference writer --------------------------------------
+#
+# The generators above hand-build Parquet, which is fine for pinning one shape
+# but cannot show what a producer actually publishes. These drive
+# ``stac_geoparquet``'s own parser and writer, the path portolan-cli takes, so
+# the tests see the file shapes real catalogs carry (#66).
+
+_HILBERT_ORDER = 16
+
+
+def _hilbert_distance(x: int, y: int, order: int = _HILBERT_ORDER) -> int:
+    """Position of integer cell ``(x, y)`` along a Hilbert curve of ``order``."""
+    distance = 0
+    side = 1 << (order - 1)
+    while side > 0:
+        rx = 1 if x & side else 0
+        ry = 1 if y & side else 0
+        distance += side * side * ((3 * rx) ^ ry)
+        if ry == 0:
+            if rx == 1:
+                x = side - 1 - x
+                y = side - 1 - y
+            x, y = y, x
+        side //= 2
+    return distance
+
+
+def _hilbert_key(point: tuple[float, float]) -> int:
+    cells = (1 << _HILBERT_ORDER) - 1
+    x, y = point
+    return _hilbert_distance(int((x + 180.0) / 360.0 * cells), int((y + 90.0) / 180.0 * cells))
+
+
+def scattered_items(count: int, *, seed: int = 1, ordered: bool = False) -> list[dict[str, object]]:
+    """STAC item dicts at pseudo-random points across the globe.
+
+    ``ordered=True`` sorts them along a Hilbert curve, which is the spatial
+    ordering formats.md:30 asks for; left unordered they are the scattered
+    mirror the issue reports as passing clean.
+    """
+    rng = random.Random(seed)
+    points = [(rng.uniform(-180.0, 180.0), rng.uniform(-80.0, 80.0)) for _ in range(count)]
+    if ordered:
+        points.sort(key=_hilbert_key)
+    return [
+        {
+            "type": "Feature",
+            "stac_version": "1.1.0",
+            "id": f"item-{i:07d}",
+            "geometry": {"type": "Point", "coordinates": [x, y]},
+            "bbox": [x, y, x, y],
+            "properties": {"datetime": "2024-01-01T00:00:00Z"},
+            "links": [],
+            "assets": {"data": {"href": f"https://example.org/{i}.tif", "type": "image/tiff"}},
+            "collection": "scattered",
+        }
+        for i, (x, y) in enumerate(points)
+    ]
+
+
+def write_stac_geoparquet(
+    path: Path, items: list[dict[str, object]], *, chunk_size: int | None = None
+) -> None:
+    """Write ``items`` with ``stac_geoparquet``, as a producer does.
+
+    ``chunk_size=None`` is the plain default: ``parse_stac_items_to_arrow``
+    infers the schema from the whole input and returns one contiguous record
+    batch, so ``to_parquet`` writes one row group whatever the item count.
+    Passing a chunk size selects the streaming schema path, which batches the
+    input and writes one row group per batch.
+    """
+    from stac_geoparquet.arrow import parse_stac_items_to_arrow, to_parquet
+
+    if chunk_size is None:
+        reader = parse_stac_items_to_arrow(items)
+    else:
+        reader = parse_stac_items_to_arrow(items, chunk_size=chunk_size, schema="FirstBatch")
+    to_parquet(reader, path)
 
 
 def write_cog(

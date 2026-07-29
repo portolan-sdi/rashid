@@ -13,7 +13,9 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   (advisory). A ``proj:epsg`` the asset declares itself is faulted on the asset;
   one inherited from the enclosing collection or item is faulted at the field
   that declares it, once, however many assets read it.
-- ``PTL-DAT-006`` GeoParquet rows are not spatially ordered (MUST, formats.md:30)
+- ``PTL-DAT-006`` GeoParquet rows are not spatially ordered (MUST, formats.md:30),
+  or the file holds every row in one row group, where ordering cannot be
+  measured and no reader can prune anything (MUST, formats.md:39)
 - ``PTL-DAT-007`` no per-row-group spatial statistics (MUST, formats.md:39)
 - ``PTL-DAT-008`` a row group exceeds 150,000 rows (MUST, formats.md:50)
 - ``PTL-DAT-009`` COG bands lack embedded statistics (MUST, formats.md:95)
@@ -125,6 +127,22 @@ _MAX_ROW_GROUP_ROWS = 150_000
 # formats.md:30 — spatial ordering passes on either criterion.
 _MAX_OVERLAP_FRACTION = 0.30  # < 30% of consecutive row-group pairs may overlap
 _MAX_LOCALITY_RATIO = 0.25  # row-group boxes average < 25% of the file extent
+# formats.md:36 completes the locality criterion: boxes that small let a reader
+# "skip at least 50% of row groups for a query window of 10% of the extent".
+_MIN_SKIP_RATE = 0.50
+_QUERY_FRACTION = 0.10
+# Query windows are placed on a fixed lattice rather than sampled randomly, so
+# the same file always yields the same finding.
+_QUERY_LATTICE = 5
+
+# A file this large in a single row group is faulted even though its ordering
+# cannot be measured: one row group defeats row-group pruning outright, which
+# is what formats.md:39 asks the statistics to enable. The bar sits at a
+# thirtieth of the 150,000-row ceiling, so a file that trips it always has a
+# split that satisfies both rules, and a smaller file — which every writer
+# emits as one row group, and which a reader scans whole for a few hundred
+# kilobytes — stays quiet.
+_MIN_ROWS_FOR_PRUNING = 5_000
 
 # geotiff-stats-headers.md — the embedded per-band statistics a COG MUST carry.
 _COG_STAT_KEYS = (
@@ -709,6 +727,10 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
     if bboxes is None:
         return defects  # without per-row-group boxes, ordering cannot be judged
 
+    if len(bboxes) <= 1:
+        defects.extend(_single_row_group_defect(key, sum(row_counts)))
+        return defects
+
     if not _is_spatially_ordered(bboxes):
         defects.append(
             DataDefect(
@@ -1031,8 +1053,44 @@ def _column_index(meta: Any) -> dict[str, int]:
     return {group.column(j).path_in_schema: j for j in range(group.num_columns)}
 
 
+def _single_row_group_defect(key: str, rows: int) -> list[DataDefect]:
+    """A large file in one row group is a defect, not an unmeasurable pass.
+
+    Ordering between row groups cannot be measured when there is one of them,
+    and returning "ordered" there let the reference writer's default output
+    pass without the rule ever running: ``parse_stac_items_to_arrow`` with no
+    explicit ``schema`` yields one contiguous record batch at any item count,
+    and ``to_parquet`` writes one row group per batch (#66).
+
+    The finding is the file's shape, not a guess about its ordering. One row
+    group is one unit of I/O, so a reader prunes nothing and reads the file
+    whole however well its rows are sorted.
+
+    Ported from geoparquet-io's ``check_spatial_pushdown_readiness``, which
+    returns ``passed: False`` with "Single row group provides no pushdown
+    benefit" for the same shape.
+    """
+    if rows < _MIN_ROWS_FOR_PRUNING:
+        return []
+    return [
+        DataDefect(
+            DAT_ORDERING,
+            Severity.ERROR,
+            f"asset '{key}' holds all {rows} rows in a single row group, so a reader "
+            "cannot skip any of them and the ordering of the rows cannot be measured; "
+            f"write row groups of at most {_MAX_ROW_GROUP_ROWS} rows",
+            key,
+        )
+    ]
+
+
 def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bool:
-    """True if row groups are spatially ordered by either spec criterion (formats.md:30)."""
+    """True if row groups are spatially ordered by either spec criterion (formats.md:30).
+
+    Callers with one row group or none are answered True: there is no pair to
+    compare. That is not a pass — :func:`_check_geoparquet` routes that shape
+    to :func:`_single_row_group_defect` before reaching here.
+    """
     if len(bboxes) <= 1:
         return True
     pairs = len(bboxes) - 1
@@ -1045,7 +1103,50 @@ def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bo
     if extent_area == 0:
         return True  # a single location — nothing to order
     mean_ratio = sum(_bbox_area(b) for b in bboxes) / len(bboxes) / extent_area
-    return mean_ratio < _MAX_LOCALITY_RATIO  # high locality
+    return mean_ratio < _locality_ratio_limit(len(bboxes)) and (
+        _mean_skip_rate(bboxes, extent) >= _MIN_SKIP_RATE
+    )
+
+
+def _locality_ratio_limit(groups: int) -> float:
+    """The area-ratio cutoff for ``groups`` row groups.
+
+    A well-ordered file's row-group boxes each cover roughly ``1/groups`` of
+    the extent plus slop, so a file split into two or three groups cannot
+    reach 25% however well it is sorted. The limit relaxes to ``2/groups``
+    below eight groups and holds formats.md's 25% at or above it. The skip
+    rate is what keeps the relaxation honest: a file whose boxes each span the
+    whole extent skips nothing and fails on that criterion instead.
+
+    Ported from geoparquet-io's ``_area_ratio_threshold``.
+    """
+    return max(_MAX_LOCALITY_RATIO, 2.0 / groups)
+
+
+def _mean_skip_rate(
+    bboxes: list[tuple[float, float, float, float]],
+    extent: tuple[float, float, float, float],
+) -> float:
+    """Fraction of row groups a query window skips, averaged over the extent.
+
+    formats.md:36 sizes the window at 10% of the extent per dimension. The
+    windows sit on a fixed lattice of ``_QUERY_LATTICE`` positions per axis,
+    so the measurement is reproducible; geoparquet-io's
+    ``_compute_locality_metrics`` samples the same windows at random from a
+    pinned seed.
+    """
+    groups = len(bboxes)
+    width = (extent[2] - extent[0]) * _QUERY_FRACTION
+    height = (extent[3] - extent[1]) * _QUERY_FRACTION
+    rates = []
+    for i in range(_QUERY_LATTICE):
+        for j in range(_QUERY_LATTICE):
+            x = extent[0] + (extent[2] - extent[0] - width) * i / (_QUERY_LATTICE - 1)
+            y = extent[1] + (extent[3] - extent[1] - height) * j / (_QUERY_LATTICE - 1)
+            window = (x, y, x + width, y + height)
+            skipped = sum(not _bbox_overlaps(window, b) for b in bboxes)
+            rates.append(skipped / groups)
+    return sum(rates) / len(rates)
 
 
 def _bbox_area(b: tuple[float, float, float, float]) -> float:

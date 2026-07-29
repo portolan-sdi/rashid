@@ -490,6 +490,40 @@ def test_spatial_ordering_high_locality_despite_overlap() -> None:
     assert checks._is_spatially_ordered(boxes)
 
 
+def test_spatial_ordering_needs_a_skippable_layout() -> None:
+    # Two row groups that both span the extent: the relaxed area-ratio limit for
+    # a two-group file (2.0 / 2) does not reject them, and the skip rate does.
+    # A query window lands inside both, so a reader skips neither.
+    spanning = [(0.0, 0.0, 10.0, 10.0), (0.05, 0.05, 10.0, 10.0)]
+    assert checks._locality_ratio_limit(2) == 1.0
+    assert not checks._is_spatially_ordered(spanning)
+
+
+def test_locality_ratio_limit_relaxes_below_eight_groups() -> None:
+    # A file split into three legitimately gives each group about a third of
+    # the extent, which the flat 25% would reject.
+    assert checks._locality_ratio_limit(3) == pytest.approx(2 / 3)
+    assert checks._locality_ratio_limit(8) == checks._MAX_LOCALITY_RATIO
+    assert checks._locality_ratio_limit(40) == checks._MAX_LOCALITY_RATIO
+
+
+def test_mean_skip_rate_counts_the_groups_a_window_misses() -> None:
+    # Ten disjoint tiles along x; a window a tenth of the extent wide meets one
+    # or two of them, so a reader skips the rest.
+    tiles = [(float(i), 0.0, float(i) + 1.0, 1.0) for i in range(10)]
+    extent = checks._bbox_union(tiles)
+    assert checks._mean_skip_rate(tiles, extent) == pytest.approx(0.84)
+    # One box covering everything is never skipped.
+    assert checks._mean_skip_rate([extent, extent], extent) == 0.0
+
+
+def test_single_row_group_defect_fires_only_above_the_row_floor() -> None:
+    assert checks._single_row_group_defect("data", checks._MIN_ROWS_FOR_PRUNING - 1) == []
+    defects = checks._single_row_group_defect("data", checks._MIN_ROWS_FOR_PRUNING)
+    assert [d.rule_id for d in defects] == [checks.DAT_ORDERING]
+    assert defects[0].severity is Severity.ERROR
+
+
 def test_spatial_ordering_zero_extent_is_ordered() -> None:
     assert checks._is_spatially_ordered([(1.0, 1.0, 1.0, 1.0), (1.0, 1.0, 1.0, 1.0)])
 

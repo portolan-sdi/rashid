@@ -8,6 +8,7 @@ each non-compliant variant raises exactly the rule it violates (formats.md:30/39
 
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -17,6 +18,8 @@ import pytest
 pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
+
+import pyarrow.parquet as pq  # noqa: E402
 
 import rashid.data.checks as checks  # noqa: E402
 from rashid.catalog import Node  # noqa: E402
@@ -187,6 +190,86 @@ def test_oversized_rowgroup_flags_dat_008(tmp_path: Path) -> None:
     defects = _gpq(path)
     assert DAT_ROWGROUP_SIZE in [d.rule_id for d in defects]
     assert next(d for d in defects if d.rule_id == DAT_ROWGROUP_SIZE).severity is Severity.ERROR
+
+
+# --- files from the reference writer ----------------------------------------
+#
+# stac_geoparquet is a dev dependency, not a runtime one: these tests read what
+# its writer emits, they do not make rashid depend on it.
+
+_needs_writer = pytest.mark.skipif(
+    importlib.util.find_spec("stac_geoparquet") is None,
+    reason="stac-geoparquet is not installed",
+)
+
+# Enough rows to clear checks._MIN_ROWS_FOR_PRUNING, and the count the issue
+# reports passing clean.
+_LARGE = 5_000
+
+
+@_needs_writer
+def test_reference_writer_default_output_is_flagged(tmp_path: Path) -> None:
+    """The plain writer path holds every row in one row group at any size.
+
+    5,000 globally scattered, entirely unsorted items used to produce no
+    findings, because ordering between row groups is unmeasurable with one of
+    them and the check read that as a pass (#66).
+    """
+    path = tmp_path / "plain.parquet"
+    assets.write_stac_geoparquet(path, assets.scattered_items(_LARGE))
+    assert pq.ParquetFile(path).metadata.num_row_groups == 1
+    defects = _gpq(path)
+    assert [d.rule_id for d in defects] == [DAT_ORDERING]
+    assert defects[0].severity is Severity.ERROR
+    assert "single row group" in defects[0].message
+
+
+@_needs_writer
+def test_small_single_row_group_file_is_clean(tmp_path: Path) -> None:
+    """A small mirror is one row group everywhere, and pruning it saves nothing."""
+    path = tmp_path / "small.parquet"
+    assets.write_stac_geoparquet(path, assets.scattered_items(200))
+    assert pq.ParquetFile(path).metadata.num_row_groups == 1
+    assert _gpq(path) == []
+
+
+@_needs_writer
+def test_chunked_unsorted_output_is_flagged(tmp_path: Path) -> None:
+    """Chunking alone does not order anything: every row group spans the globe."""
+    path = tmp_path / "chunked.parquet"
+    assets.write_stac_geoparquet(path, assets.scattered_items(_LARGE), chunk_size=500)
+    assert pq.ParquetFile(path).metadata.num_row_groups == 10
+    assert [d.rule_id for d in _gpq(path)] == [DAT_ORDERING]
+
+
+@_needs_writer
+def test_sorted_and_chunked_output_is_clean(tmp_path: Path) -> None:
+    """The path that satisfies every rule: sort the items, then chunk them."""
+    path = tmp_path / "sorted.parquet"
+    items = assets.scattered_items(_LARGE, ordered=True)
+    assets.write_stac_geoparquet(path, items, chunk_size=500)
+    assert pq.ParquetFile(path).metadata.num_row_groups == 10
+    assert _gpq(path) == []
+
+
+@_needs_writer
+def test_the_row_group_ceiling_and_the_ordering_rules_agree(tmp_path: Path) -> None:
+    """Past 150,000 rows the two rules still have a shape that satisfies both.
+
+    Unchunked, the file trips the ceiling and the single-row-group finding at
+    once. Chunked at 50,000 rows it trips neither, which is the point: no
+    collection size forces a producer to violate one rule to satisfy the other.
+    """
+    items = assets.scattered_items(150_001, seed=7, ordered=True)
+
+    plain = tmp_path / "over_ceiling.parquet"
+    assets.write_stac_geoparquet(plain, items)
+    assert sorted(d.rule_id for d in _gpq(plain)) == [DAT_ORDERING, DAT_ROWGROUP_SIZE]
+
+    chunked = tmp_path / "under_ceiling.parquet"
+    assets.write_stac_geoparquet(chunked, items, chunk_size=50_000)
+    assert pq.ParquetFile(chunked).metadata.num_row_groups == 4
+    assert _gpq(chunked) == []
 
 
 def test_plain_parquet_is_skipped(tmp_path: Path) -> None:
