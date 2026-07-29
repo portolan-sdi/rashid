@@ -7,8 +7,10 @@ from rashid.model import Finding, Report, Severity
 pytestmark = pytest.mark.unit
 
 
-def _finding(severity: Severity, rule_id: str = "PTL-TST-001") -> Finding:
-    return Finding(rule_id=rule_id, severity=severity, message="msg", path="catalog.json")
+def _finding(
+    severity: Severity, rule_id: str = "PTL-TST-001", path: str = "catalog.json"
+) -> Finding:
+    return Finding(rule_id=rule_id, severity=severity, message="msg", path=path)
 
 
 def test_report_passes_when_empty() -> None:
@@ -92,3 +94,90 @@ def test_to_dict_round_trips_structured_fields() -> None:
     import json
 
     json.dumps(payload)  # the contract: every field JSON-serializable
+
+
+def test_by_rule_counts_findings_and_distinct_files() -> None:
+    report = Report(
+        findings=[
+            _finding(Severity.ERROR, "PTL-AST-003", "a.json"),
+            _finding(Severity.ERROR, "PTL-AST-003", "a.json"),
+            _finding(Severity.ERROR, "PTL-AST-003", "b.json"),
+        ]
+    )
+    (summary,) = report.by_rule()
+    assert summary.rule_id == "PTL-AST-003"
+    assert summary.count == 3
+    assert summary.file_count == 2
+
+
+def test_by_rule_splits_a_rule_that_emits_at_two_severities() -> None:
+    report = Report(
+        findings=[
+            _finding(Severity.ERROR, "PTL-DAT-007"),
+            _finding(Severity.WARNING, "PTL-DAT-007"),
+        ]
+    )
+    error, warning = report.by_rule()
+    assert (error.severity, error.count) == (Severity.ERROR, 1)
+    assert (warning.severity, warning.count) == (Severity.WARNING, 1)
+
+
+def test_by_rule_sorts_loudest_first() -> None:
+    report = Report(
+        findings=[
+            _finding(Severity.INFO, "PTL-PRO-002"),
+            _finding(Severity.WARNING, "PTL-TTL-002"),
+            _finding(Severity.ERROR, "PTL-AST-002"),
+            *[_finding(Severity.ERROR, "PTL-AST-003") for _ in range(4)],
+        ]
+    )
+    assert [s.rule_id for s in report.by_rule()] == [
+        "PTL-AST-003",  # error, 4 findings
+        "PTL-AST-002",  # error, 1 finding
+        "PTL-TTL-002",  # warning
+        "PTL-PRO-002",  # info
+    ]
+
+
+def test_by_rule_carries_the_registry_description() -> None:
+    from rashid.registry import describe
+
+    report = Report(findings=[_finding(Severity.ERROR, "PTL-AST-003")])
+    assert report.by_rule()[0].description == describe("PTL-AST-003")
+
+
+def test_by_rule_leaves_an_unknown_rule_id_undescribed() -> None:
+    report = Report(findings=[_finding(Severity.ERROR, "PTL-ZZZ-999")])
+    assert report.by_rule()[0].description == ""
+
+
+def test_by_rule_is_empty_for_a_clean_report() -> None:
+    assert Report().by_rule() == []
+
+
+def test_report_to_dict_carries_a_summary_block() -> None:
+    report = Report(
+        findings=[
+            _finding(Severity.ERROR, "PTL-AST-003", "a.json"),
+            _finding(Severity.ERROR, "PTL-AST-003", "b.json"),
+            _finding(Severity.WARNING, "PTL-TTL-002", "a.json"),
+        ],
+        files_checked=2,
+    )
+    summary = report.to_dict()["summary"]
+    assert summary["by_severity"] == {"error": 2, "warning": 1, "info": 0}
+    assert summary["by_rule"][0] == {
+        "rule_id": "PTL-AST-003",
+        "severity": "error",
+        "count": 2,
+        "file_count": 2,
+        "description": "every asset must carry file:size and file:checksum",
+    }
+
+
+def test_report_to_dict_still_lists_every_finding() -> None:
+    """The summary is additive: machine consumers of findings keep working."""
+    report = Report(findings=[_finding(Severity.ERROR) for _ in range(5)])
+    payload = report.to_dict()
+    assert len(payload["findings"]) == 5
+    assert payload["error_count"] == 5

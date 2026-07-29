@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -70,3 +71,86 @@ def test_cli_json_output(catalog: CatalogBuilder) -> None:
 def test_cli_missing_path_is_usage_error() -> None:
     result = CliRunner().invoke(main, ["check", "/definitely/not/here"])
     assert result.exit_code == 2
+
+
+def _noisy(catalog: CatalogBuilder, count: int) -> Path:
+    """A catalog whose every collection trips one warning: ``count`` findings."""
+    for index in range(count):
+        catalog.collection(f"roads_{index}", title=f"road_centerlines_{index}")
+    return catalog.write()
+
+
+def test_cli_lists_findings_below_the_threshold(catalog: CatalogBuilder) -> None:
+    root = _noisy(catalog, 3)
+    result = CliRunner().invoke(main, ["check", str(root)])
+    assert "Too many to list" not in result.output
+    assert result.output.count("PTL-TTL-002") == 3
+    assert "3 error(s)" not in result.output  # they are warnings
+    assert "0 error(s), 3 warning(s), 0 info(s)" in result.output
+
+
+def test_cli_summarizes_above_the_threshold(catalog: CatalogBuilder) -> None:
+    root = _noisy(catalog, 60)
+    result = CliRunner().invoke(main, ["check", str(root)])
+    assert "Too many to list" in result.output
+    # One rule block, not sixty lines: the id appears once, with its count.
+    assert result.output.count("PTL-TTL-002") == 1
+    assert "60x" in result.output
+    assert "... 57 more in 60 files" in result.output
+    assert "titles must be human-readable" in result.output
+
+
+def test_cli_summary_keeps_the_counts_line(catalog: CatalogBuilder) -> None:
+    root = _noisy(catalog, 60)
+    result = CliRunner().invoke(main, ["check", str(root)])
+    assert "0 error(s), 60 warning(s), 0 info(s) across" in result.output
+    assert result.exit_code == 0  # warnings alone still pass
+
+
+def test_cli_all_lists_every_finding_above_the_threshold(catalog: CatalogBuilder) -> None:
+    root = _noisy(catalog, 60)
+    result = CliRunner().invoke(main, ["check", str(root), "--all"])
+    assert "Too many to list" not in result.output
+    assert result.output.count("PTL-TTL-002") == 60
+
+
+def test_cli_summary_collapses_below_the_threshold(catalog: CatalogBuilder) -> None:
+    root = _noisy(catalog, 3)
+    result = CliRunner().invoke(main, ["check", str(root), "--summary"])
+    assert result.output.count("PTL-TTL-002") == 1
+    assert "3x" in result.output
+    # The note explains an automatic collapse; here the caller asked for it.
+    assert "Too many to list" not in result.output
+
+
+def test_cli_summary_shows_examples_without_a_more_line(catalog: CatalogBuilder) -> None:
+    root = _noisy(catalog, 2)
+    result = CliRunner().invoke(main, ["check", str(root), "--summary"])
+    assert result.output.count("collection.json:") == 2
+    assert "more in" not in result.output
+
+
+def test_cli_all_and_summary_conflict(catalog: CatalogBuilder) -> None:
+    root = _noisy(catalog, 3)
+    result = CliRunner().invoke(main, ["check", str(root), "--all", "--summary"])
+    assert result.exit_code == 2
+    assert "opposite things" in result.output
+
+
+def test_cli_summary_mode_keeps_the_failing_exit_code(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", license="proprietary")
+    root = _noisy(catalog, 60)
+    result = CliRunner().invoke(main, ["check", str(root)])
+    assert "Too many to list" in result.output
+    assert result.exit_code == 1
+
+
+def test_cli_json_carries_the_summary_and_every_finding(catalog: CatalogBuilder) -> None:
+    root = _noisy(catalog, 60)
+    payload = json.loads(CliRunner().invoke(main, ["check", str(root), "--json"]).output)
+    assert len(payload["findings"]) == 60  # JSON never truncates
+    assert payload["summary"]["by_severity"] == {"error": 0, "warning": 60, "info": 0}
+    (row,) = payload["summary"]["by_rule"]
+    assert row["rule_id"] == "PTL-TTL-002"
+    assert row["count"] == 60
+    assert row["file_count"] == 60

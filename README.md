@@ -31,6 +31,26 @@ rashid check path/to/catalog --live --live-base-url https://data.example.org/my-
 
 `--no-data` skips byte verification when the assets are huge or remote and only the metadata verdict is needed. Add `--json` for a machine-readable report.
 
+### Reading a large report
+
+A rule broken once per asset produces one finding per asset, so a catalog of a few hundred files can break one rule ten thousand times. Past 50 findings rashid counts each rule instead of listing it, and quotes a few examples:
+
+```
+1 error(s), 60 warning(s), 0 info(s) across 62 files.
+Too many to list; showing a summary (--all to list every finding).
+
+error    PTL-LIC-003   1x  the deprecated license value 'proprietary' must not be used
+    parks/collection.json: license 'proprietary' is deprecated and must not be used
+
+warning  PTL-TTL-002  60x  titles must be human-readable, not raw slugs or ns:LayerName identifiers
+    roads_0/collection.json: title 'road_centerlines_0' looks like a raw slug, not a human-readable title
+    roads_1/collection.json: title 'road_centerlines_1' looks like a raw slug, not a human-readable title
+    roads_10/collection.json: title 'road_centerlines_10' looks like a raw slug, not a human-readable title
+    ... 57 more in 60 files
+```
+
+`--all` lists every finding however many there are, and `--summary` counts them however few. `--json` reports both: a `summary.by_rule` block alongside the complete `findings` array.
+
 ## What it checks
 
 Validation runs as five separable passes.

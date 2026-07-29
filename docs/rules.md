@@ -33,6 +33,8 @@ Findings carry a stable rule id (`PTL-<GROUP>-<NNN>`), a severity, a message, an
 | `PTL-COL` | 001–004 | a single-file collection exposes its data as a collection-level asset, not wrapped in a lone item; collections never nest; collection IDs follow the naming convention and are unique; raster scenes sit on items rather than on the collection |
 | `PTL-MIR` | 001–002 | a raster collection with scene items publishes an `items.parquet` mirror (a warning, per the SHOULD), and a published mirror is registered as a collection-level asset with the `collection-mirror` role and type `application/vnd.apache.parquet`, per the stac-geoparquet spec |
 
+`rashid.registry.CHECKS` is the same list in machine-readable form: every check id mapped to its description, the strongest severity it can emit, and the spec requirements it enforces. The per-rule summary and the JSON `summary.by_rule` block read from it, and `rashid.describe(rule_id)` returns one description.
+
 The catalog tree is loaded from a local directory. `CatalogGraph` (`src/rashid/catalog.py`) is the single I/O layer for the metadata, loaded in one pass, so a remote (HTTP) catalog loader can slot in later; the data pass already reads asset bytes over `https`.
 
 ## Development
