@@ -178,18 +178,15 @@ class NestedCollectionRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        ancestor = graph.parent_of(node)
-        while ancestor is not None:
-            if ancestor.kind == "collection":
-                yield self.finding(
-                    node,
-                    f"collection is nested inside collection"
-                    f" '{ancestor.id or ancestor.path!s}'; collections must be one level deep",
-                    fix_hint="restructure so intermediate levels are catalogs"
-                    " and collections are leaves",
-                )
-                return
-            ancestor = graph.parent_of(ancestor)
+        ancestor = graph.enclosing_collection_of(node)
+        if ancestor is not None:
+            yield self.finding(
+                node,
+                f"collection is nested inside collection"
+                f" '{ancestor.id or ancestor.path!s}'; collections must be one level deep",
+                fix_hint="restructure so intermediate levels are catalogs"
+                " and collections are leaves",
+            )
 
 
 class CollectionIdRule(Rule):

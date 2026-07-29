@@ -155,7 +155,16 @@ class NoSelfLinkRule(Rule):
 
 
 class LinkResolutionRule(Rule):
-    """Every relative structural link resolves to the correct object."""
+    """Every relative structural link resolves to the correct object.
+
+    core.md, Links requires each link to resolve to "the correct object",
+    which for an item's rel:'collection' link is the collection that encloses
+    it. That is not always its direct parent. core.md, Core Structure allows
+    "a catalog ... below a collection to organize its items", and in that
+    layout an item's parent is the organizing catalog while its collection
+    link points at the collection above. The check therefore compares the
+    target against the nearest collection ancestor, not the direct parent.
+    """
 
     id = "PTL-LNK-006"
     spec_ids = ("PORTO-CORE-015", "PORTO-CORE-035", "PORTO-CORE-036")
@@ -165,6 +174,7 @@ class LinkResolutionRule(Rule):
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         parent = graph.parent_of(node)
+        enclosing = graph.enclosing_collection_of(node) if node.kind == "item" else None
         for index, link in enumerate(links_of(node)):
             rel = link.get("rel")
             if rel not in STRUCTURAL_RELS:
@@ -208,8 +218,10 @@ class LinkResolutionRule(Rule):
                 wrong = "must point to the containing object" + (
                     f" ({parent.path})" if parent is not None else ""
                 )
-            elif rel == "collection" and (target.kind != "collection" or target is not parent):
-                wrong = "must point to the item's enclosing collection"
+            elif rel == "collection" and (target.kind != "collection" or target is not enclosing):
+                wrong = "must point to the item's enclosing collection" + (
+                    f" ({enclosing.path})" if enclosing is not None else ""
+                )
             elif rel == "child" and (
                 target.kind not in ("catalog", "collection") or graph.parent_of(target) is not node
             ):
