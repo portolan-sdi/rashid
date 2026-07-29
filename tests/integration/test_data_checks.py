@@ -383,13 +383,65 @@ def test_declared_epsg_from_properties() -> None:
         id="i",
         data={"properties": {"proj:epsg": 3857}},
     )
-    assert checks._declared_epsg(node, {}) == 3857
-    assert checks._declared_epsg(node, {"proj:epsg": 32631}) == 32631  # asset wins
+    inherited = checks._declared_epsg(node, {})
+    assert inherited == checks._EpsgDeclaration(3857, "/properties/proj:epsg")
+    own = checks._declared_epsg(node, {"proj:epsg": 32631})  # asset wins
+    assert own == checks._EpsgDeclaration(32631, None)
+
+
+def test_declared_epsg_from_document_root() -> None:
+    node = Node(
+        path=PurePosixPath("c/collection.json"),
+        abs_path=Path("/x"),
+        kind="collection",
+        id="c",
+        data={"proj:epsg": 3857},
+    )
+    assert checks._declared_epsg(node, {}) == checks._EpsgDeclaration(3857, "/proj:epsg")
 
 
 def test_declared_epsg_absent() -> None:
     node = Node(path=PurePosixPath("c/i/i.json"), abs_path=Path("/x"), kind="item", id="i", data={})
     assert checks._declared_epsg(node, {}) is None
+
+
+def test_inherited_epsg_defect_points_at_the_declaration() -> None:
+    node = Node(
+        path=PurePosixPath("c/collection.json"),
+        abs_path=Path("/x"),
+        kind="collection",
+        id="c",
+        data={"proj:epsg": 3857},
+    )
+    defect = checks._epsg_defect(node, "data", checks._EpsgDeclaration(3857, "/proj:epsg"), 4326)
+    assert defect.json_pointer == "/proj:epsg"
+    assert defect.expected == 4326
+    assert defect.actual == 3857
+    assert "collection 'c'" in defect.message
+    assert "inherit" in defect.message
+
+
+def test_asset_epsg_defect_points_at_the_asset() -> None:
+    node = _item(_asset())
+    defect = checks._epsg_defect(node, "data", checks._EpsgDeclaration(3857, None), 4326)
+    assert defect.json_pointer is None  # validate_data points it at /assets/data
+    assert defect.asset_key == "data"
+    assert defect.message.startswith("asset 'data' declares proj:epsg 3857")
+
+
+def test_collapse_keeps_one_defect_per_shared_field() -> None:
+    inherited = [
+        checks.DataDefect(
+            checks.DAT_CONSISTENCY, Severity.WARNING, "same field", key, json_pointer="/proj:epsg"
+        )
+        for key in ("data", "extra", "third")
+    ]
+    per_asset = [
+        checks.DataDefect(checks.DAT_CONSISTENCY, Severity.WARNING, f"asset {key}", key)
+        for key in ("data", "extra")
+    ]
+    collapsed = checks._collapse_shared_fields(inherited + per_asset)
+    assert [d.asset_key for d in collapsed] == ["data", "data", "extra"]
 
 
 def test_check_raster_reader_error_is_info() -> None:

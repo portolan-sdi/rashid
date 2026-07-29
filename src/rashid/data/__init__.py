@@ -96,8 +96,10 @@ class DataDefect:
     A lightweight seed that :func:`validate_data` turns into a :class:`Finding`,
     filling in the object's path and id. ``asset_key`` and ``field`` locate the
     asset within the object (``/assets/<key>[/<field>]``); a node-level defect
-    (the partition check, which binds to no single asset) sets ``json_pointer``
-    directly instead.
+    sets ``json_pointer`` directly instead. Two checks do that: the partition
+    check, which binds to no single asset, and the consistency check when the
+    contradicted ``proj:epsg`` is inherited from the enclosing object rather
+    than declared on the asset.
     """
 
     rule_id: str

@@ -33,7 +33,7 @@ from rashid.data import (  # noqa: E402
     DAT_SIZE,
     validate_data,
 )
-from tests.conftest import CatalogBuilder, mutate_json  # noqa: E402
+from tests.conftest import CatalogBuilder, mutate_json, thumbnail_asset  # noqa: E402
 from tests.integration import _data_assets as assets  # noqa: E402
 
 pytestmark = pytest.mark.integration
@@ -46,11 +46,11 @@ def _asset(href: str, media_type: str) -> dict[str, Any]:
     return {"href": href, "type": media_type, "roles": ["data"]}
 
 
-def _patch_checksum(item_json: Path, asset_path: Path) -> None:
+def _patch_checksum(item_json: Path, asset_path: Path, key: str = "data") -> None:
     payload = asset_path.read_bytes()
     mutate_json(
         item_json,
-        lambda d: d["assets"]["data"].update(
+        lambda d: d["assets"][key].update(
             {"file:size": len(payload), "file:checksum": assets.multihash(payload)}
         ),
     )
@@ -58,15 +58,29 @@ def _patch_checksum(item_json: Path, asset_path: Path) -> None:
 
 def _build(root: Path) -> Path:
     cat = CatalogBuilder(root)
-    col = cat.collection("layers")
+    # The collection carries two real assets of its own: a proj:epsg written at
+    # the collection root governs both, which is what PTL-DAT-005 must report
+    # once rather than once per inheritor.
+    col = cat.collection(
+        "layers",
+        assets={
+            "data": _asset("./layers.parquet", _PARQUET_TYPE),
+            "extra": _asset("./extra.parquet", _PARQUET_TYPE),
+            "thumbnail": thumbnail_asset(),
+        },
+    )
     col.item("points", assets={"data": _asset("./points.parquet", _PARQUET_TYPE)})
     col.item("raster", assets={"data": _asset("./cog.tif", _COG_TYPE)})
     cat.write()
 
     layers = root / "layers"
+    assets.write_geoparquet(layers / "layers.parquet")
+    assets.write_geoparquet(layers / "extra.parquet")
     assets.write_geoparquet(layers / "points" / "points.parquet")
     assets.write_cog(layers / "raster" / "cog.tif")
 
+    _patch_checksum(layers / "collection.json", layers / "layers.parquet")
+    _patch_checksum(layers / "collection.json", layers / "extra.parquet", key="extra")
     _patch_checksum(layers / "points" / "points.json", layers / "points" / "points.parquet")
     _patch_checksum(layers / "raster" / "raster.json", layers / "raster" / "cog.tif")
     return root
@@ -147,4 +161,47 @@ def test_proj_epsg_disagreement_flags_dat_005(catalog_root: Path) -> None:
         _item(catalog_root, "points"),
         lambda d: d["assets"]["data"].__setitem__("proj:epsg", 3857),
     )
-    assert DAT_CONSISTENCY in [f.rule_id for f in _data_findings(catalog_root)]
+    (finding,) = [f for f in _data_findings(catalog_root) if f.rule_id == DAT_CONSISTENCY]
+    # The asset declares the value itself, so the asset is what disagrees with
+    # its own bytes and the finding stays on the asset.
+    assert finding.json_pointer == "/assets/data"
+    assert finding.message.startswith("asset 'data' declares proj:epsg 3857")
+
+
+def _collection(root: Path) -> Path:
+    return root / "layers" / "collection.json"
+
+
+def test_collection_root_proj_epsg_is_reported_once_at_the_declaration(
+    catalog_root: Path,
+) -> None:
+    mutate_json(_collection(catalog_root), lambda d: d.__setitem__("proj:epsg", 3857))
+    findings = [f for f in _data_findings(catalog_root) if f.rule_id == DAT_CONSISTENCY]
+    # Both collection assets inherit the one root declaration; one field is one
+    # finding, and it points at the field a reader has to edit.
+    (finding,) = findings
+    assert finding.path == "layers/collection.json"
+    assert finding.json_pointer == "/proj:epsg"
+    assert finding.message == (
+        "collection 'layers' declares proj:epsg 3857 at its root, which its assets "
+        "inherit, but the asset data is EPSG:4326"
+    )
+    # The bytes settle the disagreement, so a rewriter has both values it needs.
+    assert finding.expected == 4326
+    assert finding.actual == 3857
+
+
+def test_collection_root_proj_epsg_agreeing_with_the_data_is_clean(catalog_root: Path) -> None:
+    mutate_json(_collection(catalog_root), lambda d: d.__setitem__("proj:epsg", 4326))
+    findings = _data_findings(catalog_root)
+    assert findings == [], [f"{f.rule_id} {f.message}" for f in findings]
+
+
+def test_item_properties_proj_epsg_points_at_the_properties(catalog_root: Path) -> None:
+    mutate_json(
+        _item(catalog_root, "points"),
+        lambda d: d["properties"].__setitem__("proj:epsg", 3857),
+    )
+    (finding,) = [f for f in _data_findings(catalog_root) if f.rule_id == DAT_CONSISTENCY]
+    assert finding.json_pointer == "/properties/proj:epsg"
+    assert "item 'points' declares proj:epsg 3857 in its properties" in finding.message
