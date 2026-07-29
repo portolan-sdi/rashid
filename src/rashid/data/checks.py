@@ -33,10 +33,10 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
 - ``PTL-DAT-015`` a tabular (plain Parquet) collection is missing the SHOULDs
   of formats.md, Tabular Data: ``table:columns`` documenting the columns, and
   ``extent.temporal`` when the file carries a temporal column (WARNING)
-- ``PTL-DAT-016`` an item mirror's ids diverge from the collection's items
-  (MUST, formats.md, Raster § Item mirror). A mirror runs the GeoParquet
-  checks above as well: the spec binds it to them like any other spatial
-  table.
+- ``PTL-DAT-016`` an item mirror diverges from the collection's items in row
+  count, ids, geometry, datetime, or bbox (MUST, formats.md, Raster § Item
+  mirror). A mirror runs the GeoParquet checks above as well: the spec binds
+  it to them like any other spatial table.
 
 ``PTL-DAT-007`` also carries formats.md's covering-column recommendation: a
 GeoParquet 2.x file that satisfies the statistics MUST through native
@@ -59,8 +59,10 @@ import hashlib
 import json
 import math
 import posixpath
+import re
 import struct
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -759,28 +761,90 @@ def _geo_metadata(parquet: Any) -> dict[str, Any] | None:
 # --- item mirrors -----------------------------------------------------------
 
 
+# Coordinate agreement tolerance, in degrees, for the mirror comparison. Item
+# JSON and WKB both carry float64, so the only divergence a conformant pair
+# shows is decimal formatting on the JSON side: a coordinate written to six
+# decimals lands within 5e-7 of the value the mirror stores. 1e-6 degrees is
+# about 0.11 m at the equator, well under any edit a publisher makes to a
+# footprint.
+_MIRROR_COORD_TOL = 1e-6
+
+# Timestamp agreement tolerance. A STAC datetime is an RFC 3339 string with
+# arbitrary fractional precision, while a Parquet timestamp column stores one
+# fixed unit, so a conformant mirror rounds the fraction away. A mirror left
+# behind by an edited item is off by minutes at least.
+_MIRROR_TIME_TOL = timedelta(seconds=1)
+
+# EWKB sets these high bits on the type code; ISO WKB instead adds 1000 per
+# extra dimension (1000 Z, 2000 M, 3000 ZM).
+_WKB_Z = 0x80000000
+_WKB_M = 0x40000000
+_WKB_SRID = 0x20000000
+_WKB_BASE = 0x1FFFFFFF
+_WKB_TYPES = {
+    1: "Point",
+    2: "LineString",
+    3: "Polygon",
+    4: "MultiPoint",
+    5: "MultiLineString",
+    6: "MultiPolygon",
+    7: "GeometryCollection",
+}
+
+# RFC 3339: fromisoformat on Python 3.10 rejects the 'Z' suffix and any
+# fraction that is not three or six digits, both of which the grammar allows.
+_RFC3339 = re.compile(
+    r"(?P<stamp>\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2})"
+    r"(?:\.(?P<fraction>\d+))?(?P<offset>[Zz]|[+-]\d{2}:?\d{2})?$"
+)
+
+# A geometry as the comparison reads it: type name plus vertices in order.
+_Geometry = tuple[str, list[tuple[float, float]]]
+
+
+@dataclass(frozen=True)
+class _MirrorRows:
+    """The mirror columns the comparison reads, one entry per row.
+
+    ``geometry``, ``datetimes``, and ``bboxes`` are None when the file carries
+    no such column, which is not the same as a column full of nulls.
+    """
+
+    ids: list[Any]
+    geometry: list[Any] | None
+    datetimes: list[Any] | None
+    bboxes: list[Any] | None
+
+
 def _check_mirror(
     node: Node, key: str, located: Locator, graph: CatalogGraph | None
 ) -> list[DataDefect]:
     """A mirror MUST reproduce the collection's items (PORTO-FMT-042).
 
-    The comparison is on item ids, the one field both representations carry and
-    the only one a client uses to join them. A mirror that has fallen behind
-    reports items that no longer exist, or omits items that do, and the client
-    reading it cannot tell either way.
+    formats.md, Raster § Item mirror: "the file MUST reproduce the
+    collection's items exactly at publish time — one row per item, each row
+    carrying that item's fields." Five comparisons stand in for that: the row
+    count against the item count, the two id sets against each other, and the
+    geometry, datetime, and bbox of every matched row against the item it
+    names. Geometry and datetime are what a client queries the mirror on, and
+    they are what goes stale when an item is edited and the mirror is not
+    regenerated.
 
-    Skipped when the graph is unavailable, when the collection has no items to
-    compare against, or when the mirror carries no ``id`` column to read. The
-    last of those is reported: a file registered as a stac-geoparquet mirror
-    without item ids is not one.
+    Fidelity stops short of every field. stac-geoparquet is lossy by design in
+    places — its ``docs/drawbacks.md`` names the
+    defined-versus-undefined-versus-null distinction among item properties — so
+    a field-by-field equality rule would fault conformant files.
+
+    Skipped when the graph is unavailable, when the node is not a collection,
+    or when the collection's items carry no ids to join on. A collection the
+    walk finds no items under is not skipped: zero items against a mirror
+    holding rows is the stale mirror this requirement is about.
     """
-    if graph is None:
+    if graph is None or node.kind != "collection":
         return []
-    items = [child for child in graph.children_of(node) if child.kind == "item"]
-    if not items:
-        return []
-    declared = {item.id for item in items if isinstance(item.id, str) and item.id}
-    if not declared:
+    items = _collection_items(node, graph)
+    identified = {item.id: item for item in items if isinstance(item.id, str) and item.id}
+    if items and not identified:
         return []  # unidentified items; PTL-STR/PTL-GEN own that gap
 
     try:
@@ -800,30 +864,358 @@ def _check_mirror(
             )
         ]
 
-    try:
-        column = parquet.read(columns=["id"]).column("id").to_pylist()
-    except Exception:  # noqa: BLE001 - as above
+    rows = _read_mirror_rows(parquet)
+    if rows is None:
         return []
-    present = {value for value in column if isinstance(value, str)}
+    defects = _mirror_membership_defects(key, identified, rows)
+    defects.extend(_mirror_field_defects(key, identified, rows))
+    return defects
 
-    missing = sorted(declared - present)
-    extra = sorted(present - declared)
-    if not missing and not extra:
-        return []
 
+def _collection_items(node: Node, graph: CatalogGraph) -> list[Node]:
+    """Every item the collection owns, at any depth beneath it.
+
+    core.md, Core Structure: "a catalog may also appear below a collection to
+    organize its items (for example, a raster collection grouping items by
+    year)." Reading direct children alone would leave such a collection's
+    mirror unverified, so the walk claims every item whose nearest collection
+    ancestor is this node. An item under a nested collection belongs to that
+    collection instead.
+    """
+    return [item for item in graph.iter("item") if graph.enclosing_collection_of(item) is node]
+
+
+def _mirror_membership_defects(
+    key: str, identified: dict[str, Node], rows: _MirrorRows
+) -> list[DataDefect]:
+    """One row per item, and the two id sets equal.
+
+    The counts are compared as counts because the id sets are sets: two rows
+    sharing one id satisfy set equality, and a mirror that repeats an item is
+    not one row per item.
+    """
+    defects: list[DataDefect] = []
+    if len(rows.ids) != len(identified):
+        defects.append(
+            DataDefect(
+                DAT_MIRROR,
+                Severity.ERROR,
+                f"mirror asset '{key}' holds {len(rows.ids)} row(s) for {len(identified)} "
+                "item(s); the mirror must carry one row per item",
+                key,
+            )
+        )
+    present = {value for value in rows.ids if isinstance(value, str)}
+    missing = sorted(set(identified) - present)
+    extra = sorted(present - set(identified))
     parts = []
     if missing:
         parts.append(f"{len(missing)} item(s) absent from the mirror ({_sample(missing)})")
     if extra:
         parts.append(f"{len(extra)} mirror row(s) with no item ({_sample(extra)})")
-    return [
+    if parts:
+        defects.append(
+            DataDefect(
+                DAT_MIRROR,
+                Severity.ERROR,
+                f"mirror asset '{key}' disagrees with the collection's items: " + ", ".join(parts),
+                key,
+            )
+        )
+    return defects
+
+
+def _mirror_field_defects(
+    key: str, identified: dict[str, Node], rows: _MirrorRows
+) -> list[DataDefect]:
+    """Geometry, datetime, and bbox of each matched row against its item.
+
+    Only ids both sides carry are compared; an id on one side alone is the
+    membership defect's business. A column the file lacks is left to the rule
+    that owns it: the GeoParquet rules own a file with no geometry, and
+    ``PTL-DAT-007`` owns one with no bbox covering column. A missing datetime
+    column has no other owner, so it is reported here.
+    """
+    index = {value: i for i, value in enumerate(rows.ids) if isinstance(value, str)}
+    off: dict[str, list[str]] = {"geometry": [], "datetime": [], "bbox": []}
+    for item_id in sorted(set(identified) & set(index)):
+        item, i = identified[item_id], index[item_id]
+        if rows.geometry is not None and not _geometry_agrees(item, rows.geometry[i]):
+            off["geometry"].append(item_id)
+        if rows.datetimes is not None and not _datetime_agrees(item, rows.datetimes[i]):
+            off["datetime"].append(item_id)
+        if rows.bboxes is not None and not _bbox_agrees(item, rows.bboxes[i]):
+            off["bbox"].append(item_id)
+    defects = [
         DataDefect(
             DAT_MIRROR,
             Severity.ERROR,
-            f"mirror asset '{key}' disagrees with the collection's items: " + ", ".join(parts),
+            f"mirror asset '{key}' {field} disagrees with the item it names for "
+            f"{len(ids)} item(s) ({_sample(ids)})",
             key,
         )
+        for field, ids in off.items()
+        if ids
     ]
+    if rows.datetimes is None and any(_item_datetime(item) for item in identified.values()):
+        defects.append(
+            DataDefect(
+                DAT_MIRROR,
+                Severity.ERROR,
+                f"mirror asset '{key}' has no 'datetime' column, so it does not carry the "
+                "items' datetimes",
+                key,
+            )
+        )
+    return defects
+
+
+def _read_mirror_rows(parquet: Any) -> _MirrorRows | None:
+    """Read id, geometry, datetime, and bbox in one pass over the file."""
+    names = parquet.schema_arrow.names
+    geo = _geo_metadata(parquet) or {}
+    primary = geo.get("primary_column")
+    geometry_name = primary if isinstance(primary, str) and primary in names else None
+    if geometry_name is None and "geometry" in names:
+        geometry_name = "geometry"
+    datetime_name = "datetime" if "datetime" in names else None
+    bbox = _bbox_struct(parquet, geo)
+    wanted = [geometry_name, datetime_name, bbox[0] if bbox is not None else None]
+    try:
+        table = parquet.read(columns=["id", *(name for name in wanted if name is not None)])
+    except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
+        return None
+    return _MirrorRows(
+        ids=table.column("id").to_pylist(),
+        geometry=table.column(geometry_name).to_pylist() if geometry_name else None,
+        datetimes=table.column(datetime_name).to_pylist() if datetime_name else None,
+        bboxes=_bbox_column_values(table, bbox) if bbox is not None else None,
+    )
+
+
+def _bbox_struct(parquet: Any, geo: dict[str, Any]) -> tuple[str, list[str]] | None:
+    """The covering column as a struct name and its four leaf field names.
+
+    Read from the same ``covering`` declaration the row-group statistics use
+    (:func:`_covering_bboxes`) rather than from a guessed column name. A
+    covering nested deeper than one struct level yields None: statistics name
+    their leaves by path, while a per-row read needs the struct itself.
+    """
+    columns = geo.get("columns")
+    entry = columns.get(geo.get("primary_column")) if isinstance(columns, dict) else None
+    covering = entry.get("covering") if isinstance(entry, dict) else None
+    bbox = covering.get("bbox") if isinstance(covering, dict) else None
+    if not isinstance(bbox, dict):
+        return None
+    paths = [bbox.get(corner) for corner in ("xmin", "ymin", "xmax", "ymax")]
+    if not all(isinstance(path, list) and len(path) == 2 for path in paths):
+        return None
+    roots = {str(path[0]) for path in paths}  # type: ignore[index]
+    if len(roots) != 1:
+        return None
+    root = roots.pop()
+    if root not in parquet.schema_arrow.names:
+        return None
+    return root, [str(path[1]) for path in paths]  # type: ignore[index]
+
+
+def _bbox_column_values(table: Any, bbox: tuple[str, list[str]]) -> list[Any]:
+    """Per-row [xmin, ymin, xmax, ymax], or None for a row that carries none."""
+    root, fields = bbox
+    values: list[Any] = []
+    for row in table.column(root).to_pylist():
+        corners = [row.get(field) for field in fields] if isinstance(row, dict) else []
+        numeric = [float(corner) for corner in corners if isinstance(corner, (int, float))]
+        values.append(numeric if len(numeric) == 4 else None)
+    return values
+
+
+def _geometry_agrees(item: Node, blob: Any) -> bool:
+    """Does one mirror row's geometry reproduce the item's?
+
+    Compared as a type name plus a vertex sequence, within
+    ``_MIRROR_COORD_TOL``: both sides hold float64, so exact equality would
+    fault a mirror built from full-precision sources against item JSON written
+    to a fixed number of decimals. A blob this reader cannot decode is left
+    alone, because an encoding it does not know is not evidence of drift; a
+    null geometry against an item that has one is drift.
+    """
+    declared = _geojson_geometry(item.data.get("geometry"))
+    if declared is None:
+        return True  # a null item geometry is nothing to compare against
+    if blob is None:
+        return False
+    if not isinstance(blob, bytes):
+        return True
+    actual = _wkb_geometry(blob)
+    if actual is None:
+        return True
+    name, points = declared
+    other_name, other_points = actual
+    if name != other_name or len(points) != len(other_points):
+        return False
+    return all(
+        abs(x - u) <= _MIRROR_COORD_TOL and abs(y - v) <= _MIRROR_COORD_TOL
+        for (x, y), (u, v) in zip(points, other_points, strict=True)
+    )
+
+
+def _datetime_agrees(item: Node, value: Any) -> bool:
+    """Does one mirror row's timestamp reproduce the item's ``datetime``?
+
+    Both sides are normalized to UTC before the comparison, so a mirror
+    written in local time with its offset still agrees with a ``Z`` item. An
+    item whose ``datetime`` is null carries the interval in
+    ``start_datetime``/``end_datetime`` instead and has nothing to compare.
+    """
+    declared = _item_datetime(item)
+    if declared is None:
+        return True
+    if isinstance(value, str):
+        value = _parse_timestamp(value)
+    if not isinstance(value, datetime):
+        return False
+    return abs(_as_utc(value) - declared) <= _MIRROR_TIME_TOL
+
+
+def _bbox_agrees(item: Node, value: Any) -> bool:
+    """Does one mirror row's covering box reproduce the item's ``bbox``?"""
+    declared = _as_bbox(item.data.get("bbox"))
+    if declared is None:
+        return True  # no declared bbox is nothing to compare against
+    if not isinstance(value, list) or len(value) != len(declared):
+        return False
+    return all(abs(a - b) <= _MIRROR_COORD_TOL for a, b in zip(declared, value, strict=True))
+
+
+def _item_datetime(item: Node) -> datetime | None:
+    properties = item.data.get("properties")
+    raw = properties.get("datetime") if isinstance(properties, dict) else None
+    return _parse_timestamp(raw) if isinstance(raw, str) else None
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    """An RFC 3339 timestamp as an aware UTC datetime, or None if unparseable."""
+    match = _RFC3339.match(value.strip())
+    if match is None:
+        return None
+    fraction = (match["fraction"] or "").ljust(6, "0")[:6]
+    offset = (match["offset"] or "Z").replace("Z", "+00:00").replace("z", "+00:00")
+    if len(offset) == 5:  # +HHMM, which fromisoformat wants as +HH:MM
+        offset = f"{offset[:3]}:{offset[3:]}"
+    try:
+        return _as_utc(datetime.fromisoformat(f"{match['stamp']}.{fraction}{offset}"))
+    except ValueError:
+        return None
+
+
+def _as_utc(value: datetime) -> datetime:
+    """A naive timestamp is read as UTC: stac-geoparquet writes the column so."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _geojson_geometry(geometry: Any) -> _Geometry | None:
+    """A GeoJSON geometry as its type name and its vertices in document order."""
+    if not isinstance(geometry, dict):
+        return None
+    name = geometry.get("type")
+    if not isinstance(name, str) or name not in _WKB_TYPES.values():
+        return None
+    if name == "GeometryCollection":
+        members = geometry.get("geometries")
+        if not isinstance(members, list):
+            return None
+        points: list[tuple[float, float]] = []
+        for member in members:
+            parsed = _geojson_geometry(member)
+            if parsed is None:
+                return None
+            points.extend(parsed[1])
+        return (name, points) if points else None
+    vertices = _coordinate_points(geometry.get("coordinates"))
+    return (name, vertices) if vertices else None
+
+
+def _coordinate_points(coordinates: Any) -> list[tuple[float, float]]:
+    """Flatten a GeoJSON coordinate array to its x/y pairs, in order."""
+    if not isinstance(coordinates, list) or not coordinates:
+        return []
+    if isinstance(coordinates[0], list):
+        points: list[tuple[float, float]] = []
+        for part in coordinates:
+            points.extend(_coordinate_points(part))
+        return points
+    if len(coordinates) < 2 or not all(isinstance(v, (int, float)) for v in coordinates[:2]):
+        return []
+    return [(float(coordinates[0]), float(coordinates[1]))]
+
+
+def _wkb_geometry(blob: bytes) -> _Geometry | None:
+    """A WKB geometry as its type name and its x/y vertices, in stored order."""
+    try:
+        name, points, _end = _read_wkb(blob, 0)
+    except (struct.error, IndexError, KeyError, ValueError):
+        return None
+    return (name, points) if points else None
+
+
+def _read_wkb(blob: bytes, offset: int) -> tuple[str, list[tuple[float, float]], int]:
+    """One WKB geometry: its type name, its vertices, and the offset past it."""
+    endian = "<" if blob[offset] == 1 else ">"
+    (code,) = struct.unpack_from(endian + "I", blob, offset + 1)
+    offset += 5
+    if code & _WKB_SRID:
+        offset += 4  # EWKB carries the SRID inline, ahead of the body
+    ndim = _wkb_dimensions(code)
+    name = _WKB_TYPES[(code & _WKB_BASE) % 1000]
+    if name == "Point":
+        return name, _wkb_coords(blob, endian, offset, 1, ndim), offset + 8 * ndim
+    (count,) = struct.unpack_from(endian + "I", blob, offset)
+    offset += 4
+    if name == "LineString":
+        return name, _wkb_coords(blob, endian, offset, count, ndim), offset + 8 * ndim * count
+    if name == "Polygon":
+        points, offset = _wkb_rings(blob, endian, offset, count, ndim)
+        return name, points, offset
+    points = []  # Multi* and GeometryCollection nest whole geometries
+    for _ in range(count):
+        _member_name, member_points, offset = _read_wkb(blob, offset)
+        points.extend(member_points)
+    return name, points, offset
+
+
+def _wkb_dimensions(code: int) -> int:
+    if code & (_WKB_Z | _WKB_M):
+        return 2 + bool(code & _WKB_Z) + bool(code & _WKB_M)
+    return {1: 3, 2: 3, 3: 4}.get((code & _WKB_BASE) // 1000, 2)
+
+
+def _wkb_coords(
+    blob: bytes, endian: str, offset: int, count: int, ndim: int
+) -> list[tuple[float, float]]:
+    """``count`` coordinates of ``ndim`` doubles each, kept as x/y pairs."""
+    step = 8 * ndim
+    if count < 0 or offset + step * count > len(blob):
+        raise ValueError("WKB coordinate run runs past the end of the buffer")
+    points = []
+    for i in range(count):
+        x, y = struct.unpack_from(endian + "dd", blob, offset + i * step)
+        points.append((float(x), float(y)))
+    return points
+
+
+def _wkb_rings(
+    blob: bytes, endian: str, offset: int, count: int, ndim: int
+) -> tuple[list[tuple[float, float]], int]:
+    points: list[tuple[float, float]] = []
+    for _ in range(count):
+        (size,) = struct.unpack_from(endian + "I", blob, offset)
+        offset += 4
+        points.extend(_wkb_coords(blob, endian, offset, size, ndim))
+        offset += 8 * ndim * size
+    return points, offset
 
 
 def _sample(ids: list[str], limit: int = 3) -> str:

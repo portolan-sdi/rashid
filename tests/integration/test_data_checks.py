@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import struct
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -518,3 +519,297 @@ def test_bbox_helpers() -> None:
         2.0,
         5.0,
     )
+
+
+# --- item-mirror fidelity ---------------------------------------------------
+#
+# PTL-DAT-016 compares each mirror row against the item it names. The geometry
+# side of that reads WKB, the datetime side reads RFC 3339, and both compare
+# within a tolerance, so both the decoders and the tolerance boundaries are
+# exercised here rather than through a written file.
+
+
+def _wkb_point(x: float, y: float) -> bytes:
+    return struct.pack("<BIdd", 1, 1, x, y)
+
+
+def _wkb_ring(points: list[tuple[float, float]]) -> bytes:
+    return struct.pack("<I", len(points)) + b"".join(struct.pack("<dd", x, y) for x, y in points)
+
+
+def _wkb_polygon(rings: list[list[tuple[float, float]]]) -> bytes:
+    return struct.pack("<BII", 1, 3, len(rings)) + b"".join(_wkb_ring(ring) for ring in rings)
+
+
+_SQUARE = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)]
+# The same ring as JSON: parsed GeoJSON holds lists, never tuples.
+_SQUARE_JSON = [[x, y] for x, y in _SQUARE]
+
+
+def _mirror_item(**data: object) -> Node:
+    return Node(
+        path=PurePosixPath("c/i/i.json"),
+        abs_path=Path("/nowhere/i.json"),
+        kind="item",
+        id="i",
+        data=dict(data),
+    )
+
+
+class _FakeParquet:
+    """Just the schema surface ``_bbox_struct`` reads."""
+
+    def __init__(self, *names: str) -> None:
+        self.schema_arrow = type("_Schema", (), {"names": list(names), "metadata": None})()
+
+
+class _UnreadableParquet(_FakeParquet):
+    def read(self, columns: list[str]) -> object:
+        raise OSError("truncated mid-column")
+
+
+class _FakeTable:
+    """Just the column surface ``_bbox_column_values`` reads."""
+
+    def __init__(self, rows: list[object]) -> None:
+        self._rows = rows
+
+    def column(self, _name: str) -> object:
+        return type("_Column", (), {"to_pylist": lambda _self: self._rows})()
+
+
+def _covering(bbox: object) -> dict[str, object]:
+    return {"primary_column": "geometry", "columns": {"geometry": {"covering": {"bbox": bbox}}}}
+
+
+def test_bbox_struct_reads_the_covering_declaration() -> None:
+    geo = _covering({corner: ["bbox", corner] for corner in ("xmin", "ymin", "xmax", "ymax")})
+    assert checks._bbox_struct(_FakeParquet("bbox"), geo) == (
+        "bbox",
+        ["xmin", "ymin", "xmax", "ymax"],
+    )
+
+
+@pytest.mark.parametrize(
+    "geo",
+    [
+        {},  # no geo metadata at all
+        _covering(None),
+        _covering({"xmin": ["bbox", "xmin"]}),  # an incomplete declaration
+        _covering({c: ["box", "x", c] for c in ("xmin", "ymin", "xmax", "ymax")}),  # nested deeper
+        _covering(
+            {  # leaves under two different structs
+                "xmin": ["west", "xmin"],
+                "ymin": ["bbox", "ymin"],
+                "xmax": ["bbox", "xmax"],
+                "ymax": ["bbox", "ymax"],
+            }
+        ),
+        _covering({c: ["absent", c] for c in ("xmin", "ymin", "xmax", "ymax")}),  # no such column
+    ],
+)
+def test_unusable_covering_declaration_yields_no_bbox_column(geo: dict[str, object]) -> None:
+    assert checks._bbox_struct(_FakeParquet("bbox"), geo) is None
+
+
+@pytest.mark.parametrize(
+    "row,expected",
+    [
+        ({"xmin": 4, "ymin": 50, "xmax": 6, "ymax": 52}, [4.0, 50.0, 6.0, 52.0]),
+        ({"xmin": 4, "ymin": 50, "xmax": 6, "ymax": None}, None),
+        (None, None),
+    ],
+)
+def test_bbox_column_values(row: object, expected: object) -> None:
+    table = _FakeTable([row])
+    assert checks._bbox_column_values(table, ("bbox", ["xmin", "ymin", "xmax", "ymax"])) == [
+        expected
+    ]
+
+
+def test_mirror_rows_read_a_file_with_no_geo_metadata(tmp_path: Path) -> None:
+    """No ``geo`` key names the primary column, so the plain name is used."""
+    path = tmp_path / "items.parquet"
+    pq.write_table(pa.table({"id": ["a"], "geometry": [_wkb_point(5.0, 51.0)]}), path)
+    rows = checks._read_mirror_rows(pq.ParquetFile(path))
+    assert rows is not None
+    assert rows.ids == ["a"]
+    assert rows.geometry == [_wkb_point(5.0, 51.0)]
+    assert rows.datetimes is None and rows.bboxes is None
+
+
+def test_unreadable_mirror_columns_yield_no_rows() -> None:
+    assert checks._read_mirror_rows(_UnreadableParquet("id", "geometry")) is None
+
+
+def test_wkb_point_round_trips() -> None:
+    assert checks._wkb_geometry(_wkb_point(5.0, 51.0)) == ("Point", [(5.0, 51.0)])
+
+
+def test_wkb_big_endian_point_round_trips() -> None:
+    assert checks._wkb_geometry(struct.pack(">BIdd", 0, 1, 5.0, 51.0)) == ("Point", [(5.0, 51.0)])
+
+
+def test_wkb_iso_z_point_drops_the_third_ordinate() -> None:
+    assert checks._wkb_geometry(struct.pack("<BIddd", 1, 1001, 5.0, 51.0, 7.0)) == (
+        "Point",
+        [(5.0, 51.0)],
+    )
+
+
+def test_wkb_ewkb_point_skips_the_inline_srid() -> None:
+    blob = struct.pack("<BIIdd", 1, 0x20000001, 4326, 5.0, 51.0)
+    assert checks._wkb_geometry(blob) == ("Point", [(5.0, 51.0)])
+
+
+def test_wkb_ewkb_zm_point_reads_four_ordinates() -> None:
+    blob = struct.pack("<BIdddd", 1, 1 | 0x80000000 | 0x40000000, 5.0, 51.0, 7.0, 9.0)
+    assert checks._wkb_geometry(blob) == ("Point", [(5.0, 51.0)])
+
+
+def test_wkb_linestring_round_trips() -> None:
+    blob = struct.pack("<BI", 1, 2) + _wkb_ring([(0.0, 1.0), (2.0, 3.0)])
+    assert checks._wkb_geometry(blob) == ("LineString", [(0.0, 1.0), (2.0, 3.0)])
+
+
+def test_wkb_polygon_reads_every_ring() -> None:
+    inner = [(0.2, 0.2), (0.4, 0.2), (0.4, 0.4), (0.2, 0.2)]
+    assert checks._wkb_geometry(_wkb_polygon([_SQUARE, inner])) == ("Polygon", _SQUARE + inner)
+
+
+def test_wkb_multipolygon_recurses_into_members() -> None:
+    blob = struct.pack("<BII", 1, 6, 2) + _wkb_polygon([_SQUARE]) + _wkb_polygon([_SQUARE])
+    assert checks._wkb_geometry(blob) == ("MultiPolygon", _SQUARE * 2)
+
+
+def test_wkb_geometry_collection_recurses_into_members() -> None:
+    blob = struct.pack("<BII", 1, 7, 2) + _wkb_point(1.0, 2.0) + _wkb_point(3.0, 4.0)
+    assert checks._wkb_geometry(blob) == ("GeometryCollection", [(1.0, 2.0), (3.0, 4.0)])
+
+
+@pytest.mark.parametrize(
+    "blob",
+    [
+        b"",  # nothing to read
+        struct.pack("<BI", 1, 42),  # unknown geometry type
+        struct.pack("<BIdd", 1, 1, 5.0, 51.0)[:-4],  # truncated coordinate
+        struct.pack("<BII", 1, 2, 1_000_000),  # a vertex count the buffer cannot hold
+    ],
+)
+def test_unreadable_wkb_is_none(blob: bytes) -> None:
+    assert checks._wkb_geometry(blob) is None
+
+
+@pytest.mark.parametrize(
+    "geometry,expected",
+    [
+        ({"type": "Point", "coordinates": [5.0, 51.0]}, ("Point", [(5.0, 51.0)])),
+        ({"type": "Polygon", "coordinates": [_SQUARE_JSON]}, ("Polygon", _SQUARE)),
+        (
+            {
+                "type": "GeometryCollection",
+                "geometries": [{"type": "Point", "coordinates": [1, 2]}],
+            },
+            ("GeometryCollection", [(1.0, 2.0)]),
+        ),
+    ],
+)
+def test_geojson_geometry_flattens_to_vertices(geometry: object, expected: object) -> None:
+    assert checks._geojson_geometry(geometry) == expected
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    [
+        None,
+        {"type": "Circle", "coordinates": [0, 0]},  # not a GeoJSON geometry type
+        {"type": "Point", "coordinates": []},
+        {"type": "Point", "coordinates": ["west", "north"]},
+        {"type": "GeometryCollection", "geometries": {}},
+        {"type": "GeometryCollection", "geometries": [{"type": "Circle"}]},
+    ],
+)
+def test_unusable_geojson_geometry_is_none(geometry: object) -> None:
+    assert checks._geojson_geometry(geometry) is None
+
+
+def test_geometry_agreement_holds_within_the_tolerance() -> None:
+    item = _mirror_item(geometry={"type": "Point", "coordinates": [5.0, 51.0]})
+    assert checks._geometry_agrees(item, _wkb_point(5.0 + 9e-7, 51.0))
+    assert not checks._geometry_agrees(item, _wkb_point(5.0 + 2e-6, 51.0))
+
+
+@pytest.mark.parametrize(
+    "blob,expected",
+    [
+        (None, False),  # a null row geometry against an item that has one
+        (b"\x01\x2a\x00\x00\x00", True),  # an encoding this reader cannot decode
+        ("POINT (5 51)", True),  # nor a column that is not binary
+        (_wkb_polygon([_SQUARE]), False),  # a different geometry type
+    ],
+)
+def test_geometry_agreement_on_unusable_rows(blob: object, expected: bool) -> None:
+    item = _mirror_item(geometry={"type": "Point", "coordinates": [5.0, 51.0]})
+    assert checks._geometry_agrees(item, blob) is expected
+
+
+def test_geometry_agreement_is_silent_without_an_item_geometry() -> None:
+    assert checks._geometry_agrees(_mirror_item(geometry=None), _wkb_point(0.0, 0.0))
+
+
+def test_geometry_agreement_counts_vertices() -> None:
+    item = _mirror_item(geometry={"type": "Polygon", "coordinates": [_SQUARE_JSON]})
+    assert not checks._geometry_agrees(item, _wkb_polygon([_SQUARE[:-1]]))
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("2024-01-01T00:00:00Z", datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        ("2024-01-01t00:00:00z", datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        ("2024-01-01 00:00:00", datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        ("2024-01-01T02:00:00+0200", datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        ("2024-01-01T00:00:00.123456789Z", datetime(2024, 1, 1, 0, 0, 0, 123456, timezone.utc)),
+        ("2024-01-01", None),
+        ("not a timestamp", None),
+        ("2024-13-01T00:00:00Z", None),
+    ],
+)
+def test_timestamp_parsing(value: str, expected: datetime | None) -> None:
+    assert checks._parse_timestamp(value) == expected
+
+
+def test_datetime_agreement_holds_within_the_tolerance() -> None:
+    item = _mirror_item(properties={"datetime": "2024-01-01T00:00:00Z"})
+    assert checks._datetime_agrees(item, datetime(2024, 1, 1, 0, 0, 1, tzinfo=timezone.utc))
+    assert not checks._datetime_agrees(item, datetime(2024, 1, 1, 0, 0, 2, tzinfo=timezone.utc))
+
+
+def test_datetime_agreement_normalizes_the_zone() -> None:
+    item = _mirror_item(properties={"datetime": "2024-01-01T00:00:00Z"})
+    assert checks._datetime_agrees(item, datetime(2024, 1, 1))  # naive column reads as UTC
+    assert checks._datetime_agrees(item, "2024-01-01T01:00:00+01:00")
+
+
+@pytest.mark.parametrize("value", [None, "yesterday", 1704067200])
+def test_datetime_agreement_fails_on_an_unusable_row(value: object) -> None:
+    item = _mirror_item(properties={"datetime": "2024-01-01T00:00:00Z"})
+    assert not checks._datetime_agrees(item, value)
+
+
+@pytest.mark.parametrize("properties", [None, {}, {"datetime": None}, {"datetime": 5}])
+def test_datetime_agreement_is_silent_without_an_item_datetime(properties: object) -> None:
+    assert checks._datetime_agrees(_mirror_item(properties=properties), None)
+
+
+def test_bbox_agreement() -> None:
+    item = _mirror_item(bbox=[4.0, 50.0, 6.0, 52.0])
+    assert checks._bbox_agrees(item, [4.0, 50.0, 6.0, 52.0 + 5e-7])
+    assert not checks._bbox_agrees(item, [4.0, 50.0, 6.0, 52.5])
+    assert not checks._bbox_agrees(item, None)
+    assert checks._bbox_agrees(_mirror_item(), None)
+
+
+def test_bbox_agreement_drops_the_z_ordinates() -> None:
+    item = _mirror_item(bbox=[4.0, 50.0, 0.0, 6.0, 52.0, 100.0])
+    assert checks._bbox_agrees(item, [4.0, 50.0, 6.0, 52.0])
