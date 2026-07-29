@@ -29,6 +29,8 @@ warnings when it cannot probe rather than failing the run.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Protocol
 from urllib.error import HTTPError
 from urllib.parse import urlparse
@@ -66,6 +68,28 @@ _PROBE_ORIGIN = "https://rashid-live-probe.invalid"
 
 # core.md, Data Storage — the response headers a server MUST expose to browsers.
 _REQUIRED_EXPOSED = ("Content-Range", "Content-Length", "Accept-Ranges", "ETag")
+
+_PROJECT_URL = "https://github.com/portolan-sdi/rashid"
+
+
+@lru_cache(maxsize=1)
+def _user_agent() -> str:
+    """The ``User-Agent`` every probe sends.
+
+    urllib defaults to ``Python-urllib/3.x``, which edge providers block:
+    Cloudflare answers it with a 403 and a 17-byte error page, and the pass
+    then reads that page's length back as every asset's ``Content-Length``,
+    failing all four live rules against a healthy host. Naming the validator,
+    its version, and its homepage also makes the traffic legible to the
+    operators whose servers are being probed.
+
+    Read at first use, not at import, so `import rashid` stays cheap.
+    """
+    try:
+        release = version("rashid")
+    except PackageNotFoundError:  # pragma: no cover - installed metadata is always present
+        release = "unknown"
+    return f"rashid/{release} (+{_PROJECT_URL})"
 
 
 @dataclass(frozen=True)
@@ -112,7 +136,9 @@ def _lower_headers(items: Any) -> dict[str, str]:
 def _request(url: str, method: str, headers: dict[str, str]) -> ProbeResponse:
     if urlparse(url).scheme.lower() != "https":
         raise ValueError(f"refusing to probe non-https URL: {url!r}")
-    request = Request(url, method=method, headers=headers)
+    # Every probe shape — ranged GET, HEAD, OPTIONS preflight — funnels through
+    # here, so setting the agent once covers all of them.
+    request = Request(url, method=method, headers={"User-Agent": _user_agent(), **headers})
     try:
         with urlopen(request, timeout=_TIMEOUT) as response:  # noqa: S310  # nosec B310
             return ProbeResponse(

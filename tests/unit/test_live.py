@@ -7,9 +7,15 @@ integration test in ``tests/integration/test_live_remote.py``.
 
 from __future__ import annotations
 
+import re
+from importlib.metadata import version
+from typing import Any
+from urllib.request import Request
+
 import pytest
 
 from rashid import RulesConfig, validate, validate_live
+from rashid import live as live_mod
 from rashid.catalog import CatalogGraph
 from rashid.live import (
     LIV_CORS_EXPOSE,
@@ -19,6 +25,7 @@ from rashid.live import (
     LIV_RANGE,
     LIV_UNAVAILABLE,
     ProbeResponse,
+    _UrllibProber,
 )
 from rashid.model import Severity
 from tests.conftest import VALID_MULTIHASH, CatalogBuilder
@@ -510,3 +517,70 @@ def test_runner_threads_live_base_url(catalog: CatalogBuilder) -> None:
         live_base_url="https://data.example.org/cat",
     )
     assert "https://data.example.org/cat/roads/data.parquet" in prober.head_calls
+
+
+# --- the default prober's outgoing request headers ---------------------------
+#
+# The fake prober above never builds a Request, so a missing or malformed
+# User-Agent is invisible to every test that uses it. These drive the real
+# _UrllibProber against a recording urlopen instead (#64).
+
+
+class _RecordedResponse:
+    """The bare surface ``_request`` reads off a urlopen result."""
+
+    status = 200
+    headers: dict[str, str] = {}
+
+    def __enter__(self) -> _RecordedResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+def _recorder(requests: list[Request]) -> Any:
+    def fake_urlopen(request: Request, **_kwargs: Any) -> _RecordedResponse:
+        requests.append(request)
+        return _RecordedResponse()
+
+    return fake_urlopen
+
+
+def _record(monkeypatch: pytest.MonkeyPatch, probe: str) -> Request:
+    """Run one probe kind against a recording urlopen and return its Request."""
+    requests: list[Request] = []
+    monkeypatch.setattr(live_mod, "urlopen", _recorder(requests))
+    getattr(_UrllibProber(), probe)(_URL)
+    (request,) = requests
+    return request
+
+
+# urllib capitalizes header names, so the stored key is 'User-agent'.
+_AGENT_PATTERN = re.compile(r"^rashid/\S+ \(\+https://github\.com/portolan-sdi/rashid\)$")
+
+
+@pytest.mark.parametrize("probe", ["get_range", "head", "preflight"])
+def test_every_probe_sends_a_named_user_agent(monkeypatch: pytest.MonkeyPatch, probe: str) -> None:
+    agent = _record(monkeypatch, probe).get_header("User-agent")
+    assert agent is not None, f"{probe} sent no User-Agent"
+    assert _AGENT_PATTERN.match(agent), agent
+    assert "Python-urllib" not in agent
+
+
+@pytest.mark.parametrize("probe", ["get_range", "head", "preflight"])
+def test_user_agent_carries_the_installed_version(
+    monkeypatch: pytest.MonkeyPatch, probe: str
+) -> None:
+    agent = _record(monkeypatch, probe).get_header("User-agent")
+    assert agent == f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
+
+
+def test_user_agent_does_not_displace_the_probe_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    ranged = _record(monkeypatch, "get_range")
+    assert ranged.get_header("Range") == "bytes=0-0"
+    assert ranged.get_header("Origin") is not None
+
+    preflight = _record(monkeypatch, "preflight")
+    assert preflight.get_header("Access-control-request-method") == "GET"
+    assert preflight.get_header("Access-control-request-headers") == "Range"
