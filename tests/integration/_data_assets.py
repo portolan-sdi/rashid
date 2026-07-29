@@ -48,6 +48,43 @@ def interleaved_points() -> list[tuple[float, float]]:
     ]
 
 
+def scattered_points(n: int, seed: int = 0) -> list[tuple[float, float]]:
+    """Globally scattered points in insertion order, never spatially sorted.
+
+    Deterministic per ``n`` and ``seed``, so a file built from them does not
+    drift between runs. This is the shape a plain stac-geoparquet writer
+    emits: whatever order the items arrived in.
+    """
+    rng = np.random.default_rng(seed)
+    xs = rng.uniform(-180.0, 180.0, n).tolist()
+    ys = rng.uniform(-85.0, 85.0, n).tolist()
+    return list(zip(xs, ys, strict=True))
+
+
+def local_points(n: int, seed: int = 0) -> list[tuple[float, float]]:
+    """Points scattered inside one city-sized box."""
+    rng = np.random.default_rng(seed)
+    xs = rng.uniform(4.85, 4.95, n).tolist()
+    ys = rng.uniform(52.30, 52.40, n).tolist()
+    return list(zip(xs, ys, strict=True))
+
+
+def morton_sorted(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """The same points in Z-order, a space-filling-curve sort.
+
+    Morton order stands in for the Hilbert or S2 sort a producer would apply;
+    it is a few lines and needs no dependency, and any curve sort is enough to
+    make nearby features nearby in the file.
+    """
+
+    def key(point: tuple[float, float]) -> int:
+        x = int((point[0] + 180.0) / 360.0 * 0xFFFF)
+        y = int((point[1] + 90.0) / 180.0 * 0xFFFF)
+        return sum(((x >> i) & 1) << (2 * i) | ((y >> i) & 1) << (2 * i + 1) for i in range(16))
+
+    return sorted(points, key=key)
+
+
 def write_geoparquet(
     path: Path,
     *,

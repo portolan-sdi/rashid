@@ -132,6 +132,25 @@ _MAX_ROW_GROUP_ROWS = 150_000
 # formats.md:30 — spatial ordering passes on either criterion.
 _MAX_OVERLAP_FRACTION = 0.30  # < 30% of consecutive row-group pairs may overlap
 _MAX_LOCALITY_RATIO = 0.25  # row-group boxes average < 25% of the file extent
+# formats.md:36 completes the locality criterion: boxes that small let a reader
+# "skip at least 50% of row groups for a query window of 10% of the extent".
+_MIN_SKIP_RATE = 0.50
+_QUERY_FRACTION = 0.10
+# Query windows sit on a fixed lattice rather than being sampled at random, so
+# the same file always yields the same finding.
+_QUERY_LATTICE = 5
+
+# A file the writer never chunked has one row group, so the two criteria above
+# have nothing to compare and pass whatever the row order. formats.md states
+# the requirement over rows ("rows MUST be spatially ordered so nearby features
+# are nearby in the file") and gives the row-group tests as how to measure it,
+# so the rows are partitioned into the groups a conforming writer would have
+# emitted and the same criteria applied to those. Neither number is a spec
+# threshold: the chunk count only has to be enough for "skip 50% of row groups"
+# to mean something, and below the row floor a chunk box covers too few points
+# to say anything about ordering.
+_ORDERING_CHUNKS = 10
+_MIN_CHUNK_ROWS = 20
 
 # geotiff-stats-headers.md — the embedded per-band statistics a COG MUST carry.
 _COG_STAT_KEYS = (
@@ -715,6 +734,10 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
     defects.extend(stat_defects)
     if bboxes is None:
         return defects  # without per-row-group boxes, ordering cannot be judged
+
+    if len(bboxes) == 1:
+        defects.extend(_unchunked_ordering_defects(key, parquet, geo, row_counts[0]))
+        return defects
 
     if not _is_spatially_ordered(bboxes):
         defects.append(
@@ -1314,8 +1337,106 @@ def _column_index(meta: Any) -> dict[str, int]:
     return {group.column(j).path_in_schema: j for j in range(group.num_columns)}
 
 
+def _unchunked_ordering_defects(
+    key: str, parquet: Any, geo: dict[str, Any], rows: int
+) -> list[DataDefect]:
+    """Judge ordering on a file that was written as one row group.
+
+    The reference stac-geoparquet writer produces exactly this: with no schema
+    passed, ``parse_stac_items_to_arrow`` returns one contiguous record batch
+    at any item count and ``to_parquet`` writes one row group per batch. The
+    row-group criteria then have a single box to compare and pass vacuously,
+    so entirely unsorted output validates clean. Partitioning the rows into
+    the groups a conforming writer would have emitted restores the measurement
+    without inventing a criterion.
+    """
+    if rows < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
+        return []  # too few rows for a chunk's box to describe anything
+    row_boxes = _row_bboxes(parquet, geo)
+    if row_boxes is None:
+        return [
+            DataDefect(
+                DAT_ORDERING,
+                Severity.INFO,
+                f"asset '{key}' is one row group of {rows} rows with no bbox covering "
+                "column to read, so spatial ordering could not be evaluated",
+                key,
+            )
+        ]
+    if _is_spatially_ordered(_chunked_bboxes(row_boxes)):
+        return []
+    return [
+        DataDefect(
+            DAT_ORDERING,
+            Severity.ERROR,
+            f"asset '{key}' rows are not spatially ordered: the file is a single row "
+            f"group of {rows} rows whose rows do not cluster spatially, so a reader "
+            "cannot skip any part of it",
+            key,
+        )
+    ]
+
+
+def _chunked_bboxes(
+    row_boxes: list[tuple[float, float, float, float]],
+) -> list[tuple[float, float, float, float]]:
+    """Box each contiguous chunk of rows, as row groups would have been.
+
+    Partitioning reads FMT-006's row-group criteria as a measurement method
+    rather than as the requirement, which the spec implies but does not say.
+    portolan-spec#100 records the ambiguity: both tests compare row groups, so
+    a file with one group has no stated evaluation.
+    """
+    size = -(-len(row_boxes) // _ORDERING_CHUNKS)
+    return [_bbox_union(row_boxes[i : i + size]) for i in range(0, len(row_boxes), size)]
+
+
+def _row_bboxes(
+    parquet: Any, geo: dict[str, Any]
+) -> list[tuple[float, float, float, float]] | None:
+    """Per-row [minx, miny, maxx, maxy] from the bbox covering column's values.
+
+    Reads the four covering leaves and not the geometry, so the cost is four
+    float64 columns. Returns None when the file has no 1.1 covering column, or
+    when its leaves sit deeper than the single struct level the spec uses.
+    """
+    columns = geo.get("columns")
+    if not isinstance(columns, dict):
+        return None
+    covering = columns.get(geo.get("primary_column"), {}).get("covering", {}).get("bbox")
+    if not isinstance(covering, dict):
+        return None
+    paths = [covering.get(corner) for corner in ("xmin", "ymin", "xmax", "ymax")]
+    if not all(isinstance(p, list) and len(p) == 2 for p in paths):
+        return None
+    if len({p[0] for p in paths}) != 1:  # type: ignore[index]
+        return None
+    try:
+        flat = parquet.read(columns=[paths[0][0]]).flatten()  # type: ignore[index]
+        corners = [flat.column(f"{p[0]}.{p[1]}").to_pylist() for p in paths]  # type: ignore[index]
+    except Exception:  # noqa: BLE001 - unreadable column: the checksum check owns bad bytes
+        return None
+    boxes: list[tuple[float, float, float, float]] = []
+    for corner_values in zip(*corners, strict=True):
+        if any(value is None for value in corner_values):
+            return None
+        boxes.append(
+            (
+                float(corner_values[0]),
+                float(corner_values[1]),
+                float(corner_values[2]),
+                float(corner_values[3]),
+            )
+        )
+    return boxes
+
+
 def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bool:
-    """True if row groups are spatially ordered by either spec criterion (formats.md:30)."""
+    """True if row groups are spatially ordered by either spec criterion (formats.md:30).
+
+    A caller with a single box must judge ordering another way; see
+    :func:`_unchunked_ordering_defects`.
+    """
     if len(bboxes) <= 1:
         return True
     pairs = len(bboxes) - 1
@@ -1328,7 +1449,50 @@ def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bo
     if extent_area == 0:
         return True  # a single location — nothing to order
     mean_ratio = sum(_bbox_area(b) for b in bboxes) / len(bboxes) / extent_area
-    return mean_ratio < _MAX_LOCALITY_RATIO  # high locality
+    return mean_ratio < _locality_ratio_limit(len(bboxes)) and (
+        _mean_skip_rate(bboxes, extent) >= _MIN_SKIP_RATE
+    )
+
+
+def _locality_ratio_limit(groups: int) -> float:
+    """The area-ratio cutoff for ``groups`` row groups.
+
+    A well-ordered file's row-group boxes each cover roughly ``1/groups`` of the
+    extent plus slop, so a file split into two or three groups cannot reach 25%
+    however well it is sorted. The limit relaxes to ``2/groups`` below eight
+    groups and holds formats.md's 25% at or above it. The skip rate keeps the
+    relaxation honest: boxes that each span the whole extent skip nothing and
+    fail on that criterion instead.
+
+    Ported from geoparquet-io's ``_area_ratio_threshold``.
+    """
+    return max(_MAX_LOCALITY_RATIO, 2.0 / groups)
+
+
+def _mean_skip_rate(
+    bboxes: list[tuple[float, float, float, float]],
+    extent: tuple[float, float, float, float],
+) -> float:
+    """Fraction of row groups a query window skips, averaged over the extent.
+
+    formats.md:36 sizes the window at 10% of the extent per dimension. The
+    windows sit on a fixed lattice of ``_QUERY_LATTICE`` positions per axis, so
+    the same file always yields the same number. geoparquet-io's
+    ``_compute_locality_metrics`` samples equivalent windows at random from a
+    pinned seed, which a reader of a validator report cannot reproduce.
+    """
+    groups = len(bboxes)
+    width = (extent[2] - extent[0]) * _QUERY_FRACTION
+    height = (extent[3] - extent[1]) * _QUERY_FRACTION
+    rates = []
+    for i in range(_QUERY_LATTICE):
+        for j in range(_QUERY_LATTICE):
+            x = extent[0] + (extent[2] - extent[0] - width) * i / (_QUERY_LATTICE - 1)
+            y = extent[1] + (extent[3] - extent[1] - height) * j / (_QUERY_LATTICE - 1)
+            window = (x, y, x + width, y + height)
+            skipped = sum(not _bbox_overlaps(window, b) for b in bboxes)
+            rates.append(skipped / groups)
+    return sum(rates) / len(rates)
 
 
 def _bbox_area(b: tuple[float, float, float, float]) -> float:
