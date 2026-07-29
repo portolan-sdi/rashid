@@ -1,3 +1,27 @@
+## v0.1.3 (2026-07-29)
+
+### Feat
+
+- summarize findings by rule when a run produces too many
+
+### Fix
+
+- raise instead of assert when building the check registry
+- **data**: measure the skip rate the locality criterion names
+- **data**: judge spatial ordering on files written as one row group
+- **rules**: resolve a collection's items across organizing catalogs
+- **schema**: send the named User-Agent when fetching a remote schema
+- **data**: compare a mirror's rows to the items, not only their ids
+- **rules**: accept an item collection link across an organizing catalog
+- **data**: point PTL-DAT-005 at the proj:epsg a collection declares
+- **data**: send the same named User-Agent from the byte reader
+- **live**: send a named User-Agent on every probe
+- **rules**: accept extra describedby and agents links
+
+### Refactor
+
+- **data**: compare mirror geometries through shapely
+
 ## v0.1.2 (2026-07-28)
 
 ### Feat
