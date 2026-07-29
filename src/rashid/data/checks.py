@@ -1393,7 +1393,13 @@ def _unchunked_ordering_defects(
 def _chunked_bboxes(
     row_boxes: list[tuple[float, float, float, float]],
 ) -> list[tuple[float, float, float, float]]:
-    """Box each contiguous chunk of rows, as row groups would have been."""
+    """Box each contiguous chunk of rows, as row groups would have been.
+
+    Partitioning reads FMT-006's row-group criteria as a measurement method
+    rather than as the requirement, which the spec implies but does not say.
+    portolan-spec#100 records the ambiguity: both tests compare row groups, so
+    a file with one group has no stated evaluation.
+    """
     size = -(-len(row_boxes) // _ORDERING_CHUNKS)
     return [_bbox_union(row_boxes[i : i + size]) for i in range(0, len(row_boxes), size)]
 
