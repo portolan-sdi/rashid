@@ -6,8 +6,9 @@ vendored to ``tests/fixtures/requirements.yaml`` by
 stable ID, an RFC 2119 severity, and an enforcement class: ``validator``
 (rashid must cite it) or ``process`` (not machine-checkable). Each rashid check
 declares the manifest IDs it enforces — ``Rule.spec_ids`` for metadata rules,
-a module-level ``SPEC_IDS`` registry for the structural, schema, runner,
-data, and live checks.
+a module-level ``SPEC_IDS`` registry for the structural, schema, runner, data,
+and live checks — and ``rashid.registry.CHECKS`` joins both into one id-space,
+carrying the strongest severity each check can emit.
 
 This module gates the join in both directions:
 
@@ -33,7 +34,7 @@ import rashid.runner as runner
 import rashid.schema as schema_pass
 import rashid.structural as structural_pass
 from rashid.model import Severity
-from rashid.rules import DEFAULT_RULES
+from rashid.registry import CHECKS
 
 pytestmark = pytest.mark.unit
 
@@ -52,38 +53,6 @@ _ENTRY = re.compile(
     + _COMMENTS
     + r"\s+enforcement: (validator|process)\s*\n"
 )
-
-# The strongest severity each non-Rule check can emit; metadata rules carry
-# theirs as Rule.default_severity. PTL-DAT-007 and PTL-DAT-010 emit both
-# levels (MUST failure at ERROR, the companion SHOULD at WARNING), so their
-# maximum is ERROR.
-_NON_RULE_SEVERITIES: dict[str, Severity] = {
-    "PTL-GEN-000": Severity.ERROR,
-    "PTL-GEN-001": Severity.ERROR,
-    "PTL-STR-001": Severity.ERROR,
-    "PTL-SCH-001": Severity.ERROR,
-    "PTL-DAT-001": Severity.ERROR,
-    "PTL-DAT-002": Severity.ERROR,
-    "PTL-DAT-003": Severity.ERROR,
-    "PTL-DAT-004": Severity.ERROR,
-    "PTL-DAT-005": Severity.WARNING,
-    "PTL-DAT-006": Severity.ERROR,
-    "PTL-DAT-007": Severity.ERROR,
-    "PTL-DAT-008": Severity.ERROR,
-    "PTL-DAT-009": Severity.ERROR,
-    "PTL-DAT-010": Severity.ERROR,
-    "PTL-DAT-011": Severity.ERROR,
-    "PTL-DAT-012": Severity.ERROR,
-    "PTL-DAT-013": Severity.ERROR,
-    "PTL-DAT-014": Severity.ERROR,
-    "PTL-DAT-015": Severity.WARNING,
-    "PTL-DAT-016": Severity.ERROR,
-    "PTL-LIV-001": Severity.ERROR,
-    "PTL-LIV-002": Severity.ERROR,
-    "PTL-LIV-003": Severity.ERROR,
-    "PTL-LIV-004": Severity.ERROR,
-    "PTL-LIV-005": Severity.ERROR,
-}
 
 # MUST requirements deliberately not enforced by any ERROR-severity check.
 # Every entry quotes the spec text that mandates the softer severity; an
@@ -117,14 +86,7 @@ def _manifest_entries() -> list[tuple[str, str, str]]:
 
 def _checks() -> dict[str, tuple[tuple[str, ...], Severity]]:
     """Every check: id -> (cited manifest IDs, strongest severity)."""
-    checks: dict[str, tuple[tuple[str, ...], Severity]] = {
-        rule.id: (rule.spec_ids, rule.default_severity) for rule in DEFAULT_RULES
-    }
-    for module in (runner, structural_pass, schema_pass, data_pass, live_pass):
-        for check_id, spec_ids in module.SPEC_IDS.items():
-            assert check_id not in checks, f"duplicate check id {check_id}"
-            checks[check_id] = (spec_ids, _NON_RULE_SEVERITIES[check_id])
-    return checks
+    return {info.id: (info.spec_ids, info.severity) for info in CHECKS.values()}
 
 
 def _citations() -> dict[str, list[tuple[str, Severity]]]:
