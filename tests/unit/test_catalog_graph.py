@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from rashid.catalog import CatalogGraph
-from tests.conftest import CatalogBuilder
+from tests.conftest import CatalogBuilder, write_organizing_catalog_layout
 
 pytestmark = pytest.mark.unit
 
@@ -97,6 +97,24 @@ def test_containment(catalog: CatalogBuilder) -> None:
     assert graph.parent_of(nested) is subcatalog
     assert {n.path for n in graph.children_of(root)} == {collection.path, subcatalog.path}
     assert graph.children_of(collection) == [item]
+
+
+def test_enclosing_collection_walks_past_intermediate_catalogs(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(write_organizing_catalog_layout(catalog))
+    root = graph.root
+    assert root is not None
+    collection = graph.nodes[PurePosixPath("roads/collection.json")]
+    organizing = graph.nodes[PurePosixPath("roads/2024/catalog.json")]
+    item = graph.nodes[PurePosixPath("roads/2024/roads-2024/roads-2024.json")]
+
+    # the item's direct parent is the organizing catalog, but the collection
+    # that encloses it is two levels up
+    assert graph.parent_of(item) is organizing
+    assert graph.enclosing_collection_of(item) is collection
+    assert graph.enclosing_collection_of(organizing) is collection
+    # nothing above these is a collection
+    assert graph.enclosing_collection_of(collection) is None
+    assert graph.enclosing_collection_of(root) is None
 
 
 def test_dir_listing_and_file_exists(catalog: CatalogBuilder) -> None:

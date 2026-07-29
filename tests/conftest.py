@@ -254,6 +254,82 @@ def catalog(tmp_path: Path) -> CatalogBuilder:
     return CatalogBuilder(tmp_path / "catalog")
 
 
+def write_organizing_catalog_layout(
+    catalog: CatalogBuilder, collection_href: str = "../../collection.json"
+) -> Path:
+    """Build a catalog-under-collection tree and return the catalog root.
+
+    core.md, Core Structure allows a catalog below a collection to organize
+    its items. The item's parent is that organizing catalog while its
+    ``collection`` link points at the collection above it::
+
+        catalog.json
+        roads/collection.json
+        roads/2024/catalog.json
+        roads/2024/roads-2024/roads-2024.json
+
+    ``collection_href`` is written verbatim as the item's rel:'collection'
+    href, relative to the item file, so callers can aim it at a wrong target.
+    """
+    collection = catalog.collection("roads")
+    item = collection.item("roads-2024")
+    root = catalog.write()
+
+    year_dir = root / "roads" / "2024"
+    year_dir.mkdir(parents=True, exist_ok=True)
+    (year_dir / "catalog.json").write_text(
+        json.dumps(
+            {
+                "type": "Catalog",
+                "stac_version": "1.1.0",
+                "id": "roads-by-year",
+                "title": "Roads by year",
+                "description": "Organizes the roads collection's items by year.",
+                "stac_extensions": [PORTOLAN_URI],
+                "links": [
+                    {"rel": "root", "href": "../../catalog.json", "type": "application/json"},
+                    {"rel": "parent", "href": "../collection.json", "type": "application/json"},
+                    {
+                        "rel": "item",
+                        "href": "./roads-2024/roads-2024.json",
+                        "type": "application/geo+json",
+                        "title": "Item roads-2024",
+                    },
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    # Move the item one level down, under the organizing catalog.
+    data = item.build()
+    data["links"] = [
+        {"rel": "root", "href": "../../../catalog.json", "type": "application/json"},
+        {"rel": "parent", "href": "../catalog.json", "type": "application/json"},
+        {"rel": "collection", "href": collection_href, "type": "application/json"},
+    ]
+    item_dir = year_dir / "roads-2024"
+    item_dir.mkdir(exist_ok=True)
+    (item_dir / "roads-2024.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+    (root / "roads" / "roads-2024" / "roads-2024.json").unlink()
+    (root / "roads" / "roads-2024").rmdir()
+
+    def repoint(d: dict[str, Any]) -> None:
+        d["links"] = [link for link in d["links"] if link["rel"] != "item"]
+        d["links"].append(
+            {
+                "rel": "child",
+                "href": "./2024/catalog.json",
+                "type": "application/json",
+                "title": "Roads by year",
+            }
+        )
+
+    mutate_json(root / "roads" / "collection.json", repoint)
+    return root
+
+
 def mutate_json(path: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
     """Load a JSON file, apply an in-place mutation, and write it back."""
     data = json.loads(path.read_text(encoding="utf-8"))

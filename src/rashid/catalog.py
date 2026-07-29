@@ -197,6 +197,22 @@ class CatalogGraph:
                 return None
             current = current.parent
 
+    def enclosing_collection_of(self, node: Node) -> Node | None:
+        """The nearest collection above ``node`` in the containment chain.
+
+        core.md, Core Structure permits a catalog below a collection to
+        organize its items, so the object containing an item is not always
+        the collection the item belongs to. This walks the parent chain past
+        any intermediate catalogs and returns the first collection it finds,
+        or None when no collection encloses ``node``.
+        """
+        current = self.parent_of(node)
+        while current is not None:
+            if current.kind == "collection":
+                return current
+            current = self.parent_of(current)
+        return None
+
     def children_of(self, node: Node) -> list[Node]:
         """Objects whose containment parent is ``node``."""
         return [n for n in self.iter() if self.parent_of(n) is node]

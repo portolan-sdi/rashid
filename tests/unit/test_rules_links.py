@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 
 from rashid import validate
-from tests.conftest import CatalogBuilder, findings_for, mutate_json, rule_ids
+from tests.conftest import (
+    CatalogBuilder,
+    findings_for,
+    mutate_json,
+    rule_ids,
+    write_organizing_catalog_layout,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -214,6 +220,38 @@ def test_clean_catalog_has_no_link_findings(catalog: CatalogBuilder) -> None:
         "PTL-LNK-005",
         "PTL-LNK-006",
     }
+
+
+def test_collection_link_across_organizing_catalog(catalog: CatalogBuilder) -> None:
+    # issue #61: a catalog may sit below a collection to organize its items,
+    # so the item's parent is that catalog while its collection link points
+    # two levels up at the enclosing collection. Both are correct.
+    root = write_organizing_catalog_layout(catalog, "../../collection.json")
+    assert findings_for(validate(root), "PTL-LNK-006") == []
+
+
+def test_collection_link_equal_to_direct_parent(catalog: CatalogBuilder) -> None:
+    # the flat layout, where the enclosing collection is also the direct parent
+    catalog.collection("roads").item("roads-2024")
+    assert findings_for(validate(catalog.write()), "PTL-LNK-006") == []
+
+
+def test_collection_link_to_non_collection(catalog: CatalogBuilder) -> None:
+    # pointing at the organizing catalog rather than the collection
+    root = write_organizing_catalog_layout(catalog, "../catalog.json")
+    findings = findings_for(validate(root), "PTL-LNK-006")
+    assert len(findings) == 1
+    assert "enclosing collection" in findings[0].message
+    assert findings[0].path == "roads/2024/roads-2024/roads-2024.json"
+
+
+def test_collection_link_to_unrelated_collection(catalog: CatalogBuilder) -> None:
+    # a real collection that does not enclose the item is still the wrong target
+    catalog.collection("rivers")
+    root = write_organizing_catalog_layout(catalog, "../../../rivers/collection.json")
+    findings = findings_for(validate(root), "PTL-LNK-006")
+    assert len(findings) == 1
+    assert "roads/collection.json" in findings[0].message
 
 
 def test_structural_link_with_no_type_field(catalog: CatalogBuilder) -> None:
