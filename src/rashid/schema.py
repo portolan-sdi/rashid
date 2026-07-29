@@ -32,6 +32,7 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
+from rashid._http import user_agent
 from rashid._jsonschema import SchemaError
 from rashid.catalog import CatalogGraph, Kind
 from rashid.model import Finding, Severity
@@ -81,7 +82,13 @@ def _fetch_schema(schema_uri: str) -> dict[str, Any]:
     # read local files or reach internal hosts (CWE-22 / SSRF).
     if not schema_uri.startswith("https://"):
         raise ValueError(f"schema URI must be an https URL, got: {schema_uri!r}")
-    with urllib.request.urlopen(schema_uri, timeout=30) as response:  # noqa: S310  # nosec B310 - scheme checked above
+    # Named agent for the same reason the live pass sends one: the URI can come
+    # from the catalog's own stac_extensions, so the schema may sit behind a CDN
+    # that answers the default Python-urllib agent with a 403.
+    request = urllib.request.Request(  # noqa: S310  # nosec B310 - scheme checked above
+        schema_uri, headers={"User-Agent": user_agent()}
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310  # nosec B310 - scheme checked above
         schema: dict[str, Any] = json.loads(response.read().decode("utf-8"))
     return schema
 
