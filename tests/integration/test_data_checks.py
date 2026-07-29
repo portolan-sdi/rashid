@@ -524,9 +524,10 @@ def test_bbox_helpers() -> None:
 # --- item-mirror fidelity ---------------------------------------------------
 #
 # PTL-DAT-016 compares each mirror row against the item it names. The geometry
-# side of that reads WKB, the datetime side reads RFC 3339, and both compare
-# within a tolerance, so both the decoders and the tolerance boundaries are
-# exercised here rather than through a written file.
+# side builds both sides as shapely geometries, the datetime side reads RFC
+# 3339, and both compare within a tolerance, so the encodings shapely is handed
+# and the tolerance boundaries are exercised here rather than through a written
+# file.
 
 
 def _wkb_point(x: float, y: float) -> bytes:
@@ -542,8 +543,10 @@ def _wkb_polygon(rings: list[list[tuple[float, float]]]) -> bytes:
 
 
 _SQUARE = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)]
-# The same ring as JSON: parsed GeoJSON holds lists, never tuples.
+_INNER = [(0.2, 0.2), (0.6, 0.2), (0.6, 0.6), (0.2, 0.2)]
+# The same rings as JSON: parsed GeoJSON holds lists, never tuples.
 _SQUARE_JSON = [[x, y] for x, y in _SQUARE]
+_INNER_JSON = [[x, y] for x, y in _INNER]
 
 
 def _mirror_item(**data: object) -> Node:
@@ -642,49 +645,53 @@ def test_unreadable_mirror_columns_yield_no_rows() -> None:
     assert checks._read_mirror_rows(_UnreadableParquet("id", "geometry")) is None
 
 
-def test_wkb_point_round_trips() -> None:
-    assert checks._wkb_geometry(_wkb_point(5.0, 51.0)) == ("Point", [(5.0, 51.0)])
-
-
-def test_wkb_big_endian_point_round_trips() -> None:
-    assert checks._wkb_geometry(struct.pack(">BIdd", 0, 1, 5.0, 51.0)) == ("Point", [(5.0, 51.0)])
-
-
-def test_wkb_iso_z_point_drops_the_third_ordinate() -> None:
-    assert checks._wkb_geometry(struct.pack("<BIddd", 1, 1001, 5.0, 51.0, 7.0)) == (
-        "Point",
-        [(5.0, 51.0)],
-    )
-
-
-def test_wkb_ewkb_point_skips_the_inline_srid() -> None:
-    blob = struct.pack("<BIIdd", 1, 0x20000001, 4326, 5.0, 51.0)
-    assert checks._wkb_geometry(blob) == ("Point", [(5.0, 51.0)])
-
-
-def test_wkb_ewkb_zm_point_reads_four_ordinates() -> None:
-    blob = struct.pack("<BIdddd", 1, 1 | 0x80000000 | 0x40000000, 5.0, 51.0, 7.0, 9.0)
-    assert checks._wkb_geometry(blob) == ("Point", [(5.0, 51.0)])
-
-
-def test_wkb_linestring_round_trips() -> None:
-    blob = struct.pack("<BI", 1, 2) + _wkb_ring([(0.0, 1.0), (2.0, 3.0)])
-    assert checks._wkb_geometry(blob) == ("LineString", [(0.0, 1.0), (2.0, 3.0)])
-
-
-def test_wkb_polygon_reads_every_ring() -> None:
-    inner = [(0.2, 0.2), (0.4, 0.2), (0.4, 0.4), (0.2, 0.2)]
-    assert checks._wkb_geometry(_wkb_polygon([_SQUARE, inner])) == ("Polygon", _SQUARE + inner)
-
-
-def test_wkb_multipolygon_recurses_into_members() -> None:
-    blob = struct.pack("<BII", 1, 6, 2) + _wkb_polygon([_SQUARE]) + _wkb_polygon([_SQUARE])
-    assert checks._wkb_geometry(blob) == ("MultiPolygon", _SQUARE * 2)
-
-
-def test_wkb_geometry_collection_recurses_into_members() -> None:
-    blob = struct.pack("<BII", 1, 7, 2) + _wkb_point(1.0, 2.0) + _wkb_point(3.0, 4.0)
-    assert checks._wkb_geometry(blob) == ("GeometryCollection", [(1.0, 2.0), (3.0, 4.0)])
+@pytest.mark.parametrize(
+    "geometry,blob",
+    [
+        ({"type": "Point", "coordinates": [5.0, 51.0]}, _wkb_point(5.0, 51.0)),
+        (  # big-endian
+            {"type": "Point", "coordinates": [5.0, 51.0]},
+            struct.pack(">BIdd", 0, 1, 5.0, 51.0),
+        ),
+        (  # ISO WKB Z: the third ordinate is not part of the comparison
+            {"type": "Point", "coordinates": [5.0, 51.0]},
+            struct.pack("<BIddd", 1, 1001, 5.0, 51.0, 7.0),
+        ),
+        (  # EWKB carries the SRID inline, ahead of the body
+            {"type": "Point", "coordinates": [5.0, 51.0]},
+            struct.pack("<BIIdd", 1, 0x20000001, 4326, 5.0, 51.0),
+        ),
+        (  # EWKB with the Z and M bits set
+            {"type": "Point", "coordinates": [5.0, 51.0]},
+            struct.pack("<BIdddd", 1, 1 | 0x80000000 | 0x40000000, 5.0, 51.0, 7.0, 9.0),
+        ),
+        (
+            {"type": "LineString", "coordinates": [[0.0, 1.0], [2.0, 3.0]]},
+            struct.pack("<BI", 1, 2) + _wkb_ring([(0.0, 1.0), (2.0, 3.0)]),
+        ),
+        (
+            {"type": "Polygon", "coordinates": [_SQUARE_JSON, _INNER_JSON]},
+            _wkb_polygon([_SQUARE, _INNER]),
+        ),
+        (
+            {"type": "MultiPolygon", "coordinates": [[_SQUARE_JSON], [_INNER_JSON]]},
+            struct.pack("<BII", 1, 6, 2) + _wkb_polygon([_SQUARE]) + _wkb_polygon([_INNER]),
+        ),
+        (
+            {
+                "type": "GeometryCollection",
+                "geometries": [
+                    {"type": "Point", "coordinates": [1.0, 2.0]},
+                    {"type": "Point", "coordinates": [3.0, 4.0]},
+                ],
+            },
+            struct.pack("<BII", 1, 7, 2) + _wkb_point(1.0, 2.0) + _wkb_point(3.0, 4.0),
+        ),
+    ],
+)
+def test_wkb_encodings_agree_with_the_item_geometry(geometry: object, blob: bytes) -> None:
+    """Every encoding a mirror may carry reaches shapely and matches the item."""
+    assert checks._geometry_agrees(_mirror_item(geometry=geometry), blob)
 
 
 @pytest.mark.parametrize(
@@ -694,28 +701,33 @@ def test_wkb_geometry_collection_recurses_into_members() -> None:
         struct.pack("<BI", 1, 42),  # unknown geometry type
         struct.pack("<BIdd", 1, 1, 5.0, 51.0)[:-4],  # truncated coordinate
         struct.pack("<BII", 1, 2, 1_000_000),  # a vertex count the buffer cannot hold
+        _wkb_polygon([_SQUARE[:-1]]),  # a ring that does not close
     ],
 )
-def test_unreadable_wkb_is_none(blob: bytes) -> None:
-    assert checks._wkb_geometry(blob) is None
+def test_unreadable_wkb_leaves_the_row_alone(blob: bytes) -> None:
+    assert checks._from_wkb(blob) is None
+    item = _mirror_item(geometry={"type": "Point", "coordinates": [5.0, 51.0]})
+    assert checks._geometry_agrees(item, blob)
 
 
 @pytest.mark.parametrize(
     "geometry,expected",
     [
-        ({"type": "Point", "coordinates": [5.0, 51.0]}, ("Point", [(5.0, 51.0)])),
-        ({"type": "Polygon", "coordinates": [_SQUARE_JSON]}, ("Polygon", _SQUARE)),
+        ({"type": "Point", "coordinates": [5.0, 51.0]}, "Point"),
+        ({"type": "Polygon", "coordinates": [_SQUARE_JSON]}, "Polygon"),
         (
             {
                 "type": "GeometryCollection",
                 "geometries": [{"type": "Point", "coordinates": [1, 2]}],
             },
-            ("GeometryCollection", [(1.0, 2.0)]),
+            "GeometryCollection",
         ),
     ],
 )
-def test_geojson_geometry_flattens_to_vertices(geometry: object, expected: object) -> None:
-    assert checks._geojson_geometry(geometry) == expected
+def test_geojson_geometry_builds_a_shape(geometry: object, expected: str) -> None:
+    built = checks._shape(geometry)
+    assert built is not None
+    assert built.geom_type == expected
 
 
 @pytest.mark.parametrize(
@@ -730,7 +742,7 @@ def test_geojson_geometry_flattens_to_vertices(geometry: object, expected: objec
     ],
 )
 def test_unusable_geojson_geometry_is_none(geometry: object) -> None:
-    assert checks._geojson_geometry(geometry) is None
+    assert checks._shape(geometry) is None
 
 
 def test_geometry_agreement_holds_within_the_tolerance() -> None:
@@ -759,7 +771,23 @@ def test_geometry_agreement_is_silent_without_an_item_geometry() -> None:
 
 def test_geometry_agreement_counts_vertices() -> None:
     item = _mirror_item(geometry={"type": "Polygon", "coordinates": [_SQUARE_JSON]})
-    assert not checks._geometry_agrees(item, _wkb_polygon([_SQUARE[:-1]]))
+    triangle = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)]
+    assert not checks._geometry_agrees(item, _wkb_polygon([triangle]))
+
+
+def test_geometry_agreement_reads_structure_not_only_vertices() -> None:
+    """Two parts against one part with a hole, over the same vertices.
+
+    A comparison that flattened both sides to a vertex list would call these
+    equal: same type name, same points, same order. They are different
+    footprints, and a mirror carrying one for an item declaring the other has
+    drifted.
+    """
+    item = _mirror_item(
+        geometry={"type": "MultiPolygon", "coordinates": [[_SQUARE_JSON], [_INNER_JSON]]}
+    )
+    one_part_with_a_hole = struct.pack("<BII", 1, 6, 1) + _wkb_polygon([_SQUARE, _INNER])
+    assert not checks._geometry_agrees(item, one_part_with_a_hole)
 
 
 @pytest.mark.parametrize(

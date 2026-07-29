@@ -69,8 +69,13 @@ from urllib.parse import urlparse
 import pyarrow as pa
 import pyarrow.parquet as pq
 import rasterio
+import shapely
 from pyproj import CRS, Transformer
 from rio_cogeo.cogeo import cog_validate
+from shapely import from_wkb
+from shapely.errors import ShapelyError
+from shapely.geometry import shape
+from shapely.geometry.base import BaseGeometry
 
 from rashid._multihash import decode_multihash
 from rashid.catalog import CatalogGraph, Node
@@ -775,31 +780,12 @@ _MIRROR_COORD_TOL = 1e-6
 # behind by an edited item is off by minutes at least.
 _MIRROR_TIME_TOL = timedelta(seconds=1)
 
-# EWKB sets these high bits on the type code; ISO WKB instead adds 1000 per
-# extra dimension (1000 Z, 2000 M, 3000 ZM).
-_WKB_Z = 0x80000000
-_WKB_M = 0x40000000
-_WKB_SRID = 0x20000000
-_WKB_BASE = 0x1FFFFFFF
-_WKB_TYPES = {
-    1: "Point",
-    2: "LineString",
-    3: "Polygon",
-    4: "MultiPoint",
-    5: "MultiLineString",
-    6: "MultiPolygon",
-    7: "GeometryCollection",
-}
-
 # RFC 3339: fromisoformat on Python 3.10 rejects the 'Z' suffix and any
 # fraction that is not three or six digits, both of which the grammar allows.
 _RFC3339 = re.compile(
     r"(?P<stamp>\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2})"
     r"(?:\.(?P<fraction>\d+))?(?P<offset>[Zz]|[+-]\d{2}:?\d{2})?$"
 )
-
-# A geometry as the comparison reads it: type name plus vertices in order.
-_Geometry = tuple[str, list[tuple[float, float]]]
 
 
 @dataclass(frozen=True)
@@ -1033,31 +1019,51 @@ def _bbox_column_values(table: Any, bbox: tuple[str, list[str]]) -> list[Any]:
 def _geometry_agrees(item: Node, blob: Any) -> bool:
     """Does one mirror row's geometry reproduce the item's?
 
-    Compared as a type name plus a vertex sequence, within
-    ``_MIRROR_COORD_TOL``: both sides hold float64, so exact equality would
-    fault a mirror built from full-precision sources against item JSON written
-    to a fixed number of decimals. A blob this reader cannot decode is left
-    alone, because an encoding it does not know is not evidence of drift; a
-    null geometry against an item that has one is drift.
+    Both sides are built as shapely geometries, the mirror's from WKB and the
+    item's from GeoJSON, and compared with ``shapely.equals_exact`` within
+    ``_MIRROR_COORD_TOL``. That comparison is structural: it holds only when
+    the two agree on type, on part and ring nesting, and on vertex order, so a
+    polygon whose rings were redrawn over the same points is drift rather than
+    a match. The tolerance is there because both sides hold float64, so exact
+    equality would fault a mirror built from full-precision sources against
+    item JSON written to a fixed number of decimals. A blob shapely cannot
+    decode is left alone, because an encoding it does not know is not evidence
+    of drift; a null geometry against an item that has one is drift.
     """
-    declared = _geojson_geometry(item.data.get("geometry"))
+    declared = _shape(item.data.get("geometry"))
     if declared is None:
-        return True  # a null item geometry is nothing to compare against
+        return True  # a null or unreadable item geometry is nothing to compare against
     if blob is None:
         return False
     if not isinstance(blob, bytes):
         return True
-    actual = _wkb_geometry(blob)
+    actual = _from_wkb(blob)
     if actual is None:
         return True
-    name, points = declared
-    other_name, other_points = actual
-    if name != other_name or len(points) != len(other_points):
-        return False
-    return all(
-        abs(x - u) <= _MIRROR_COORD_TOL and abs(y - v) <= _MIRROR_COORD_TOL
-        for (x, y), (u, v) in zip(points, other_points, strict=True)
-    )
+    return bool(shapely.equals_exact(declared, actual, tolerance=_MIRROR_COORD_TOL))
+
+
+def _shape(geometry: Any) -> BaseGeometry | None:
+    """A GeoJSON geometry mapping as a shapely geometry, or None if unusable.
+
+    An empty geometry counts as unusable: a member-less collection or a
+    coordinate-less point carries nothing to compare a mirror row against.
+    """
+    if not isinstance(geometry, dict):
+        return None
+    try:
+        built = shape(geometry)
+    except (ShapelyError, AttributeError, KeyError, TypeError, ValueError):
+        return None
+    return None if built.is_empty else built
+
+
+def _from_wkb(blob: bytes) -> BaseGeometry | None:
+    """A WKB blob as a shapely geometry, or None if shapely cannot read it."""
+    try:
+        return from_wkb(blob)
+    except (ShapelyError, TypeError, ValueError):
+        return None
 
 
 def _datetime_agrees(item: Node, value: Any) -> bool:
@@ -1114,108 +1120,6 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
-
-
-def _geojson_geometry(geometry: Any) -> _Geometry | None:
-    """A GeoJSON geometry as its type name and its vertices in document order."""
-    if not isinstance(geometry, dict):
-        return None
-    name = geometry.get("type")
-    if not isinstance(name, str) or name not in _WKB_TYPES.values():
-        return None
-    if name == "GeometryCollection":
-        members = geometry.get("geometries")
-        if not isinstance(members, list):
-            return None
-        points: list[tuple[float, float]] = []
-        for member in members:
-            parsed = _geojson_geometry(member)
-            if parsed is None:
-                return None
-            points.extend(parsed[1])
-        return (name, points) if points else None
-    vertices = _coordinate_points(geometry.get("coordinates"))
-    return (name, vertices) if vertices else None
-
-
-def _coordinate_points(coordinates: Any) -> list[tuple[float, float]]:
-    """Flatten a GeoJSON coordinate array to its x/y pairs, in order."""
-    if not isinstance(coordinates, list) or not coordinates:
-        return []
-    if isinstance(coordinates[0], list):
-        points: list[tuple[float, float]] = []
-        for part in coordinates:
-            points.extend(_coordinate_points(part))
-        return points
-    if len(coordinates) < 2 or not all(isinstance(v, (int, float)) for v in coordinates[:2]):
-        return []
-    return [(float(coordinates[0]), float(coordinates[1]))]
-
-
-def _wkb_geometry(blob: bytes) -> _Geometry | None:
-    """A WKB geometry as its type name and its x/y vertices, in stored order."""
-    try:
-        name, points, _end = _read_wkb(blob, 0)
-    except (struct.error, IndexError, KeyError, ValueError):
-        return None
-    return (name, points) if points else None
-
-
-def _read_wkb(blob: bytes, offset: int) -> tuple[str, list[tuple[float, float]], int]:
-    """One WKB geometry: its type name, its vertices, and the offset past it."""
-    endian = "<" if blob[offset] == 1 else ">"
-    (code,) = struct.unpack_from(endian + "I", blob, offset + 1)
-    offset += 5
-    if code & _WKB_SRID:
-        offset += 4  # EWKB carries the SRID inline, ahead of the body
-    ndim = _wkb_dimensions(code)
-    name = _WKB_TYPES[(code & _WKB_BASE) % 1000]
-    if name == "Point":
-        return name, _wkb_coords(blob, endian, offset, 1, ndim), offset + 8 * ndim
-    (count,) = struct.unpack_from(endian + "I", blob, offset)
-    offset += 4
-    if name == "LineString":
-        return name, _wkb_coords(blob, endian, offset, count, ndim), offset + 8 * ndim * count
-    if name == "Polygon":
-        points, offset = _wkb_rings(blob, endian, offset, count, ndim)
-        return name, points, offset
-    points = []  # Multi* and GeometryCollection nest whole geometries
-    for _ in range(count):
-        _member_name, member_points, offset = _read_wkb(blob, offset)
-        points.extend(member_points)
-    return name, points, offset
-
-
-def _wkb_dimensions(code: int) -> int:
-    if code & (_WKB_Z | _WKB_M):
-        return 2 + bool(code & _WKB_Z) + bool(code & _WKB_M)
-    return {1: 3, 2: 3, 3: 4}.get((code & _WKB_BASE) // 1000, 2)
-
-
-def _wkb_coords(
-    blob: bytes, endian: str, offset: int, count: int, ndim: int
-) -> list[tuple[float, float]]:
-    """``count`` coordinates of ``ndim`` doubles each, kept as x/y pairs."""
-    step = 8 * ndim
-    if count < 0 or offset + step * count > len(blob):
-        raise ValueError("WKB coordinate run runs past the end of the buffer")
-    points = []
-    for i in range(count):
-        x, y = struct.unpack_from(endian + "dd", blob, offset + i * step)
-        points.append((float(x), float(y)))
-    return points
-
-
-def _wkb_rings(
-    blob: bytes, endian: str, offset: int, count: int, ndim: int
-) -> tuple[list[tuple[float, float]], int]:
-    points: list[tuple[float, float]] = []
-    for _ in range(count):
-        (size,) = struct.unpack_from(endian + "I", blob, offset)
-        offset += 4
-        points.extend(_wkb_coords(blob, endian, offset, size, ndim))
-        offset += 8 * ndim * size
-    return points, offset
 
 
 def _sample(ids: list[str], limit: int = 3) -> str:
