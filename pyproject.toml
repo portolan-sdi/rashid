@@ -176,6 +176,12 @@ name = "cz_conventional_commits"
 version = "0.1.3"
 version_files = ["pyproject.toml:^version"]
 tag_format = "v$version"
+annotated_tag = true
+# uv.lock records this package's own version, and version_files rewrites
+# every line matching its pattern, which in a lock file is every package.
+# Relocking after pyproject.toml is bumped but before the commit keeps the
+# two in step, and cz stages what the hook writes.
+pre_bump_hooks = ["uv lock"]
 update_changelog_on_bump = true
 changelog_file = "CHANGELOG.md"
 major_version_zero = true
