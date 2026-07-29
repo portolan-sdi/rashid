@@ -18,6 +18,8 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
+import pyarrow.parquet as pq  # noqa: E402
+
 import rashid.data.checks as checks  # noqa: E402
 from rashid.catalog import Node  # noqa: E402
 from rashid.data import (  # noqa: E402
@@ -283,6 +285,20 @@ def test_oversized_rowgroup_flags_dat_008(tmp_path: Path) -> None:
     defects = _gpq(path)
     assert DAT_ROWGROUP_SIZE in [d.rule_id for d in defects]
     assert next(d for d in defects if d.rule_id == DAT_ROWGROUP_SIZE).severity is Severity.ERROR
+
+
+def test_sorted_file_split_for_the_ceiling_stays_clean(tmp_path: Path) -> None:
+    """The shape PTL-DAT-008 forces on a file just over the ceiling.
+
+    150,001 rows in groups of 50,000 is four row groups, and four boxes off a
+    curve sort average about 46% of the extent. The flat 25% limit read that as
+    unordered, so satisfying one storage rule produced a finding under another.
+    """
+    path = tmp_path / "ceiling.parquet"
+    points = assets.morton_sorted(assets.scattered_points(150_001))
+    assets.write_geoparquet(path, points=points, row_group_size=50_000)
+    assert pq.ParquetFile(path).metadata.num_row_groups == 4
+    assert _gpq(path) == []
 
 
 def test_plain_parquet_is_skipped(tmp_path: Path) -> None:

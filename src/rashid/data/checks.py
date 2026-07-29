@@ -132,6 +132,13 @@ _MAX_ROW_GROUP_ROWS = 150_000
 # formats.md:30 — spatial ordering passes on either criterion.
 _MAX_OVERLAP_FRACTION = 0.30  # < 30% of consecutive row-group pairs may overlap
 _MAX_LOCALITY_RATIO = 0.25  # row-group boxes average < 25% of the file extent
+# formats.md:36 completes the locality criterion: boxes that small let a reader
+# "skip at least 50% of row groups for a query window of 10% of the extent".
+_MIN_SKIP_RATE = 0.50
+_QUERY_FRACTION = 0.10
+# Query windows sit on a fixed lattice rather than being sampled at random, so
+# the same file always yields the same finding.
+_QUERY_LATTICE = 5
 
 # A file the writer never chunked has one row group, so the two criteria above
 # have nothing to compare and pass whatever the row order. formats.md states
@@ -1449,7 +1456,50 @@ def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bo
     if extent_area == 0:
         return True  # a single location — nothing to order
     mean_ratio = sum(_bbox_area(b) for b in bboxes) / len(bboxes) / extent_area
-    return mean_ratio < _MAX_LOCALITY_RATIO  # high locality
+    return mean_ratio < _locality_ratio_limit(len(bboxes)) and (
+        _mean_skip_rate(bboxes, extent) >= _MIN_SKIP_RATE
+    )
+
+
+def _locality_ratio_limit(groups: int) -> float:
+    """The area-ratio cutoff for ``groups`` row groups.
+
+    A well-ordered file's row-group boxes each cover roughly ``1/groups`` of the
+    extent plus slop, so a file split into two or three groups cannot reach 25%
+    however well it is sorted. The limit relaxes to ``2/groups`` below eight
+    groups and holds formats.md's 25% at or above it. The skip rate keeps the
+    relaxation honest: boxes that each span the whole extent skip nothing and
+    fail on that criterion instead.
+
+    Ported from geoparquet-io's ``_area_ratio_threshold``.
+    """
+    return max(_MAX_LOCALITY_RATIO, 2.0 / groups)
+
+
+def _mean_skip_rate(
+    bboxes: list[tuple[float, float, float, float]],
+    extent: tuple[float, float, float, float],
+) -> float:
+    """Fraction of row groups a query window skips, averaged over the extent.
+
+    formats.md:36 sizes the window at 10% of the extent per dimension. The
+    windows sit on a fixed lattice of ``_QUERY_LATTICE`` positions per axis, so
+    the same file always yields the same number. geoparquet-io's
+    ``_compute_locality_metrics`` samples equivalent windows at random from a
+    pinned seed, which a reader of a validator report cannot reproduce.
+    """
+    groups = len(bboxes)
+    width = (extent[2] - extent[0]) * _QUERY_FRACTION
+    height = (extent[3] - extent[1]) * _QUERY_FRACTION
+    rates = []
+    for i in range(_QUERY_LATTICE):
+        for j in range(_QUERY_LATTICE):
+            x = extent[0] + (extent[2] - extent[0] - width) * i / (_QUERY_LATTICE - 1)
+            y = extent[1] + (extent[3] - extent[1] - height) * j / (_QUERY_LATTICE - 1)
+            window = (x, y, x + width, y + height)
+            skipped = sum(not _bbox_overlaps(window, b) for b in bboxes)
+            rates.append(skipped / groups)
+    return sum(rates) / len(rates)
 
 
 def _bbox_area(b: tuple[float, float, float, float]) -> float:
