@@ -1,10 +1,17 @@
 """What every outgoing HTTP request identifies itself as.
 
-Two passes reach the network — the live prober and the data pass's byte
-reader — and both must send the same agent, so the string lives here rather
-than in either of them. Neither pass imports the other, and this module is
-stdlib-only, so it stays importable from both without creating an edge
-between the passes.
+Three passes reach the network over urllib — the live prober, the data pass's
+byte reader, and the schema pass fetching an unbundled profile schema — and
+all must send the same agent, so the string lives here rather than in any of
+them. None of them imports the others, and this module is stdlib-only, so it
+stays importable from all three without creating an edge between the passes.
+
+Raster reads go out through GDAL's own HTTP stack rather than urllib, so they
+carry GDAL's agent, not this one. That agent defaults to ``GDAL/x.y.z``, which
+is named rather than anonymous, so those reads do not hit the 403 described
+below; the gap is one of consistency. Closing it means passing
+``GDAL_HTTP_USERAGENT`` to every GDAL entry point in the data pass, the
+``rasterio.Env`` blocks and ``cog_validate``'s ``config`` alike.
 """
 
 from __future__ import annotations
