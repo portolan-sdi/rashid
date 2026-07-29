@@ -93,6 +93,102 @@ def test_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
     assert defects[0].severity is Severity.ERROR
 
 
+def test_single_row_group_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
+    """The plain stac-geoparquet writer emits one row group at any row count.
+
+    ``parse_stac_items_to_arrow`` returns one contiguous record batch unless a
+    schema is passed, and ``to_parquet`` writes one row group per batch. With
+    only one box to compare, the row-group criteria have nothing to measure
+    and the MUST passes vacuously on entirely unsorted data.
+    """
+    path = tmp_path / "one_group.parquet"
+    points = assets.scattered_points(5000)
+    assets.write_geoparquet(path, points=points, row_group_size=len(points))
+    defects = _gpq(path)
+    assert [d.rule_id for d in defects] == [DAT_ORDERING]
+    assert defects[0].severity is Severity.ERROR
+
+
+def test_single_row_group_curve_sorted_rows_are_clean(tmp_path: Path) -> None:
+    """The same rows, spatially sorted: nearby features are nearby in the file."""
+    path = tmp_path / "one_group_sorted.parquet"
+    points = assets.morton_sorted(assets.scattered_points(5000))
+    assets.write_geoparquet(path, points=points, row_group_size=len(points))
+    assert _gpq(path) == []
+
+
+def test_small_single_row_group_collection_is_not_judged(tmp_path: Path) -> None:
+    """Too few rows for chunking to mean anything, so no spurious finding."""
+    path = tmp_path / "small.parquet"
+    points = assets.local_points(20)
+    assets.write_geoparquet(path, points=points, row_group_size=len(points))
+    assert _gpq(path) == []
+
+
+def test_single_row_group_without_readable_row_boxes_reports_unevaluated() -> None:
+    """Honest silence, not a false pass, when the boxes cannot be read.
+
+    A file whose per-row-group boxes come from native GeospatialStatistics has
+    no covering column to read row by row, so ordering stays unmeasured and
+    the check says so rather than reporting success.
+    """
+    defects = checks._unchunked_ordering_defects("data", object(), {}, 5000)
+    assert [d.rule_id for d in defects] == [DAT_ORDERING]
+    assert defects[0].severity is Severity.INFO
+    assert "could not be evaluated" in defects[0].message
+
+
+@pytest.mark.parametrize(
+    "geo",
+    [
+        pytest.param({}, id="no-columns"),
+        pytest.param({"primary_column": "g", "columns": {"g": {}}}, id="no-covering"),
+        pytest.param(
+            {"primary_column": "g", "columns": {"g": {"covering": {"bbox": {"xmin": ["b", "x"]}}}}},
+            id="incomplete-corners",
+        ),
+        pytest.param(
+            {
+                "primary_column": "g",
+                "columns": {
+                    "g": {
+                        "covering": {
+                            "bbox": {
+                                "xmin": ["b", "deep", "x"],
+                                "ymin": ["b", "deep", "y"],
+                                "xmax": ["b", "deep", "X"],
+                                "ymax": ["b", "deep", "Y"],
+                            }
+                        }
+                    }
+                },
+            },
+            id="nested-deeper-than-one-struct",
+        ),
+        pytest.param(
+            {
+                "primary_column": "g",
+                "columns": {
+                    "g": {
+                        "covering": {
+                            "bbox": {
+                                "xmin": ["lo", "x"],
+                                "ymin": ["lo", "y"],
+                                "xmax": ["hi", "x"],
+                                "ymax": ["hi", "y"],
+                            }
+                        }
+                    }
+                },
+            },
+            id="corners-split-across-two-structs",
+        ),
+    ],
+)
+def test_row_bboxes_declines_coverings_it_cannot_read(geo: dict) -> None:
+    assert checks._row_bboxes(object(), geo) is None
+
+
 def test_missing_rowgroup_stats_flag_dat_007(tmp_path: Path) -> None:
     path = tmp_path / "no_covering.parquet"
     assets.write_geoparquet(path, covering=False)
