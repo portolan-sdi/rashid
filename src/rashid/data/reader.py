@@ -23,10 +23,20 @@ from typing import Protocol
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from rashid._http import user_agent
 from rashid.catalog import CatalogGraph, Node, is_absolute_href
 
 _CHUNK = 1 << 16  # 64 KiB
 _TIMEOUT = 30  # seconds per request
+
+
+def _headers(**extra: str) -> dict[str, str]:
+    """Request headers, always naming the validator.
+
+    urllib's default agent is blocked by edge providers, which answer it with
+    an error page the reader would otherwise consume as the asset's bytes.
+    """
+    return {"User-Agent": user_agent(), **extra}
 
 
 @dataclass(frozen=True)
@@ -95,7 +105,7 @@ def _file_stream(path: Path) -> Iterator[bytes]:
 
 def _http_stream(url: str) -> Iterator[bytes]:
     _require_https(url)
-    request = Request(url, method="GET")
+    request = Request(url, method="GET", headers=_headers())
     with urlopen(request, timeout=_TIMEOUT) as response:  # noqa: S310  # nosec B310
         while chunk := response.read(_CHUNK):
             yield chunk
@@ -123,7 +133,7 @@ class _HttpRangeFile(io.RawIOBase):
         self._size = self._head_length()
 
     def _head_length(self) -> int:
-        request = Request(self._url, method="HEAD")
+        request = Request(self._url, method="HEAD", headers=_headers())
         with urlopen(request, timeout=_TIMEOUT) as response:  # noqa: S310  # nosec B310
             length = response.headers.get("Content-Length")
         if length is None:
@@ -158,7 +168,7 @@ class _HttpRangeFile(io.RawIOBase):
         request = Request(
             self._url,
             method="GET",
-            headers={"Range": f"bytes={self._pos}-{end}"},
+            headers=_headers(Range=f"bytes={self._pos}-{end}"),
         )
         with urlopen(request, timeout=_TIMEOUT) as response:  # noqa: S310  # nosec B310
             data = response.read()

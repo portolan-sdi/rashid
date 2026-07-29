@@ -8,8 +8,11 @@ HTTP range/stream fallbacks the remote path relies on.
 from __future__ import annotations
 
 import io
+import re
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
+from urllib.request import Request
 
 import pytest
 
@@ -180,3 +183,73 @@ def test_local_open_binary_roundtrip(tmp_path: Path) -> None:
     located = Locator(is_remote=False, source=str(path))
     with located.open_binary() as handle:
         assert handle.read() == b"hello"
+
+
+# --- outgoing request headers ------------------------------------------------
+#
+# The stubs above answer any request, so a missing User-Agent is invisible to
+# them. These record the Request each read path builds and assert on it (#64).
+
+# urllib capitalizes header names, so the stored key is 'User-agent'.
+_AGENT_PATTERN = re.compile(r"^rashid/\S+ \(\+https://github\.com/portolan-sdi/rashid\)$")
+
+
+def _recorder(requests: list[Request], payload: bytes) -> Any:
+    server = _fake_server(payload)
+
+    def fake_urlopen(request: Request, **kwargs: Any) -> _FakeResponse:
+        requests.append(request)
+        return server(request, **kwargs)
+
+    return fake_urlopen
+
+
+def _assert_named_agent(request: Request) -> None:
+    agent = request.get_header("User-agent")
+    assert agent is not None, f"{request.get_method()} sent no User-Agent"
+    assert _AGENT_PATTERN.match(agent), agent
+    assert agent == f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
+
+
+def test_http_stream_sends_a_named_user_agent(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    graph, item = _item_graph(catalog)
+    requests: list[Request] = []
+    monkeypatch.setattr(reader_mod, "urlopen", _recorder(requests, b"payload"))
+
+    stream = FilesystemHttpReader(graph).stream(item, "https://host/x.parquet")
+    assert stream is not None
+    b"".join(stream)
+
+    (request,) = requests
+    assert request.get_method() == "GET"
+    _assert_named_agent(request)
+
+
+def test_range_file_head_sends_a_named_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests: list[Request] = []
+    monkeypatch.setattr(reader_mod, "urlopen", _recorder(requests, bytes(range(64))))
+
+    _HttpRangeFile("https://host/x.bin")
+
+    (request,) = requests
+    assert request.get_method() == "HEAD"
+    _assert_named_agent(request)
+
+
+def test_range_read_sends_a_named_user_agent_and_keeps_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = bytes(range(64))
+    requests: list[Request] = []
+    monkeypatch.setattr(reader_mod, "urlopen", _recorder(requests, payload))
+
+    handle = _HttpRangeFile("https://host/x.bin")
+    handle.seek(8)
+    assert handle.read(4) == payload[8:12]
+
+    ranged = requests[-1]
+    assert ranged.get_method() == "GET"
+    assert ranged.get_header("Range") == "bytes=8-11"
+    _assert_named_agent(ranged)
