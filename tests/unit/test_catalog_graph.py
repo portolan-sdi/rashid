@@ -117,6 +117,31 @@ def test_enclosing_collection_walks_past_intermediate_catalogs(catalog: CatalogB
     assert graph.enclosing_collection_of(root) is None
 
 
+def test_items_of_reaches_items_under_an_organizing_catalog(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(write_organizing_catalog_layout(catalog))
+    collection = graph.nodes[PurePosixPath("roads/collection.json")]
+    organizing = graph.nodes[PurePosixPath("roads/2024/catalog.json")]
+    item = graph.nodes[PurePosixPath("roads/2024/roads-2024/roads-2024.json")]
+
+    # direct containment stops at the organizing catalog and never sees the item
+    assert graph.children_of(collection) == [organizing]
+    assert graph.items_of(collection) == [item]
+
+
+def test_items_of_leaves_a_nested_collections_items_to_that_collection(
+    catalog: CatalogBuilder,
+) -> None:
+    """An item belongs to the nearest collection above it, not the outermost."""
+    outer = catalog.collection("roads")
+    outer.item("roads-2024")
+    graph = _graph(catalog)
+    collection = graph.nodes[PurePosixPath("roads/collection.json")]
+    item = graph.nodes[PurePosixPath("roads/roads-2024/roads-2024.json")]
+
+    assert graph.items_of(collection) == [item]
+    assert graph.items_of(item) == []
+
+
 def test_dir_listing_and_file_exists(catalog: CatalogBuilder) -> None:
     catalog.collection("roads")
     graph = _graph(catalog)
