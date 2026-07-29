@@ -9,7 +9,10 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
 - ``PTL-DAT-002`` byte length ≠ ``file:size`` (MUST)
 - ``PTL-DAT-003`` magic bytes ≠ declared media type (MUST)
 - ``PTL-DAT-004`` a raster asset is not a valid COG (MUST, formats.md:91)
-- ``PTL-DAT-005`` actual bbox/CRS inconsistent with the declared metadata (advisory)
+- ``PTL-DAT-005`` actual bbox/CRS inconsistent with the declared metadata
+  (advisory). A ``proj:epsg`` the asset declares itself is faulted on the asset;
+  one inherited from the enclosing collection or item is faulted at the field
+  that declares it, once, however many assets read it.
 - ``PTL-DAT-006`` GeoParquet rows are not spatially ordered (MUST, formats.md:30)
 - ``PTL-DAT-007`` no per-row-group spatial statistics (MUST, formats.md:39)
 - ``PTL-DAT-008`` a row group exceeds 150,000 rows (MUST, formats.md:50)
@@ -136,6 +139,19 @@ _VALID_PERCENT_KEY = "STATISTICS_VALID_PERCENT"
 
 
 @dataclass(frozen=True)
+class _EpsgDeclaration:
+    """A ``proj:epsg`` value and the document node that carries it.
+
+    ``pointer`` is ``None`` when the asset declares the value itself. Otherwise
+    the asset inherits it from the enclosing collection or item, and ``pointer``
+    locates the single field that governs every asset on that object.
+    """
+
+    value: int
+    pointer: str | None
+
+
+@dataclass(frozen=True)
 class _Geo:
     """Actual spatial metadata read from an asset's bytes."""
 
@@ -185,7 +201,29 @@ def check_node(
         if not isinstance(href, str) or not href:
             continue  # PTL-AST-001 reports a missing href
         defects.extend(_check_asset(node, key, asset, href, reader, graph))
-    return defects
+    return _collapse_shared_fields(defects)
+
+
+def _collapse_shared_fields(defects: list[DataDefect]) -> list[DataDefect]:
+    """Report a defect in one shared field once, not once per asset that reads it.
+
+    Every asset on a collection inherits the collection's ``proj:epsg``, so the
+    per-asset pass raises the same defect against the same field as many times
+    as the collection has assets. One declaration is one defect. Defects that
+    name an asset carry no pointer of their own and pass through untouched.
+    """
+    seen: set[tuple[str, str, str]] = set()
+    kept: list[DataDefect] = []
+    for defect in defects:
+        if defect.json_pointer is None:
+            kept.append(defect)
+            continue
+        signature = (defect.rule_id, defect.json_pointer, defect.message)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        kept.append(defect)
+    return kept
 
 
 def _assets_of(node: Node) -> list[tuple[str, dict[str, Any]]]:
@@ -563,15 +601,8 @@ def _check_consistency(
 
     defects: list[DataDefect] = []
     declared_epsg = _declared_epsg(node, asset)
-    if declared_epsg is not None and geo.epsg is not None and declared_epsg != geo.epsg:
-        defects.append(
-            DataDefect(
-                DAT_CONSISTENCY,
-                Severity.WARNING,
-                f"asset '{key}' declares proj:epsg {declared_epsg} but its data is EPSG:{geo.epsg}",
-                key,
-            )
-        )
+    if declared_epsg is not None and geo.epsg is not None and declared_epsg.value != geo.epsg:
+        defects.append(_epsg_defect(node, key, declared_epsg, geo.epsg))
 
     declared_bbox = _declared_bbox(node)
     bounds = _wgs84_bounds(geo)
@@ -579,6 +610,40 @@ def _check_consistency(
         message = _bbox_mismatch_message(key, declared_bbox, bounds, geo.epsg)
         defects.append(DataDefect(DAT_CONSISTENCY, Severity.WARNING, message, key))
     return defects
+
+
+def _epsg_defect(node: Node, key: str, declared: _EpsgDeclaration, actual: int) -> DataDefect:
+    """Fault the document node that carries the declaration, not its inheritor.
+
+    An asset that declares its own ``proj:epsg`` and contradicts its own bytes
+    is faulted on the asset: the two claims are about the same object, and only
+    the publisher knows which one is true. A value inherited from the enclosing
+    collection or item is faulted where it is written, and the message says the
+    assets inherit it, because the field an editor must change is that one and
+    the asset the reader was sent to holds no ``proj:epsg`` at all. The file's
+    own spatial metadata settles the inherited case, so ``expected`` carries the
+    CRS the bytes declare and ``actual`` the stale value in the document.
+    """
+    if declared.pointer is None:
+        return DataDefect(
+            DAT_CONSISTENCY,
+            Severity.WARNING,
+            f"asset '{key}' declares proj:epsg {declared.value} but its data is EPSG:{actual}",
+            key,
+            expected=actual,
+            actual=declared.value,
+        )
+    where = "in its properties" if declared.pointer.startswith("/properties") else "at its root"
+    return DataDefect(
+        DAT_CONSISTENCY,
+        Severity.WARNING,
+        f"{node.kind} '{node.id}' declares proj:epsg {declared.value} {where}, which its "
+        f"assets inherit, but the asset data is EPSG:{actual}",
+        key,
+        json_pointer=declared.pointer,
+        expected=actual,
+        actual=declared.value,
+    )
 
 
 def _bbox_mismatch_message(
@@ -1262,10 +1327,21 @@ def _declared_bbox(node: Node) -> list[float] | None:
     return None
 
 
-def _declared_epsg(node: Node, asset: dict[str, Any]) -> int | None:
-    for source in (asset, node.data.get("properties", {}), node.data):
+def _declared_epsg(node: Node, asset: dict[str, Any]) -> _EpsgDeclaration | None:
+    """Find the ``proj:epsg`` an asset is governed by, and where it is written.
+
+    The asset's own value wins, then the enclosing object's ``properties``, then
+    its document root. The two outer sources are inherited: one field governs
+    every asset on the object, and that field is the one an editor changes.
+    """
+    sources: tuple[tuple[Any, str | None], ...] = (
+        (asset, None),
+        (node.data.get("properties", {}), "/properties/proj:epsg"),
+        (node.data, "/proj:epsg"),
+    )
+    for source, pointer in sources:
         if isinstance(source, dict):
             value = source.get("proj:epsg")
             if isinstance(value, int) and not isinstance(value, bool):
-                return value
+                return _EpsgDeclaration(value, pointer)
     return None
