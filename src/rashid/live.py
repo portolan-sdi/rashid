@@ -34,6 +34,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from rashid._http import user_agent
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.model import Finding, Severity
 
@@ -112,7 +113,9 @@ def _lower_headers(items: Any) -> dict[str, str]:
 def _request(url: str, method: str, headers: dict[str, str]) -> ProbeResponse:
     if urlparse(url).scheme.lower() != "https":
         raise ValueError(f"refusing to probe non-https URL: {url!r}")
-    request = Request(url, method=method, headers=headers)
+    # Every probe shape — ranged GET, HEAD, OPTIONS preflight — funnels through
+    # here, so setting the agent once covers all of them.
+    request = Request(url, method=method, headers={"User-Agent": user_agent(), **headers})
     try:
         with urlopen(request, timeout=_TIMEOUT) as response:  # noqa: S310  # nosec B310
             return ProbeResponse(
