@@ -12,9 +12,10 @@ abstraction and emit findings directly; they declare only the spec IDs they
 enforce, in a module-level ``SPEC_IDS`` dict, so their titles and severities
 live in :data:`_PASS_CHECKS` below.
 
-Import-time assertions keep the two halves honest: the id-spaces must stay
-disjoint, and every ``SPEC_IDS`` key must have an entry here. A new pass check
-that forgets its title fails at import rather than rendering a blank column.
+Building the join enforces that the two halves stay honest: the id-spaces must
+stay disjoint, and every ``SPEC_IDS`` key must have an entry here. A new pass
+check that forgets its title raises :class:`RegistryError` at import rather
+than rendering a blank column.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ import rashid.structural as _structural_pass
 from rashid.model import Severity
 from rashid.rules import DEFAULT_RULES
 
-__all__ = ["CheckInfo", "CHECKS", "describe"]
+__all__ = ["CHECKS", "CheckInfo", "RegistryError", "describe"]
 
 
 @dataclass(frozen=True)
@@ -185,12 +186,22 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
 _PASS_MODULES = (_runner, _structural_pass, _schema_pass, _data_pass, _live_pass)
 
 
+class RegistryError(RuntimeError):
+    """The two id-spaces disagree: a duplicate, a collision, or a missing title.
+
+    Raised while building :data:`CHECKS`, so importing rashid at all fails
+    rather than leaving a check that renders without a description.
+    """
+
+
 def _build() -> dict[str, CheckInfo]:
     """Join the two id-spaces into one id -> CheckInfo mapping."""
     checks: dict[str, CheckInfo] = {}
     for rule in DEFAULT_RULES:
-        assert rule.id not in checks, f"duplicate rule id {rule.id}"
-        assert rule.description, f"rule {rule.id} has no description"
+        if rule.id in checks:
+            raise RegistryError(f"duplicate rule id {rule.id}")
+        if not rule.description:
+            raise RegistryError(f"rule {rule.id} has no description")
         checks[rule.id] = CheckInfo(
             id=rule.id,
             description=rule.description,
@@ -201,11 +212,13 @@ def _build() -> dict[str, CheckInfo]:
     spec_ids: dict[str, tuple[str, ...]] = {}
     for module in _PASS_MODULES:
         for check_id, ids in module.SPEC_IDS.items():
-            assert check_id not in spec_ids, f"duplicate check id {check_id}"
+            if check_id in spec_ids:
+                raise RegistryError(f"duplicate check id {check_id}")
             spec_ids[check_id] = ids
 
     for check_id, (severity, description) in _PASS_CHECKS.items():
-        assert check_id not in checks, f"pass check {check_id} collides with a rule"
+        if check_id in checks:
+            raise RegistryError(f"pass check {check_id} collides with a rule")
         checks[check_id] = CheckInfo(
             id=check_id,
             description=description,
@@ -214,7 +227,8 @@ def _build() -> dict[str, CheckInfo]:
         )
 
     missing = sorted(set(spec_ids) - set(_PASS_CHECKS))
-    assert not missing, f"pass checks missing from the registry: {missing}"
+    if missing:
+        raise RegistryError(f"pass checks missing from the registry: {missing}")
     return checks
 
 
