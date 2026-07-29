@@ -73,6 +73,21 @@ covers how a change reaches this one.
 `security-audit.yml` stays local. It opens a tracking issue when
 pip-audit finds a vulnerability and closes it when the audit goes clean.
 
+## Releasing
+
+Commitizen reads the commits since the last tag and picks the version.
+
+```bash
+git checkout main && git pull
+uv run cz bump --changelog
+git push --follow-tags
+```
+
+`cz bump` rewrites `pyproject.toml`, relocks `uv.lock` through a
+pre-bump hook, writes `CHANGELOG.md`, commits as `bump:`, and tags.
+`publish.yml` gates on that `bump:` prefix and pushes the wheel and sdist
+to PyPI. Pass `--increment PATCH` to override the computed version.
+
 ## Spec fixtures
 
 `SPEC_REF` records the portolan-spec commit the vendored fixtures came
