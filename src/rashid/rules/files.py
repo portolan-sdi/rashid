@@ -43,14 +43,83 @@ def _readme_text(node: Node, graph: CatalogGraph) -> str | None:
         return None
 
 
+def _link_findings(
+    rule: Rule,
+    node: Node,
+    graph: CatalogGraph,
+    *,
+    rel: str,
+    target: str,
+    index: int,
+    link: dict[str, object],
+) -> list[Finding]:
+    """Everything wrong with one candidate link, empty when it conforms."""
+    findings: list[Finding] = []
+    if link.get("type") != _MARKDOWN:
+        findings.append(
+            rule.finding(
+                node,
+                f"rel:{rel!r} link has type {link.get('type')!r}, expected 'text/markdown'",
+                json_pointer=f"/links/{index}/type",
+                fix_hint=f"set the rel:{rel!r} link type to 'text/markdown'",
+                expected=_MARKDOWN,
+                actual=link.get("type"),
+            )
+        )
+    href = link.get("href")
+    if not isinstance(href, str) or not href or is_absolute_href(href):
+        findings.append(
+            rule.finding(
+                node,
+                f"rel:{rel!r} link href must be a relative path, got {href!r}",
+                json_pointer=f"/links/{index}/href",
+                fix_hint=f'set the href to "./{target}"',
+                expected=f"./{target}",
+                actual=href,
+            )
+        )
+        return findings
+    expected = node.path.parent / target
+    if graph.resolve_path(node, href) != expected or not graph.file_exists(expected):
+        findings.append(
+            rule.finding(
+                node,
+                f"rel:{rel!r} link href {href!r} does not resolve to the sibling {target}",
+                json_pointer=f"/links/{index}/href",
+                fix_hint=f'set the href to "./{target}" and make sure that file exists next to'
+                " this object",
+                expected=f"./{target}",
+                actual=href,
+            )
+        )
+    return findings
+
+
+def _points_at_sibling(
+    node: Node, graph: CatalogGraph, link: dict[str, object], target: str
+) -> bool:
+    """True when the link's href names the sibling ``target``, broken or not."""
+    href = link.get("href")
+    if not isinstance(href, str) or not href or is_absolute_href(href):
+        return False
+    return graph.resolve_path(node, href) == node.path.parent / target
+
+
 def _check_markdown_link(
     rule: Rule, node: Node, graph: CatalogGraph, *, rel: str, target: str
 ) -> Iterable[Finding]:
     """Findings for a required ``rel`` link pointing at a sibling markdown file.
 
-    Shared by the AGENTS.md and README.md link rules: exactly one relative,
+    Shared by the AGENTS.md and README.md link rules: at least one relative,
     ``text/markdown`` link that resolves to ``target`` in the object's own
-    directory.
+    directory. STAC allows several links under one rel, and a collection may
+    legitimately point ``describedby`` at a data dictionary or another
+    descriptive resource alongside its README. One conforming link satisfies
+    the rule and the rest are left alone.
+
+    When no link conforms, the findings name a single link: the one that comes
+    closest to being the required one. Blaming every candidate would report a
+    foreign link a fixer must not rewrite.
     """
     matches = [(index, link) for index, link in enumerate(links_of(node)) if link.get("rel") == rel]
     if not matches:
@@ -61,39 +130,18 @@ def _check_markdown_link(
             fix_hint=f'add {{"rel": "{rel}", "href": "./{target}", "type": "text/markdown"}}',
         )
         return
-    expected = node.path.parent / target
+    candidates: list[tuple[tuple[bool, bool, int], list[Finding]]] = []
     for index, link in matches:
-        if link.get("type") != _MARKDOWN:
-            yield rule.finding(
-                node,
-                f"rel:{rel!r} link has type {link.get('type')!r}, expected 'text/markdown'",
-                json_pointer=f"/links/{index}/type",
-                fix_hint=f"set the rel:{rel!r} link type to 'text/markdown'",
-                expected=_MARKDOWN,
-                actual=link.get("type"),
-            )
-        href = link.get("href")
-        if not isinstance(href, str) or not href or is_absolute_href(href):
-            yield rule.finding(
-                node,
-                f"rel:{rel!r} link href must be a relative path, got {href!r}",
-                json_pointer=f"/links/{index}/href",
-                fix_hint=f'set the href to "./{target}"',
-                expected=f"./{target}",
-                actual=href,
-            )
-            continue
-        resolved = graph.resolve_path(node, href)
-        if resolved != expected or not graph.file_exists(expected):
-            yield rule.finding(
-                node,
-                f"rel:{rel!r} link href {href!r} does not resolve to the sibling {target}",
-                json_pointer=f"/links/{index}/href",
-                fix_hint=f'set the href to "./{target}" and make sure that file exists next to'
-                " this object",
-                expected=f"./{target}",
-                actual=href,
-            )
+        findings = _link_findings(rule, node, graph, rel=rel, target=target, index=index, link=link)
+        if not findings:
+            return
+        rank = (
+            not _points_at_sibling(node, graph, link, target),
+            link.get("type") != _MARKDOWN,
+            index,
+        )
+        candidates.append((rank, findings))
+    yield from min(candidates, key=lambda candidate: candidate[0])[1]
 
 
 class RequiredFilesRule(Rule):
