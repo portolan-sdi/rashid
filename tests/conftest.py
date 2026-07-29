@@ -8,6 +8,7 @@ exactly one aspect (builder kwarg or post-write surgery via ``mutate_json`` /
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -328,6 +329,88 @@ def write_organizing_catalog_layout(
 
     mutate_json(root / "roads" / "collection.json", repoint)
     return root
+
+
+def nest_items_under_organizing_catalog(
+    root: Path, collection_dir: Path, catalog_id: str = "2024"
+) -> Path:
+    """Move a written collection's items under a catalog that organizes them.
+
+    core.md, Core Structure permits a catalog below a collection to group its
+    items, a raster collection by year being the example it gives. Containment
+    changes, ownership does not, so every item keeps its rel:'collection' link
+    to the collection above. Returns the organizing catalog's directory.
+    """
+    depth = len(collection_dir.relative_to(root).parts)
+    name = collection_dir.name
+    organizing = collection_dir / catalog_id
+    organizing.mkdir(parents=True, exist_ok=True)
+
+    collection_json = collection_dir / "collection.json"
+    links = json.loads(collection_json.read_text(encoding="utf-8"))["links"]
+    item_links = [link for link in links if link.get("rel") == "item"]
+    title = f"{name} by {catalog_id}"
+
+    (organizing / "catalog.json").write_text(
+        json.dumps(
+            {
+                "type": "Catalog",
+                "stac_version": "1.1.0",
+                "id": f"{name}-by-{catalog_id}",
+                "title": title,
+                "description": f"Organizes the {name} collection's items.",
+                "stac_extensions": [PORTOLAN_URI],
+                "links": [
+                    {
+                        "rel": "root",
+                        "href": "../" * (depth + 1) + "catalog.json",
+                        "type": "application/json",
+                    },
+                    {"rel": "parent", "href": "../collection.json", "type": "application/json"},
+                    *item_links,
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    for link in item_links:
+        item_id = link["href"].rsplit("/", 2)[-2]
+        shutil.move(str(collection_dir / item_id), str(organizing / item_id))
+        mutate_json(
+            organizing / item_id / f"{item_id}.json",
+            lambda d: d.__setitem__(
+                "links",
+                [
+                    {
+                        "rel": "root",
+                        "href": "../" * (depth + 2) + "catalog.json",
+                        "type": "application/json",
+                    },
+                    {"rel": "parent", "href": "../catalog.json", "type": "application/json"},
+                    {
+                        "rel": "collection",
+                        "href": "../../collection.json",
+                        "type": "application/json",
+                    },
+                ],
+            ),
+        )
+
+    def repoint(data: dict[str, Any]) -> None:
+        data["links"] = [link for link in data["links"] if link.get("rel") != "item"]
+        data["links"].append(
+            {
+                "rel": "child",
+                "href": f"./{catalog_id}/catalog.json",
+                "type": "application/json",
+                "title": title,
+            }
+        )
+
+    mutate_json(collection_json, repoint)
+    return organizing
 
 
 def mutate_json(path: Path, mutate: Callable[[dict[str, Any]], None]) -> None:

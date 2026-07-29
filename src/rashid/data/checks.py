@@ -828,7 +828,7 @@ def _check_mirror(
     """
     if graph is None or node.kind != "collection":
         return []
-    items = _collection_items(node, graph)
+    items = graph.items_of(node)
     identified = {item.id: item for item in items if isinstance(item.id, str) and item.id}
     if items and not identified:
         return []  # unidentified items; PTL-STR/PTL-GEN own that gap
@@ -856,19 +856,6 @@ def _check_mirror(
     defects = _mirror_membership_defects(key, identified, rows)
     defects.extend(_mirror_field_defects(key, identified, rows))
     return defects
-
-
-def _collection_items(node: Node, graph: CatalogGraph) -> list[Node]:
-    """Every item the collection owns, at any depth beneath it.
-
-    core.md, Core Structure: "a catalog may also appear below a collection to
-    organize its items (for example, a raster collection grouping items by
-    year)." Reading direct children alone would leave such a collection's
-    mirror unverified, so the walk claims every item whose nearest collection
-    ancestor is this node. An item under a nested collection belongs to that
-    collection instead.
-    """
-    return [item for item in graph.iter("item") if graph.enclosing_collection_of(item) is node]
 
 
 def _mirror_membership_defects(

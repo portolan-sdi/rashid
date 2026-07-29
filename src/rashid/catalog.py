@@ -216,3 +216,17 @@ class CatalogGraph:
     def children_of(self, node: Node) -> list[Node]:
         """Objects whose containment parent is ``node``."""
         return [n for n in self.iter() if self.parent_of(n) is node]
+
+    def items_of(self, node: Node) -> list[Node]:
+        """The items ``node`` owns, across any catalogs organizing them.
+
+        The containment child of a collection is not always its item:
+        core.md, Core Structure permits a catalog below a collection to group
+        items, so an item can sit any number of levels down. Ownership follows
+        :meth:`enclosing_collection_of`, which stops at the nearest collection,
+        so a nested collection keeps its own items rather than lending them
+        upward.
+        """
+        return [
+            n for n in self.iter() if n.kind == "item" and self.enclosing_collection_of(n) is node
+        ]

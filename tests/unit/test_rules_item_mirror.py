@@ -11,7 +11,12 @@ import pytest
 from rashid import validate
 from rashid.model import Severity
 from rashid.rules.item_mirror import MIRROR_ROLE, PARQUET_MEDIA_TYPE
-from tests.conftest import CatalogBuilder, findings_for, mutate_json
+from tests.conftest import (
+    CatalogBuilder,
+    findings_for,
+    mutate_json,
+    nest_items_under_organizing_catalog,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -71,6 +76,22 @@ def test_scene_collection_without_a_mirror_warns(catalog: CatalogBuilder) -> Non
     assert len(findings) == 1
     assert findings[0].severity is Severity.WARNING
     assert findings[0].path == "scenes/collection.json"
+    assert "2 scene(s)" in findings[0].message
+
+
+def test_scene_collection_organized_by_a_catalog_still_owes_a_mirror(
+    catalog: CatalogBuilder,
+) -> None:
+    """core.md permits a catalog below a collection to group its items.
+
+    The scenes are then not the collection's containment children, but they
+    are still its items, so the mirror is still owed. Resolving ownership by
+    direct containment alone makes this rule skip without saying so.
+    """
+    root = _scene_collection(catalog, "scene-a", "scene-b")
+    nest_items_under_organizing_catalog(root, root / "scenes")
+    findings = findings_for(validate(root), "PTL-MIR-001")
+    assert len(findings) == 1
     assert "2 scene(s)" in findings[0].message
 
 

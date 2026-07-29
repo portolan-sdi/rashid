@@ -70,7 +70,7 @@ def has_cog(node: Node) -> bool:
 
 
 def _scene_items(node: Node, graph: CatalogGraph) -> list[Node]:
-    return [child for child in graph.children_of(node) if child.kind == "item" and has_cog(child)]
+    return [item for item in graph.items_of(node) if has_cog(item)]
 
 
 class ItemMirrorPresentRule(Rule):
