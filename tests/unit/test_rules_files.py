@@ -146,6 +146,87 @@ def test_absolute_readme_href(catalog: CatalogBuilder) -> None:
     assert "relative path" in findings[0].message
 
 
+def _append_link(path, link: dict) -> None:  # type: ignore[no-untyped-def]
+    mutate_json(path, lambda d: d["links"].append(link))
+
+
+def test_foreign_describedby_link_alongside_readme_is_ignored(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    (root / "roads" / "data-dictionary.pdf").write_bytes(b"%PDF-1.4\n")
+    _append_link(
+        root / "roads" / "collection.json",
+        {"rel": "describedby", "href": "./data-dictionary.pdf", "type": "application/pdf"},
+    )
+    assert findings_for(validate(root), "PTL-FIL-003") == []
+
+
+def test_foreign_agents_link_alongside_agents_md_is_ignored(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    (root / "roads" / "playbook.pdf").write_bytes(b"%PDF-1.4\n")
+    _append_link(
+        root / "roads" / "collection.json",
+        {"rel": "agents", "href": "./playbook.pdf", "type": "application/pdf"},
+    )
+    assert findings_for(validate(root), "PTL-FIL-002") == []
+
+
+def test_only_foreign_describedby_link_still_fails(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    (root / "roads" / "data-dictionary.pdf").write_bytes(b"%PDF-1.4\n")
+
+    def replace(d: dict) -> None:
+        for link in d["links"]:
+            if link["rel"] == "describedby":
+                link["href"] = "./data-dictionary.pdf"
+                link["type"] = "application/pdf"
+
+    mutate_json(root / "roads" / "collection.json", replace)
+    findings = findings_for(validate(root), "PTL-FIL-003")
+    assert len(findings) == 2
+    assert {finding.json_pointer for finding in findings} == {"/links/3/type", "/links/3/href"}
+
+
+def test_only_foreign_agents_link_still_fails(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    (root / "roads" / "playbook.pdf").write_bytes(b"%PDF-1.4\n")
+
+    def replace(d: dict) -> None:
+        for link in d["links"]:
+            if link["rel"] == "agents":
+                link["href"] = "./playbook.pdf"
+                link["type"] = "application/pdf"
+
+    mutate_json(root / "roads" / "collection.json", replace)
+    findings = findings_for(validate(root), "PTL-FIL-002")
+    assert len(findings) == 2
+    assert {finding.json_pointer for finding in findings} == {"/links/2/type", "/links/2/href"}
+
+
+def test_broken_readme_link_is_blamed_over_a_foreign_link(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    (root / "roads" / "data-dictionary.pdf").write_bytes(b"%PDF-1.4\n")
+
+    def set_type(d: dict) -> None:
+        for link in d["links"]:
+            if link["rel"] == "describedby":
+                link["type"] = "text/plain"
+
+    mutate_json(root / "roads" / "collection.json", set_type)
+    _append_link(
+        root / "roads" / "collection.json",
+        {"rel": "describedby", "href": "./data-dictionary.pdf", "type": "application/pdf"},
+    )
+    findings = findings_for(validate(root), "PTL-FIL-003")
+    assert len(findings) == 1
+    assert findings[0].json_pointer == "/links/3/type"
+    assert "text/markdown" in findings[0].message
+
+
 def test_readme_link_on_collection(catalog: CatalogBuilder) -> None:
     catalog.collection("roads")
     root = catalog.write()

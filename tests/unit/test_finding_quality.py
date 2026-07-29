@@ -207,10 +207,22 @@ def _mutate_collections(root: Path) -> None:
             d.__setitem__("links", [ln for ln in d["links"] if ln["rel"] != "parent"]),
         ),
     )
+    # The collection's only describedby link is absolute and not markdown. It
+    # has to replace the good link rather than sit beside it: a second
+    # describedby link is legal, and PTL-FIL-003 passes as long as one link
+    # resolves to the sibling README.md.
     mutate_json(
         root / "mirror-gap" / "collection.json",
-        lambda d: d["links"].append(
-            {"rel": "describedby", "href": "https://example.org/README.md", "type": "text/plain"}
+        lambda d: d.__setitem__(
+            "links",
+            [ln for ln in d["links"] if ln["rel"] != "describedby"]
+            + [
+                {
+                    "rel": "describedby",
+                    "href": "https://example.org/README.md",
+                    "type": "text/plain",
+                }
+            ],
         ),
     )
     mutate_json(
@@ -219,10 +231,14 @@ def _mutate_collections(root: Path) -> None:
             {"rel": "via", "href": "https://example.org/source", "type": "text/html"}
         ),
     )
+    # Same shape as the describedby defect above: the sole agents link points
+    # at a file that is not there.
     mutate_json(
         root / "titleless" / "collection.json",
-        lambda d: d["links"].append(
-            {"rel": "agents", "href": "./MISSING.md", "type": "text/markdown"}
+        lambda d: d.__setitem__(
+            "links",
+            [ln for ln in d["links"] if ln["rel"] != "agents"]
+            + [{"rel": "agents", "href": "./MISSING.md", "type": "text/markdown"}],
         ),
     )
     mutate_json(
