@@ -17,6 +17,7 @@ from rashid.data import (
     DAT_CONSISTENCY,
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
+    DAT_MIRROR,
     DAT_ORDERING,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
@@ -28,6 +29,7 @@ from rashid.data import (
     DAT_VALID_PERCENT,
     validate_data,
 )
+from rashid.data import ReaderFactory as DataReaderFactory
 from rashid.data import Validator as DataValidator
 from rashid.live import (
     LIV_CORS_EXPOSE,
@@ -57,7 +59,10 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
 }
 
 # Every rule the data pass can raise; disabling all of them skips the (networked)
-# pass entirely, while disabling any subset just silences those findings.
+# pass entirely, while disabling any subset just silences those findings. An id
+# left out is a rule that vanishes when the listed ones are disabled, without
+# anyone having disabled it, so tests/unit/test_runner_data_rules.py derives the
+# membership from the registry rather than trusting this list.
 _DATA_RULE_IDS = frozenset(
     {
         DAT_CHECKSUM,
@@ -75,6 +80,7 @@ _DATA_RULE_IDS = frozenset(
         DAT_TILE_SIZE,
         DAT_PARTITION_SCHEMA,
         DAT_TABULAR,
+        DAT_MIRROR,
     }
 )
 
@@ -105,6 +111,7 @@ def _optional_passes(
     schema_allow_network: bool,
     data: bool,
     data_validator: DataValidator | None,
+    data_reader_factory: DataReaderFactory | None,
     live: bool,
     live_prober: LiveProber | None,
     live_base_url: str | None,
@@ -119,7 +126,9 @@ def _optional_passes(
         )
     if data and not _DATA_RULE_IDS <= config.disabled:
         findings.extend(
-            f for f in validate_data(graph, data_validator) if f.rule_id not in config.disabled
+            f
+            for f in validate_data(graph, data_validator, reader_factory=data_reader_factory)
+            if f.rule_id not in config.disabled
         )
     if live and not _LIVE_RULE_IDS <= config.disabled:
         findings.extend(
@@ -142,6 +151,7 @@ def validate(
     schema_allow_network: bool = False,
     data: bool = True,
     data_validator: DataValidator | None = None,
+    data_reader_factory: DataReaderFactory | None = None,
     live: bool = False,
     live_prober: LiveProber | None = None,
     live_base_url: str | None = None,
@@ -174,6 +184,13 @@ def validate(
     injects an alternate validator, chiefly for offline testing. If the
     geospatial stack cannot import (broken GDAL, wheel-less platform), the
     pass degrades to a single ``PTL-DAT-000`` warning.
+
+    ``data_reader_factory`` narrows what the pass may read without turning it
+    off: passing :class:`~rashid.data.reader.LocalOnlyReader` checks the assets
+    that live in the tree and treats the rest as unfetchable, which is the
+    difference between validating a metadata-only mirror and downloading the
+    catalog it mirrors. It defaults to
+    :class:`~rashid.data.reader.FilesystemHttpReader`, which reads both.
 
     When ``live`` is true the live-hosting pass runs too, probing the servers
     behind the catalog's assets for HTTP range support and CORS (see
@@ -258,6 +275,7 @@ def validate(
             schema_allow_network=schema_allow_network,
             data=data,
             data_validator=data_validator,
+            data_reader_factory=data_reader_factory,
             live=live,
             live_prober=live_prober,
             live_base_url=live_base_url,

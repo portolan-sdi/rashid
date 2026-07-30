@@ -61,6 +61,7 @@ import math
 import posixpath
 import re
 import struct
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -312,45 +313,122 @@ def _check_bytes(
     node: Node,
     reader: AssetReader,
 ) -> list[DataDefect]:
-    """Stream the object once: verify checksum, size, and format magic."""
+    """Verify checksum, size, and format magic, reading only what they need.
+
+    The three findings do not cost the same. A recomputed digest and a byte
+    counter each need every byte; the format magic needs ``_HEAD_BYTES``. So the
+    metadata decides how much of the object is read, and an asset that declares
+    none of the three is never fetched — for a catalog of remote COGs that is
+    the difference between a full download per asset and no request at all
+    (#86). What is reported does not change: the same three verifications run on
+    the same bytes they always looked at.
+
+    Two absences are what they look like elsewhere in this module. A
+    ``file:checksum`` naming a hash function rashid cannot compute yields no
+    hasher, and :func:`_verify_checksum` answers it with an INFO drawn from the
+    declaration alone, so those bytes would settle nothing. A ``file:size``
+    that is not an integer is absent to :func:`_verify_size`, and the guard here
+    is that same test so the two cannot disagree.
+
+    The stream is still requested up front, and ``None`` still means silence:
+    both readers build it lazily (``_http_stream`` is a generator, so no request
+    leaves until it is iterated), which makes asking for one the cheapest
+    fetchability test available through the ``AssetReader`` protocol.
+    """
     stream = reader.stream(node, href)
     if stream is None:
         return []  # not fetchable; metadata pass owns missing/foreign hrefs
 
-    declared_checksum = asset.get("file:checksum")
-    decoded = decode_multihash(declared_checksum)
-    algo: str | None = None
-    hasher: Any = None
-    if decoded is not None:
-        code, digest = decoded
-        algo = _HASH_ALGOS.get(code)
-        if algo is not None:
-            hasher = hashlib.new(algo)
+    decoded = decode_multihash(asset.get("file:checksum"))
+    algo, hasher = _hasher_for(decoded)
+    declared_size = asset.get("file:size")
+    sized = isinstance(declared_size, int) and not isinstance(declared_size, bool)
 
-    head = b""
-    count = 0
+    if hasher is None and not sized:
+        if expected is None:
+            _close(stream)
+            return _verify_checksum(key, decoded, algo, hasher)
+        try:
+            head = _read_head(stream)
+        except OSError as exc:
+            return [_unread(key, exc)]
+        return _verify_checksum(key, decoded, algo, hasher) + _verify_format(key, expected, head)
+
     try:
-        for chunk in stream:
-            count += len(chunk)
-            if len(head) < _HEAD_BYTES:
-                head += chunk[: _HEAD_BYTES - len(head)]
-            if hasher is not None:
-                hasher.update(chunk)
+        head, count = _consume(stream, hasher)
     except OSError as exc:
-        return [
-            DataDefect(
-                DAT_CHECKSUM,
-                Severity.INFO,
-                f"asset '{key}' bytes could not be read ({exc}); not verified",
-                key,
-            )
-        ]
+        return [_unread(key, exc)]
 
     defects: list[DataDefect] = []
     defects.extend(_verify_checksum(key, decoded, algo, hasher))
-    defects.extend(_verify_size(key, asset.get("file:size"), count))
+    defects.extend(_verify_size(key, declared_size, count))
     defects.extend(_verify_format(key, expected, head))
     return defects
+
+
+def _hasher_for(decoded: tuple[int, bytes] | None) -> tuple[str | None, Any]:
+    """The hashlib name and hasher for a decoded multihash, or ``(None, None)``.
+
+    A code outside ``_HASH_ALGOS`` leaves both None: the digest cannot be
+    recomputed, and :func:`_verify_checksum` reports that from the code alone.
+    """
+    if decoded is None:
+        return None, None
+    algo = _HASH_ALGOS.get(decoded[0])
+    return algo, hashlib.new(algo) if algo is not None else None
+
+
+def _consume(stream: Iterator[bytes], hasher: Any) -> tuple[bytes, int]:
+    """Read the whole object, returning its head and its byte count."""
+    head = b""
+    count = 0
+    for chunk in stream:
+        count += len(chunk)
+        if len(head) < _HEAD_BYTES:
+            head += chunk[: _HEAD_BYTES - len(head)]
+        if hasher is not None:
+            hasher.update(chunk)
+    return head, count
+
+
+def _read_head(stream: Iterator[bytes]) -> bytes:
+    """The object's first ``_HEAD_BYTES``, then stop pulling.
+
+    Every probe in :func:`_detect_format` reads within that prefix, so the rest
+    of the object cannot change the answer. A short object simply ends first.
+    """
+    head = b""
+    try:
+        for chunk in stream:
+            head += chunk[: _HEAD_BYTES - len(head)]
+            if len(head) >= _HEAD_BYTES:
+                break
+    finally:
+        _close(stream)
+    return head
+
+
+def _close(stream: Iterator[bytes]) -> None:
+    """Release a stream this check is done with, rather than leave it to the collector.
+
+    ``_http_stream`` is a generator holding an open ``urlopen`` response, so a
+    stream dropped part-way keeps a socket until it is reclaimed.
+    ``AssetReader.stream`` promises only an ``Iterator[bytes]``, which need not
+    be closeable, hence the guard.
+    """
+    close = getattr(stream, "close", None)
+    if callable(close):
+        close()
+
+
+def _unread(key: str, exc: OSError) -> DataDefect:
+    """A read that failed is unverified, not nonconformant."""
+    return DataDefect(
+        DAT_CHECKSUM,
+        Severity.INFO,
+        f"asset '{key}' bytes could not be read ({exc}); not verified",
+        key,
+    )
 
 
 def _verify_checksum(
