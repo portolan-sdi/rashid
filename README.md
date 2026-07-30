@@ -77,7 +77,7 @@ for finding in report.errors:
     print(finding.message)
 ```
 
-`validate()` runs the metadata, structural, and data passes by default, matching the CLI; `schema` and `live` opt the remaining two in, and `structural=False` / `data=False` opt the defaults out.
+`validate()` runs the metadata, structural, and data passes by default, matching the CLI; `schema` and `live` opt the remaining two in, and `structural=False` / `data=False` opt the defaults out. `data_reader_factory=LocalOnlyReader` narrows the data pass to the catalog tree, as `--data-scope local` does.
 
 `RulesConfig` skips rules or changes their severity.
 

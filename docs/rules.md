@@ -46,7 +46,7 @@ The data and live passes are the only ones that reach the network by default, an
 | Metadata | none | the catalog's JSON, read from the local tree |
 | Structural | none | nothing, the core schemas ship in the wheel |
 | Schema | only under `--schema-allow-network` | one schema document, when the build does not bundle that version |
-| Data | one or more per remote asset | asset bytes, as below |
+| Data | zero or more per remote asset | asset bytes, as below |
 | Live | two per host, plus one HEAD per distinct asset URL | response headers, and one byte for the range probe |
 
 Most data checks read only what they need at a known offset, a COG header, a Parquet footer, or one geometry column, over HTTP range requests or `/vsicurl/`. Two cannot. `PTL-DAT-001` recomputes the multihash and `PTL-DAT-002` counts the bytes, so an asset carrying a `file:checksum` rashid can compute, or an integer `file:size`, is read in full. An asset carrying neither is read only as far as the 16 bytes of format magic, and is not fetched at all when it declares no media type to confirm.
@@ -57,7 +57,9 @@ Most data checks read only what they need at a known offset, a COG header, a Par
 
 `--data-scope all`, the default, reads local files and remote `https` assets alike. `--data-scope local` runs every data rule against the assets that live inside the catalog tree and leaves remote assets untouched, reading none of their bytes.
 
-Use `local` when the metadata is yours and the assets sit on a host you do not control, which is the shape of a mirror. It keeps the checks that bind the catalog's own files, such as GeoParquet ordering, row-group statistics, and the item-mirror comparison on a collection's `items.parquet`, all of which `--no-data` drops along with everything else. The catalog in [issue #86](https://github.com/portolan-sdi/rashid/issues/86) is the case that prompted it, 924 Items whose COGs sit on a host the operator does not run, about 1.7 TB to stream, against one small local `items.parquet`.
+Use `local` when the metadata is yours and the assets sit on a host you do not control, which is the shape of a mirror. It keeps the checks that bind the catalog's own files, such as GeoParquet ordering, row-group statistics, and the item-mirror comparison on a collection's `items.parquet`, all of which `--no-data` drops along with everything else. The catalog in [issue #86](https://github.com/portolan-sdi/rashid/issues/86) is the case that prompted it. Its 924 Items name 1848 remote assets on a host the operator does not run, declaring 1.86 TB between them, against three local files totalling 1.2 MB.
+
+Pairing it with `--live` recovers most of what the narrowed scope gives up on remote assets. `PTL-LIV-002` compares each one's declared `file:size` against the `Content-Length` its host returns on HEAD, which settles every size without transferring a byte. Only `file:checksum` still needs the object itself.
 
 The library takes a reader factory rather than a flag. `validate(path, data_reader_factory=LocalOnlyReader)` is the equivalent, using `LocalOnlyReader` from `rashid.data.reader`, and `validate_data(graph, reader_factory=LocalOnlyReader)` scopes the pass on its own.
 

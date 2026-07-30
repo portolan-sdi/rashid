@@ -18,10 +18,17 @@ within 30 days for confirmed issues.
 
 ## Scope
 
-rashid reads and validates catalog metadata (JSON) from local disk. It makes no
-network requests and executes no code from the catalogs it validates. Reports
-about crashes or resource exhaustion triggered by malicious catalog files are
-in scope.
+rashid reads catalog metadata (JSON) from local disk, and by default reads asset
+bytes too. The data pass fetches the `https` hrefs a catalog declares, so
+checking a catalog someone handed you issues requests to whatever hosts its
+metadata names. `--data-scope local` confines the pass to the catalog tree and
+`--no-data` skips it. The live pass (`--live`) and remote schema fetching
+(`--schema-allow-network`) are opt-in.
+
+Reading those bytes means parsing untrusted input with GDAL, rasterio, and
+pyarrow, so those parsers sit inside the trust boundary. rashid executes no code
+from the catalogs it validates. Reports about crashes, resource exhaustion, or
+requests a catalog induces to a host the operator did not intend are in scope.
 
 ## Automated auditing
 
