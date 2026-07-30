@@ -14,6 +14,13 @@ reports where they diverge from the claim. Like the structural and schema passes
 it is off by default (CLI ``--data``; ``validate(..., data=True)``), reaches the
 network, and downgrades to a single WARNING when it cannot run.
 
+Which bytes it may read is the caller's choice. ``reader_factory`` supplies the
+:class:`~rashid.data.reader.AssetReader`, defaulting to
+:class:`~rashid.data.reader.FilesystemHttpReader`; passing
+:class:`~rashid.data.reader.LocalOnlyReader` (CLI ``--data-scope local``) keeps
+the checks that read the catalog's own files and skips the ones that would have
+to stream someone else's host.
+
 The heavy geospatial dependencies (``pyarrow``, ``rasterio``, ``rio-cogeo``,
 ``pyproj``) are core dependencies but are imported
 lazily by :func:`default_validator`, so the core package stays stdlib-only and a
@@ -116,6 +123,10 @@ class DataDefect:
 # returns the mismatches it found; an empty list means every asset matched.
 Validator = Callable[[Node, AssetReader], list[DataDefect]]
 
+# A reader is built per run, from the graph whose tree it resolves hrefs
+# against; both readers' constructors are therefore factories themselves.
+ReaderFactory = Callable[[CatalogGraph], AssetReader]
+
 
 def default_validator(graph: CatalogGraph | None = None) -> Validator:
     """Build the byte-verifying validator, importing the geospatial deps lazily.
@@ -137,13 +148,23 @@ def default_validator(graph: CatalogGraph | None = None) -> Validator:
     return partial(checks.check_node, graph=graph)
 
 
-def validate_data(graph: CatalogGraph, validator: Validator | None = None) -> list[Finding]:
+def validate_data(
+    graph: CatalogGraph,
+    validator: Validator | None = None,
+    *,
+    reader_factory: ReaderFactory | None = None,
+) -> list[Finding]:
     """Verify every asset's bytes against its declared metadata.
 
     Returns ``PTL-DAT-00x`` findings for each mismatch. If the validator is
     unavailable (the geospatial stack cannot import) or a call fails
     systemically, returns a single ``PTL-DAT-000`` warning instead of failing the
     run — a systemic failure is reported once, not once per object.
+
+    ``reader_factory`` chooses which assets are readable at all;
+    :class:`~rashid.data.reader.LocalOnlyReader` narrows the pass to the
+    catalog's own files. An asset its reader declines is skipped silently, so a
+    narrowed scope produces a subset of the findings rather than new ones.
     """
     if validator is None:
         try:
@@ -162,7 +183,7 @@ def validate_data(graph: CatalogGraph, validator: Validator | None = None) -> li
                 )
             ]
 
-    reader = FilesystemHttpReader(graph)
+    reader = (reader_factory or FilesystemHttpReader)(graph)
     findings: list[Finding] = []
     for node in graph.iter(*_DATA_KINDS):
         if node.parse_error is not None:

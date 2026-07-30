@@ -29,7 +29,7 @@ The default run covers the metadata, structural, and data passes, all offline fo
 rashid check path/to/catalog --live --live-base-url https://data.example.org/my-catalog/
 ```
 
-`--no-data` skips byte verification when the assets are huge or remote and only the metadata verdict is needed. Add `--json` for a machine-readable report.
+`--no-data` skips byte verification when only the metadata verdict is needed. `--data-scope local` keeps every data rule and reads only the assets inside the catalog tree, which bounds the transfer when the remote assets are large. Add `--json` for a machine-readable report.
 
 ### Reading a large report
 
@@ -61,7 +61,7 @@ Validation runs as five separable passes.
 
 **Schema.** The published [Portolan profile schema](https://schemas.portolan-sdi.org/portolan/), applied to every object. rashid also implements those requirements in code, which yields precise messages and fix hints. Running both catches drift between them, at the cost of reporting some defects twice. Opt in with `--schema`.
 
-**Data.** Asset bytes, local files and remote https URLs alike, checked against the declared metadata and the format rules. rashid recomputes checksum and size, confirms media type by magic number, and enforces storage rules a metadata reader cannot see. Expect a real catalog to fail here on rules its metadata satisfies, because this pass is stricter than what current tooling emits. On by default; `--no-data` skips it.
+**Data.** Asset bytes, local files and remote https URLs alike, checked against the declared metadata and the format rules. rashid recomputes checksum and size, confirms media type by magic number, and enforces storage rules a metadata reader cannot see. Expect a real catalog to fail here on rules its metadata satisfies, because this pass is stricter than what current tooling emits. On by default. `--no-data` skips it, and `--data-scope local` narrows it to the catalog tree. [docs/rules.md](docs/rules.md) records what each pass transfers.
 
 **Live hosting.** The servers behind remote https assets, probed for HTTP range support and CORS. Those are properties of the server rather than of any file. Range and CORS cost one probe per host, and each asset costs one HEAD. Opt in with `--live`.
 

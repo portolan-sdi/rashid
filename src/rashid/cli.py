@@ -11,6 +11,7 @@ from pathlib import Path
 
 import click
 
+from rashid.data.reader import LocalOnlyReader
 from rashid.model import Report, Severity
 from rashid.runner import validate
 
@@ -66,6 +67,13 @@ def main() -> None:
     "network for remote hrefs). On by default; --no-data skips.",
 )
 @click.option(
+    "--data-scope",
+    type=click.Choice(["all", "local"]),
+    default="all",
+    help="Which assets the byte checks may read: all (default), or local to check only "
+    "the assets inside the catalog tree, leaving assets hosted elsewhere unread.",
+)
+@click.option(
     "--live/--no-live",
     "live",
     default=False,
@@ -96,6 +104,7 @@ def check(
     schema: bool,
     schema_allow_network: bool,
     data: bool,
+    data_scope: str,
     live: bool,
     live_base_url: str | None,
     list_all: bool,
@@ -107,12 +116,15 @@ def check(
     hosting servers."""
     if list_all and force_summary:
         raise click.UsageError("--all and --summary ask for opposite things.")
+    if data_scope != "all" and not data:
+        raise click.UsageError("--data-scope and --no-data ask for opposite things.")
     report = validate(
         catalog_path,
         structural=structural,
         schema=schema,
         schema_allow_network=schema_allow_network,
         data=data,
+        data_reader_factory=LocalOnlyReader if data_scope == "local" else None,
         live=live,
         live_base_url=live_base_url,
     )

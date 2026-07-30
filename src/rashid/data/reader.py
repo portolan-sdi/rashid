@@ -11,6 +11,11 @@ Non-fetchable hrefs — ``s3``/``http``/``file`` or a relative path that escapes
 the tree — resolve to ``None``; the metadata pass already reports those
 (``PTL-AST-002`` flags ``s3``), so the data pass skips them rather than emitting
 a second finding.
+
+A caller can narrow that further. :class:`LocalOnlyReader` resolves only what
+lives in the tree, which is what a metadata-only mirror needs: the checks that
+read its own files run, and the assets hosted elsewhere — terabytes of them —
+are treated as unfetchable rather than streamed.
 """
 
 from __future__ import annotations
@@ -95,6 +100,31 @@ class FilesystemHttpReader:
         if located.is_remote:
             return _http_stream(located.source)
         return _file_stream(Path(located.source))
+
+
+class LocalOnlyReader:
+    """Resolves only assets inside the catalog tree; remote hrefs are ``None``.
+
+    Delegates to :class:`FilesystemHttpReader` and drops the remote half of its
+    answer, so path resolution — the part with the escaping-relative-href rules
+    — has one implementation. A remote asset becomes indistinguishable from an
+    ``s3`` one: unfetchable, so every check that needs its bytes is skipped
+    without a network read and without a second finding.
+    """
+
+    def __init__(self, graph: CatalogGraph) -> None:
+        self._inner = FilesystemHttpReader(graph)
+
+    def locate(self, node: Node, href: str) -> Locator | None:
+        located = self._inner.locate(node, href)
+        if located is None or located.is_remote:
+            return None
+        return located
+
+    def stream(self, node: Node, href: str) -> Iterator[bytes] | None:
+        if self.locate(node, href) is None:
+            return None
+        return self._inner.stream(node, href)
 
 
 def _file_stream(path: Path) -> Iterator[bytes]:
