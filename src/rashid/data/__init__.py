@@ -60,8 +60,9 @@ DAT_MIRROR = "PTL-DAT-016"
 # (specs/portolan/requirements.yaml) enforced by each check;
 # gated by tests/unit/test_spec_coverage.py.
 SPEC_IDS: dict[str, tuple[str, ...]] = {
-    # Checksum/size verification is the observable half of the
-    # regenerated-at-publish-time process MUST (PORTO-CORE-030).
+    # PORTO-CORE-030 requires any file:size and file:checksum an asset carries
+    # to match the bytes its href resolves to. These two checks are how that is
+    # observed, which is why the requirement is enforcement: validator.
     DAT_CHECKSUM: ("PORTO-CORE-030",),
     DAT_SIZE: ("PORTO-CORE-030",),
     DAT_FORMAT: ("PORTO-CORE-026", "PORTO-FMT-001"),

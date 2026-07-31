@@ -22,7 +22,7 @@ Findings carry a stable rule id (`PTL-<GROUP>-<NNN>`), a severity, a message, an
 | `PTL-PRV` | 001–003 | ≥1 producer, exactly one host listed last, host url-or-email |
 | `PTL-LIC` | 001–003 | SPDX or `other`, license link for `other`, no `proprietary` |
 | `PTL-FIL` | 001–005 | AGENTS.md and README.md on disk, `rel:"agents"` and `rel:"describedby"` markdown links; README.md non-empty with a title heading, and (heuristically, a warning) mentioning license and provenance on collections |
-| `PTL-AST` | 001–005 | asset href/type/roles, https-not-s3, `file:size`, multihash `file:checksum`; catalogs carry no assets |
+| `PTL-AST` | 001–005 | asset href/type/roles, https-not-s3, `file:size` and `file:checksum` present (a warning, per the SHOULD) with the checksum multihash-encoded; catalogs carry no assets |
 | `PTL-CNF` | 001–003 | versioned Portolan schema URI declared, consistent with the root; dataset versioning declares the STAC version extension |
 | `PTL-PRO` | 001–004 | mirror `via`/`canonical` links and `updated` sync time; officials carry no upstream links |
 | `PTL-VIZ` | 001–005 | thumbnail on geospatial collections, style assets for visual derivatives, PMTiles `rel:"pmtiles"` registration, large-vector-without-visual nudge, MapLibre style media type in PMTiles collections |
@@ -51,7 +51,7 @@ The data and live passes are the only ones that reach the network by default, an
 
 Most data checks read only what they need at a known offset, a COG header, a Parquet footer, or one geometry column, over HTTP range requests or `/vsicurl/`. Two cannot. `PTL-DAT-001` recomputes the multihash and `PTL-DAT-002` counts the bytes, so an asset carrying a `file:checksum` rashid can compute, or an integer `file:size`, is read in full. An asset carrying neither is read only as far as the 16 bytes of format magic, and is not fetched at all when it declares no media type to confirm.
 
-`PORTO-CORE-028` makes `file:size` and `file:checksum` a MUST on every asset. A conformant catalog of large remote assets therefore cannot be fully byte-verified without transferring all of it. That follows from the requirement, not from how rashid reads.
+`PORTO-CORE-028` makes `file:size` and `file:checksum` a SHOULD, so a publisher who cannot compute them over bytes it does not host may omit them and stay conformant. Where they are present rashid verifies them, which is why a fully-populated catalog of large remote assets cannot be byte-verified without transferring all of it. That follows from what the metadata claims, not from how rashid reads.
 
 ### `--data-scope`
 

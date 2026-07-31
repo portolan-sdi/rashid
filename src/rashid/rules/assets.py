@@ -124,12 +124,19 @@ class AssetHrefSchemeRule(Rule):
 
 
 class AssetFileFieldsRule(Rule):
-    """Every asset carries file:size and file:checksum."""
+    """Every asset should carry file:size and file:checksum.
+
+    core.md, Assets: "Assets SHOULD carry ``file:size`` and ``file:checksum``".
+    A catalog that describes data it does not host cannot checksum bytes it
+    never touches, so the absence is a warning rather than an error. A
+    ``file:size`` that is present but not a positive integer is reported here
+    too; the schema pass errors on its type independently (PORTO-CORE-028).
+    """
 
     id = "PTL-AST-003"
     spec_ids = ("PORTO-CORE-028",)
-    default_severity = Severity.ERROR
-    description = "every asset must carry file:size and file:checksum"
+    default_severity = Severity.WARNING
+    description = "every asset should carry file:size and file:checksum"
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
