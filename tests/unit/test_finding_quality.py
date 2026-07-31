@@ -170,7 +170,7 @@ def _add_collections(catalog: CatalogBuilder) -> None:
         },
     )
 
-    # Two styles, neither keyed 'style-default': the default is unidentifiable.
+    # Two styles, neither carrying the 'default' role: the default is unidentifiable.
     _STYLE_TYPE = "application/vnd.mapbox.style+json"
     catalog.collection(
         "unmarked-styles",

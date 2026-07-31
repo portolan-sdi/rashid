@@ -54,7 +54,7 @@ from rashid.rules.providers import HostContactRule, ProducerPresentRule, SingleH
 from rashid.rules.temporal import DatetimePresentRule, DatetimeValidRule
 from rashid.rules.titles import HumanReadableTitleRule, LinkTitleRule, TitleDescriptionRule
 from rashid.rules.viz import (
-    DefaultStyleKeyRule,
+    DefaultStyleRoleRule,
     LargeVectorWithoutVisualRule,
     PMTilesRegistrationRule,
     StyleMediaTypeRule,
@@ -102,7 +102,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     StylesForDerivativeRule(),
     PMTilesRegistrationRule(),
     StyleMediaTypeRule(),
-    DefaultStyleKeyRule(),
+    DefaultStyleRoleRule(),
     LargeVectorWithoutVisualRule(),
     PartitionFieldsRule(),
     SingleFileCollectionRule(),
