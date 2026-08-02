@@ -19,7 +19,7 @@ from rashid.rules.assets import _assets_of
 
 PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
 STYLE_MEDIA_TYPE = "application/vnd.mapbox.style+json"
-_THUMBNAIL_TYPES = ("image/png", "image/jpeg")
+_THUMBNAIL_TYPES = ("image/png", "image/jpeg", "image/webp")
 _WEB_MAP_LINKS_PREFIX = "https://stac-extensions.github.io/web-map-links/"
 # Render-from-source is plausible for small files; above this, a missing
 # visual derivative is worth a nudge. Deliberately conservative.
@@ -91,7 +91,7 @@ class ThumbnailRule(Rule):
                 node,
                 "geospatial collection has no asset with the 'thumbnail' role",
                 json_pointer="/assets",
-                fix_hint="add a thumbnail.png generated from the collection's default styling",
+                fix_hint="add a thumbnail generated from the collection's default styling",
             )
             return
         for pointer, key, asset in thumbnails:
@@ -99,12 +99,12 @@ class ThumbnailRule(Rule):
             if media_type not in _THUMBNAIL_TYPES:
                 yield self.finding(
                     node,
-                    f"thumbnail asset '{key}' has type {media_type!r}, expected image/png"
-                    " or image/jpeg",
+                    f"thumbnail asset '{key}' has type {media_type!r}, expected image/png,"
+                    " image/jpeg or image/webp",
                     json_pointer=f"{pointer}/type",
                     fix_hint="set the thumbnail's type to the media type of the file it points"
-                    " at, 'image/png' or 'image/jpeg'",
-                    expected="image/png",
+                    " at, 'image/png', 'image/jpeg' or 'image/webp'",
+                    expected=list(_THUMBNAIL_TYPES),
                     actual=media_type,
                 )
 
