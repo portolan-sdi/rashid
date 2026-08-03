@@ -37,6 +37,9 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   count, ids, geometry, datetime, or bbox (MUST, formats.md, Raster § Item
   mirror). A mirror runs the GeoParquet checks above as well: the spec binds
   it to them like any other spatial table.
+- ``PTL-DAT-017`` a vector (GeoParquet) collection does not document its
+  columns with ``table:columns``, on the collection or on the asset (SHOULD,
+  formats.md, Vector § GeoParquet; WARNING)
 
 ``PTL-DAT-007`` also carries formats.md's covering-column recommendation: a
 GeoParquet 2.x file that satisfies the statistics MUST through native
@@ -97,6 +100,7 @@ from rashid.data import (
     DAT_TABULAR,
     DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
+    DAT_VECTOR_COLUMNS,
     DataDefect,
 )
 from rashid.data.reader import AssetReader, Locator
@@ -285,14 +289,14 @@ def _check_asset(
         # it mirrors (PORTO-FMT-042). It then falls through to the GeoParquet
         # checks below, which bind it as they bind vector data
         # (PORTO-FMT-043) — an item index is queried by extent like any other
-        # spatial table. The tabular SHOULDs skip it on their own, being
-        # scoped to assets with the 'data' role.
+        # spatial table. The table:columns SHOULDs skip it: it indexes items
+        # rather than carrying a schema of its own.
         defects.extend(_check_mirror(node, key, located, graph))
     if expected == "tiff":
         defects.extend(_check_raster(key, located))
     if expected == "parquet":
         defects.extend(_check_geoparquet(key, located))
-        defects.extend(_check_tabular(node, key, asset, located))
+        defects.extend(_check_columns(node, key, asset, located))
     if expected in {"parquet", "tiff", "pmtiles"}:
         defects.extend(_check_consistency(node, key, asset, expected, located))
     return defects
@@ -1215,33 +1219,46 @@ def _sample(ids: list[str], limit: int = 3) -> str:
     return shown if len(ids) <= limit else f"{shown}, …"
 
 
-# --- tabular collections ----------------------------------------------------
+# --- column documentation ---------------------------------------------------
 
 
-def _check_tabular(
+def _check_columns(
     node: Node, key: str, asset: dict[str, Any], located: Locator
 ) -> list[DataDefect]:
-    """The Tabular Data SHOULDs for a plain-Parquet collection-level data asset.
+    """The ``table:columns`` SHOULDs, for both kinds of Parquet collection.
 
-    formats.md, Tabular Data: "Tabular collections SHOULD populate
+    formats.md asks the same thing of each, in two sections. Vector
+    (``PORTO-FMT-044``): "A vector collection SHOULD document its columns with
+    the STAC table extension, carrying ``table:columns`` with names, types, and
+    descriptions on the collection or on the GeoParquet asset." Tabular
+    (``PORTO-FMT-037``): "Tabular collections SHOULD populate
     ``extent.temporal`` when the data has a time dimension, and SHOULD document
     their columns with the STAC table extension (``table:columns`` with names,
-    types, and descriptions)." A tabular collection is a Parquet data asset
-    with no ``geo`` metadata key, exposed at collection level (the single-file
-    collection pattern the same section mandates); non-data Parquet and
-    item-level assets are out of scope. The time dimension is read from the
-    file itself: a temporal (timestamp/date) column is the machine-detectable
-    signal, so its absence keeps the extent SHOULD silent rather than guessed.
+    types, and descriptions)."
+
+    Which one applies is a data-pass fact: the spec separates the two by
+    whether the Parquet carries a ``geo`` metadata key, so both branches share
+    the one footer read this function makes. Scope is the same either way — a
+    collection-level asset with the ``data`` role, the single-file collection
+    pattern — which leaves item-level and non-data Parquet out, and exempts an
+    item mirror (role ``collection-mirror``) that indexes items rather than
+    describing a schema of its own.
+
+    The temporal half stays tabular-only. Its trigger is read from the file: a
+    timestamp or date column is the machine-detectable signal of a time
+    dimension, so its absence keeps that SHOULD silent rather than guessed.
     """
     if node.kind != "collection" or "data" not in _asset_roles(asset):
         return []
+    if is_mirror_asset(asset):
+        return []  # an index of items, not a schema of its own
     try:
         source: Any = located.open_binary() if located.is_remote else located.source
         parquet = pq.ParquetFile(source)
     except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
         return []
     if _geo_metadata(parquet) is not None:
-        return []  # GeoParquet: the geospatial storage rules own it
+        return _check_vector_columns(node, key, asset)
     defects: list[DataDefect] = []
     if not _has_table_columns(node, asset):
         defects.append(
@@ -1264,6 +1281,27 @@ def _check_tabular(
             )
         )
     return defects
+
+
+def _check_vector_columns(node: Node, key: str, asset: dict[str, Any]) -> list[DataDefect]:
+    """A GeoParquet collection SHOULD declare ``table:columns`` (PORTO-FMT-044).
+
+    Undocumented, the attribute names and types are only in the Parquet footer,
+    so a client has to read the file to learn what the collection holds. One
+    warning per collection-level data asset, whichever of the two placements
+    the publisher chose.
+    """
+    if _has_table_columns(node, asset):
+        return []
+    return [
+        DataDefect(
+            DAT_VECTOR_COLUMNS,
+            Severity.WARNING,
+            f"vector asset '{key}': the collection does not document its columns "
+            "with the table extension (table:columns)",
+            key,
+        )
+    ]
 
 
 def _asset_roles(asset: dict[str, Any]) -> list[str]:

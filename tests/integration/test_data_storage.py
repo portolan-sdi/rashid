@@ -34,6 +34,7 @@ from rashid.data import (  # noqa: E402
     DAT_TABULAR,
     DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
+    DAT_VECTOR_COLUMNS,
 )
 from rashid.data.reader import Locator  # noqa: E402
 from rashid.model import Severity  # noqa: E402
@@ -554,7 +555,7 @@ def _tabular_collection(**overrides: object) -> Node:
 
 def _tabular(node: Node, path: Path) -> list:
     asset = {"href": "./data.parquet", "roles": ["data"]}
-    return checks._check_tabular(node, "data", asset, _loc(path))
+    return checks._check_columns(node, "data", asset, _loc(path))
 
 
 def _timestamp_column() -> dict[str, list[object]]:
@@ -589,7 +590,7 @@ def test_tabular_with_asset_level_table_columns_is_clean(tmp_path: Path) -> None
         "roles": ["data"],
         "table:columns": [{"name": "value", "type": "int64", "description": "a value"}],
     }
-    assert checks._check_tabular(_tabular_collection(), "data", asset, _loc(path)) == []
+    assert checks._check_columns(_tabular_collection(), "data", asset, _loc(path)) == []
 
 
 def test_tabular_temporal_column_without_extent_flags_dat_015(tmp_path: Path) -> None:
@@ -616,23 +617,80 @@ def test_tabular_temporal_column_with_extent_is_clean(tmp_path: Path) -> None:
     assert _tabular(node, path) == []
 
 
-def test_geoparquet_is_not_tabular(tmp_path: Path) -> None:
-    # A 'geo' metadata key marks GeoParquet: the geospatial rules own it and
-    # the tabular SHOULDs stay silent.
+def test_geoparquet_takes_the_vector_branch_not_the_tabular_one(tmp_path: Path) -> None:
+    # A 'geo' metadata key marks GeoParquet: the temporal-extent SHOULD is
+    # tabular-only, so the vector rule is the only one such a file can raise.
     path = tmp_path / "geo.parquet"
-    assets.write_geoparquet(path)
-    assert _tabular(_tabular_collection(), path) == []
+    assets.write_geoparquet(path, columns=_timestamp_column())
+    defects = _tabular(_tabular_collection(), path)
+    assert [d.rule_id for d in defects] == [DAT_VECTOR_COLUMNS]
 
 
 def test_non_data_roles_are_not_tabular(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False)
     asset = {"href": "./data.parquet", "roles": ["metadata"]}
-    assert checks._check_tabular(_tabular_collection(), "data", asset, _loc(path)) == []
+    assert checks._check_columns(_tabular_collection(), "data", asset, _loc(path)) == []
 
 
 def test_item_level_parquet_is_not_tabular(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False)
     node = _node_with_asset({"href": "./data.parquet", "roles": ["data"]})
-    assert checks._check_tabular(node, "data", node.data["assets"]["a"], _loc(path)) == []
+    assert checks._check_columns(node, "data", node.data["assets"]["a"], _loc(path)) == []
+
+
+# --- vector collections (PTL-DAT-017) ---------------------------------------
+
+
+def _vector(node: Node, path: Path, **asset_fields: object) -> list:
+    asset = {"href": "./data.parquet", "roles": ["data"], **asset_fields}
+    return checks._check_columns(node, "data", asset, _loc(path))
+
+
+def test_vector_without_table_columns_flags_dat_017(tmp_path: Path) -> None:
+    path = tmp_path / "geo.parquet"
+    assets.write_geoparquet(path)
+    defects = _vector(_tabular_collection(), path)
+    assert [d.rule_id for d in defects] == [DAT_VECTOR_COLUMNS]
+    assert defects[0].severity is Severity.WARNING
+    assert "table:columns" in defects[0].message
+
+
+def test_vector_with_collection_level_table_columns_is_clean(tmp_path: Path) -> None:
+    path = tmp_path / "geo.parquet"
+    assets.write_geoparquet(path)
+    node = _tabular_collection(
+        **{"table:columns": [{"name": "geometry", "type": "binary", "description": "WKB"}]}
+    )
+    assert _vector(node, path) == []
+
+
+def test_vector_with_asset_level_table_columns_is_clean(tmp_path: Path) -> None:
+    # PORTO-FMT-044 allows either placement; the reference catalog uses the asset.
+    path = tmp_path / "geo.parquet"
+    assets.write_geoparquet(path)
+    columns = [{"name": "geometry", "type": "binary", "description": "WKB"}]
+    assert _vector(_tabular_collection(), path, **{"table:columns": columns}) == []
+
+
+def test_empty_table_columns_does_not_satisfy_dat_017(tmp_path: Path) -> None:
+    path = tmp_path / "geo.parquet"
+    assets.write_geoparquet(path)
+    defects = _vector(_tabular_collection(**{"table:columns": []}), path)
+    assert [d.rule_id for d in defects] == [DAT_VECTOR_COLUMNS]
+
+
+def test_item_mirror_is_exempt_from_dat_017(tmp_path: Path) -> None:
+    # An items.parquet indexes the collection's items; its schema is STAC's,
+    # not the dataset's, so PORTO-FMT-044 does not ask it for table:columns.
+    path = tmp_path / "items.parquet"
+    assets.write_geoparquet(path)
+    assert _vector(_tabular_collection(), path, roles=["data", "collection-mirror"]) == []
+
+
+def test_item_level_geoparquet_is_exempt_from_dat_017(tmp_path: Path) -> None:
+    path = tmp_path / "geo.parquet"
+    assets.write_geoparquet(path)
+    node = _node_with_asset({"href": "./data.parquet", "roles": ["data"]})
+    assert checks._check_columns(node, "data", node.data["assets"]["a"], _loc(path)) == []

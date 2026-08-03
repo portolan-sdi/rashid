@@ -34,6 +34,7 @@ from rashid.data import (
     DAT_TILE_SIZE,
     DAT_UNAVAILABLE,
     DAT_VALID_PERCENT,
+    DAT_VECTOR_COLUMNS,
     DataDefect,
     validate_data,
 )
@@ -172,6 +173,7 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
             DAT_PARTITION_SCHEMA,
             DAT_TABULAR,
             DAT_MIRROR,
+            DAT_VECTOR_COLUMNS,
         }
     )
     validate(graph_root, config=RulesConfig(disabled=all_ids), data=True, data_validator=spy)
