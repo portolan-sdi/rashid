@@ -91,7 +91,9 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     DAT_TABULAR: ("PORTO-FMT-037",),
     # A mirror must reproduce the collection's items (PORTO-FMT-042).
     DAT_MIRROR: ("PORTO-FMT-042",),
-    DAT_VECTOR_COLUMNS: ("PORTO-FMT-044",),
+    # The collection SHOULD and the item-properties SHOULD, plus the per-asset
+    # alternative (PORTO-FMT-046) the same check honours when it looks there.
+    DAT_VECTOR_COLUMNS: ("PORTO-FMT-044", "PORTO-FMT-045", "PORTO-FMT-046"),
 }
 
 # Assets are declared on collections and items; catalogs carry none.

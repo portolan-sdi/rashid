@@ -633,19 +633,32 @@ def test_non_data_roles_are_not_tabular(tmp_path: Path) -> None:
     assert checks._check_columns(_tabular_collection(), "data", asset, _loc(path)) == []
 
 
-def test_item_level_parquet_is_not_tabular(tmp_path: Path) -> None:
-    path = tmp_path / "plain.parquet"
-    assets.write_geoparquet(path, geo=False)
-    node = _node_with_asset({"href": "./data.parquet", "roles": ["data"]})
-    assert checks._check_columns(node, "data", node.data["assets"]["a"], _loc(path)) == []
+# --- vector collections and items (PTL-DAT-017) -----------------------------
 
-
-# --- vector collections (PTL-DAT-017) ---------------------------------------
+_COLUMNS = [{"name": "geometry", "type": "binary", "description": "Geometry as WKB."}]
 
 
 def _vector(node: Node, path: Path, **asset_fields: object) -> list:
     asset = {"href": "./data.parquet", "roles": ["data"], **asset_fields}
     return checks._check_columns(node, "data", asset, _loc(path))
+
+
+def _vector_item(properties: dict | None = None, **overrides: object) -> Node:
+    """An item holding one GeoParquet data asset, as a partition file would."""
+    data: dict = {
+        "type": "Feature",
+        "bbox": [4.0, 50.0, 6.0, 52.0],
+        "properties": properties if properties is not None else {"datetime": None},
+        "assets": {"a": {"href": "./data.parquet", "roles": ["data"]}},
+    }
+    data.update(overrides)
+    return Node(
+        path=PurePosixPath("tables/part/part.json"),
+        abs_path=Path("/nowhere/part.json"),
+        kind="item",
+        id="part",
+        data=data,
+    )
 
 
 def test_vector_without_table_columns_flags_dat_017(tmp_path: Path) -> None:
@@ -660,18 +673,51 @@ def test_vector_without_table_columns_flags_dat_017(tmp_path: Path) -> None:
 def test_vector_with_collection_level_table_columns_is_clean(tmp_path: Path) -> None:
     path = tmp_path / "geo.parquet"
     assets.write_geoparquet(path)
-    node = _tabular_collection(
-        **{"table:columns": [{"name": "geometry", "type": "binary", "description": "WKB"}]}
-    )
+    node = _tabular_collection(**{"table:columns": _COLUMNS})
     assert _vector(node, path) == []
 
 
 def test_vector_with_asset_level_table_columns_is_clean(tmp_path: Path) -> None:
-    # PORTO-FMT-044 allows either placement; the reference catalog uses the asset.
+    # PORTO-FMT-046 permits the per-asset placement the reference catalog uses.
     path = tmp_path / "geo.parquet"
     assets.write_geoparquet(path)
-    columns = [{"name": "geometry", "type": "binary", "description": "WKB"}]
-    assert _vector(_tabular_collection(), path, **{"table:columns": columns}) == []
+    assert _vector(_tabular_collection(), path, **{"table:columns": _COLUMNS}) == []
+
+
+def test_collection_level_columns_do_not_satisfy_an_item(tmp_path: Path) -> None:
+    # PORTO-FMT-045 scopes the item placement to properties, where the table
+    # extension puts it; a top-level field on an item is not where it looks.
+    path = tmp_path / "geo.parquet"
+    assets.write_geoparquet(path)
+    node = _vector_item(**{"table:columns": _COLUMNS})
+    defects = checks._check_columns(node, "data", node.data["assets"]["a"], _loc(path))
+    assert [d.rule_id for d in defects] == [DAT_VECTOR_COLUMNS]
+    assert "in its properties" in defects[0].message
+
+
+def test_item_with_table_columns_in_properties_is_clean(tmp_path: Path) -> None:
+    path = tmp_path / "geo.parquet"
+    assets.write_geoparquet(path)
+    node = _vector_item(properties={"datetime": None, "table:columns": _COLUMNS})
+    assert checks._check_columns(node, "data", node.data["assets"]["a"], _loc(path)) == []
+
+
+def test_item_without_table_columns_flags_dat_017(tmp_path: Path) -> None:
+    path = tmp_path / "geo.parquet"
+    assets.write_geoparquet(path)
+    node = _vector_item()
+    defects = checks._check_columns(node, "data", node.data["assets"]["a"], _loc(path))
+    assert [d.rule_id for d in defects] == [DAT_VECTOR_COLUMNS]
+    assert defects[0].severity is Severity.WARNING
+
+
+def test_tabular_item_is_out_of_scope(tmp_path: Path) -> None:
+    # The Tabular Data section mandates the single-file collection pattern, so
+    # PORTO-FMT-037 has nothing to say about a plain-Parquet item asset.
+    path = tmp_path / "plain.parquet"
+    assets.write_geoparquet(path, geo=False)
+    node = _vector_item()
+    assert checks._check_columns(node, "data", node.data["assets"]["a"], _loc(path)) == []
 
 
 def test_empty_table_columns_does_not_satisfy_dat_017(tmp_path: Path) -> None:
@@ -689,8 +735,7 @@ def test_item_mirror_is_exempt_from_dat_017(tmp_path: Path) -> None:
     assert _vector(_tabular_collection(), path, roles=["data", "collection-mirror"]) == []
 
 
-def test_item_level_geoparquet_is_exempt_from_dat_017(tmp_path: Path) -> None:
+def test_non_data_roles_are_exempt_from_dat_017(tmp_path: Path) -> None:
     path = tmp_path / "geo.parquet"
     assets.write_geoparquet(path)
-    node = _node_with_asset({"href": "./data.parquet", "roles": ["data"]})
-    assert checks._check_columns(node, "data", node.data["assets"]["a"], _loc(path)) == []
+    assert _vector(_tabular_collection(), path, roles=["visual"]) == []
