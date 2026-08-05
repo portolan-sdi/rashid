@@ -233,6 +233,45 @@ class StyleMediaTypeRule(Rule):
                 )
 
 
+class DefaultStyleRoleRule(Rule):
+    """A collection with multiple styles marks its default with the `default` role.
+
+    core.md, Visualization Styles: "when a collection provides more than one
+    style, exactly one style asset MUST carry both `style` and `default` in its
+    `roles`". STAC assets are an unordered JSON object whose keys carry no
+    meaning a client is expected to understand, so the default can be read off
+    neither position nor key; the second role names it. A lone style is the
+    default implicitly, so this only bites when more than one is registered.
+    """
+
+    id = "PTL-VIZ-006"
+    spec_ids = ("PORTO-CORE-070",)
+    default_severity = Severity.ERROR
+    description = "collections with multiple styles must mark the default with the 'default' role"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        styles = [(key, asset) for _p, key, asset in _assets_of(node) if "style" in roles_of(asset)]
+        if len(styles) < 2:
+            return
+        marked = sorted(key for key, asset in styles if "default" in roles_of(asset))
+        if len(marked) == 1:
+            return
+        message = (
+            f"collection registers {len(styles)} style assets but none carries the 'default'"
+            " role, so the default style cannot be identified"
+            if not marked
+            else f"collection marks {len(marked)} style assets with the 'default' role"
+            f" ({', '.join(marked)}); exactly one is the default"
+        )
+        yield self.finding(
+            node,
+            message,
+            json_pointer="/assets",
+            fix_hint="add 'default' to the roles of exactly one style asset",
+        )
+
+
 class LargeVectorWithoutVisualRule(Rule):
     """Large vector data without a visual derivative gets a nudge.
 
