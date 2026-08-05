@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from rashid import validate
+from rashid.model import Severity
 from tests.conftest import (
     VALID_MULTIHASH,
     CatalogBuilder,
@@ -75,6 +76,8 @@ def test_missing_file_size(catalog: CatalogBuilder) -> None:
     findings = findings_for(validate(catalog.write()), "PTL-AST-003")
     assert len(findings) == 1
     assert "no file:size" in findings[0].message
+    # PORTO-CORE-028 is a SHOULD, so the absence never fails a catalog.
+    assert findings[0].severity is Severity.WARNING
 
 
 def test_negative_file_size(catalog: CatalogBuilder) -> None:
@@ -87,7 +90,11 @@ def test_negative_file_size(catalog: CatalogBuilder) -> None:
 def test_missing_checksum(catalog: CatalogBuilder) -> None:
     catalog.collection("roads", assets={"data": _asset(**{"file:checksum": None})})
     report = validate(catalog.write())
-    assert len(findings_for(report, "PTL-AST-003")) == 1
+    findings = findings_for(report, "PTL-AST-003")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.WARNING
+    # A mirror that cannot checksum bytes it does not host still conforms.
+    assert report.passed
     # AST-004 does not double-report the absence
     assert findings_for(report, "PTL-AST-004") == []
 

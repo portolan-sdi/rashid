@@ -63,7 +63,8 @@ _COVERED: frozenset[str] = frozenset(
     {
         "PTL-AST-001",
         "PTL-AST-002",
-        "PTL-AST-003",
+        # PTL-AST-003 is a WARNING: PORTO-CORE-028 makes file:size and
+        # file:checksum a SHOULD, so it never reaches this ERROR-only gate.
         "PTL-AST-004",
         "PTL-AST-005",
         "PTL-BBX-001",
