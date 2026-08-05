@@ -49,12 +49,21 @@ def test_geospatial_collection_without_thumbnail(catalog: CatalogBuilder) -> Non
 
 def test_thumbnail_with_wrong_type(catalog: CatalogBuilder) -> None:
     bad = thumbnail_asset()
-    bad["type"] = "image/webp"
+    bad["type"] = "image/gif"
     collection = catalog.collection("roads", assets={"data": default_asset(), "thumbnail": bad})
     collection.item("roads-2024")
     findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
     assert len(findings) == 1
-    assert "image/webp" in findings[0].message
+    assert "image/gif" in findings[0].message
+
+
+@pytest.mark.parametrize("media_type", ["image/png", "image/jpeg", "image/webp"])
+def test_thumbnail_accepts_each_allowed_type(catalog: CatalogBuilder, media_type: str) -> None:
+    asset = thumbnail_asset()
+    asset["type"] = media_type
+    collection = catalog.collection("roads", assets={"data": default_asset(), "thumbnail": asset})
+    collection.item("roads-2024")
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-001") == []
 
 
 def test_unknowable_collection_is_skipped(catalog: CatalogBuilder) -> None:
