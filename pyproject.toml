@@ -202,7 +202,9 @@ exclude_dirs = ["tests", ".venv"]
 
 [tool.deptry]
 known_first_party = ["rashid"]
-exclude = [".venv", "tests", "mutants"]
+# .claude holds Claude Code worktrees, each with its own .venv. Like mutants,
+# it is generated, not this project's dependency surface.
+exclude = [".venv", "tests", "mutants", ".claude"]
 
 [tool.deptry.package_module_name_map]
 # rio-cogeo installs as the `rio_cogeo` import package.
