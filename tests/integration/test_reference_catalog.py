@@ -1,6 +1,7 @@
 """The spec's reference catalog, vendored, must pass rashid with zero errors.
 
-This is the dogfood guard. ``portolan-spec``'s ``examples/catalog/reference`` is
+This is the dogfood guard. ``portolan-spec``'s
+``examples/catalog/portolan-reference`` is
 the canonical example of a valid Portolan catalog; it is vendored here (JSON and
 Markdown only) by ``scripts/vendor_spec_fixtures.py`` and validated by both the
 metadata pass and the profile schema pass. The only findings allowed are the two

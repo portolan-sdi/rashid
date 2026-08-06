@@ -47,7 +47,7 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures"
 BUNDLED_SCHEMAS = REPO_ROOT / "src" / "rashid" / "_schemas" / "portolan"
 
 # Relative to the spec checkout root.
-CATALOG_SRC = Path("examples/catalog/reference")
+CATALOG_SRC = Path("examples/catalog/portolan-reference")
 SCHEMA_GLOB = "stac/json-schema/v*/schema.json"
 PROFILE_EXAMPLES_SRC = Path("stac/examples")
 REQUIREMENTS_SRC = Path("specs/portolan/requirements.yaml")
