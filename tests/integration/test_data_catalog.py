@@ -68,8 +68,26 @@ def _build(root: Path) -> Path:
             "extra": _asset("./extra.parquet", _PARQUET_TYPE),
             "thumbnail": thumbnail_asset(),
         },
+        # PORTO-FMT-044: a vector collection documents its columns. Declared at
+        # collection level, which covers both of its GeoParquet data assets.
+        **{
+            "table:columns": [
+                {"name": "geometry", "type": "binary", "description": "Point geometry as WKB."}
+            ]
+        },
     )
-    col.item("points", assets={"data": _asset("./points.parquet", _PARQUET_TYPE)})
+    # PORTO-FMT-045 puts an item's columns in properties, where the table
+    # extension scopes the field for items.
+    col.item(
+        "points",
+        assets={"data": _asset("./points.parquet", _PARQUET_TYPE)},
+        properties={
+            "datetime": "2024-01-01T00:00:00Z",
+            "table:columns": [
+                {"name": "geometry", "type": "binary", "description": "Point geometry as WKB."}
+            ],
+        },
+    )
     col.item("raster", assets={"data": _asset("./cog.tif", _COG_TYPE)})
     cat.write()
 

@@ -156,6 +156,10 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
         Severity.ERROR,
         "an item mirror reproduces the collection's items",
     ),
+    "PTL-DAT-017": (
+        Severity.WARNING,
+        "a GeoParquet data asset declares table:columns",
+    ),
     "PTL-LIV-000": (
         Severity.WARNING,
         "the live pass could reach a host to probe",
