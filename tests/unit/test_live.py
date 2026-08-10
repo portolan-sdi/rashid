@@ -340,22 +340,46 @@ def test_duplicate_url_still_checks_every_declared_size(catalog: CatalogBuilder)
     assert findings[0].json_pointer == "/assets/wrong"
 
 
-def test_source_and_alternate_assets_are_not_probed(catalog: CatalogBuilder) -> None:
-    # A source/alternate original lives on a server the publisher does not
-    # control (census.gov, an agency API), which core.md's Data Storage section
-    # exempts: its MUSTs bind the servers hosting the catalog's own cloud-native
-    # assets. Mirrors the data pass exemption.
+def test_upstream_hosts_are_not_probed(catalog: CatalogBuilder) -> None:
+    # PORTO-CORE-073: the Data Storage MUSTs reach the servers hosting the
+    # catalog's own cloud-native assets. census.gov serves an upstream original
+    # and api.example.gov an unrelated export; neither is the publish host, so
+    # neither is probed. What the assets are roled does not enter into it.
     source = _remote_asset("https://www2.census.gov/geo/tiger/counties.zip")
-    source["roles"] = ["data", "source"]
-    alternate = _remote_asset("https://api.example.gov/export.geojson")
-    alternate["roles"] = ["alternate"]
-    catalog.collection("roads", assets={"source": source, "alternate": alternate})
+    source["roles"] = ["source"]
+    unroled = _remote_asset("https://api.example.gov/export.geojson")
+    catalog.collection("roads", assets={"source": source, "upstream": unroled})
     graph = CatalogGraph.load(catalog.write())
     prober = FakeProber()
-    findings = validate_live(graph, prober)
+    findings = validate_live(graph, prober, base_url="https://data.example.org/cat")
     assert prober.range_calls == []
     assert prober.head_calls == []
     assert _ids(findings) == [LIV_UNAVAILABLE]  # nothing probeable remains
+
+
+def test_absolute_href_on_the_publish_host_is_probed(catalog: CatalogBuilder) -> None:
+    # The mirror image of the test above: writing the catalog's own asset as an
+    # absolute URL rather than a relative path does not put it out of scope.
+    own = _remote_asset("https://data.example.org/cat/roads/data.parquet")
+    catalog.collection("roads", assets={"data": own})
+    graph = CatalogGraph.load(catalog.write())
+    prober = FakeProber()
+    findings = validate_live(graph, prober, base_url="https://data.example.org/cat")
+    assert prober.head_calls == ["https://data.example.org/cat/roads/data.parquet"]
+    assert findings == []
+
+
+def test_source_role_alone_does_not_exempt_from_probing(catalog: CatalogBuilder) -> None:
+    # Hosting decides, not the role. Without base_url there is no publish host
+    # to compare against, so an absolute href is probed as declared whatever it
+    # carries — the documented limit of the carve-out.
+    source = _remote_asset()
+    source["roles"] = ["source"]
+    catalog.collection("roads", assets={"data": source})
+    graph = CatalogGraph.load(catalog.write())
+    prober = FakeProber()
+    validate_live(graph, prober)
+    assert prober.head_calls == [_URL]
 
 
 def test_probe_failure_is_warning_and_other_hosts_continue(catalog: CatalogBuilder) -> None:
@@ -532,14 +556,16 @@ def test_without_base_url_relative_hrefs_stay_skipped(catalog: CatalogBuilder) -
     assert _ids(findings) == [LIV_UNAVAILABLE]
 
 
-def test_mixed_absolute_and_relative_group_by_host(catalog: CatalogBuilder) -> None:
+def test_relative_hrefs_probe_the_publish_host_only(catalog: CatalogBuilder) -> None:
+    # data.example.com is a second host the catalog cites but does not publish
+    # under, so the probe set is the publish host alone (PORTO-CORE-073).
     catalog.collection("roads")  # relative ./data.parquet
     catalog.collection("rails", assets={"data": _remote_asset()})  # absolute _URL
     graph = CatalogGraph.load(catalog.write())
     prober = FakeProber()
     validate_live(graph, prober, base_url="https://data.example.org/cat")
     hosts = {u.split("/")[2] for u in prober.range_calls}
-    assert hosts == {"data.example.org", "data.example.com"}
+    assert hosts == {"data.example.org"}
 
 
 def test_runner_threads_live_base_url(catalog: CatalogBuilder) -> None:

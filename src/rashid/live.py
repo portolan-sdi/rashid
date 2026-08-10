@@ -18,10 +18,15 @@ the section's MUSTs:
   only on preflight responses, never on GET/HEAD.
 
 The section scopes its MUSTs to the servers hosting the catalog's own
-cloud-native assets, and exempts upstream originals a third party hosts, so
-assets carrying the ``source`` or ``alternate`` role are skipped rather than
-probed. A census.gov ZIP that ignores ``Range`` says nothing about the catalog
-citing it.
+cloud-native assets and exempts bytes a third party hosts, so the target set is
+built from who serves an asset rather than from the roles it carries. Given
+``base_url``, an asset is the catalog's own when its href is relative (it lives
+in the published tree) or absolute on the publish host; an absolute href on any
+other host is upstream and is skipped. A census.gov ZIP that ignores ``Range``
+says nothing about the catalog citing it. Without ``base_url`` there is no
+publish host to compare against, so every absolute href is probed as declared
+and the PORTO-CORE-073 carve-out cannot be applied — pass ``base_url`` for a
+catalog that cites upstream copies.
 
 Range and CORS semantics are server properties, so the GET and OPTIONS probes
 run once per distinct host (via its lexically first asset); only the cheap HEAD
@@ -57,9 +62,9 @@ LIV_CORS_PREFLIGHT = "PTL-LIV-005"
 # gated by tests/unit/test_spec_coverage.py.
 SPEC_IDS: dict[str, tuple[str, ...]] = {
     # Every live check probes the host set built below, and that set is where
-    # PORTO-CORE-073 lands: assets carrying the source or alternate role are
-    # dropped before a host is ever collected, so no upstream server is asked
-    # to satisfy the Data Storage MUSTs.
+    # PORTO-CORE-073 lands: an absolute href on a host other than the one the
+    # catalog is published under is dropped before a host is ever collected,
+    # so no upstream server is asked to satisfy the Data Storage MUSTs.
     LIV_RANGE: ("PORTO-CORE-043", "PORTO-CORE-073"),
     LIV_HEAD_LENGTH: ("PORTO-CORE-043", "PORTO-CORE-073"),
     LIV_CORS_ORIGIN: ("PORTO-CORE-045", "PORTO-CORE-073"),
@@ -181,10 +186,16 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
     """Probeable assets grouped by host: absolute ``https`` hrefs as declared,
     plus — when ``base_url`` is given — relative hrefs resolved against it.
 
+    ``base_url`` also names the publish host, which is what scopes the set to
+    the catalog's own assets under PORTO-CORE-073: an absolute href on another
+    host is a copy someone else serves, and dropping it here keeps every probe
+    off upstream servers.
+
     Node iteration is path-sorted and asset keys are sorted, so each host's
     first target — the probe representative — is deterministic.
     """
     base = _normalize_base(base_url) if base_url is not None else None
+    base_host = urlparse(base).netloc.lower() if base is not None else None
     by_host: dict[str, list[_Target]] = {}
     for node in graph.iter(*_LIVE_KINDS):
         if node.parse_error is not None:
@@ -199,12 +210,6 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
             href = asset.get("href")
             if not isinstance(href, str):
                 continue
-            if _is_alternate(asset):
-                # A source/alternate original lives on a server the publisher
-                # does not control, which core.md's Data Storage section
-                # exempts: its MUSTs bind the servers hosting the catalog's own
-                # cloud-native assets. Mirrors the data pass exemption.
-                continue
             url = href
             parsed = urlparse(href)
             if parsed.scheme.lower() != "https" or not parsed.netloc:
@@ -215,6 +220,12 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
                     continue  # absolute non-https, or a href escaping the tree
                 url = f"{base}{rel}"
                 parsed = urlparse(url)
+            elif base_host is not None and parsed.netloc.lower() != base_host:
+                # Published under a known host, and this href names a different
+                # one: an upstream copy the publisher does not serve. core.md's
+                # Data Storage MUSTs do not reach it (PORTO-CORE-073), whatever
+                # roles it carries.
+                continue
             size = asset.get("file:size")
             by_host.setdefault(parsed.netloc.lower(), []).append(
                 _Target(
@@ -225,13 +236,6 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
                 )
             )
     return by_host
-
-
-def _is_alternate(asset: dict[str, Any]) -> bool:
-    roles = asset.get("roles")
-    if not isinstance(roles, list):
-        return False
-    return any(isinstance(role, str) and role in ("source", "alternate") for role in roles)
 
 
 def _normalize_base(base_url: str) -> str:

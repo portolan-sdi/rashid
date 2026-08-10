@@ -277,10 +277,13 @@ def _check_asset(
     defects.extend(_check_bytes(key, asset, href, expected, node, reader))
 
     located = reader.locate(node, href)
-    if located is None or _is_alternate(asset):
-        # A source/alternate original (a non-cloud-native representation kept
-        # alongside the primary) is exempt from the cloud-native format MUSTs;
-        # its bytes are still checksum/size/format-verified above.
+    if located is None or _is_source(asset):
+        # PORTO-FMT-045: the format requirements apply to the catalog's own
+        # cloud-native assets, and a source asset is not one. It names the
+        # upstream original a cloud-native asset was derived from, which is a
+        # Shapefile or a GeoPackage as often as not, so judging it as a COG or
+        # a GeoParquet would fail it for being what it says it is. Its bytes
+        # are still checksum/size/format-verified above.
         return defects
     if is_mirror_asset(asset):
         # formats.md, Raster § Item mirror: a mirror must reproduce the items
@@ -300,11 +303,19 @@ def _check_asset(
     return defects
 
 
-def _is_alternate(asset: dict[str, Any]) -> bool:
+def _is_source(asset: dict[str, Any]) -> bool:
+    """Whether the asset carries the ``source`` role.
+
+    Only ``source``. An earlier version also matched ``alternate``, which is
+    not a role: the Alternate Assets extension defines an ``alternate`` field
+    holding other locations for the same bytes, and core.md uses "alternate"
+    as prose for a non-primary representation. Neither makes it a role name,
+    and no catalog emitted one.
+    """
     roles = asset.get("roles")
     if not isinstance(roles, list):
         return False
-    return any(isinstance(role, str) and role in ("source", "alternate") for role in roles)
+    return any(isinstance(role, str) and role == "source" for role in roles)
 
 
 def _check_bytes(

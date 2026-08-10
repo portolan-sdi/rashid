@@ -514,14 +514,18 @@ def test_spatial_ordering_zero_extent_is_ordered() -> None:
     "roles,expected",
     [
         (["data"], False),
+        (["source"], True),
         (["data", "source"], True),
-        (["visual", "alternate"], True),
+        # Not a role: the Alternate Assets extension defines an `alternate`
+        # field, and core.md uses the word as prose for a non-primary
+        # representation. Neither exempts an asset from the format MUSTs.
+        (["visual", "alternate"], False),
         (None, False),
         ("data", False),
     ],
 )
-def test_is_alternate(roles: object, expected: bool) -> None:
-    assert checks._is_alternate({"roles": roles}) is expected
+def test_is_source(roles: object, expected: bool) -> None:
+    assert checks._is_source({"roles": roles}) is expected
 
 
 def test_bbox_helpers() -> None:
