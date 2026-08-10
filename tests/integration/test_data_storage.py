@@ -2,8 +2,8 @@
 
 Needs the ``rashid[data]`` extra; skips without it. Drives the check functions
 directly on generated assets — a spec-compliant asset produces no findings, and
-each non-compliant variant raises exactly the rule it violates (formats.md:30/55/
-66/91/95).
+each non-compliant variant raises exactly the rule it violates (formats.md:30/64/
+75/91/95).
 """
 
 from __future__ import annotations
@@ -152,7 +152,7 @@ def test_five_row_groups_ordered_is_clean(tmp_path: Path) -> None:
 def test_hilbert_sorted_rows_pass_where_the_criteria_apply(
     tmp_path: Path, groups: int, seed: int
 ) -> None:
-    """The counts the 30% threshold was set from (formats.md:36).
+    """The counts the 30% threshold was set from (formats.md:38).
 
     Hilbert-sorted boxes average 0.263 to 0.274 of the extent at five row groups
     and 0.250 to 0.270 at six, so the old 25% rejected them for their row-group
