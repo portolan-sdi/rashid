@@ -17,6 +17,12 @@ the section's MUSTs:
   conditional-request headers) — allowed methods and request headers appear
   only on preflight responses, never on GET/HEAD.
 
+The section scopes its MUSTs to the servers hosting the catalog's own
+cloud-native assets, and exempts upstream originals a third party hosts, so
+assets carrying the ``source`` or ``alternate`` role are skipped rather than
+probed. A census.gov ZIP that ignores ``Range`` says nothing about the catalog
+citing it.
+
 Range and CORS semantics are server properties, so the GET and OPTIONS probes
 run once per distinct host (via its lexically first asset); only the cheap HEAD
 runs per asset. Absolute ``https`` hrefs are probed as declared; relative
@@ -191,8 +197,9 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
                 continue
             if _is_alternate(asset):
                 # A source/alternate original lives on a server the publisher
-                # does not control; the hosting MUSTs bind the servers hosting
-                # the cloud-native primaries. Mirrors the data pass exemption.
+                # does not control, which core.md's Data Storage section
+                # exempts: its MUSTs bind the servers hosting the catalog's own
+                # cloud-native assets. Mirrors the data pass exemption.
                 continue
             url = href
             parsed = urlparse(href)
