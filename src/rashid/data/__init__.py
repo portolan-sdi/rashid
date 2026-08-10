@@ -66,7 +66,11 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     DAT_CHECKSUM: ("PORTO-CORE-030",),
     DAT_SIZE: ("PORTO-CORE-030",),
     DAT_FORMAT: ("PORTO-CORE-026", "PORTO-FMT-001"),
-    DAT_COG: ("PORTO-FMT-001", "PORTO-FMT-023", "PORTO-FMT-024"),
+    # FMT-045 scopes every format check below to the catalog's own cloud-native
+    # assets. It is enforced once, at the dispatch in checks.py that returns
+    # early for a source asset, so each check the early return suppresses
+    # carries the ID.
+    DAT_COG: ("PORTO-FMT-001", "PORTO-FMT-023", "PORTO-FMT-024", "PORTO-FMT-045"),
     # The footprint comparison is scoped to geospatial data only, which is
     # how a tabular bbox stays informational (PORTO-FMT-036).
     DAT_CONSISTENCY: ("PORTO-FMT-036",),
@@ -76,23 +80,24 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     # run at five or more groups, a single group is measured over its rows, and
     # two to four are left alone rather than faulted on a threshold they cannot
     # express.
-    DAT_ORDERING: ("PORTO-FMT-006", "PORTO-FMT-043", "PORTO-FMT-044"),
+    DAT_ORDERING: ("PORTO-FMT-006", "PORTO-FMT-043", "PORTO-FMT-044", "PORTO-FMT-045"),
     # ERROR when neither statistics source exists; WARNING when a 2.x file
     # relies on native statistics without the RECOMMENDED covering column.
-    DAT_ROWGROUP_STATS: ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043"),
-    DAT_ROWGROUP_SIZE: ("PORTO-FMT-009", "PORTO-FMT-043"),
+    DAT_ROWGROUP_STATS: ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043", "PORTO-FMT-045"),
+    DAT_ROWGROUP_SIZE: ("PORTO-FMT-009", "PORTO-FMT-043", "PORTO-FMT-045"),
     DAT_COG_STATS: (
         "PORTO-FMT-026",
         "PORTO-FMT-027",
         "PORTO-FMT-028",
         "PORTO-FMT-030",
+        "PORTO-FMT-045",
     ),
-    DAT_VALID_PERCENT: ("PORTO-FMT-031",),
-    DAT_OVERVIEWS: ("PORTO-FMT-024", "PORTO-FMT-025"),
-    DAT_GEOPARQUET_VERSION: ("PORTO-FMT-004",),
-    DAT_TILE_SIZE: ("PORTO-FMT-024",),
-    DAT_PARTITION_SCHEMA: ("PORTO-FMT-021",),
-    DAT_TABULAR: ("PORTO-FMT-037",),
+    DAT_VALID_PERCENT: ("PORTO-FMT-031", "PORTO-FMT-045"),
+    DAT_OVERVIEWS: ("PORTO-FMT-024", "PORTO-FMT-025", "PORTO-FMT-045"),
+    DAT_GEOPARQUET_VERSION: ("PORTO-FMT-004", "PORTO-FMT-045"),
+    DAT_TILE_SIZE: ("PORTO-FMT-024", "PORTO-FMT-045"),
+    DAT_PARTITION_SCHEMA: ("PORTO-FMT-021", "PORTO-FMT-045"),
+    DAT_TABULAR: ("PORTO-FMT-037", "PORTO-FMT-045"),
     # A mirror must reproduce the collection's items (PORTO-FMT-042).
     DAT_MIRROR: ("PORTO-FMT-042",),
 }
