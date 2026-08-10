@@ -72,7 +72,11 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     DAT_CONSISTENCY: ("PORTO-FMT-036",),
     # FMT-043 binds an item mirror to the same three GeoParquet MUSTs as
     # vector data, so the checks that enforce them carry it too.
-    DAT_ORDERING: ("PORTO-FMT-006", "PORTO-FMT-043"),
+    # FMT-044 is the applicability guard on FMT-006: the two row-group criteria
+    # run at five or more groups, a single group is measured over its rows, and
+    # two to four are left alone rather than faulted on a threshold they cannot
+    # express.
+    DAT_ORDERING: ("PORTO-FMT-006", "PORTO-FMT-043", "PORTO-FMT-044"),
     # ERROR when neither statistics source exists; WARNING when a 2.x file
     # relies on native statistics without the RECOMMENDED covering column.
     DAT_ROWGROUP_STATS: ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043"),

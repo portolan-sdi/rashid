@@ -35,17 +35,20 @@ def ordered_points(n: int = 6) -> list[tuple[float, float]]:
     ]
 
 
-def interleaved_points() -> list[tuple[float, float]]:
-    """Each consecutive pair spans the whole extent, so row groups overlap."""
+def interleaved_points(n: int = 10) -> list[tuple[float, float]]:
+    """Each consecutive pair spans the whole extent, so row groups overlap.
+
+    Ten points at the default ``row_group_size`` of 2 give five row groups,
+    which is where PORTO-FMT-006's tests start applying (formats.md:41). A
+    shorter file is exempt, so a test that wants an ordering finding needs at
+    least this many rows.
+    """
     minx, miny, maxx, maxy = BBOX
-    return [
-        (minx, miny),
-        (maxx, maxy),
-        (minx + 0.2, miny + 0.2),
-        (maxx - 0.2, maxy - 0.2),
-        (minx + 0.4, miny + 0.4),
-        (maxx - 0.4, maxy - 0.4),
-    ]
+    points = []
+    for i in range(n):
+        inset = 0.2 * (i // 2)
+        points.append((minx + inset, miny + inset) if i % 2 == 0 else (maxx - inset, maxy - inset))
+    return points
 
 
 def scattered_points(n: int, seed: int = 0) -> list[tuple[float, float]]:
@@ -69,18 +72,37 @@ def local_points(n: int, seed: int = 0) -> list[tuple[float, float]]:
     return list(zip(xs, ys, strict=True))
 
 
-def morton_sorted(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    """The same points in Z-order, a space-filling-curve sort.
+_HILBERT_ORDER = 16
+_HILBERT_SIDE = 1 << _HILBERT_ORDER
 
-    Morton order stands in for the Hilbert or S2 sort a producer would apply;
-    it is a few lines and needs no dependency, and any curve sort is enough to
-    make nearby features nearby in the file.
+
+def hilbert_sorted(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """The same points in Hilbert order, a space-filling-curve sort.
+
+    Hilbert is what producers reach for, and the curve matters at the row-group
+    counts formats.md's locality threshold is set against. Z-order leaves boxes
+    about 35% of the extent at five row groups where Hilbert reaches 27%, so a
+    Morton fixture would misrepresent well-sorted data as failing.
+
+    Standard xy2d, no dependency beyond the coordinate scaling.
     """
 
     def key(point: tuple[float, float]) -> int:
-        x = int((point[0] + 180.0) / 360.0 * 0xFFFF)
-        y = int((point[1] + 90.0) / 180.0 * 0xFFFF)
-        return sum(((x >> i) & 1) << (2 * i) | ((y >> i) & 1) << (2 * i + 1) for i in range(16))
+        x = min(_HILBERT_SIDE - 1, int((point[0] + 180.0) / 360.0 * _HILBERT_SIDE))
+        y = min(_HILBERT_SIDE - 1, int((point[1] + 90.0) / 180.0 * _HILBERT_SIDE))
+        d = 0
+        s = _HILBERT_SIDE >> 1
+        while s > 0:
+            rx = 1 if (x & s) > 0 else 0
+            ry = 1 if (y & s) > 0 else 0
+            d += s * s * ((3 * rx) ^ ry)
+            if ry == 0:
+                if rx == 1:
+                    x = s - 1 - x
+                    y = s - 1 - y
+                x, y = y, x
+            s >>= 1
+        return d
 
     return sorted(points, key=key)
 
