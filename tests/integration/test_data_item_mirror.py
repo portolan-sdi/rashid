@@ -157,11 +157,12 @@ def test_matching_mirror_is_clean(catalog_root: Path) -> None:
 def test_unordered_mirror_is_flagged(catalog_root: Path) -> None:
     """PORTO-FMT-043: an item index is queried by extent like any other table.
 
-    Six interleaved rows across three row groups, so ordering has something to
-    judge. The row count no longer matches the collection's two items, which
-    ``PTL-DAT-016`` reports separately; this test reads the storage rules only.
+    Ten interleaved rows across five row groups, the count at which
+    PORTO-FMT-006's criteria start applying. The row count no longer matches
+    the collection's two items, which ``PTL-DAT-016`` reports separately; this
+    test reads the storage rules only.
     """
-    scattered = [f"scene-{n}" for n in range(6)]
+    scattered = [f"scene-{n}" for n in range(10)]
     _rewrite_mirror(catalog_root, scattered, ordered=False, row_group_size=2)
     ids = {f.rule_id for f in validate_data(CatalogGraph.load(catalog_root))}
     assert DAT_ORDERING in ids

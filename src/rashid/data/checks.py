@@ -14,8 +14,8 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   one inherited from the enclosing collection or item is faulted at the field
   that declares it, once, however many assets read it.
 - ``PTL-DAT-006`` GeoParquet rows are not spatially ordered (MUST, formats.md:30)
-- ``PTL-DAT-007`` no per-row-group spatial statistics (MUST, formats.md:39)
-- ``PTL-DAT-008`` a row group exceeds 150,000 rows (MUST, formats.md:50)
+- ``PTL-DAT-007`` no per-row-group spatial statistics (MUST, formats.md:51)
+- ``PTL-DAT-008`` a row group exceeds 150,000 rows (MUST, formats.md:62)
 - ``PTL-DAT-009`` COG bands lack embedded statistics (MUST, formats.md:95)
 - ``PTL-DAT-010`` a band lacks embedded valid percent (SHOULD; MUST — and thus
   an ERROR — when the band has a nodata value, formats.md:121)
@@ -127,29 +127,28 @@ _BBOX_TOL = 0.01
 # every edge is walked rather than sampled at its ends.
 _DENSIFY_PTS = 21
 
-# formats.md:50 — a GeoParquet row group MUST hold no more than this many rows.
+# formats.md:62 — a GeoParquet row group MUST hold no more than this many rows.
 _MAX_ROW_GROUP_ROWS = 150_000
 
 # formats.md:30 — spatial ordering passes on either criterion.
 _MAX_OVERLAP_FRACTION = 0.30  # < 30% of consecutive row-group pairs may overlap
 _MAX_LOCALITY_RATIO = 0.25  # row-group boxes average < 25% of the file extent
-# formats.md:36 completes the locality criterion: boxes that small let a reader
-# "skip at least 50% of row groups for a query window of 10% of the extent".
-_MIN_SKIP_RATE = 0.50
-_QUERY_FRACTION = 0.10
-# Query windows sit on a fixed lattice rather than being sampled at random, so
-# the same file always yields the same finding.
-_QUERY_LATTICE = 5
 
-# A file the writer never chunked has one row group, so the two criteria above
-# have nothing to compare and pass whatever the row order. formats.md states
-# the requirement over rows ("rows MUST be spatially ordered so nearby features
-# are nearby in the file") and gives the row-group tests as how to measure it,
-# so the rows are partitioned into the groups a conforming writer would have
-# emitted and the same criteria applied to those. Neither number is a spec
-# threshold: the chunk count only has to be enough for "skip 50% of row groups"
-# to mean something, and below the row floor a chunk box covers too few points
-# to say anything about ordering.
+# formats.md:41 — both criteria are fractions over the row groups themselves, so
+# below five groups the fraction has nowhere useful to land: three groups can only
+# overlap on 0%, 50%, or 100% of consecutive pairs, and an average box under 25%
+# of the extent is out of reach on two or three however well the rows are sorted.
+# PORTO-FMT-044 forbids faulting a file on a threshold its row-group count cannot
+# express, so between two and four groups the pair of tests is not run at all.
+_MIN_ORDERING_ROW_GROUPS = 5
+
+# One row group is the other end of that range, and formats.md:45 names the way
+# out: the requirement is stated over rows ("rows MUST be spatially ordered so
+# nearby features are nearby in the file"), so the rows are partitioned into the
+# groups a conforming writer would have emitted and the same criteria applied to
+# those. Ten chunks clears _MIN_ORDERING_ROW_GROUPS with room to spare; below the
+# row floor a chunk box covers too few points to say anything about ordering.
+# Neither number is a spec threshold.
 _ORDERING_CHUNKS = 10
 _MIN_CHUNK_ROWS = 20
 
@@ -776,7 +775,7 @@ def _bbox_mismatch_message(
 
 def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
     """A GeoParquet asset MUST have bounded row groups, per-row-group spatial
-    statistics, and spatial ordering (formats.md:30,39,50).
+    statistics, and spatial ordering (formats.md:30,51,62).
 
     Parquet and GeoParquet share the ``application/vnd.apache.parquet`` media
     type. A file with no ``geo`` metadata key is plain Parquet — legitimate
@@ -815,6 +814,11 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
 
     if len(bboxes) == 1:
         defects.extend(_unchunked_ordering_defects(key, parquet, geo, row_counts[0]))
+        return defects
+
+    if len(bboxes) < _MIN_ORDERING_ROW_GROUPS:
+        # PORTO-FMT-044: two to four row groups cannot express either threshold,
+        # and there is no single row group to fall back to partitioning.
         return defects
 
     if not _is_spatially_ordered(bboxes):
@@ -1303,7 +1307,7 @@ def _rowgroup_stat_defects(
 ) -> tuple[list[tuple[float, float, float, float]] | None, list[DataDefect]]:
     """Per-row-group [minx, miny, maxx, maxy] boxes, plus statistics defects.
 
-    formats.md:39 accepts two satisfiers: a 1.1 ``bbox`` covering column whose
+    formats.md:51 accepts two satisfiers: a 1.1 ``bbox`` covering column whose
     leaf fields carry Parquet min/max, or — for GeoParquet 2.x / Parquet
     ``GEOMETRY`` — native ``GeospatialStatistics`` per row group. Neither
     source yielding a box for every row group is the MUST failure (ERROR).
@@ -1512,11 +1516,11 @@ def _row_bboxes(
 def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bool:
     """True if row groups are spatially ordered by either spec criterion (formats.md:30).
 
-    A caller with a single box must judge ordering another way; see
-    :func:`_unchunked_ordering_defects`.
+    Callers must hold the applicability guard themselves. Below
+    ``_MIN_ORDERING_ROW_GROUPS`` the two criteria say nothing, so a file that
+    thin is either left alone or measured over its rows instead; see
+    :func:`_check_geoparquet` and :func:`_unchunked_ordering_defects`.
     """
-    if len(bboxes) <= 1:
-        return True
     pairs = len(bboxes) - 1
     overlaps = sum(_bbox_overlaps(bboxes[i], bboxes[i + 1]) for i in range(pairs))
     if overlaps / pairs < _MAX_OVERLAP_FRACTION:
@@ -1527,50 +1531,7 @@ def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bo
     if extent_area == 0:
         return True  # a single location — nothing to order
     mean_ratio = sum(_bbox_area(b) for b in bboxes) / len(bboxes) / extent_area
-    return mean_ratio < _locality_ratio_limit(len(bboxes)) and (
-        _mean_skip_rate(bboxes, extent) >= _MIN_SKIP_RATE
-    )
-
-
-def _locality_ratio_limit(groups: int) -> float:
-    """The area-ratio cutoff for ``groups`` row groups.
-
-    A well-ordered file's row-group boxes each cover roughly ``1/groups`` of the
-    extent plus slop, so a file split into two or three groups cannot reach 25%
-    however well it is sorted. The limit relaxes to ``2/groups`` below eight
-    groups and holds formats.md's 25% at or above it. The skip rate keeps the
-    relaxation honest: boxes that each span the whole extent skip nothing and
-    fail on that criterion instead.
-
-    Ported from geoparquet-io's ``_area_ratio_threshold``.
-    """
-    return max(_MAX_LOCALITY_RATIO, 2.0 / groups)
-
-
-def _mean_skip_rate(
-    bboxes: list[tuple[float, float, float, float]],
-    extent: tuple[float, float, float, float],
-) -> float:
-    """Fraction of row groups a query window skips, averaged over the extent.
-
-    formats.md:36 sizes the window at 10% of the extent per dimension. The
-    windows sit on a fixed lattice of ``_QUERY_LATTICE`` positions per axis, so
-    the same file always yields the same number. geoparquet-io's
-    ``_compute_locality_metrics`` samples equivalent windows at random from a
-    pinned seed, which a reader of a validator report cannot reproduce.
-    """
-    groups = len(bboxes)
-    width = (extent[2] - extent[0]) * _QUERY_FRACTION
-    height = (extent[3] - extent[1]) * _QUERY_FRACTION
-    rates = []
-    for i in range(_QUERY_LATTICE):
-        for j in range(_QUERY_LATTICE):
-            x = extent[0] + (extent[2] - extent[0] - width) * i / (_QUERY_LATTICE - 1)
-            y = extent[1] + (extent[3] - extent[1] - height) * j / (_QUERY_LATTICE - 1)
-            window = (x, y, x + width, y + height)
-            skipped = sum(not _bbox_overlaps(window, b) for b in bboxes)
-            rates.append(skipped / groups)
-    return sum(rates) / len(rates)
+    return mean_ratio < _MAX_LOCALITY_RATIO
 
 
 def _bbox_area(b: tuple[float, float, float, float]) -> float:

@@ -56,11 +56,15 @@ LIV_CORS_PREFLIGHT = "PTL-LIV-005"
 # (specs/portolan/requirements.yaml) enforced by each check;
 # gated by tests/unit/test_spec_coverage.py.
 SPEC_IDS: dict[str, tuple[str, ...]] = {
-    LIV_RANGE: ("PORTO-CORE-043",),
-    LIV_HEAD_LENGTH: ("PORTO-CORE-043",),
-    LIV_CORS_ORIGIN: ("PORTO-CORE-045",),
-    LIV_CORS_EXPOSE: ("PORTO-CORE-045",),
-    LIV_CORS_PREFLIGHT: ("PORTO-CORE-045",),
+    # Every live check probes the host set built below, and that set is where
+    # PORTO-CORE-073 lands: assets carrying the source or alternate role are
+    # dropped before a host is ever collected, so no upstream server is asked
+    # to satisfy the Data Storage MUSTs.
+    LIV_RANGE: ("PORTO-CORE-043", "PORTO-CORE-073"),
+    LIV_HEAD_LENGTH: ("PORTO-CORE-043", "PORTO-CORE-073"),
+    LIV_CORS_ORIGIN: ("PORTO-CORE-045", "PORTO-CORE-073"),
+    LIV_CORS_EXPOSE: ("PORTO-CORE-045", "PORTO-CORE-073"),
+    LIV_CORS_PREFLIGHT: ("PORTO-CORE-045", "PORTO-CORE-073"),
 }
 
 # Assets are declared on collections and items; catalogs carry none.

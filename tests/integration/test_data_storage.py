@@ -2,7 +2,7 @@
 
 Needs the ``rashid[data]`` extra; skips without it. Drives the check functions
 directly on generated assets — a spec-compliant asset produces no findings, and
-each non-compliant variant raises exactly the rule it violates (formats.md:30/39/
+each non-compliant variant raises exactly the rule it violates (formats.md:30/51/
 50/91/95).
 """
 
@@ -90,9 +90,30 @@ def test_compliant_geoparquet_is_clean(tmp_path: Path) -> None:
 def test_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
     path = tmp_path / "unordered.parquet"
     assets.write_geoparquet(path, points=assets.interleaved_points())
+    assert pq.ParquetFile(path).metadata.num_row_groups == 5
     defects = _gpq(path)
     assert [d.rule_id for d in defects] == [DAT_ORDERING]
     assert defects[0].severity is Severity.ERROR
+
+
+def test_four_row_groups_are_exempt_from_dat_006(tmp_path: Path) -> None:
+    """PORTO-FMT-044: below five row groups neither criterion can be expressed.
+
+    These eight rows are the same interleaved layout the five-group file above
+    is faulted for, so the exemption is what clears them, not their ordering.
+    """
+    path = tmp_path / "four_groups.parquet"
+    assets.write_geoparquet(path, points=assets.interleaved_points(8))
+    assert pq.ParquetFile(path).metadata.num_row_groups == 4
+    assert _gpq(path) == []
+
+
+def test_five_row_groups_ordered_is_clean(tmp_path: Path) -> None:
+    """The first count the criteria do apply at, on rows that satisfy them."""
+    path = tmp_path / "five_groups.parquet"
+    assets.write_geoparquet(path, points=assets.ordered_points(10))
+    assert pq.ParquetFile(path).metadata.num_row_groups == 5
+    assert _gpq(path) == []
 
 
 def test_single_row_group_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
