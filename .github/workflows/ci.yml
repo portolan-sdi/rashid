@@ -35,7 +35,7 @@ jobs:
     # v1 is a moving major tag. Compatible changes arrive when ops moves
     # it; a breaking change ships as v2 and reaches this repo as a
     # Dependabot PR.
-    uses: portolan-sdi/portolan-ops/.github/workflows/reusable-python-ci.yml@v1.1.0
+    uses: portolan-sdi/portolan-ops/.github/workflows/reusable-python-ci.yml@v1.5.0
     permissions:
       contents: read
       # The reusable test job requests this for Codecov OIDC even when the
