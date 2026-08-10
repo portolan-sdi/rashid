@@ -14,8 +14,8 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   one inherited from the enclosing collection or item is faulted at the field
   that declares it, once, however many assets read it.
 - ``PTL-DAT-006`` GeoParquet rows are not spatially ordered (MUST, formats.md:30)
-- ``PTL-DAT-007`` no per-row-group spatial statistics (MUST, formats.md:55)
-- ``PTL-DAT-008`` a row group exceeds 150,000 rows (MUST, formats.md:66)
+- ``PTL-DAT-007`` no per-row-group spatial statistics (MUST, formats.md:64)
+- ``PTL-DAT-008`` a row group exceeds 150,000 rows (MUST, formats.md:75)
 - ``PTL-DAT-009`` COG bands lack embedded statistics (MUST, formats.md:95)
 - ``PTL-DAT-010`` a band lacks embedded valid percent (SHOULD; MUST — and thus
   an ERROR — when the band has a nodata value, formats.md:121)
@@ -127,10 +127,10 @@ _BBOX_TOL = 0.01
 # every edge is walked rather than sampled at its ends.
 _DENSIFY_PTS = 21
 
-# formats.md:66 — a GeoParquet row group MUST hold no more than this many rows.
+# formats.md:75 — a GeoParquet row group MUST hold no more than this many rows.
 _MAX_ROW_GROUP_ROWS = 150_000
 
-# formats.md:36 — spatial ordering passes on either criterion.
+# formats.md:38 — spatial ordering passes on either criterion.
 _MAX_OVERLAP_FRACTION = 0.30  # < 30% of consecutive row-group pairs may overlap
 # Row-group boxes average < 30% of the file extent. formats.md sets the figure from
 # what a Hilbert sort achieves: boxes land near 27% of the extent at five row groups
@@ -138,21 +138,20 @@ _MAX_OVERLAP_FRACTION = 0.30  # < 30% of consecutive row-group pairs may overlap
 # six-group files for their row-group count rather than their ordering.
 _MAX_LOCALITY_RATIO = 0.30
 
-# formats.md:47 — both criteria are fractions over the row groups themselves, so
-# below five groups the fraction has nowhere useful to land: three groups can only
-# overlap on 0%, 50%, or 100% of consecutive pairs, and an average box under 25%
-# of the extent is out of reach on two or three however well the rows are sorted.
-# PORTO-FMT-044 forbids faulting a file on a threshold its row-group count cannot
-# express, so below five groups these two are not run.
+# formats.md:55 — both checks measure a percentage across the row groups, and with
+# fewer than five groups that percentage cannot land on a useful value. Three groups
+# can only produce an overlap of 0%, 50%, or 100%, and two or three boxes cannot
+# average less than 30% of the extent however well the rows are sorted. PORTO-FMT-044
+# forbids failing a file on a threshold its row-group count puts out of reach, so
+# below five groups neither check runs.
 _MIN_ORDERING_ROW_GROUPS = 5
 
-# The requirement itself is over rows and is not exempted with them: "rows MUST be
-# spatially ordered so nearby features are nearby in the file" binds every file
-# (formats.md:30). It is measured by partitioning the rows into the groups a
-# conforming writer would have emitted, which runs at any row-group count and is
-# the only measurement below five. Ten chunks clears _MIN_ORDERING_ROW_GROUPS with
-# room to spare, so the flat 25% resolves; below the row floor a chunk box covers
-# too few points to say anything. Neither number is a spec threshold.
+# Row ordering is a separate rule that applies to every file, whatever its row-group
+# layout (formats.md:30). It is checked by splitting the rows into the groups a
+# conforming writer would have produced, which works at any row-group count and is
+# the only check available below five. Ten chunks is comfortably above
+# _MIN_ORDERING_ROW_GROUPS, so the 30% limit means something; below the row floor a
+# chunk covers too few points to say anything. Neither number is a spec threshold.
 _ORDERING_CHUNKS = 10
 _MIN_CHUNK_ROWS = 20
 
@@ -779,7 +778,7 @@ def _bbox_mismatch_message(
 
 def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
     """A GeoParquet asset MUST have bounded row groups, per-row-group spatial
-    statistics, and spatial ordering (formats.md:30,55,66).
+    statistics, and spatial ordering (formats.md:30,64,75).
 
     Parquet and GeoParquet share the ``application/vnd.apache.parquet`` media
     type. A file with no ``geo`` metadata key is plain Parquet — legitimate
@@ -819,8 +818,8 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
     groups = len(bboxes)
     metrics_apply = groups >= _MIN_ORDERING_ROW_GROUPS
 
-    # Rows first: the requirement is over rows and binds every file, so it is
-    # measured over rows at any row-group count (formats.md:30).
+    # Rows first: the rule is about row order and applies to every file, so it
+    # is checked at any row-group count (formats.md:30).
     row_defects = _row_ordering_defects(
         key, parquet, geo, sum(row_counts), groups, report_unreadable=not metrics_apply
     )
@@ -1316,7 +1315,7 @@ def _rowgroup_stat_defects(
 ) -> tuple[list[tuple[float, float, float, float]] | None, list[DataDefect]]:
     """Per-row-group [minx, miny, maxx, maxy] boxes, plus statistics defects.
 
-    formats.md:55 accepts two satisfiers: a 1.1 ``bbox`` covering column whose
+    formats.md:64 accepts two satisfiers: a 1.1 ``bbox`` covering column whose
     leaf fields carry Parquet min/max, or — for GeoParquet 2.x / Parquet
     ``GEOMETRY`` — native ``GeospatialStatistics`` per row group. Neither
     source yielding a box for every row group is the MUST failure (ERROR).
@@ -1437,22 +1436,21 @@ def _row_ordering_defects(
     *,
     report_unreadable: bool,
 ) -> list[DataDefect]:
-    """Judge ordering over the rows, whatever the file's row-group layout.
+    """Check row order, whatever the file's row-group layout.
 
-    formats.md:30 binds every file: rows MUST be spatially ordered, and a
-    validator measures that by partitioning them into the groups a conforming
-    writer would have emitted. Row-group layout does not change the property,
-    only how cheaply a reader can observe it, so this runs at any group count.
+    formats.md:30 requires spatially ordered rows in every file, and a validator
+    checks that by splitting them into the groups a conforming writer would have
+    produced. How the file happens to be chunked does not change whether the rows
+    are ordered, only how cheaply a reader can tell, so this runs at any count.
 
-    Below ``_MIN_ORDERING_ROW_GROUPS`` it is the only measurement there is. The
-    reference stac-geoparquet writer shows why that matters: with no schema
-    passed, ``parse_stac_items_to_arrow`` returns one contiguous record batch
-    at any item count and ``to_parquet`` writes one row group per batch, so the
-    row-group criteria have a single box to compare and pass vacuously on
-    entirely unsorted output.
+    Below ``_MIN_ORDERING_ROW_GROUPS`` it is the only check available. The
+    reference stac-geoparquet writer shows why that matters. With no schema
+    passed, ``parse_stac_items_to_arrow`` returns one contiguous record batch at
+    any item count and ``to_parquet`` writes one row group per batch, leaving the
+    row-group checks a single box to compare, which passes on any row order.
 
-    ``report_unreadable`` is off when the row-group criteria also apply, since
-    then an unreadable covering column leaves ordering measured, not unmeasured.
+    ``report_unreadable`` is off when the row-group checks also run, since an
+    unreadable covering column then leaves row order checked, not unchecked.
     """
     if rows < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
         return []  # too few rows for a chunk's box to describe anything
@@ -1543,7 +1541,7 @@ def _row_bboxes(
 
 
 def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bool:
-    """True if row groups are spatially ordered by either spec criterion (formats.md:36).
+    """True if row groups are spatially ordered by either spec criterion (formats.md:38).
 
     Callers must hold the applicability guard themselves. Below
     ``_MIN_ORDERING_ROW_GROUPS`` the two criteria say nothing, so a file that
