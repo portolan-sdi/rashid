@@ -14,8 +14,8 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   one inherited from the enclosing collection or item is faulted at the field
   that declares it, once, however many assets read it.
 - ``PTL-DAT-006`` GeoParquet rows are not spatially ordered (MUST, formats.md:30)
-- ``PTL-DAT-007`` no per-row-group spatial statistics (MUST, formats.md:51)
-- ``PTL-DAT-008`` a row group exceeds 150,000 rows (MUST, formats.md:62)
+- ``PTL-DAT-007`` no per-row-group spatial statistics (MUST, formats.md:55)
+- ``PTL-DAT-008`` a row group exceeds 150,000 rows (MUST, formats.md:66)
 - ``PTL-DAT-009`` COG bands lack embedded statistics (MUST, formats.md:95)
 - ``PTL-DAT-010`` a band lacks embedded valid percent (SHOULD; MUST — and thus
   an ERROR — when the band has a nodata value, formats.md:121)
@@ -127,28 +127,28 @@ _BBOX_TOL = 0.01
 # every edge is walked rather than sampled at its ends.
 _DENSIFY_PTS = 21
 
-# formats.md:62 — a GeoParquet row group MUST hold no more than this many rows.
+# formats.md:66 — a GeoParquet row group MUST hold no more than this many rows.
 _MAX_ROW_GROUP_ROWS = 150_000
 
-# formats.md:30 — spatial ordering passes on either criterion.
+# formats.md:36 — spatial ordering passes on either criterion.
 _MAX_OVERLAP_FRACTION = 0.30  # < 30% of consecutive row-group pairs may overlap
 _MAX_LOCALITY_RATIO = 0.25  # row-group boxes average < 25% of the file extent
 
-# formats.md:41 — both criteria are fractions over the row groups themselves, so
+# formats.md:47 — both criteria are fractions over the row groups themselves, so
 # below five groups the fraction has nowhere useful to land: three groups can only
 # overlap on 0%, 50%, or 100% of consecutive pairs, and an average box under 25%
 # of the extent is out of reach on two or three however well the rows are sorted.
 # PORTO-FMT-044 forbids faulting a file on a threshold its row-group count cannot
-# express, so between two and four groups the pair of tests is not run at all.
+# express, so below five groups these two are not run.
 _MIN_ORDERING_ROW_GROUPS = 5
 
-# One row group is the other end of that range, and formats.md:45 names the way
-# out: the requirement is stated over rows ("rows MUST be spatially ordered so
-# nearby features are nearby in the file"), so the rows are partitioned into the
-# groups a conforming writer would have emitted and the same criteria applied to
-# those. Ten chunks clears _MIN_ORDERING_ROW_GROUPS with room to spare; below the
-# row floor a chunk box covers too few points to say anything about ordering.
-# Neither number is a spec threshold.
+# The requirement itself is over rows and is not exempted with them: "rows MUST be
+# spatially ordered so nearby features are nearby in the file" binds every file
+# (formats.md:30). It is measured by partitioning the rows into the groups a
+# conforming writer would have emitted, which runs at any row-group count and is
+# the only measurement below five. Ten chunks clears _MIN_ORDERING_ROW_GROUPS with
+# room to spare, so the flat 25% resolves; below the row floor a chunk box covers
+# too few points to say anything. Neither number is a spec threshold.
 _ORDERING_CHUNKS = 10
 _MIN_CHUNK_ROWS = 20
 
@@ -775,7 +775,7 @@ def _bbox_mismatch_message(
 
 def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
     """A GeoParquet asset MUST have bounded row groups, per-row-group spatial
-    statistics, and spatial ordering (formats.md:30,51,62).
+    statistics, and spatial ordering (formats.md:30,55,66).
 
     Parquet and GeoParquet share the ``application/vnd.apache.parquet`` media
     type. A file with no ``geo`` metadata key is plain Parquet — legitimate
@@ -812,16 +812,21 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
     if bboxes is None:
         return defects  # without per-row-group boxes, ordering cannot be judged
 
-    if len(bboxes) == 1:
-        defects.extend(_unchunked_ordering_defects(key, parquet, geo, row_counts[0]))
-        return defects
+    groups = len(bboxes)
+    metrics_apply = groups >= _MIN_ORDERING_ROW_GROUPS
 
-    if len(bboxes) < _MIN_ORDERING_ROW_GROUPS:
-        # PORTO-FMT-044: two to four row groups cannot express either threshold,
-        # and there is no single row group to fall back to partitioning.
-        return defects
+    # Rows first: the requirement is over rows and binds every file, so it is
+    # measured over rows at any row-group count (formats.md:30).
+    row_defects = _row_ordering_defects(
+        key, parquet, geo, sum(row_counts), groups, report_unreadable=not metrics_apply
+    )
+    defects.extend(row_defects)
+    if any(d.severity is Severity.ERROR for d in row_defects):
+        return defects  # already faulted on ordering; one finding is enough
 
-    if not _is_spatially_ordered(bboxes):
+    # The row-group criteria are the footer-metadata proxy on top, and they only
+    # resolve at five or more groups (PORTO-FMT-044).
+    if metrics_apply and not _is_spatially_ordered(bboxes):
         defects.append(
             DataDefect(
                 DAT_ORDERING,
@@ -1307,7 +1312,7 @@ def _rowgroup_stat_defects(
 ) -> tuple[list[tuple[float, float, float, float]] | None, list[DataDefect]]:
     """Per-row-group [minx, miny, maxx, maxy] boxes, plus statistics defects.
 
-    formats.md:51 accepts two satisfiers: a 1.1 ``bbox`` covering column whose
+    formats.md:55 accepts two satisfiers: a 1.1 ``bbox`` covering column whose
     leaf fields carry Parquet min/max, or — for GeoParquet 2.x / Parquet
     ``GEOMETRY`` — native ``GeospatialStatistics`` per row group. Neither
     source yielding a box for every row group is the MUST failure (ERROR).
@@ -1419,29 +1424,45 @@ def _column_index(meta: Any) -> dict[str, int]:
     return {group.column(j).path_in_schema: j for j in range(group.num_columns)}
 
 
-def _unchunked_ordering_defects(
-    key: str, parquet: Any, geo: dict[str, Any], rows: int
+def _row_ordering_defects(
+    key: str,
+    parquet: Any,
+    geo: dict[str, Any],
+    rows: int,
+    groups: int,
+    *,
+    report_unreadable: bool,
 ) -> list[DataDefect]:
-    """Judge ordering on a file that was written as one row group.
+    """Judge ordering over the rows, whatever the file's row-group layout.
 
-    The reference stac-geoparquet writer produces exactly this: with no schema
+    formats.md:30 binds every file: rows MUST be spatially ordered, and a
+    validator measures that by partitioning them into the groups a conforming
+    writer would have emitted. Row-group layout does not change the property,
+    only how cheaply a reader can observe it, so this runs at any group count.
+
+    Below ``_MIN_ORDERING_ROW_GROUPS`` it is the only measurement there is. The
+    reference stac-geoparquet writer shows why that matters: with no schema
     passed, ``parse_stac_items_to_arrow`` returns one contiguous record batch
-    at any item count and ``to_parquet`` writes one row group per batch. The
-    row-group criteria then have a single box to compare and pass vacuously,
-    so entirely unsorted output validates clean. Partitioning the rows into
-    the groups a conforming writer would have emitted restores the measurement
-    without inventing a criterion.
+    at any item count and ``to_parquet`` writes one row group per batch, so the
+    row-group criteria have a single box to compare and pass vacuously on
+    entirely unsorted output.
+
+    ``report_unreadable`` is off when the row-group criteria also apply, since
+    then an unreadable covering column leaves ordering measured, not unmeasured.
     """
     if rows < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
         return []  # too few rows for a chunk's box to describe anything
     row_boxes = _row_bboxes(parquet, geo)
     if row_boxes is None:
+        if not report_unreadable:
+            return []
         return [
             DataDefect(
                 DAT_ORDERING,
                 Severity.INFO,
-                f"asset '{key}' is one row group of {rows} rows with no bbox covering "
-                "column to read, so spatial ordering could not be evaluated",
+                f"asset '{key}' holds {rows} rows in {_plural(groups, 'row group')} "
+                "with no bbox covering column to read, so spatial ordering could "
+                "not be evaluated",
                 key,
             )
         ]
@@ -1451,12 +1472,16 @@ def _unchunked_ordering_defects(
         DataDefect(
             DAT_ORDERING,
             Severity.ERROR,
-            f"asset '{key}' rows are not spatially ordered: the file is a single row "
-            f"group of {rows} rows whose rows do not cluster spatially, so a reader "
-            "cannot skip any part of it",
+            f"asset '{key}' rows are not spatially ordered: {rows} rows in "
+            f"{_plural(groups, 'row group')} do not cluster spatially, so a reader "
+            "cannot skip any part of the file",
             key,
         )
     ]
+
+
+def _plural(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
 
 def _chunked_bboxes(
@@ -1514,12 +1539,12 @@ def _row_bboxes(
 
 
 def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bool:
-    """True if row groups are spatially ordered by either spec criterion (formats.md:30).
+    """True if row groups are spatially ordered by either spec criterion (formats.md:36).
 
     Callers must hold the applicability guard themselves. Below
     ``_MIN_ORDERING_ROW_GROUPS`` the two criteria say nothing, so a file that
     thin is either left alone or measured over its rows instead; see
-    :func:`_check_geoparquet` and :func:`_unchunked_ordering_defects`.
+    :func:`_check_geoparquet` and :func:`_row_ordering_defects`.
     """
     pairs = len(bboxes) - 1
     overlaps = sum(_bbox_overlaps(bboxes[i], bboxes[i + 1]) for i in range(pairs))
