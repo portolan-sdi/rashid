@@ -132,7 +132,11 @@ _MAX_ROW_GROUP_ROWS = 150_000
 
 # formats.md:36 — spatial ordering passes on either criterion.
 _MAX_OVERLAP_FRACTION = 0.30  # < 30% of consecutive row-group pairs may overlap
-_MAX_LOCALITY_RATIO = 0.25  # row-group boxes average < 25% of the file extent
+# Row-group boxes average < 30% of the file extent. formats.md sets the figure from
+# what a Hilbert sort achieves: boxes land near 27% of the extent at five row groups
+# and fall away as groups are added. A flat 25% rejected well-sorted five- and
+# six-group files for their row-group count rather than their ordering.
+_MAX_LOCALITY_RATIO = 0.30
 
 # formats.md:47 — both criteria are fractions over the row groups themselves, so
 # below five groups the fraction has nowhere useful to land: three groups can only

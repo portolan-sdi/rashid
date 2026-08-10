@@ -1,3 +1,3 @@
 # portolan-spec commit the vendored fixtures were built from.
 # Regenerate with: uv run python scripts/vendor_spec_fixtures.py
-2f90b3fc3851890c0de7c6e71eac2e0fc94c51a1
+0793d1fdd9623a11f353ee7a941618177383a327

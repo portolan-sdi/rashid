@@ -495,10 +495,10 @@ def test_spatial_ordering_needs_a_skippable_layout() -> None:
 
 
 def test_spatial_ordering_holds_the_flat_locality_limit() -> None:
-    # Five overlapping row groups whose boxes average 35% of the extent. The
-    # limit is formats.md's flat 25% with no relaxation for low group counts,
-    # since PORTO-FMT-044 exempts a thin file outright rather than judging it
-    # against a softened threshold.
+    # Five overlapping row groups whose boxes average 35% of the extent, clear of
+    # the 27% a Hilbert sort reaches at this count. The limit is formats.md's flat
+    # 30% with no relaxation for low group counts, since PORTO-FMT-044 exempts a
+    # thin file outright rather than judging it against a softened threshold.
     wide = [(1.625 * i, 0.0, 1.625 * i + 3.5, 10.0) for i in range(5)]
     extent = checks._bbox_union(wide)
     ratio = sum(checks._bbox_area(b) for b in wide) / len(wide) / checks._bbox_area(extent)

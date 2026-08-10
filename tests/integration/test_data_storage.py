@@ -133,7 +133,7 @@ def test_curve_sorted_rows_are_clean_below_five_row_groups(tmp_path: Path, group
     """The same rows spatially sorted pass, so the check above is not vacuous."""
     rows = 6000
     path = tmp_path / f"sorted_{groups}.parquet"
-    points = assets.morton_sorted(assets.scattered_points(rows))
+    points = assets.hilbert_sorted(assets.scattered_points(rows))
     assets.write_geoparquet(path, points=points, row_group_size=rows // groups)
     assert pq.ParquetFile(path).metadata.num_row_groups == groups
     assert _gpq(path) == []
@@ -145,6 +145,40 @@ def test_five_row_groups_ordered_is_clean(tmp_path: Path) -> None:
     assets.write_geoparquet(path, points=assets.ordered_points(10))
     assert pq.ParquetFile(path).metadata.num_row_groups == 5
     assert _gpq(path) == []
+
+
+@pytest.mark.parametrize("groups", [5, 6, 7])
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_hilbert_sorted_rows_pass_where_the_criteria_apply(
+    tmp_path: Path, groups: int, seed: int
+) -> None:
+    """The counts the 30% threshold was set from (formats.md:36).
+
+    Hilbert-sorted boxes average 0.263 to 0.274 of the extent at five row groups
+    and 0.250 to 0.270 at six, so the old 25% rejected them for their row-group
+    count rather than their ordering. Consecutive boxes overlap at these counts,
+    so low overlap never carries the file and the locality figure is what decides.
+    """
+    rows = 6300  # divisible by 5, 6, and 7
+    path = tmp_path / f"hilbert_{groups}_{seed}.parquet"
+    points = assets.hilbert_sorted(assets.scattered_points(rows, seed=seed))
+    assets.write_geoparquet(path, points=points, row_group_size=rows // groups)
+    assert pq.ParquetFile(path).metadata.num_row_groups == groups
+    assert _gpq(path) == []
+
+
+@pytest.mark.parametrize("groups", [5, 6, 7])
+def test_unsorted_rows_still_fail_where_the_criteria_apply(tmp_path: Path, groups: int) -> None:
+    """Raising the threshold to 30% does not let genuinely poor ordering through."""
+    rows = 6300
+    path = tmp_path / f"scattered_{groups}.parquet"
+    assets.write_geoparquet(
+        path, points=assets.scattered_points(rows), row_group_size=rows // groups
+    )
+    assert pq.ParquetFile(path).metadata.num_row_groups == groups
+    defects = _gpq(path)
+    assert [d.rule_id for d in defects] == [DAT_ORDERING]
+    assert defects[0].severity is Severity.ERROR
 
 
 def test_single_row_group_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
@@ -166,7 +200,7 @@ def test_single_row_group_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
 def test_single_row_group_curve_sorted_rows_are_clean(tmp_path: Path) -> None:
     """The same rows, spatially sorted: nearby features are nearby in the file."""
     path = tmp_path / "one_group_sorted.parquet"
-    points = assets.morton_sorted(assets.scattered_points(5000))
+    points = assets.hilbert_sorted(assets.scattered_points(5000))
     assets.write_geoparquet(path, points=points, row_group_size=len(points))
     assert _gpq(path) == []
 
@@ -354,7 +388,7 @@ def test_sorted_file_split_for_the_ceiling_stays_clean(tmp_path: Path) -> None:
     unordered, so satisfying one storage rule produced a finding under another.
     """
     path = tmp_path / "ceiling.parquet"
-    points = assets.morton_sorted(assets.scattered_points(150_001))
+    points = assets.hilbert_sorted(assets.scattered_points(150_001))
     assets.write_geoparquet(path, points=points, row_group_size=50_000)
     assert pq.ParquetFile(path).metadata.num_row_groups == 4
     assert _gpq(path) == []
