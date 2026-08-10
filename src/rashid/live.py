@@ -55,12 +55,14 @@ LIV_CORS_PREFLIGHT = "PTL-LIV-005"
 # Requirement IDs from the spec's requirements manifest
 # (specs/portolan/requirements.yaml) enforced by each check;
 # gated by tests/unit/test_spec_coverage.py.
+# PORTO-CORE-073 rides on every probing check: it governs which servers they
+# run against, and _targets_by_host answers it by skipping upstream assets.
 SPEC_IDS: dict[str, tuple[str, ...]] = {
-    LIV_RANGE: ("PORTO-CORE-043",),
-    LIV_HEAD_LENGTH: ("PORTO-CORE-043",),
-    LIV_CORS_ORIGIN: ("PORTO-CORE-045",),
-    LIV_CORS_EXPOSE: ("PORTO-CORE-045",),
-    LIV_CORS_PREFLIGHT: ("PORTO-CORE-045",),
+    LIV_RANGE: ("PORTO-CORE-043", "PORTO-CORE-073"),
+    LIV_HEAD_LENGTH: ("PORTO-CORE-043", "PORTO-CORE-073"),
+    LIV_CORS_ORIGIN: ("PORTO-CORE-045", "PORTO-CORE-073"),
+    LIV_CORS_EXPOSE: ("PORTO-CORE-045", "PORTO-CORE-073"),
+    LIV_CORS_PREFLIGHT: ("PORTO-CORE-045", "PORTO-CORE-073"),
 }
 
 # Assets are declared on collections and items; catalogs carry none.
@@ -199,7 +201,8 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
                 # A source/alternate original lives on a server the publisher
                 # does not control, which core.md's Data Storage section
                 # exempts: its MUSTs bind the servers hosting the catalog's own
-                # cloud-native assets. Mirrors the data pass exemption.
+                # cloud-native assets, and PORTO-CORE-073 forbids holding an
+                # upstream host to them. Mirrors the data pass exemption.
                 continue
             url = href
             parsed = urlparse(href)
