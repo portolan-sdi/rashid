@@ -342,8 +342,9 @@ def test_duplicate_url_still_checks_every_declared_size(catalog: CatalogBuilder)
 
 def test_source_and_alternate_assets_are_not_probed(catalog: CatalogBuilder) -> None:
     # A source/alternate original lives on a server the publisher does not
-    # control (census.gov, an agency API); the hosting MUSTs bind the servers
-    # hosting the cloud-native primaries. Mirrors the data pass exemption.
+    # control (census.gov, an agency API), which core.md's Data Storage section
+    # exempts: its MUSTs bind the servers hosting the catalog's own cloud-native
+    # assets. Mirrors the data pass exemption.
     source = _remote_asset("https://www2.census.gov/geo/tiger/counties.zip")
     source["roles"] = ["data", "source"]
     alternate = _remote_asset("https://api.example.gov/export.geojson")
