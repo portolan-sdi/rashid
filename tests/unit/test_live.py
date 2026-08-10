@@ -40,7 +40,9 @@ def _good_range(**overrides: str) -> ProbeResponse:
         "accept-ranges": "bytes",
         "content-length": "1",
         "access-control-allow-origin": "*",
-        "access-control-expose-headers": "Content-Range, Content-Length, Accept-Ranges, ETag",
+        "access-control-expose-headers": (
+            "Content-Type, Content-Length, Content-Range, Accept-Ranges, ETag"
+        ),
     }
     headers.update(overrides)
     return ProbeResponse(status=206, headers=headers)
@@ -54,7 +56,9 @@ def _good_preflight(**overrides: str) -> ProbeResponse:
     headers = {
         "access-control-allow-origin": "*",
         "access-control-allow-methods": "GET, HEAD",
-        "access-control-allow-headers": "Range",
+        "access-control-allow-headers": (
+            "Range, If-Match, If-Modified-Since, If-None-Match, If-Unmodified-Since"
+        ),
     }
     headers.update(overrides)
     return ProbeResponse(status=204, headers=headers)
@@ -161,13 +165,24 @@ def test_any_allow_origin_value_passes(catalog: CatalogBuilder) -> None:
 def test_missing_expose_headers_lists_the_missing(catalog: CatalogBuilder) -> None:
     graph = _graph_with_remote(catalog)
     response = _good_range(
-        **{"access-control-expose-headers": "Content-Range, Content-Length, Accept-Ranges"}
+        **{"access-control-expose-headers": "Content-Type, Content-Range, Content-Length"}
     )
     findings = validate_live(graph, FakeProber(range_response=response))
     assert LIV_CORS_EXPOSE in _ids(findings)
     message = next(f.message for f in findings if f.rule_id == LIV_CORS_EXPOSE)
     assert "ETag" in message
+    assert "Accept-Ranges" in message
     assert "Content-Range" not in message  # present ones are not reported
+
+
+def test_missing_content_type_exposure_is_an_error(catalog: CatalogBuilder) -> None:
+    graph = _graph_with_remote(catalog)
+    response = _good_range(
+        **{"access-control-expose-headers": "Content-Length, Content-Range, Accept-Ranges, ETag"}
+    )
+    findings = validate_live(graph, FakeProber(range_response=response))
+    assert LIV_CORS_EXPOSE in _ids(findings)
+    assert "Content-Type" in next(f.message for f in findings if f.rule_id == LIV_CORS_EXPOSE)
 
 
 def test_wildcard_expose_headers_passes(catalog: CatalogBuilder) -> None:
@@ -194,6 +209,27 @@ def test_preflight_missing_range_header_is_error(catalog: CatalogBuilder) -> Non
     findings = validate_live(graph, FakeProber(preflight_response=response))
     assert LIV_CORS_PREFLIGHT in _ids(findings)
     assert "Range" in next(f.message for f in findings if f.rule_id == LIV_CORS_PREFLIGHT)
+
+
+@pytest.mark.parametrize(
+    "absent",
+    ["If-Match", "If-Modified-Since", "If-None-Match", "If-Unmodified-Since"],
+)
+def test_preflight_missing_a_conditional_header_is_error(
+    catalog: CatalogBuilder, absent: str
+) -> None:
+    graph = _graph_with_remote(catalog)
+    kept = [
+        h
+        for h in ("Range", "If-Match", "If-Modified-Since", "If-None-Match", "If-Unmodified-Since")
+        if h != absent
+    ]
+    response = _good_preflight(**{"access-control-allow-headers": ", ".join(kept)})
+    findings = validate_live(graph, FakeProber(preflight_response=response))
+    assert LIV_CORS_PREFLIGHT in _ids(findings)
+    message = next(f.message for f in findings if f.rule_id == LIV_CORS_PREFLIGHT)
+    assert absent in message
+    assert "Range" not in message  # present ones are not reported
 
 
 def test_wildcard_preflight_passes(catalog: CatalogBuilder) -> None:
@@ -583,4 +619,6 @@ def test_user_agent_does_not_displace_the_probe_headers(monkeypatch: pytest.Monk
 
     preflight = _record(monkeypatch, "preflight")
     assert preflight.get_header("Access-control-request-method") == "GET"
-    assert preflight.get_header("Access-control-request-headers") == "Range"
+    assert preflight.get_header("Access-control-request-headers") == (
+        "Range, If-Match, If-Modified-Since, If-None-Match, If-Unmodified-Since"
+    )

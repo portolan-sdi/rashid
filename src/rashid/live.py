@@ -12,9 +12,10 @@ the section's MUSTs:
   sending one is required, not optional.
 - a **HEAD** per asset — an accurate ``Content-Length`` (checked for presence,
   and against the declared ``file:size`` when the asset carries one).
-- an **OPTIONS preflight** (``Access-Control-Request-Method: GET``,
-  ``Access-Control-Request-Headers: Range``) — allowed methods and request
-  headers appear only on preflight responses, never on GET/HEAD.
+- an **OPTIONS preflight** (``Access-Control-Request-Method: GET``, and
+  ``Access-Control-Request-Headers`` naming ``Range`` plus the
+  conditional-request headers) — allowed methods and request headers appear
+  only on preflight responses, never on GET/HEAD.
 
 Range and CORS semantics are server properties, so the GET and OPTIONS probes
 run once per distinct host (via its lexically first asset); only the cheap HEAD
@@ -66,7 +67,24 @@ _TIMEOUT = 30  # seconds per request
 _PROBE_ORIGIN = "https://rashid-live-probe.invalid"
 
 # core.md, Data Storage — the response headers a server MUST expose to browsers.
-_REQUIRED_EXPOSED = ("Content-Range", "Content-Length", "Accept-Ranges", "ETag")
+_REQUIRED_EXPOSED = (
+    "Content-Type",
+    "Content-Length",
+    "Content-Range",
+    "Accept-Ranges",
+    "ETag",
+)
+
+# core.md, Data Storage — the request headers a server MUST allow. The
+# conditional ones let a browser revalidate a cached range instead of
+# refetching it.
+_REQUIRED_REQUEST = (
+    "Range",
+    "If-Match",
+    "If-Modified-Since",
+    "If-None-Match",
+    "If-Unmodified-Since",
+)
 
 
 @dataclass(frozen=True)
@@ -144,7 +162,7 @@ class _UrllibProber:
             {
                 "Origin": _PROBE_ORIGIN,
                 "Access-Control-Request-Method": "GET",
-                "Access-Control-Request-Headers": "Range",
+                "Access-Control-Request-Headers": ", ".join(_REQUIRED_REQUEST),
             },
         )
 
@@ -293,7 +311,7 @@ def _check_cors(host: str, rep: _Target, response: ProbeResponse) -> list[Findin
             host,
             rep,
             "Access-Control-Expose-Headers omits " + ", ".join(missing),
-            fix_hint="expose Content-Range, Content-Length, Accept-Ranges, and ETag to browsers",
+            fix_hint="expose " + ", ".join(_REQUIRED_EXPOSED) + " to browsers",
         )
     ]
 
@@ -308,8 +326,10 @@ def _check_preflight(host: str, rep: _Target, response: ProbeResponse) -> list[F
         if missing:
             problems.append("allowed methods omit " + ", ".join(missing))
     allowed = _header_set(response.header("access-control-allow-headers"))
-    if "*" not in allowed and "range" not in allowed:
-        problems.append("allowed request headers omit Range")
+    if "*" not in allowed:
+        absent = [h for h in _REQUIRED_REQUEST if h.lower() not in allowed]
+        if absent:
+            problems.append("allowed request headers omit " + ", ".join(absent))
     if not problems:
         return []
     return [
@@ -318,7 +338,11 @@ def _check_preflight(host: str, rep: _Target, response: ProbeResponse) -> list[F
             host,
             rep,
             "CORS preflight failed: " + "; ".join(problems),
-            fix_hint="allow GET and HEAD methods and the Range request header in the CORS policy",
+            fix_hint=(
+                "allow the GET and HEAD methods and the "
+                + ", ".join(_REQUIRED_REQUEST)
+                + " request headers in the CORS policy"
+            ),
         )
     ]
 
