@@ -3,6 +3,11 @@
 Generated from https://spdx.org/licenses/licenses.json
 (license list version 3.28.0, fetched 2026-07-20).
 Includes deprecated identifiers, which remain valid SPDX ids.
+
+``SPDX_LICENSE_IDS`` and ``canonical_spdx_id`` are re-exported from
+``rashid.api`` and are part of the public 0.x surface. PTL-LIC-001 validates
+against this same object, so a downstream tool that gates on the export cannot
+disagree with the rule. Keep both names re-exported when this module changes.
 """
 
 from __future__ import annotations
@@ -738,3 +743,23 @@ SPDX_LICENSE_IDS: frozenset[str] = frozenset(
         "zlib-acknowledgement",
     }
 )
+
+
+SPDX_BY_CASEFOLD: dict[str, str] = {
+    license_id.casefold(): license_id for license_id in SPDX_LICENSE_IDS
+}
+
+
+def canonical_spdx_id(value: object) -> str | None:
+    """The official spelling of ``value``, or None if it is not an identifier.
+
+    Matching is case-insensitive, so ``"apache-2.0"`` resolves to
+    ``"Apache-2.0"``. A caller can therefore tell a typo apart from a value
+    that is not an SPDX identifier at all, and name the correct spelling.
+
+    Note that ``"other"`` is a STAC value rather than an SPDX identifier, so it
+    returns None. A caller that accepts it must allow it separately.
+    """
+    if not isinstance(value, str):
+        return None
+    return SPDX_BY_CASEFOLD.get(value.casefold())

@@ -23,7 +23,9 @@ pytestmark = pytest.mark.unit
 # a re-export that no longer resolves to its implementation.
 EXPORTS = {
     "SHA2_256": "rashid._multihash",
+    "SPDX_LICENSE_IDS": "rashid._spdx",
     "STRUCTURAL_RELS": "rashid.rules._common",
+    "canonical_spdx_id": "rashid._spdx",
     "decode_multihash": "rashid._multihash",
     "encode_multihash": "rashid._multihash",
     "has_cog": "rashid.rules.item_mirror",
@@ -143,3 +145,39 @@ def test_has_cog_rejects_a_collection_of_plain_geotiffs() -> None:
 
 def test_has_cog_tolerates_a_missing_assets_field() -> None:
     assert not api.has_cog(_node({}))
+
+
+def test_canonical_spdx_id_returns_the_official_spelling() -> None:
+    assert api.canonical_spdx_id("apache-2.0") == "Apache-2.0"
+
+
+def test_canonical_spdx_id_passes_an_exact_identifier_through() -> None:
+    assert api.canonical_spdx_id("CC-BY-4.0") == "CC-BY-4.0"
+
+
+def test_canonical_spdx_id_returns_none_for_a_non_identifier() -> None:
+    # the near miss PTL-LIC-001 cannot help with: a name, not a spelling
+    assert api.canonical_spdx_id("Apache 2.0") is None
+
+
+@pytest.mark.parametrize("value", [None, 42, ["MIT"]])
+def test_canonical_spdx_id_tolerates_non_strings(value: object) -> None:
+    assert api.canonical_spdx_id(value) is None
+
+
+def test_the_exported_list_carries_identifiers_beyond_the_popular_ones() -> None:
+    # the downstream case in portolan-cli#727: a real identifier that a
+    # hand-maintained shortlist omits
+    assert "EUPL-1.2" in api.SPDX_LICENSE_IDS
+    assert "OGL-UK-3.0" in api.SPDX_LICENSE_IDS
+
+
+def test_the_exported_list_holds_no_licenseref_entries() -> None:
+    # downstream tools gate on this: LicenseRef-* is an SPDX expression
+    # construct, not an identifier, so PTL-LIC-001 rejects every one
+    assert [i for i in api.SPDX_LICENSE_IDS if i.casefold().startswith("licenseref")] == []
+
+
+def test_the_exported_list_excludes_the_stac_escape_hatch() -> None:
+    # "other" is a STAC value, not SPDX; a caller has to allow it separately
+    assert "other" not in api.SPDX_LICENSE_IDS

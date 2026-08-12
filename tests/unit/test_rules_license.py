@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import validate
+from rashid import api, validate
 from tests.conftest import CatalogBuilder, findings_for, mutate_json
 
 pytestmark = pytest.mark.unit
@@ -34,6 +34,33 @@ def test_case_insensitive_near_miss_gets_hint(catalog: CatalogBuilder) -> None:
     assert len(findings) == 1
     assert findings[0].fix_hint is not None
     assert "Apache-2.0" in findings[0].fix_hint
+
+
+def test_the_hint_is_built_from_the_exported_lookup(catalog: CatalogBuilder) -> None:
+    """The rule and rashid.api.canonical_spdx_id must agree on the spelling.
+
+    A downstream tool prints the exported lookup's answer. If the rule ever
+    grows a second, private lookup again, the two start printing different
+    spellings for the same typo and this test goes red.
+    """
+    catalog.collection("roads", license="apache-2.0")
+    findings = findings_for(validate(catalog.write()), "PTL-LIC-001")
+    canonical = api.canonical_spdx_id("apache-2.0")
+    assert canonical is not None
+    assert findings[0].fix_hint is not None
+    assert canonical in findings[0].fix_hint
+
+
+def test_an_identifier_outside_the_popular_shortlist_passes(catalog: CatalogBuilder) -> None:
+    # portolan-cli#727: EUPL-1.2 is real SPDX and must not be reported
+    catalog.collection("roads", license="EUPL-1.2")
+    assert findings_for(validate(catalog.write()), "PTL-LIC-001") == []
+
+
+def test_licenseref_is_rejected(catalog: CatalogBuilder) -> None:
+    # LicenseRef-* is an SPDX expression construct, not an identifier
+    catalog.collection("roads", license="LicenseRef-CityOfPhiladelphia")
+    assert len(findings_for(validate(catalog.write()), "PTL-LIC-001")) == 1
 
 
 def test_other_without_license_link(catalog: CatalogBuilder) -> None:
