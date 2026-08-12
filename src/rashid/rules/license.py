@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from rashid._spdx import SPDX_LICENSE_IDS
+from rashid._spdx import SPDX_LICENSE_IDS, canonical_spdx_id
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
 from rashid.rules._common import links_of
-
-_SPDX_BY_CASEFOLD = {license_id.casefold(): license_id for license_id in SPDX_LICENSE_IDS}
 
 
 class LicenseDeclaredRule(Rule):
@@ -37,7 +35,7 @@ class LicenseDeclaredRule(Rule):
             return  # PTL-LIC-003 reports this specifically
         if value == "other" or value in SPDX_LICENSE_IDS:
             return
-        canonical = _SPDX_BY_CASEFOLD.get(value.casefold())
+        canonical = canonical_spdx_id(value)
         if canonical is not None:
             hint = f"SPDX identifiers are case-sensitive; write '{canonical}'"
         else:

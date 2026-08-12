@@ -10,6 +10,11 @@ tests and still disagrees with the rule it was written against.
 
     from rashid.api import has_cog, links_of, roles_of
 
+``SPDX_LICENSE_IDS`` is the list PTL-LIC-001 validates against, and
+``canonical_spdx_id`` is the lookup behind its case-mismatch hint. A tool that
+gates on a license identifier should use both rather than keep a shorter list,
+which would reject real identifiers the rule accepts.
+
 To run validation, use the top-level package:
 
     from rashid import validate
@@ -23,6 +28,7 @@ from rashid._multihash import (
     encode_multihash,
     is_well_formed_multihash,
 )
+from rashid._spdx import SPDX_LICENSE_IDS, canonical_spdx_id
 from rashid.rules._common import (
     STRUCTURAL_RELS,
     is_cog_media_type,
@@ -34,7 +40,9 @@ from rashid.rules.item_mirror import has_cog
 
 __all__ = [
     "SHA2_256",
+    "SPDX_LICENSE_IDS",
     "STRUCTURAL_RELS",
+    "canonical_spdx_id",
     "decode_multihash",
     "encode_multihash",
     "has_cog",

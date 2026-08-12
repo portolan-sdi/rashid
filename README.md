@@ -115,6 +115,15 @@ checksum = encode_multihash(SHA2_256, hashlib.sha256(data).digest())
 
 `decode_multihash` and `is_well_formed_multihash` read those values back.
 
+`SPDX_LICENSE_IDS` is the license list PTL-LIC-001 validates against, and `canonical_spdx_id` is the case-insensitive lookup behind its hint. Gate on these rather than on a shorter hand-written list, which rejects real identifiers the rule accepts.
+
+```python
+from rashid.api import canonical_spdx_id
+
+canonical_spdx_id("apache-2.0")  # "Apache-2.0"
+canonical_spdx_id("Apache 2.0")  # None
+```
+
 A name imported from `rashid.api` stays available across 0.x releases. The modules behind it are private, and importing from them directly can break in any patch release.
 
 ## Rules
