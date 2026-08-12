@@ -36,9 +36,17 @@ repos:
     hooks:
       - id: codespell
         additional_dependencies: [tomli]
-        # Vendored upstream schemas must stay byte-identical (their typos
-        # included) so the vendoring scripts' --check stays an honest diff.
-        exclude: ^src/rashid/_schemas/
+        # Everything vendored from portolan-spec must stay byte-identical (its
+        # typos included) so the vendoring scripts' --check stays an honest
+        # diff. The catalog fixtures also carry real place names that read as
+        # misspellings, San Francisco's neighborhood names among them.
+        exclude: >
+          (?x)^(
+            src/rashid/_schemas/
+            |tests/fixtures/reference-catalog/
+            |tests/fixtures/profile-examples/
+            |tests/fixtures/requirements\.yaml$
+          )
 
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.12

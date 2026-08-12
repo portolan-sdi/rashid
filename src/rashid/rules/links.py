@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from rashid.catalog import CatalogGraph, Node, is_absolute_href
 from rashid.model import Finding, Severity
@@ -15,6 +16,34 @@ _REQUIRED_LINK_TARGETS = {
     "parent": "the JSON of the object that contains this one",
     "collection": "the item's enclosing collection.json",
 }
+
+# core.md, Catalog Logo: the media types a browser renders in an <img> element.
+# A client drops an icon whose media type it does not recognize, so an icon
+# outside this set renders nowhere even when the link itself is well formed.
+ICON_MEDIA_TYPES = frozenset(
+    {
+        "image/apng",
+        "image/avif",
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/svg+xml",
+        "image/webp",
+    }
+)
+
+
+def _icon_links(node: Node) -> Iterable[tuple[int, dict[str, Any]]]:
+    """Every rel:'icon' link on the node, with its index in the links array.
+
+    core.md scopes publishing a logo to the root catalog, but says nothing to
+    forbid one elsewhere, and STAC Browser renders a per-entity icon on
+    collection and item cards. So the rules below constrain any icon link they
+    find rather than only the root's.
+    """
+    for index, link in enumerate(links_of(node)):
+        if link.get("rel") == "icon":
+            yield index, link
 
 
 class RequiredLinksRule(Rule):
@@ -234,5 +263,89 @@ class LinkResolutionRule(Rule):
                     f"link rel:'{rel}' href '{href}' points to the wrong object: {wrong}",
                     json_pointer=pointer,
                     fix_hint=f"repoint the href: a rel:'{rel}' link {wrong}",
+                    actual=href,
+                )
+
+
+class IconMediaTypeRule(Rule):
+    """A logo link declares a media type a browser renders."""
+
+    id = "PTL-LNK-007"
+    spec_ids = ("PORTO-CORE-075",)
+    default_severity = Severity.ERROR
+    description = "a rel:'icon' link must declare a browser-displayable image media type"
+    kinds = ("catalog", "collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        allowed = ", ".join(sorted(ICON_MEDIA_TYPES))
+        for index, link in _icon_links(node):
+            actual = link.get("type")
+            if actual in ICON_MEDIA_TYPES:
+                continue
+            if actual is None:
+                message = "logo link rel:'icon' declares no type"
+                pointer = f"/links/{index}"
+            else:
+                message = f"logo link rel:'icon' has type {actual!r}, which no browser renders"
+                pointer = f"/links/{index}/type"
+            yield self.finding(
+                node,
+                message,
+                json_pointer=pointer,
+                fix_hint=f"set the link's type to one of {allowed}",
+                actual=actual,
+            )
+
+
+class IconTitleRule(Rule):
+    """A logo link carries the title a page needs as the image's alt text."""
+
+    id = "PTL-LNK-008"
+    spec_ids = ("PORTO-CORE-076",)
+    default_severity = Severity.WARNING
+    description = "a rel:'icon' link should carry a title for use as the accessible label"
+    kinds = ("catalog", "collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for index, link in _icon_links(node):
+            title = link.get("title")
+            if isinstance(title, str) and title.strip():
+                continue
+            yield self.finding(
+                node,
+                "logo link rel:'icon' has no title",
+                json_pointer=f"/links/{index}",
+                fix_hint="add a title naming what the logo shows; a page that renders"
+                " the logo uses it as the image's accessible label",
+            )
+
+
+class IconRelativeHrefRule(Rule):
+    """A logo link points at an image the catalog carries."""
+
+    id = "PTL-LNK-009"
+    spec_ids = ("PORTO-CORE-077",)
+    default_severity = Severity.WARNING
+    description = "a rel:'icon' link should be relative so the catalog stays portable"
+    kinds = ("catalog", "collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for index, link in _icon_links(node):
+            href = link.get("href")
+            if not isinstance(href, str) or not href:
+                yield self.finding(
+                    node,
+                    "logo link rel:'icon' has no href",
+                    json_pointer=f"/links/{index}/href",
+                    fix_hint="set the href to the image's path relative to this file,"
+                    " e.g. './_assets/logo.png'",
+                )
+            elif is_absolute_href(href):
+                yield self.finding(
+                    node,
+                    f"logo link rel:'icon' should be relative, got '{href}'",
+                    json_pointer=f"/links/{index}/href",
+                    fix_hint="copy the image into the catalog and point the href at it,"
+                    " e.g. './_assets/logo.png'",
                     actual=href,
                 )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from rashid import validate
+from rashid.model import Severity
 from tests.conftest import (
     CatalogBuilder,
     findings_for,
@@ -269,3 +270,108 @@ def test_structural_link_with_no_type_field(catalog: CatalogBuilder) -> None:
     findings = findings_for(validate(root), "PTL-LNK-003")
     assert len(findings) == 1
     assert "has type None" in findings[0].message
+
+
+# --------------------------------------------------------------- catalog logo
+
+
+def _add_icon(root, **fields):
+    """Put a rel:'icon' link with the given fields on the root catalog."""
+    mutate_json(root / "catalog.json", lambda d: d["links"].append({"rel": "icon", **fields}))
+
+
+def test_icon_link_with_displayable_type_is_clean(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _add_icon(root, href="./_assets/logo.png", type="image/png", title="Demo Org")
+    report = validate(root)
+    assert findings_for(report, "PTL-LNK-007") == []
+    assert findings_for(report, "PTL-LNK-008") == []
+    assert findings_for(report, "PTL-LNK-009") == []
+
+
+def test_icon_link_without_type(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _add_icon(root, href="./_assets/logo.png", title="Demo Org")
+    findings = findings_for(validate(root), "PTL-LNK-007")
+    assert len(findings) == 1
+    assert "declares no type" in findings[0].message
+    assert findings[0].path == "catalog.json"
+
+
+def test_icon_link_with_undisplayable_type(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _add_icon(root, href="./_assets/logo.pdf", type="application/pdf", title="Demo Org")
+    findings = findings_for(validate(root), "PTL-LNK-007")
+    assert len(findings) == 1
+    assert "no browser renders" in findings[0].message
+
+
+def test_icon_link_accepts_svg(catalog: CatalogBuilder) -> None:
+    # stac-js drops SVG, but the spec lists it, so the validator must not.
+    catalog.collection("roads")
+    root = catalog.write()
+    _add_icon(root, href="./_assets/logo.svg", type="image/svg+xml", title="Demo Org")
+    assert findings_for(validate(root), "PTL-LNK-007") == []
+
+
+def test_icon_link_without_title_warns(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _add_icon(root, href="./_assets/logo.png", type="image/png")
+    findings = findings_for(validate(root), "PTL-LNK-008")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.WARNING
+
+
+def test_icon_link_with_blank_title_warns(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _add_icon(root, href="./_assets/logo.png", type="image/png", title="   ")
+    assert len(findings_for(validate(root), "PTL-LNK-008")) == 1
+
+
+def test_icon_link_with_absolute_href_warns(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _add_icon(root, href="https://example.org/logo.png", type="image/png", title="Demo Org")
+    findings = findings_for(validate(root), "PTL-LNK-009")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.WARNING
+    assert "should be relative" in findings[0].message
+
+
+def test_icon_link_without_href_warns(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _add_icon(root, type="image/png", title="Demo Org")
+    findings = findings_for(validate(root), "PTL-LNK-009")
+    assert len(findings) == 1
+    assert "has no href" in findings[0].message
+
+
+def test_catalog_without_icon_link_is_clean(catalog: CatalogBuilder) -> None:
+    # The logo is optional; its absence is never a finding.
+    catalog.collection("roads")
+    report = validate(catalog.write())
+    assert findings_for(report, "PTL-LNK-007") == []
+    assert findings_for(report, "PTL-LNK-008") == []
+    assert findings_for(report, "PTL-LNK-009") == []
+
+
+def test_icon_link_on_a_collection_is_checked(catalog: CatalogBuilder) -> None:
+    # core.md scopes publishing to the root, but STAC Browser renders per-entity
+    # icons, so an icon found elsewhere is held to the same media-type rule.
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(
+        root / "roads" / "collection.json",
+        lambda d: d["links"].append(
+            {"rel": "icon", "href": "./logo.pdf", "type": "application/pdf", "title": "Roads"}
+        ),
+    )
+    findings = findings_for(validate(root), "PTL-LNK-007")
+    assert len(findings) == 1
+    assert findings[0].path == "roads/collection.json"

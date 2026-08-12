@@ -23,6 +23,17 @@ Query the GeoParquet `data` asset in place with DuckDB spatial, read_parquet('na
 - 59 places carry POP_MAX below 1,000, mostly stations and outposts, so
   population filters silently drop real capitals of small territories.
 
+## Coordinate Reference System
+
+EPSG:4326, WGS 84, a geographic coordinate reference system whose coordinates are in degrees.
+Planar distance functions return degrees, which are not ground units and vary with latitude. For real distances use a sphere or spheroid function, or transform to a projected CRS first.
+The `data` asset carries the same code as `proj:code`.
+
+The same CRS as the countries Collection, so the two overlay and join
+without a transform. Nearest-neighbour work wants
+`ST_Distance_Sphere`, which needs `geometry_always_xy` set first, as
+the query below does.
+
 ## Tested Queries
 
 Capitals per continent, with the country join done correctly.
@@ -42,11 +53,12 @@ Nearest city to a point, distance in kilometres.
 
 ```sql
 INSTALL spatial; LOAD spatial;
+SET geometry_always_xy = true;
 SELECT NAME, ADM0NAME,
        round(ST_Distance_Sphere(geom, ST_Point(-122.4783, 37.8199)) / 1000, 1) AS km
 FROM read_parquet('natural-earth-populated-places.parquet')
 ORDER BY km LIMIT 3;
--- San Francisco 9.0 km, San Jose 71.7 km, Sacramento 120.4 km.
+-- San Francisco 8.0 km, San Jose 75.2 km, Sacramento 121.7 km.
 ```
 
 ## Related Collections
