@@ -1,3 +1,28 @@
+## v0.1.4 (2026-08-12)
+
+### Feat
+
+- **api**: publish the SPDX identifier list PTL-LIC-001 validates against
+- **data**: apply the ordering criteria only at five or more row groups
+- **live**: probe the full CORS header set browsers need
+- **rules**: downgrade PTL-AST-003 to a warning
+- **rules**: accept image/webp thumbnails in PTL-VIZ-001
+- **rules**: add PTL-VIZ-006 for the default-style key (PORTO-CORE-070)
+- **data**: add --data-scope so a metadata-only mirror can be validated
+
+### Fix
+
+- scope the source carve-out to formats, and drop the alternate role
+- **data**: raise the locality limit to 30% and sort fixtures by Hilbert
+- **data**: judge row ordering at every row-group count
+- skip the wheel test when it would build a partial tree
+- point the fixture vendor at the renamed spec catalog directory
+- **ci**: run the checks on every pull request, not only those onto main
+
+### Refactor
+
+- **rules**: PTL-VIZ-006 reads the `default` role, not the asset key
+
 ## v0.1.3 (2026-07-29)
 
 ### Feat
