@@ -67,6 +67,7 @@ _COVERED: frozenset[str] = frozenset(
         # file:checksum a SHOULD, so it never reaches this ERROR-only gate.
         "PTL-AST-004",
         "PTL-AST-005",
+        "PTL-AST-006",
         "PTL-BBX-001",
         "PTL-CNF-001",
         "PTL-CNF-003",
@@ -190,12 +191,12 @@ def _add_collections(catalog: CatalogBuilder) -> None:
     # partition:scheme alone: keys, glob, and the extension are all missing.
     catalog.collection("parts", **{"partition:scheme": "hive"})
 
-    # Two scene COGs at collection level.
+    # Two raster scenes at collection level, one missing the required COG profile.
     catalog.collection(
         "scenes",
         assets={
             "thumbnail": thumbnail_asset(),
-            "a": _asset(href="./a.tif", type=_COG_TYPE),
+            "a": _asset(href="./a.tif", type="image/tiff; application=geotiff"),
             "b": _asset(href="./b.tif", type=_COG_TYPE),
         },
     )

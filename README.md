@@ -100,7 +100,7 @@ A tool that rewrites catalog metadata has to read that metadata the way rashid r
 ```python
 from rashid.api import has_cog, is_cog_media_type, links_of, roles_of
 
-if has_cog(item):  # true only for image/tiff ... profile=cloud-optimized
+if has_cog(item):  # true only for the required COG media type
     ...
 ```
 

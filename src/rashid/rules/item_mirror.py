@@ -20,7 +20,7 @@ from collections.abc import Iterable
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import is_cog_media_type, roles_of
+from rashid.rules._common import is_cog_media_type, is_raster_data_asset, roles_of
 from rashid.rules.assets import _assets_of
 
 PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
@@ -70,13 +70,20 @@ def has_cog(node: Node) -> bool:
 
 
 def _scene_items(node: Node, graph: CatalogGraph) -> list[Node]:
-    return [item for item in graph.items_of(node) if has_cog(item)]
+    return [
+        item
+        for item in graph.items_of(node)
+        if any(is_raster_data_asset(asset) for _pointer, _key, asset in _assets_of(item))
+    ]
 
 
 class ItemMirrorPresentRule(Rule):
     """A raster collection with scene items publishes an items.parquet mirror.
 
-    Scoped to the shape the spec names: items that carry COGs. A collection
+    Scoped to the shape the spec names: items that carry raster data, which
+    Portolan requires to be COGs. Raster intent is detected independently of
+    a correct COG media type so ``PTL-AST-006`` and this rule can both report
+    in one run. A collection
     whose single COG sits at collection level has no items and owes no
     mirror, and a vector or point-cloud collection is outside the ratified
     SHOULD (mirroring those is still incubating). SHOULD-level, so WARNING.

@@ -79,6 +79,41 @@ def test_scene_collection_without_a_mirror_warns(catalog: CatalogBuilder) -> Non
     assert "2 scene(s)" in findings[0].message
 
 
+def test_wrong_cog_type_does_not_hide_the_mirror_requirement(
+    catalog: CatalogBuilder,
+) -> None:
+    root = _scene_collection(catalog, "scene-a", "scene-b")
+    for item_id in ("scene-a", "scene-b"):
+        mutate_json(
+            _item(root, item_id),
+            lambda d: d["assets"]["data"].__setitem__("type", "image/tiff; application=geotiff"),
+        )
+    report = validate(root)
+    mirror_findings = findings_for(report, "PTL-MIR-001")
+    assert len(mirror_findings) == 1
+    assert "2 scene(s)" in mirror_findings[0].message
+    assert len(findings_for(report, "PTL-AST-006")) == 2
+
+
+def test_source_geotiff_items_do_not_create_a_mirror_requirement(
+    catalog: CatalogBuilder,
+) -> None:
+    root = _scene_collection(catalog, "source-a", "source-b")
+    for item_id in ("source-a", "source-b"):
+        mutate_json(
+            _item(root, item_id),
+            lambda d: d["assets"]["data"].update(
+                {
+                    "type": "image/tiff; application=geotiff",
+                    "roles": ["data", "source"],
+                }
+            ),
+        )
+    report = validate(root)
+    assert findings_for(report, "PTL-MIR-001") == []
+    assert findings_for(report, "PTL-AST-006") == []
+
+
 def test_scene_collection_organized_by_a_catalog_still_owes_a_mirror(
     catalog: CatalogBuilder,
 ) -> None:

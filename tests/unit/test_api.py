@@ -71,7 +71,11 @@ def test_plain_geotiff_is_not_a_cog() -> None:
 
 
 def test_cog_media_type_ignores_case_and_surrounding_space() -> None:
-    assert api.is_cog_media_type("  IMAGE/TIFF; PROFILE=CLOUD-OPTIMIZED  ")
+    assert api.is_cog_media_type("  IMAGE/TIFF; PROFILE=CLOUD-OPTIMIZED; APPLICATION=GEOTIFF  ")
+
+
+def test_cog_media_type_needs_the_geotiff_parameter() -> None:
+    assert not api.is_cog_media_type("image/tiff; profile=cloud-optimized")
 
 
 def test_profile_on_a_non_tiff_type_is_not_a_cog() -> None:
