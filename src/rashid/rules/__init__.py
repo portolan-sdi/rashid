@@ -9,6 +9,7 @@ from rashid.rules.assets import (
     AssetHrefSchemeRule,
     CatalogAssetsRule,
     ChecksumMultihashRule,
+    CogMediaTypeRule,
 )
 from rashid.rules.bbox import BboxValidRule
 from rashid.rules.collections import (
@@ -94,6 +95,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     NoProprietaryLicenseRule(),
     AssetFieldsRule(),
     AssetHrefSchemeRule(),
+    CogMediaTypeRule(),
     AssetFileFieldsRule(),
     ChecksumMultihashRule(),
     CatalogAssetsRule(),

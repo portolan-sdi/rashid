@@ -24,7 +24,7 @@ from collections.abc import Iterable
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import is_cog_media_type, roles_of
+from rashid.rules._common import is_raster_data_asset, roles_of
 from rashid.rules.assets import _assets_of
 
 _HAS_DATA_ASSET = "has-data-asset"
@@ -37,10 +37,9 @@ _UNKNOWN = "unknown"
 # held to the convention.
 _ID_SEGMENT = re.compile(r"^[a-z][a-z0-9_-]*$")
 
-# Scene counting matches on the COG profile through is_cog_media_type,
-# following core.md: a scene is an item carrying its COG. A raster asset
-# typed without the profile is not a scene, and the defect in its media type
-# belongs to PTL-DAT-004 and PTL-FMT rather than to a modelling rule.
+# Scene counting uses raster intent rather than an already-correct COG type.
+# Portolan requires primary raster data to be COG, but a bad declaration must
+# not hide the scene-modeling defect. PTL-AST-006 owns the media-type finding.
 
 
 class SingleFileCollectionRule(Rule):
@@ -126,7 +125,7 @@ class RasterSceneItemRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        keys = _cog_asset_keys(node)
+        keys = _raster_asset_keys(node)
         if len(keys) > 1:
             listed = ", ".join(f"'{key}'" for key in keys)
             yield self.finding(
@@ -144,7 +143,7 @@ class RasterSceneItemRule(Rule):
         scene_items = [
             item
             for item in graph.children_of(node)
-            if item.kind == "item" and _cog_asset_keys(item)
+            if item.kind == "item" and _raster_asset_keys(item)
         ]
         if not scene_items:
             return
@@ -240,13 +239,11 @@ def _is_partitioned(node: Node) -> bool:
     return any(key.startswith("partition:") for key in node.data)
 
 
-def _cog_asset_keys(node: Node) -> list[str]:
-    """Keys of the node's COG data assets, in declaration order."""
+def _raster_asset_keys(node: Node) -> list[str]:
+    """Keys of the node's primary raster assets, in declaration order."""
     keys: list[str] = []
     for _pointer, key, asset in _assets_of(node):
-        if not is_cog_media_type(asset.get("type")):
-            continue
-        if "data" in roles_of(asset):
+        if is_raster_data_asset(asset):
             keys.append(key)
     return keys
 

@@ -155,3 +155,81 @@ def test_subcatalog_with_assets_is_flagged(catalog: CatalogBuilder) -> None:
 def test_catalog_without_assets_is_clean(catalog: CatalogBuilder) -> None:
     catalog.collection("roads")
     assert findings_for(validate(catalog.write()), "PTL-AST-005") == []
+
+
+def test_plain_geotiff_data_asset_needs_cog_media_type(catalog: CatalogBuilder) -> None:
+    catalog.collection(
+        "scenes",
+        assets={
+            "data": _asset(
+                href="./scene.tif",
+                type="image/tiff; application=geotiff",
+                roles=["data"],
+            )
+        },
+    )
+    findings = findings_for(validate(catalog.write()), "PTL-AST-006")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+    assert findings[0].json_pointer == "/assets/data/type"
+    assert findings[0].expected == ("image/tiff; application=geotiff; profile=cloud-optimized")
+    assert findings[0].actual == "image/tiff; application=geotiff"
+
+
+def test_tiff_href_reveals_wrong_media_type(catalog: CatalogBuilder) -> None:
+    catalog.collection(
+        "scenes",
+        assets={
+            "data": _asset(
+                href="https://example.org/scene.TIFF?download=1",
+                type="application/octet-stream",
+                roles=["data"],
+            )
+        },
+    )
+    findings = findings_for(validate(catalog.write()), "PTL-AST-006")
+    assert len(findings) == 1
+    assert findings[0].actual == "application/octet-stream"
+
+
+def test_canonical_cog_media_type_is_clean(catalog: CatalogBuilder) -> None:
+    catalog.collection(
+        "scenes",
+        assets={
+            "data": _asset(
+                href="./scene.tif",
+                type="image/tiff; application=geotiff; profile=cloud-optimized",
+                roles=["data"],
+            )
+        },
+    )
+    assert findings_for(validate(catalog.write()), "PTL-AST-006") == []
+
+
+def test_upstream_source_geotiff_is_exempt(catalog: CatalogBuilder) -> None:
+    catalog.collection(
+        "scenes",
+        assets={
+            "source": _asset(
+                href="https://example.org/original.tif",
+                type="image/tiff; application=geotiff",
+                roles=["data", "source"],
+            )
+        },
+    )
+    assert findings_for(validate(catalog.write()), "PTL-AST-006") == []
+
+
+def test_item_asset_template_needs_cog_media_type(catalog: CatalogBuilder) -> None:
+    catalog.collection(
+        "scenes",
+        item_assets={
+            "data": {
+                "type": "image/tiff; application=geotiff",
+                "roles": ["data"],
+            }
+        },
+    )
+    findings = findings_for(validate(catalog.write()), "PTL-AST-006")
+    assert len(findings) == 1
+    assert findings[0].json_pointer == "/item_assets/data/type"

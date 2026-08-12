@@ -22,7 +22,7 @@ Findings carry a stable rule id (`PTL-<GROUP>-<NNN>`), a severity, a message, an
 | `PTL-PRV` | 001–003 | ≥1 producer, exactly one host listed last, host url-or-email |
 | `PTL-LIC` | 001–003 | SPDX or `other`, license link for `other`, no `proprietary` |
 | `PTL-FIL` | 001–005 | AGENTS.md and README.md on disk, `rel:"agents"` and `rel:"describedby"` markdown links; README.md non-empty with a title heading, and (heuristically, a warning) mentioning license and provenance on collections |
-| `PTL-AST` | 001–005 | asset href/type/roles, https-not-s3, `file:size` and `file:checksum` present (a warning, per the SHOULD) with the checksum multihash-encoded; catalogs carry no assets |
+| `PTL-AST` | 001–006 | asset href/type/roles, required COG media type for primary raster data, https-not-s3, `file:size` and `file:checksum` present (a warning, per the SHOULD) with the checksum multihash-encoded; catalogs carry no assets |
 | `PTL-CNF` | 001–003 | versioned Portolan schema URI declared, consistent with the root; dataset versioning declares the STAC version extension |
 | `PTL-PRO` | 001–004 | mirror `via`/`canonical` links and `updated` sync time; officials carry no upstream links |
 | `PTL-VIZ` | 001–005 | thumbnail on geospatial collections, style assets for visual derivatives, PMTiles `rel:"pmtiles"` registration, large-vector-without-visual nudge, MapLibre style media type in PMTiles collections |

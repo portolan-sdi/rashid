@@ -14,6 +14,7 @@ from rashid._multihash import is_well_formed_multihash
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
+from rashid.rules._common import COG_MEDIA_TYPE, is_cog_media_type, is_raster_data_asset
 
 
 def _assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
@@ -121,6 +122,40 @@ class AssetHrefSchemeRule(Rule):
                     expected="https",
                     actual=scheme,
                 )
+
+
+class CogMediaTypeRule(Rule):
+    """Primary raster data declares the required COG media type.
+
+    Raster intent comes from the data role plus a TIFF type or href, rather
+    than from an already-correct COG declaration. Otherwise an incomplete
+    type removes the asset from every COG-gated rule. A source asset is an
+    upstream original and is exempt from the cloud-native format requirements.
+    """
+
+    id = "PTL-AST-006"
+    spec_ids = ("PORTO-CORE-026", "PORTO-FMT-023", "PORTO-FMT-045")
+    default_severity = Severity.ERROR
+    description = "primary raster data must declare the required COG media type"
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in [*_assets_of(node), *_item_asset_templates(node)]:
+            if not is_raster_data_asset(asset):
+                continue
+            media_type = asset.get("type")
+            if not isinstance(media_type, str) or not media_type.strip():
+                continue  # PTL-AST-001 reports a missing type
+            if is_cog_media_type(media_type):
+                continue
+            yield self.finding(
+                node,
+                f"raster data asset '{key}' has type {media_type!r}, expected '{COG_MEDIA_TYPE}'",
+                json_pointer=f"{pointer}/type",
+                fix_hint=f"set the asset's type to '{COG_MEDIA_TYPE}'",
+                expected=COG_MEDIA_TYPE,
+                actual=media_type,
+            )
 
 
 class AssetFileFieldsRule(Rule):

@@ -156,6 +156,32 @@ def test_multiple_collection_level_cogs_are_flagged(catalog: CatalogBuilder) -> 
     assert "2 scene COGs" in findings[0].message
 
 
+def test_wrong_cog_types_do_not_hide_collection_level_scenes(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _make_cog(_collection(root), href="./scene-a.tif")
+    mutate_json(
+        _collection(root),
+        lambda d: (
+            d["assets"]["data"].__setitem__("type", "image/tiff; application=geotiff"),
+            d["assets"].__setitem__(
+                "scene-b",
+                {
+                    **_cog_asset("./scene-b.tiff"),
+                    "type": "image/tiff; application=geotiff",
+                },
+            ),
+        ),
+    )
+    report = validate(root)
+    findings = findings_for(report, "PTL-COL-004")
+    assert len(findings) == 1
+    assert "2 scene COGs" in findings[0].message
+    assert len(findings_for(report, "PTL-AST-006")) == 2
+
+
 def test_scenes_modelled_as_items_are_clean(catalog: CatalogBuilder) -> None:
     collection = catalog.collection("roads")
     collection.item("scene-a")
@@ -216,7 +242,9 @@ def test_upstream_geotiff_original_is_not_a_scene(catalog: CatalogBuilder) -> No
         data["assets"]["source"] = asset
 
     mutate_json(_collection(root), add_source_original)
-    assert findings_for(validate(root), "PTL-COL-004") == []
+    report = validate(root)
+    assert findings_for(report, "PTL-COL-004") == []
+    assert findings_for(report, "PTL-AST-006") == []
 
 
 def test_roleless_raster_assets_are_out_of_scope(catalog: CatalogBuilder) -> None:

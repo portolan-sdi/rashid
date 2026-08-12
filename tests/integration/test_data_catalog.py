@@ -146,6 +146,20 @@ def test_wrong_media_type_flags_dat_003(catalog_root: Path) -> None:
     assert DAT_FORMAT in [f.rule_id for f in _data_findings(catalog_root)]
 
 
+def test_valid_cog_bytes_with_plain_geotiff_type_flags_ast_006(
+    catalog_root: Path,
+) -> None:
+    mutate_json(
+        _item(catalog_root, "raster"),
+        lambda d: d["assets"]["data"].__setitem__("type", "image/tiff; application=geotiff"),
+    )
+    report = validate(catalog_root, data=True)
+    findings = [f for f in report.findings if f.rule_id == "PTL-AST-006"]
+    assert len(findings) == 1
+    assert findings[0].path == "layers/raster/raster.json"
+    assert not any(f.rule_id in {DAT_FORMAT, "PTL-DAT-004"} for f in report.findings)
+
+
 def test_bbox_disagreement_flags_dat_005(catalog_root: Path) -> None:
     mutate_json(
         _item(catalog_root, "points"),
