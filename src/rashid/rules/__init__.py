@@ -37,6 +37,9 @@ from rashid.rules.license import (
 )
 from rashid.rules.links import (
     ChildLinkCompletenessRule,
+    IconMediaTypeRule,
+    IconRelativeHrefRule,
+    IconTitleRule,
     LinkResolutionRule,
     NoSelfLinkRule,
     RelativeLinksRule,
@@ -77,6 +80,9 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     RelativeLinksRule(),
     NoSelfLinkRule(),
     LinkResolutionRule(),
+    IconMediaTypeRule(),
+    IconTitleRule(),
+    IconRelativeHrefRule(),
     BboxValidRule(),
     DatetimePresentRule(),
     DatetimeValidRule(),
