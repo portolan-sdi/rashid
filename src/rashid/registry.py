@@ -45,8 +45,9 @@ class CheckInfo:
             the passing condition.
         severity: The strongest severity the check can emit. Most checks emit
             exactly one; ``PTL-DAT-007`` and ``PTL-DAT-010`` emit a MUST
-            failure at ERROR and a companion SHOULD at WARNING, and record the
-            stronger of the two.
+            failure at ERROR and a companion SHOULD at WARNING, and
+            ``PTL-VIZ-001`` softens to WARNING when it cannot decide whether
+            its MUST applies. Each records the strongest it reaches.
         spec_ids: Requirement IDs from the spec's manifest that this check
             enforces. Empty for the checks that report a pass could not run,
             which discharge no requirement of their own.

@@ -41,16 +41,25 @@ class Rule(ABC):
         node: Node,
         message: str,
         *,
+        severity: Severity | None = None,
         json_pointer: str | None = None,
         fix_hint: str | None = None,
         expected: Any | None = None,
         actual: Any | None = None,
         data: dict[str, Any] | None = None,
     ) -> Finding:
-        """Build a finding for ``node`` with this rule's id and severity."""
+        """Build a finding for ``node`` with this rule's id and severity.
+
+        ``severity`` softens one finding without changing what the rule is.
+        A rule that cannot decide whether its requirement applies reports the
+        uncertainty below its own severity, the way ``PTL-VIZ-001`` warns when
+        a collection's geospatial nature is undecidable. ``registry.CheckInfo``
+        records the strongest severity a check emits, so an override may only
+        soften: never pass one stronger than ``default_severity``.
+        """
         return Finding(
             rule_id=self.id,
-            severity=self.default_severity,
+            severity=self.default_severity if severity is None else severity,
             message=message,
             path=str(node.path),
             object_id=node.id,
