@@ -14,6 +14,9 @@ This module gates the join in both directions:
 
 - every ``enforcement: validator`` requirement at MUST or SHOULD is cited by
   at least one check;
+- every ``enforcement: validator`` requirement at MAY is either cited by a
+  check or covered by a permission test in ``test_may_permissions.py``, which
+  asserts rashid reports nothing for the form the requirement permits;
 - every cited ID exists in the manifest;
 - severities map: a MUST is cited by at least one ERROR-severity check, a
   SHOULD by at least one WARNING-or-stronger check, except where the spec
@@ -33,6 +36,7 @@ import rashid.live as live_pass
 import rashid.runner as runner
 import rashid.schema as schema_pass
 import rashid.structural as structural_pass
+import tests.unit.test_may_permissions as may_permissions
 from rashid.model import Severity
 from rashid.registry import CHECKS
 
@@ -111,6 +115,52 @@ def test_every_validator_must_and_should_is_cited() -> None:
         if enforcement == "validator" and severity in ("MUST", "SHOULD") and req_id not in cited
     ]
     assert not missing, f"validator requirements cited by no check: {missing}"
+
+
+def _validator_mays() -> list[str]:
+    """Every ``MAY`` requirement the manifest assigns to the validator."""
+    return [
+        req_id
+        for req_id, severity, enforcement in _manifest_entries()
+        if enforcement == "validator" and severity == "MAY"
+    ]
+
+
+def test_every_validator_may_is_cited_or_has_a_permission_test() -> None:
+    """A MAY is a permission, so the proof is that rashid does not report it.
+
+    Two discharges count. A check may cite the requirement, which is how a MAY
+    that permits a validator to *say* something is covered (``PORTO-CORE-055``,
+    ``PORTO-CORE-066``). Otherwise a permission test must supply the permitted
+    form and assert an empty report.
+    """
+    cited = _citations()
+    covered = set(cited) | set(may_permissions.PERMISSION_TESTS)
+    missing = [req_id for req_id in _validator_mays() if req_id not in covered]
+    assert not missing, (
+        "validator MAY requirements with neither a citation nor a permission test: "
+        f"{missing}; add one to tests/unit/test_may_permissions.py"
+    )
+
+
+def test_every_permission_test_named_in_the_registry_exists() -> None:
+    """The registry cannot outlive the tests it names.
+
+    Deleting a permission test leaves its entry pointing at nothing, which
+    fails here; deleting the entry too fails the coverage gate above. Either
+    way the requirement cannot lose its cover silently.
+    """
+    for req_id, name in may_permissions.PERMISSION_TESTS.items():
+        test = getattr(may_permissions, name, None)
+        assert callable(test), f"{req_id} names a permission test that does not exist: {name}"
+        assert name.startswith("test_"), f"{req_id} names {name}, which pytest will not collect"
+
+
+def test_permission_tests_claim_only_validator_mays() -> None:
+    """An entry for a requirement that is no longer a validator MAY is stale."""
+    mays = set(_validator_mays())
+    stale = [req_id for req_id in may_permissions.PERMISSION_TESTS if req_id not in mays]
+    assert not stale, f"permission tests claim requirements that are not validator MAYs: {stale}"
 
 
 def test_every_cited_id_exists_in_the_manifest() -> None:
