@@ -1,3 +1,15 @@
+## v0.1.5 (2026-08-13)
+
+### Feat
+
+- **rules**: report undecidable geospatial nature instead of skipping
+- flag extensions pinned behind the profile registry
+- enforce the catalog logo convention
+
+### Fix
+
+- report invalid COG types without hiding raster rules
+
 ## v0.1.4 (2026-08-12)
 
 ### Feat
