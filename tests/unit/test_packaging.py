@@ -14,6 +14,12 @@ def test_py_typed_marker_is_present() -> None:
     assert marker.is_file()
 
 
+def test_bundled_extension_registry_is_present() -> None:
+    """PTL-CNF-004 reads the vendored registry at runtime, so it must ship."""
+    registry = resources.files("rashid").joinpath("_schemas/extension-registry.json")
+    assert registry.is_file()
+
+
 def test_bundled_profile_schema_is_present() -> None:
     root = resources.files("rashid").joinpath("_schemas/portolan")
     versions = [entry.name for entry in root.iterdir() if entry.name.startswith("v")]

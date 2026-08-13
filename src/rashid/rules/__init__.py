@@ -19,6 +19,7 @@ from rashid.rules.collections import (
     SingleFileCollectionRule,
 )
 from rashid.rules.conformance import (
+    ExtensionVersionRule,
     SchemaUriConsistencyRule,
     SchemaUriDeclaredRule,
     VersionExtensionRule,
@@ -102,6 +103,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     SchemaUriDeclaredRule(),
     SchemaUriConsistencyRule(),
     VersionExtensionRule(),
+    ExtensionVersionRule(),
     MirrorViaLinkRule(),
     MirrorCanonicalLinkRule(),
     MirrorUpdatedRule(),
