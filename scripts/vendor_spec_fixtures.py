@@ -6,7 +6,7 @@ against. Both live upstream in ``portolan-spec`` and drift as the spec evolves,
 so a hand-copied snapshot rots — that rot is exactly the schema-URI-namespace
 break this script exists to catch early.
 
-Running it against a spec checkout refreshes the bundled schemas and three
+Running it against a spec checkout refreshes the bundled schemas and four
 fixture sets, and records the spec commit they came from in ``SPEC_REF``:
 
 - ``tests/fixtures/reference-catalog/`` — the JSON and Markdown of the reference
@@ -16,6 +16,10 @@ fixture sets, and records the spec commit they came from in ``SPEC_REF``:
   the wheel: the schema pass validates against them offline.
 - ``tests/fixtures/profile-examples/`` — the profile's own hand-authored STAC
   example objects (the micro-cases its ``check-portolan`` runs).
+- ``src/rashid/_schemas/extension-registry.json`` — the profile's normative
+  registry of STAC extensions (``stac/README.md``), parsed out of the Markdown
+  table into a name-to-URI map so ``PTL-CNF-004`` compares versions at runtime
+  without parsing prose.
 - ``tests/fixtures/requirements.yaml`` — the spec's requirements manifest, the
   per-requirement ID/severity/enforcement register that
   ``tests/unit/test_spec_coverage.py`` gates every check's ``spec_ids``
@@ -36,7 +40,9 @@ means the spec moved and rashid has not caught up.
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -44,13 +50,22 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
-BUNDLED_SCHEMAS = REPO_ROOT / "src" / "rashid" / "_schemas" / "portolan"
+SCHEMAS_ROOT = REPO_ROOT / "src" / "rashid" / "_schemas"
+BUNDLED_SCHEMAS = SCHEMAS_ROOT / "portolan"
+EXTENSION_REGISTRY_DEST = SCHEMAS_ROOT / "extension-registry.json"
 
 # Relative to the spec checkout root.
 CATALOG_SRC = Path("examples/catalog/portolan-reference")
 SCHEMA_GLOB = "stac/json-schema/v*/schema.json"
 PROFILE_EXAMPLES_SRC = Path("stac/examples")
 REQUIREMENTS_SRC = Path("specs/portolan/requirements.yaml")
+EXTENSION_REGISTRY_SRC = Path("stac/README.md")
+
+# One row of the profile's extension registry table: a reference-style link
+# holding the extension's name, then its pinned schema URI in backticks.
+EXTENSION_ROW = re.compile(r"^\|\s*\[(?P<name>[^\]]+)\]\[\]\s*\|\s*`(?P<uri>https://[^`]+)`\s*\|")
+# Every registered URI pins a version: <base>/vX.Y.Z/schema.json.
+EXTENSION_URI = re.compile(r"^https://[^\s|]+/v\d+\.\d+\.\d+/schema\.json$")
 
 # Only these extensions are copied out of the catalog tree; the parquet, COG,
 # PMTiles, and PNG assets (tens of MB) are never read by the validator.
@@ -121,6 +136,47 @@ def _vendor_profile_examples(spec: Path) -> int:
     return count
 
 
+def _vendor_extension_registry(spec: Path) -> int:
+    """Parse the profile's extension registry table into a name-to-URI map.
+
+    The table in ``stac/README.md`` is the normative register of which
+    extension version a Portolan object pins. Parsing it here, at vendor time,
+    keeps a Markdown parser out of the validator: rashid ships the map and
+    ``PTL-CNF-004`` reads it.
+    """
+    src = spec / EXTENSION_REGISTRY_SRC
+    if not src.is_file():
+        sys.exit(f"profile README not found at {src}")
+    extensions: dict[str, str] = {}
+    for line in src.read_text(encoding="utf-8").splitlines():
+        row = EXTENSION_ROW.match(line.strip())
+        if row is None:
+            continue
+        name, uri = row["name"], row["uri"]
+        if not EXTENSION_URI.match(uri):
+            sys.exit(f"registry row {name!r} pins no version: {uri}")
+        if name in extensions:
+            sys.exit(f"registry lists {name!r} twice")
+        extensions[name] = uri
+    if len(extensions) < 10:
+        sys.exit(f"extension registry scan found only {len(extensions)} rows in {src}")
+    EXTENSION_REGISTRY_DEST.write_text(
+        json.dumps(
+            {
+                "$comment": (
+                    "The Portolan STAC profile's extension registry (stac/README.md), "
+                    "vendored by scripts/vendor_spec_fixtures.py. Do not edit by hand."
+                ),
+                "extensions": extensions,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return len(extensions)
+
+
 def _vendor_requirements(spec: Path) -> int:
     src = spec / REQUIREMENTS_SRC
     if not src.is_file():
@@ -148,6 +204,7 @@ def main() -> None:
     files = _vendor_catalog(spec)
     versions = _vendor_schemas(spec)
     examples = _vendor_profile_examples(spec)
+    registered = _vendor_extension_registry(spec)
     requirements = _vendor_requirements(spec)
     ref = _spec_ref(spec)
 
@@ -162,6 +219,7 @@ def main() -> None:
     print(f"  reference-catalog: {files} json/md files")
     print(f"  schema versions:   {', '.join(versions)}")
     print(f"  profile-examples:  {examples} objects")
+    print(f"  extension registry: {registered} extensions")
     print(f"  requirements:      {requirements} manifest entries")
 
 

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable
+from functools import lru_cache
+from importlib import resources
+from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
@@ -149,3 +153,86 @@ def _declares_version_extension(node: Node) -> bool:
     return any(
         isinstance(uri, str) and uri.startswith(_VERSION_EXTENSION_PREFIX) for uri in extensions
     )
+
+
+# The profile's extension registry, vendored from the spec's stac/README.md by
+# scripts/vendor_spec_fixtures.py and shipped in the wheel.
+_REGISTRY_RESOURCE = "_schemas/extension-registry.json"
+
+# Every registered URI pins a version: <base>/vX.Y.Z/schema.json. The base
+# carries the host and the extension's path, so it identifies the extension
+# across versions on either host the registry uses.
+_EXTENSION_URI_PATTERN = re.compile(
+    r"^(?P<base>https://\S+?)/(?P<version>v\d+\.\d+\.\d+)/schema\.json$"
+)
+
+
+@lru_cache(maxsize=1)
+def _registry() -> dict[str, tuple[str, str]]:
+    """Registered extensions, keyed by base URI: base -> (name, pinned version)."""
+    resource = resources.files("rashid").joinpath(_REGISTRY_RESOURCE)
+    document: dict[str, Any] = json.loads(resource.read_text(encoding="utf-8"))
+    registered: dict[str, tuple[str, str]] = {}
+    for name, uri in document["extensions"].items():
+        parsed = _EXTENSION_URI_PATTERN.match(str(uri))
+        if parsed is None:  # pragma: no cover - the vendoring script rejects these
+            continue
+        registered[parsed["base"]] = (str(name), parsed["version"])
+    return registered
+
+
+class ExtensionVersionRule(Rule):
+    """A registered extension is declared at the version the registry pins.
+
+    The profile's STAC extension registry (the spec's ``stac/README.md``) is
+    the normative list of which extensions Portolan uses and which schema URI
+    to pin for each. core.md defers to it: "Which extensions are required
+    versus recommended, the exact schema URIs and versions to pin, and their
+    usage are defined normatively by the Portolan STAC Profile." That sentence
+    carries no RFC 2119 keyword, so the requirements manifest assigns the
+    registry no ID and this rule cites none.
+
+    The finding is a warning rather than an error. The registry advances after
+    catalogs are published, and a catalog that pinned the then-current version
+    is not broken, only behind.
+
+    Extensions absent from the registry are ignored: the registry governs what
+    it lists, not what a publisher adds. The Portolan schema URI is ignored
+    too, because the version a catalog declares there is owned by PTL-CNF-001
+    and PTL-CNF-002, which the spec pins to a warning about the root catalog
+    rather than about the registry.
+    """
+
+    id = "PTL-CNF-004"
+    spec_ids = ()
+    default_severity = Severity.WARNING
+    description = "declared extension URIs match the versions the profile registry pins"
+    kinds = ("catalog", "collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        declared = node.data.get("stac_extensions")
+        if not isinstance(declared, list):
+            return
+        registry = _registry()
+        for index, uri in enumerate(declared):
+            if not isinstance(uri, str) or SCHEMA_URI_PATTERN.match(uri):
+                continue
+            parsed = _EXTENSION_URI_PATTERN.match(uri)
+            if parsed is None:
+                continue  # not a versioned schema URI; nothing to compare
+            entry = registry.get(parsed["base"])
+            if entry is None:
+                continue  # unregistered extension: out of the registry's scope
+            name, pinned = entry
+            if parsed["version"] == pinned:
+                continue
+            expected = f"{parsed['base']}/{pinned}/schema.json"
+            yield self.finding(
+                node,
+                f"{name} extension declared at {parsed['version']}, but the Portolan"
+                f" extension registry pins {pinned}",
+                json_pointer=f"/stac_extensions/{index}",
+                fix_hint=f"replace '{uri}' with '{expected}' in stac_extensions",
+                expected=expected,
+                actual=uri,
+            )
