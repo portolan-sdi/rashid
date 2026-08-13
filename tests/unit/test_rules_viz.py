@@ -66,10 +66,89 @@ def test_thumbnail_accepts_each_allowed_type(catalog: CatalogBuilder, media_type
     assert findings_for(validate(catalog.write()), "PTL-VIZ-001") == []
 
 
-def test_unknowable_collection_is_skipped(catalog: CatalogBuilder) -> None:
+def test_undecidable_collection_without_thumbnail_warns(catalog: CatalogBuilder) -> None:
     # single parquet asset, no items, no table:columns: could be tabular
     catalog.collection("prices", assets={"data": default_asset()})
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.WARNING
+    assert "cannot be decided from metadata" in findings[0].message
+    assert "it has no items" in findings[0].message
+    assert "table:columns" in findings[0].message
+    assert "PMTiles, COG, or COPC" in findings[0].message
+    assert findings[0].json_pointer == "/assets"
+    assert "table:columns" in (findings[0].fix_hint or "")
+
+
+@pytest.mark.parametrize(
+    ("count", "clause"),
+    [(1, "its one item declares no geometry"), (2, "none of its 2 items declares a geometry")],
+)
+def test_undecidable_message_names_geometryless_items(
+    catalog: CatalogBuilder, count: int, clause: str
+) -> None:
+    collection = catalog.collection("prices", assets={"data": default_asset()})
+    for index in range(count):
+        collection.item(f"prices-202{index}")
+    root = catalog.write()
+    for index in range(count):
+        item_id = f"prices-202{index}"
+        mutate_json(
+            root / "prices" / item_id / f"{item_id}.json",
+            lambda d: (d.__setitem__("geometry", None), d.pop("bbox")),
+        )
+    findings = findings_for(validate(root), "PTL-VIZ-001")
+    assert len(findings) == 1
+    assert clause in findings[0].message
+
+
+def test_undecidable_collection_with_thumbnail_is_silent(catalog: CatalogBuilder) -> None:
+    """The requirement is met whichever way the question would have resolved."""
+    catalog.collection("prices", assets={"data": default_asset(), "thumbnail": thumbnail_asset()})
     assert findings_for(validate(catalog.write()), "PTL-VIZ-001") == []
+
+
+def test_asset_columns_without_geometry_mark_tabular(catalog: CatalogBuilder) -> None:
+    """The spec's reference catalog declares table:columns on the data asset."""
+    asset = default_asset()
+    asset["table:columns"] = [{"name": "year", "type": "int64"}]
+    catalog.collection("prices", assets={"data": asset})
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-001") == []
+
+
+def test_asset_geometry_column_marks_geospatial(catalog: CatalogBuilder) -> None:
+    asset = default_asset()
+    asset["table:columns"] = [{"name": "geom", "type": "binary"}]
+    catalog.collection("places", assets={"data": asset})
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+
+
+def test_source_asset_columns_do_not_decide(catalog: CatalogBuilder) -> None:
+    """An upstream CSV's columns describe what was converted, not what ships."""
+    source = default_asset()
+    source["href"] = "./prices.csv"
+    source["type"] = "text/csv"
+    source["roles"] = ["source"]
+    source["table:columns"] = [{"name": "year", "type": "int64"}]
+    catalog.collection("places", assets={"data": default_asset(), "source": source})
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.WARNING
+
+
+def test_spatial_media_type_outranks_a_geometryless_column_list(catalog: CatalogBuilder) -> None:
+    """A COG stays raster however an attribute table beside it is described."""
+    cog = default_asset()
+    cog["href"] = "./scene.tif"
+    cog["type"] = "image/tiff; application=geotiff; profile=cloud-optimized"
+    table = default_asset()
+    table["table:columns"] = [{"name": "year", "type": "int64"}]
+    catalog.collection("scenes", assets={"data": cog, "table": table})
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
 
 
 def test_declared_columns_without_geometry_mark_tabular(catalog: CatalogBuilder) -> None:
@@ -174,6 +253,28 @@ def test_large_vector_without_visual_is_info(catalog: CatalogBuilder) -> None:
     findings = findings_for(validate(catalog.write()), "PTL-VIZ-004")
     assert len(findings) == 1
     assert findings[0].severity is Severity.INFO
+
+
+def test_large_undecidable_asset_without_visual_reports_the_uncertainty(
+    catalog: CatalogBuilder,
+) -> None:
+    big = default_asset()
+    big["file:size"] = 553_395_618
+    catalog.collection("prices", assets={"data": big, "thumbnail": thumbnail_asset()})
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-004")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.INFO
+    assert "cannot be decided from metadata" in findings[0].message
+    assert "553395618 bytes" in findings[0].message
+    assert "PMTiles" in (findings[0].fix_hint or "")
+
+
+def test_large_tabular_asset_without_visual_is_silent(catalog: CatalogBuilder) -> None:
+    big = default_asset()
+    big["file:size"] = 553_395_618
+    big["table:columns"] = [{"name": "year", "type": "int64"}]
+    catalog.collection("prices", assets={"data": big, "thumbnail": thumbnail_asset()})
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-004") == []
 
 
 def test_small_vector_without_visual_is_silent(catalog: CatalogBuilder) -> None:

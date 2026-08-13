@@ -5,11 +5,18 @@ visualization derivative exists, and PMTiles registration. Whether a
 render-from-source path is genuinely viable (a "small" GeoParquet, a
 display-ready COG) is not decidable from metadata, so its absence is at
 most an INFO nudge, never an error.
+
+The thumbnail rule and the render-path nudge bind geospatial collections
+only, and metadata does not always say which a collection is. Where the
+answer decides whether a finding fires, the undecidability is itself
+reported, softened one severity, so a publisher reading a clean run never
+mistakes "could not tell" for "nothing to fix".
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
@@ -26,27 +33,39 @@ _WEB_MAP_LINKS_PREFIX = "https://stac-extensions.github.io/web-map-links/"
 _LARGE_VECTOR_BYTES = 100_000_000
 
 
-def is_geospatial(node: Node, graph: CatalogGraph) -> bool | None:
-    """Best-effort geospatial detection from metadata alone.
+def _column_declarations(node: Node) -> list[dict[str, Any]] | None:
+    """Every ``table:columns`` entry describing the collection's own data.
 
-    The spec identifies a tabular collection by its Parquet data having no
-    geometry column — a data-pass fact. From metadata we can only look for
-    positive signals: an item with a geometry, a geometry column declared
-    via the table extension, or an inherently spatial media type. With no
-    signal either way, return None and let callers skip rather than guess.
+    The table extension allows the field on the collection and on the asset
+    that holds the table, and the spec's reference catalog puts it on the data
+    asset, so both are read. Assets carrying the ``source`` role are skipped:
+    an upstream CSV's columns describe what was converted, not what the
+    collection publishes. None means nothing declared any, which is what
+    separates "no geometry column" from "no column list".
     """
-    for child in graph.children_of(node):
-        if child.kind == "item" and child.data.get("geometry") is not None:
+    holders: list[dict[str, Any]] = [node.data]
+    holders += [asset for _p, _k, asset in _assets_of(node) if "source" not in roles_of(asset)]
+    declared: list[dict[str, Any]] = []
+    found = False
+    for holder in holders:
+        columns = holder.get("table:columns")
+        if isinstance(columns, list):
+            found = True
+            declared += [column for column in columns if isinstance(column, dict)]
+    return declared if found else None
+
+
+def _names_a_geometry_column(columns: list[dict[str, Any]]) -> bool:
+    for column in columns:
+        name = str(column.get("name", "")).casefold()
+        ctype = str(column.get("type", "")).casefold()
+        if name in ("geometry", "geom") or "geometry" in ctype:
             return True
-    columns = node.data.get("table:columns")
-    if isinstance(columns, list):
-        for column in columns:
-            if isinstance(column, dict):
-                name = str(column.get("name", "")).casefold()
-                ctype = str(column.get("type", "")).casefold()
-                if name in ("geometry", "geom") or "geometry" in ctype:
-                    return True
-        return False  # declared columns, none of them a geometry
+    return False
+
+
+def _has_spatial_media_type(node: Node) -> bool:
+    """Whether any asset's media type is spatial whatever the metadata says."""
     for _pointer, _key, asset in _assets_of(node):
         media_type = asset.get("type")
         if isinstance(media_type, str) and (
@@ -55,7 +74,58 @@ def is_geospatial(node: Node, graph: CatalogGraph) -> bool | None:
             or media_type == "application/vnd.laszip+copc"
         ):
             return True
+    return False
+
+
+def is_geospatial(node: Node, graph: CatalogGraph) -> bool | None:
+    """Best-effort geospatial detection from metadata alone.
+
+    The spec identifies a tabular collection by its Parquet data having no
+    geometry column — a data-pass fact. From metadata we can only look for
+    positive signals: an item with a geometry, an inherently spatial media
+    type, or a geometry column declared via the table extension. A declared
+    column list with no geometry in it is the one negative signal, and it
+    yields to a spatial media type, since a COG stays raster however an
+    attribute table beside it is described. With no signal either way, return
+    None: callers report that uncertainty rather than guess past it.
+    """
+    for child in graph.children_of(node):
+        if child.kind == "item" and child.data.get("geometry") is not None:
+            return True
+    if _has_spatial_media_type(node):
+        return True
+    columns = _column_declarations(node)
+    if columns is not None:
+        return _names_a_geometry_column(columns)
     return None
+
+
+def _undecided_because(node: Node, graph: CatalogGraph) -> str:
+    """The signals that were absent, phrased as one clause each.
+
+    Only called where :func:`is_geospatial` returned None, so all three
+    signals are known to be missing; the item clause reports which of the two
+    ways that happened, since publishing items and giving them geometries are
+    separate edits.
+    """
+    items = sum(1 for child in graph.children_of(node) if child.kind == "item")
+    if items == 0:
+        seen = "it has no items"
+    elif items == 1:
+        seen = "its one item declares no geometry"
+    else:
+        seen = f"none of its {items} items declares a geometry"
+    return (
+        f"{seen}, neither it nor its assets declare table:columns, and no asset"
+        " carries an inherently spatial media type (PMTiles, COG, or COPC)"
+    )
+
+
+#: Imperative repair for an undecidable collection, shared by both callers.
+_RESOLVE_HINT = (
+    "declare table:columns on the data asset, naming the geometry column when the"
+    " data has one, so the next run can decide"
+)
 
 
 def _pmtiles_registration(node: Node) -> tuple[bool, bool]:
@@ -70,7 +140,15 @@ def _pmtiles_registration(node: Node) -> tuple[bool, bool]:
 
 
 class ThumbnailRule(Rule):
-    """Every geospatial collection carries a thumbnail asset."""
+    """Every geospatial collection carries a thumbnail asset.
+
+    A collection whose geospatial nature metadata cannot decide gets a WARNING
+    naming the missing signals, not silence: PORTO-CORE-067 is a MUST, and a
+    skipped MUST that reads as a pass hides the gap from the publisher. The
+    warning is limited to collections carrying no thumbnail at all, because a
+    collection that carries one satisfies the requirement whichever way the
+    question would have resolved.
+    """
 
     id = "PTL-VIZ-001"
     spec_ids = ("PORTO-CORE-067", "PORTO-FMT-033")
@@ -79,13 +157,26 @@ class ThumbnailRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        if is_geospatial(node, graph) is not True:
+        geospatial = is_geospatial(node, graph)
+        if geospatial is False:
             return
         thumbnails = [
             (pointer, key, asset)
             for pointer, key, asset in _assets_of(node)
             if "thumbnail" in roles_of(asset)
         ]
+        if geospatial is None:
+            if not thumbnails:
+                yield self.finding(
+                    node,
+                    "collection has no asset with the 'thumbnail' role, and whether it is"
+                    " geospatial cannot be decided from metadata:"
+                    f" {_undecided_because(node, graph)}",
+                    severity=Severity.WARNING,
+                    json_pointer="/assets",
+                    fix_hint=f"{_RESOLVE_HINT}; add a thumbnail if the collection is geospatial",
+                )
+            return
         if not thumbnails:
             yield self.finding(
                 node,
@@ -278,6 +369,11 @@ class LargeVectorWithoutVisualRule(Rule):
     The spec requires a zero-infrastructure render path; render-from-source
     is only plausible for small files. The size threshold is heuristic, so
     this is INFO, never an error.
+
+    A collection whose geospatial nature metadata cannot decide gets the same
+    nudge worded as the uncertainty it is, still INFO: a large Parquet file
+    needs a visual derivative only if it holds geometries, and nothing here
+    establishes that it does.
     """
 
     id = "PTL-VIZ-004"
@@ -287,7 +383,8 @@ class LargeVectorWithoutVisualRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        if is_geospatial(node, graph) is not True:
+        geospatial = is_geospatial(node, graph)
+        if geospatial is False:
             return
         has_visual = any("visual" in roles_of(asset) for _p, _k, asset in _assets_of(node))
         has_pmtiles_asset, has_pmtiles_link = _pmtiles_registration(node)
@@ -299,11 +396,23 @@ class LargeVectorWithoutVisualRule(Rule):
             if asset.get("type") != "application/vnd.apache.parquet":
                 continue
             size = asset.get("file:size")
-            if isinstance(size, int) and not isinstance(size, bool) and size > _LARGE_VECTOR_BYTES:
+            if not isinstance(size, int) or isinstance(size, bool) or size <= _LARGE_VECTOR_BYTES:
+                continue
+            if geospatial is None:
                 yield self.finding(
                     node,
-                    f"vector data asset '{key}' is {size} bytes with no visual"
-                    " derivative; rendering from source is unlikely to be viable",
+                    f"data asset '{key}' is {size} bytes with no visual derivative, and"
+                    " whether this collection is geospatial cannot be decided from"
+                    f" metadata: {_undecided_because(node, graph)}",
                     json_pointer="/assets",
-                    fix_hint="publish a PMTiles derivative with a MapLibre style",
+                    fix_hint=f"{_RESOLVE_HINT}; publish a PMTiles derivative with a MapLibre"
+                    " style if the collection is geospatial",
                 )
+                continue
+            yield self.finding(
+                node,
+                f"vector data asset '{key}' is {size} bytes with no visual"
+                " derivative; rendering from source is unlikely to be viable",
+                json_pointer="/assets",
+                fix_hint="publish a PMTiles derivative with a MapLibre style",
+            )
