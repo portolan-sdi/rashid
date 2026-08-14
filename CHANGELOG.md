@@ -1,3 +1,9 @@
+## v0.1.6 (2026-08-14)
+
+### Feat
+
+- catch up to portolan-spec v0.1.1
+
 ## v0.1.5 (2026-08-13)
 
 ### Feat
