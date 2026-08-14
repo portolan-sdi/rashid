@@ -17,7 +17,7 @@ import pytest
 
 from rashid.model import Report
 
-PORTOLAN_URI = "https://schemas.portolan-sdi.org/portolan/v0.1.0/schema.json"
+PORTOLAN_URI = "https://schemas.portolan-sdi.org/portolan/v0.1.1/schema.json"
 # multihash: varint(0x12 sha2-256) + varint(0x20) + sha256(b"")
 VALID_MULTIHASH = "1220e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
