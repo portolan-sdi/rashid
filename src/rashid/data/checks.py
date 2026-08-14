@@ -97,6 +97,7 @@ from rashid.data import (
     DAT_TABULAR,
     DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
+    DAT_VECTOR_COLUMNS,
     DataDefect,
 )
 from rashid.data.reader import AssetReader, Locator
@@ -298,6 +299,7 @@ def _check_asset(
     if expected == "parquet":
         defects.extend(_check_geoparquet(key, located))
         defects.extend(_check_tabular(node, key, asset, located))
+        defects.extend(_check_vector_columns(node, key, asset, located))
     if expected in {"parquet", "tiff", "pmtiles"}:
         defects.extend(_check_consistency(node, key, asset, expected, located))
     return defects
@@ -1289,6 +1291,45 @@ def _check_tabular(
     return defects
 
 
+def _check_vector_columns(
+    node: Node, key: str, asset: dict[str, Any], located: Locator
+) -> list[DataDefect]:
+    """The table-extension SHOULDs for a GeoParquet data asset.
+
+    formats.md, Vector Data: a vector collection SHOULD carry ``table:columns``
+    on the collection itself (PORTO-FMT-046), and an item that carries a
+    GeoParquet data asset SHOULD carry the same field in its ``properties``
+    (PORTO-FMT-047). Without it a client discovers a hundred attribute columns
+    only by reading the Parquet footer. Plain Parquet is the tabular SHOULD's
+    business, and a partitioned collection has no data asset to reach here, so
+    its columns are checked wherever its partition files are described.
+    """
+    if "data" not in _asset_roles(asset):
+        return []
+    try:
+        source: Any = located.open_binary() if located.is_remote else located.source
+        parquet = pq.ParquetFile(source)
+    except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
+        return []
+    if _geo_metadata(parquet) is None:
+        return []  # plain Parquet: the Tabular Data SHOULDs own it
+    if _has_table_columns(node, asset):
+        return []
+    where = (
+        "the item does not document its columns in properties"
+        if node.kind == "item"
+        else "the collection does not document its columns"
+    )
+    return [
+        DataDefect(
+            DAT_VECTOR_COLUMNS,
+            Severity.WARNING,
+            f"vector asset '{key}': {where} with the table extension (table:columns)",
+            key,
+        )
+    ]
+
+
 def _asset_roles(asset: dict[str, Any]) -> list[str]:
     raw = asset.get("roles")
     if not isinstance(raw, list):
@@ -1297,9 +1338,20 @@ def _asset_roles(asset: dict[str, Any]) -> list[str]:
 
 
 def _has_table_columns(node: Node, asset: dict[str, Any]) -> bool:
-    """The table extension allows ``table:columns`` on the collection or on
-    the asset itself; the reference catalog uses the asset."""
-    for columns in (node.data.get("table:columns"), asset.get("table:columns")):
+    """Whether ``table:columns`` is declared anywhere the extension allows.
+
+    The extension defines two placements, the object and the asset, and the
+    reference catalog carries it on the collection. An item's fields live under
+    ``properties``, which is where PORTO-FMT-047 asks for it. A per-asset
+    declaration is the PORTO-FMT-048 escape for a collection whose data assets
+    describe differing schemas, so it satisfies the collection SHOULD too.
+    """
+    holders = [node.data, asset]
+    properties = node.data.get("properties")
+    if isinstance(properties, dict):
+        holders.append(properties)
+    for holder in holders:
+        columns = holder.get("table:columns")
         if isinstance(columns, list) and len(columns) > 0:
             return True
     return False

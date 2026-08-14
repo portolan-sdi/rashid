@@ -41,7 +41,7 @@ class SchemaUriDeclaredRule(Rule):
                 node,
                 "stac_extensions declares no Portolan schema URI",
                 json_pointer="/stac_extensions",
-                fix_hint=("add e.g. https://schemas.portolan-sdi.org/portolan/v0.1.0/schema.json"),
+                fix_hint=("add e.g. https://schemas.portolan-sdi.org/portolan/v0.1.1/schema.json"),
             )
         elif len(uris) > 1:
             yield self.finding(

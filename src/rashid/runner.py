@@ -27,6 +27,7 @@ from rashid.data import (
     DAT_TABULAR,
     DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
+    DAT_VECTOR_COLUMNS,
     validate_data,
 )
 from rashid.data import ReaderFactory as DataReaderFactory
@@ -81,6 +82,7 @@ _DATA_RULE_IDS = frozenset(
         DAT_PARTITION_SCHEMA,
         DAT_TABULAR,
         DAT_MIRROR,
+        DAT_VECTOR_COLUMNS,
     }
 )
 

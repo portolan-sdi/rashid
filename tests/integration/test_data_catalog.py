@@ -42,6 +42,15 @@ _PARQUET_TYPE = "application/vnd.apache.parquet"
 _COG_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
 
 
+# The columns write_geoparquet lays down. A vector collection documents them on
+# itself (PORTO-FMT-046) and an item carrying a GeoParquet asset documents them
+# in properties (PORTO-FMT-047), so a pristine catalog declares both.
+_TABLE_COLUMNS = [
+    {"name": "geometry", "type": "byte_array", "description": "WKB point"},
+    {"name": "value", "type": "int64", "description": "a per-row value"},
+]
+
+
 def _asset(href: str, media_type: str) -> dict[str, Any]:
     return {"href": href, "type": media_type, "roles": ["data"]}
 
@@ -68,8 +77,16 @@ def _build(root: Path) -> Path:
             "extra": _asset("./extra.parquet", _PARQUET_TYPE),
             "thumbnail": thumbnail_asset(),
         },
+        **{"table:columns": _TABLE_COLUMNS},
     )
-    col.item("points", assets={"data": _asset("./points.parquet", _PARQUET_TYPE)})
+    col.item(
+        "points",
+        assets={"data": _asset("./points.parquet", _PARQUET_TYPE)},
+        properties={
+            "datetime": "2024-01-01T00:00:00Z",
+            "table:columns": _TABLE_COLUMNS,
+        },
+    )
     col.item("raster", assets={"data": _asset("./cog.tif", _COG_TYPE)})
     cat.write()
 

@@ -64,7 +64,7 @@ Pairing it with `--live` recovers most of what the narrowed scope gives up on re
 
 The library takes a reader factory rather than a flag. `validate(path, data_reader_factory=LocalOnlyReader)` is the equivalent, using `LocalOnlyReader` from `rashid.data.reader`, and `validate_data(graph, reader_factory=LocalOnlyReader)` scopes the pass on its own.
 
-Two settings drop the pass rather than narrowing it. `--no-data` skips it, and so does disabling every rule from `PTL-DAT-001` to `PTL-DAT-016` through `RulesConfig`. Disabling any subset only silences those findings, after the pass has run.
+Two settings drop the pass rather than narrowing it. `--no-data` skips it, and so does disabling every rule from `PTL-DAT-001` to `PTL-DAT-017` through `RulesConfig`. Disabling any subset only silences those findings, after the pass has run.
 
 ## Development
 
