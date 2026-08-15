@@ -79,14 +79,31 @@ Commitizen reads the commits since the last tag and picks the version.
 
 ```bash
 git checkout main && git pull
+git switch -c release/vX.Y.Z
 uv run cz bump --changelog
-git push --follow-tags
+git tag -d "vX.Y.Z"
+git push -u origin release/vX.Y.Z
 ```
 
 `cz bump` rewrites `pyproject.toml`, relocks `uv.lock` through a
 pre-bump hook, writes `CHANGELOG.md`, commits as `bump:`, and tags.
-`publish.yml` gates on that `bump:` prefix and pushes the wheel and sdist
-to PyPI. Pass `--increment PATCH` to override the computed version.
+Delete the local tag: `publish.yml` tags the merged commit itself, so a
+tag on the branch commit points at the wrong one. Pass `--increment
+PATCH` to override the computed version, which is what past releases
+have done — `major_version_zero` keeps breaking changes off the major
+but still bumps the minor for a `feat`.
+
+**Squash-merge the release pull request.** `publish.yml` gates on the
+head commit message starting with `bump:`, and a merge commit reads
+`Merge pull request #N from ...`, so the run skips with no error
+anywhere and nothing reaches PyPI. Squashing puts the `bump:` title on
+`main` and the workflow tags, builds, publishes, and creates the GitHub
+release. If a release does merge the wrong way, recover with `gh
+workflow run publish.yml --ref main`, which reads the version from
+`pyproject.toml` rather than from the commit message.
+
+Branch protection rejects a direct push to `main` without bypass rights,
+so the pull request is the reliable route.
 
 ## Spec fixtures
 
