@@ -10,6 +10,11 @@ updates:
       prefix: ci
     cooldown:
       default-days: 7
+    ignore:
+      # v1 is a moving major tag by design, so a pin defeats it. Pinning it to
+      # v1.1.0 broke repo-checks outright: the reusable workflow did not exist
+      # at that tag.
+      - dependency-name: portolan-sdi/portolan-ops/.github/workflows/reusable-repo-checks.yml
 
   - package-ecosystem: uv
     directory: /
