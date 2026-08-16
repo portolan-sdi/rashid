@@ -87,7 +87,6 @@ _COVERED: frozenset[str] = frozenset(
         "PTL-LNK-002",
         "PTL-LNK-003",
         "PTL-LNK-004",
-        "PTL-LNK-005",
         "PTL-LNK-006",
         "PTL-MIR-002",
         "PTL-PRO-001",
@@ -270,7 +269,7 @@ def _mutate_collections(root: Path) -> None:
 
 
 def _mutate_root(root: Path) -> None:
-    """Root-catalog defects: a self link, a bad child link, a stray asset."""
+    """Root-catalog defects: a bad child link and a stray asset."""
 
     def untitle(links: list[dict[str, Any]]) -> None:
         for link in links:
@@ -281,9 +280,6 @@ def _mutate_root(root: Path) -> None:
         root / "catalog.json",
         lambda d: (
             untitle(d["links"]),
-            d["links"].append(
-                {"rel": "self", "href": "./catalog.json", "type": "application/json"}
-            ),
             d["links"].append(
                 {
                     "rel": "child",

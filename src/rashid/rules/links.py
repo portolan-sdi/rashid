@@ -163,26 +163,6 @@ class RelativeLinksRule(Rule):
                 )
 
 
-class NoSelfLinkRule(Rule):
-    """Objects carry no self link."""
-
-    id = "PTL-LNK-005"
-    spec_ids = ("PORTO-CORE-034",)
-    default_severity = Severity.ERROR
-    description = "objects must not include a self link (pystac SELF_CONTAINED convention)"
-    kinds = ("catalog", "collection", "item")
-
-    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for index, link in enumerate(links_of(node)):
-            if link.get("rel") == "self":
-                yield self.finding(
-                    node,
-                    "object includes a rel:'self' link",
-                    json_pointer=f"/links/{index}",
-                    fix_hint="remove the self link; Portolan catalogs are self-contained",
-                )
-
-
 class LinkResolutionRule(Rule):
     """Every relative structural link resolves to the correct object.
 

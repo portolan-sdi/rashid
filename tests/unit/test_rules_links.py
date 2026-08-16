@@ -122,15 +122,33 @@ def test_absolute_structural_href(catalog: CatalogBuilder) -> None:
     assert all("child" not in f.message for f in findings_for(report, "PTL-LNK-006"))
 
 
-def test_self_link_is_rejected(catalog: CatalogBuilder) -> None:
+def test_self_link_is_accepted(catalog: CatalogBuilder) -> None:
+    # PORTO-CORE-034 constrains structural links only; Portolan takes no
+    # position on self links, so neither does rashid. A root self link is the
+    # relative published catalog of the STAC best practices.
+    catalog.collection("roads")
     root = catalog.write()
     mutate_json(
         root / "catalog.json",
         lambda d: d["links"].append(
-            {"rel": "self", "href": "./catalog.json", "type": "application/json"}
+            {
+                "rel": "self",
+                "href": "https://example.org/catalog.json",
+                "type": "application/json",
+            }
         ),
     )
-    assert len(findings_for(validate(root), "PTL-LNK-005")) == 1
+    mutate_json(
+        root / "roads" / "collection.json",
+        lambda d: d["links"].append(
+            {
+                "rel": "self",
+                "href": "https://example.org/roads/collection.json",
+                "type": "application/json",
+            }
+        ),
+    )
+    assert validate(root).passed
 
 
 def test_dangling_child_link(catalog: CatalogBuilder) -> None:
@@ -218,7 +236,6 @@ def test_clean_catalog_has_no_link_findings(catalog: CatalogBuilder) -> None:
         "PTL-LNK-002",
         "PTL-LNK-003",
         "PTL-LNK-004",
-        "PTL-LNK-005",
         "PTL-LNK-006",
     }
 
