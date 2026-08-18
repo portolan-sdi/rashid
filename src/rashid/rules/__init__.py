@@ -12,6 +12,7 @@ from rashid.rules.assets import (
     CogMediaTypeRule,
 )
 from rashid.rules.bbox import BboxValidRule
+from rashid.rules.catalogs import SubcatalogFanoutRule
 from rashid.rules.collections import (
     CollectionIdRule,
     NestedCollectionRule,
@@ -119,6 +120,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     RasterSceneItemRule(),
     NestedCollectionRule(),
     CollectionIdRule(),
+    SubcatalogFanoutRule(),
     ItemMirrorPresentRule(),
     ItemMirrorRegistrationRule(),
 )

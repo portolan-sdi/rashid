@@ -74,7 +74,11 @@ def test_cli_missing_path_is_usage_error() -> None:
 
 
 def _noisy(catalog: CatalogBuilder, count: int) -> Path:
-    """A catalog whose every collection trips one warning: ``count`` findings."""
+    """A catalog whose every collection trips one warning: ``count`` findings.
+
+    From twenty collections up, the root catalog also trips ``PTL-CAT-001``,
+    the subcatalog fan-out warning, for one finding more.
+    """
     for index in range(count):
         catalog.collection(f"roads_{index}", title=f"road_centerlines_{index}")
     return catalog.write()
@@ -103,7 +107,8 @@ def test_cli_summarizes_above_the_threshold(catalog: CatalogBuilder) -> None:
 def test_cli_summary_keeps_the_counts_line(catalog: CatalogBuilder) -> None:
     root = _noisy(catalog, 60)
     result = CliRunner().invoke(main, ["check", str(root)])
-    assert "0 error(s), 60 warning(s), 0 info(s) across" in result.output
+    # Sixty title warnings, plus the root's own fan-out warning.
+    assert "0 error(s), 61 warning(s), 0 info(s) across" in result.output
     assert result.exit_code == 0  # warnings alone still pass
 
 
@@ -148,9 +153,10 @@ def test_cli_summary_mode_keeps_the_failing_exit_code(catalog: CatalogBuilder) -
 def test_cli_json_carries_the_summary_and_every_finding(catalog: CatalogBuilder) -> None:
     root = _noisy(catalog, 60)
     payload = json.loads(CliRunner().invoke(main, ["check", str(root), "--json"]).output)
-    assert len(payload["findings"]) == 60  # JSON never truncates
-    assert payload["summary"]["by_severity"] == {"error": 0, "warning": 60, "info": 0}
-    (row,) = payload["summary"]["by_rule"]
-    assert row["rule_id"] == "PTL-TTL-002"
-    assert row["count"] == 60
-    assert row["file_count"] == 60
+    assert len(payload["findings"]) == 61  # JSON never truncates
+    assert payload["summary"]["by_severity"] == {"error": 0, "warning": 61, "info": 0}
+    rows = {row["rule_id"]: row for row in payload["summary"]["by_rule"]}
+    assert rows["PTL-TTL-002"]["count"] == 60
+    assert rows["PTL-TTL-002"]["file_count"] == 60
+    # The root's flat sixty children trip the fan-out warning once.
+    assert rows["PTL-CAT-001"]["count"] == 1
