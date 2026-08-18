@@ -42,8 +42,19 @@ def test_grouped_catalog_with_a_flat_tail_is_flagged(catalog: CatalogBuilder) ->
     assert findings[0].path == "catalog.json"
 
 
-def test_a_collections_items_do_not_count_for_its_catalog(catalog: CatalogBuilder) -> None:
+def test_a_collections_items_are_counted_against_the_collection(catalog: CatalogBuilder) -> None:
     collection = catalog.collection("scenes")
     for index in range(20):
+        collection.item(f"scene-{index:02d}")
+    findings = findings_for(validate(catalog.write()), "PTL-CAT-001")
+    # The catalog holds one child; the collection holds twenty items.
+    assert len(findings) == 1
+    assert findings[0].path == "scenes/collection.json"
+    assert "collection holds 20 children" in findings[0].message
+
+
+def test_nineteen_items_leave_a_collection_clean(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection("scenes")
+    for index in range(19):
         collection.item(f"scene-{index:02d}")
     assert findings_for(validate(catalog.write()), "PTL-CAT-001") == []
