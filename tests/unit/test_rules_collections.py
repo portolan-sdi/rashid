@@ -10,7 +10,13 @@ import pytest
 
 from rashid import validate
 from rashid.model import Severity
-from tests.conftest import CatalogBuilder, default_asset, findings_for, mutate_json
+from tests.conftest import (
+    CatalogBuilder,
+    default_asset,
+    findings_for,
+    mutate_json,
+    write_language_trees,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -362,3 +368,25 @@ def test_duplicate_id_is_flagged_once_on_the_later_collection(catalog: CatalogBu
     # flagged on the later collection in path order ("rivers/" sorts first)
     assert findings[0].path == "roads/collection.json"
     assert "not unique" in findings[0].message
+
+
+def test_a_collection_keeps_its_id_in_every_language(catalog: CatalogBuilder) -> None:
+    """core.md, Alternate-Language Trees: one object repeated across trees keeps one ID.
+
+    The shared ID is what lets a client match a collection to its translations,
+    so reporting it as a duplicate would push publishers into breaking the match.
+    """
+    report = validate(write_language_trees(catalog))
+    assert findings_for(report, "PTL-COL-003") == []
+
+
+def test_duplicate_ids_inside_one_language_tree_are_still_reported(
+    catalog: CatalogBuilder,
+) -> None:
+    """The carve-out reaches across trees only, never within one."""
+    catalog.subcatalog("regional").collection("roads")
+    root = write_language_trees(catalog)
+    findings = findings_for(validate(root), "PTL-COL-003")
+    assert len(findings) == 1
+    assert findings[0].path == "roads/collection.json"
+    assert "regional/roads/collection.json" in findings[0].message

@@ -35,6 +35,7 @@ from tests.conftest import (
     findings_for,
     mutate_json,
     thumbnail_asset,
+    write_language_trees,
 )
 
 pytestmark = pytest.mark.unit
@@ -52,6 +53,7 @@ PERMISSION_TESTS: dict[str, str] = {
     "PORTO-CORE-050": "test_catalogs_may_declare_providers",
     "PORTO-CORE-052": "test_collection_may_add_the_contacts_extension",
     "PORTO-CORE-056": "test_via_and_canonical_may_point_at_different_targets",
+    "PORTO-CORE-079": "test_a_catalog_may_publish_an_alternate_language_tree",
     "PORTO-FMT-013": "test_pmtiles_may_be_registered_as_an_asset_and_a_link",
     "PORTO-FMT-016": "test_large_files_may_be_partitioned",
     "PORTO-FMT-020": "test_partition_glob_may_use_bucket_native_schemes",
@@ -303,4 +305,18 @@ def test_converted_source_may_be_retained_alongside_the_parquet(catalog: Catalog
         **{"table:columns": [{"name": "year", "type": "int64"}]},
     )
     report = validate(catalog.write())
+    assert report.findings == []
+
+
+def test_a_catalog_may_publish_an_alternate_language_tree(catalog: CatalogBuilder) -> None:
+    """PORTO-CORE-079: a catalog MAY carry its metadata in more than one language.
+
+    The tree the STAC Language extension prescribes looks like a stray
+    sub-catalog to a walk of the file system. Before the carve-out landed,
+    rashid asked it for a ``parent`` link, asked the root for a ``child`` link
+    to it, and called the repeated collection ID a duplicate, so a publisher
+    following the extension could not pass. The whole report is asserted,
+    because any one of those three would defeat the permission on its own.
+    """
+    report = validate(write_language_trees(catalog))
     assert report.findings == []
