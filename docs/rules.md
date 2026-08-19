@@ -1,81 +1,173 @@
 # Rules
 
-Reference for every rule rashid applies. The README covers what each
-validation pass does; this file lists the rules themselves.
+This page lists every rule that rashid applies. For an overview of each validation pass, see the [README](../README.md).
 
-Findings carry a stable rule id (`PTL-<GROUP>-<NNN>`), a severity, a message, and the offending file path — plus, where applicable, a `json_pointer` locating the defect inside the file, an imperative `fix_hint` naming the repair, and structured `expected`/`actual` values when the rule compares two concrete things (say, a declared checksum against the recomputed one). Every ERROR-severity metadata finding carries a hint and, where a JSON location exists, a pointer; a coverage test enforces this. The combination is designed for an agent iterating a fix loop: check, apply the hints, re-check. Severities follow the spec: MUST maps to `error`, SHOULD to `warning`, with three deliberate exceptions:
+## Understand Findings
 
-- `PTL-CNF-002` (schema URI differs from the root catalog's) is a **warning** — the spec's explicit exception; a mixed-version catalog remains valid.
-- `PTL-CNF-004` (extension version behind the registry) is a **warning**: the registry advances after catalogs are published, and a catalog that pinned the then-current version is behind, not broken. It reads `src/rashid/_schemas/extension-registry.json`, the profile's registry table (spec: `stac/README.md`) parsed at vendor time by `scripts/vendor_spec_fixtures.py`. Extensions the registry does not list are ignored, and the Portolan schema URI's own version is left to `PTL-CNF-001` and `PTL-CNF-002`.
-- `PTL-TTL-002` (title looks machine-generated) is a **warning** by default because it is heuristic; promote it with a severity override.
-- An alternate-language tree (spec: core.md, Alternate-Language Trees) is a translation of the catalog, not a part of it. `CatalogGraph.translation_roots()` finds one by following the root catalog's `rel:"alternate"` `application/json` links, and three rules stand back from what it names: `PTL-LNK-001` does not ask a translation root for a `parent` link, `PTL-LNK-002` does not ask the catalog for a `child` link to it, and `PTL-COL-003` judges ID uniqueness inside one tree so the same collection may keep its ID in every language. `PTL-LNK-010` reports the opposite mistake, a `child` or `item` link reaching into a translation.
-- `PTL-PRO-002` (mirror without a `canonical` link) is **info**, since whether the upstream publishes STAC is unknowable from metadata.
-- `PTL-VIZ-004` (large vector without a visual derivative) is **info**: the spec's render-path MUST hinges on whether render-from-source is viable, which metadata cannot prove; the size threshold (100 MB) is heuristic.
-- `PTL-COL-001` fires only on the exact shape the spec rules out: one item, one data asset on it, and no data asset on the collection. Several items, several data files, or a partitioned collection are all legitimate, and a collection whose assets omit `roles` is undecidable, so `PTL-AST-001` reports it instead.
-- `PTL-VIZ-001` reports collections whose geospatial-vs-tabular nature is undecidable from metadata (the spec identifies tabular by the Parquet's geometry column — a data-pass fact). A collection carrying no thumbnail gets a **warning** naming the signals that would settle the question, because the requirement is a MUST and silence would read as a pass; one that already carries a thumbnail meets the requirement either way and stays silent. `PTL-VIZ-004` reports the same uncertainty at **info**, where its own nudge would otherwise fire. The positive signals are an item geometry, a spatial media type (PMTiles, COG, COPC), or a `table:columns` geometry column declared on the collection or on any non-`source` asset; a declared column list with no geometry in it marks the collection tabular and exempt.
+Each finding contains a stable rule ID in the form `PTL-<GROUP>-<NNN>`. It also contains a severity, a message, and the path of the affected file.
+
+When applicable, a finding also contains:
+
+- A `json_pointer` that locates the problem in the file.
+- An imperative `fix_hint` that describes the repair.
+- Structured `expected` and `actual` values for concrete comparisons, such as checksums.
+
+Every metadata error includes a fix hint. If a JSON location exists, the error also includes a pointer. A coverage test enforces these requirements.
+
+These fields support an agent-based repair cycle: check the catalog, apply the hints, and check it again.
+
+Severities follow the Portolan specification. MUST requirements produce errors, and SHOULD requirements produce warnings. The following rules need more context or use a different severity:
+
+- `PTL-CNF-002` produces a warning when a schema URI differs from the root catalog's URI. The specification makes this exception because a mixed-version catalog remains valid.
+- `PTL-CNF-004` produces a warning when an extension version is behind the registry. The registry can advance after a catalog pins the current version, so the catalog is behind rather than broken.
+- `PTL-TTL-002` produces a warning because its machine-generated title check is heuristic. A severity override can promote it.
+- `PTL-PRO-002` produces an info finding when a mirror lacks a `canonical` link. Metadata cannot show whether the upstream publisher provides STAC.
+- `PTL-VIZ-004` produces an info finding when a large vector lacks a visual derivative. The render-path MUST depends on whether source rendering is viable, which metadata cannot prove. The 100 MB threshold is also heuristic.
+
+`PTL-CNF-004` reads `src/rashid/_schemas/extension-registry.json`. This file contains the profile's registry table from `stac/README.md` in the specification.
+
+At vendor time, `scripts/vendor_spec_fixtures.py` parses that table. The rule ignores extensions that the registry does not list. `PTL-CNF-001` and `PTL-CNF-002` handle the Portolan schema URI's version.
+
+## Understand Special Cases
+
+An alternate-language tree translates a catalog but is not part of that catalog. The specification defines this behavior in `core.md` under Alternate-Language Trees.
+
+`CatalogGraph.translation_roots()` finds a translation root. It follows the root catalog's `rel:"alternate"` links with the `application/json` media type.
+
+Four rules account for these separate trees:
+
+- `PTL-LNK-001` does not require a translation root to have a `parent` link.
+- `PTL-LNK-002` does not require the catalog to have a `child` link to a translation root.
+- `PTL-COL-003` checks ID uniqueness within one language tree. A collection can keep the same ID in each language.
+- `PTL-LNK-010` reports a `child` or `item` link that enters a translation tree.
+
+`PTL-COL-001` applies only to the exact structure that the specification prohibits. That structure has one item, one data asset on the item, and no data asset on the collection.
+
+The rule permits several items, several data files, and partitioned collections. If collection assets omit `roles`, rashid cannot decide whether the rule applies. `PTL-AST-001` reports that omission instead.
+
+`PTL-VIZ-001` reports when metadata cannot identify a collection as geospatial or tabular. The specification identifies tabular data through a Parquet geometry column, which requires the data pass.
+
+If the collection has no thumbnail, the rule produces a warning and names the missing signals. The requirement is a MUST, so silence could imply that the collection passed. A collection with a thumbnail meets the requirement either way and produces no finding.
+
+`PTL-VIZ-004` reports the same uncertainty at info severity when its own recommendation would otherwise apply.
+
+The following metadata signals identify a geospatial collection:
+
+- An item geometry.
+- A spatial media type: PMTiles, COG, or COPC.
+- A geometry column in `table:columns` on the collection or any non-`source` asset.
+
+A declared column list without a geometry column identifies a tabular collection. The collection is then exempt from the thumbnail requirement.
+
+## Rule Groups
 
 | Group | Rules | Checks |
-|-------|-------|--------|
-| `PTL-GEN` | 000–001 | root catalog.json present, every object file parseable |
-| `PTL-LNK` | 001–010 | required structural links, child/item completeness, link types, relative-only, no self link, links resolve to the correct object; a `rel:"icon"` logo carries a renderable media type, a title, and a relative href; `child` and `item` links stay out of an alternate-language tree |
-| `PTL-TTL` | 001–003 | non-empty title/description, human-readable titles, titled child/item links |
-| `PTL-BBX` | 001 | finite, sentinel-free WGS84 bboxes with south ≤ north (2D and 3D) |
-| `PTL-TMP` | 001–002 | item datetime or interval present; RFC 3339, start ≤ end |
-| `PTL-PRV` | 001–003 | ≥1 producer, exactly one host listed last, host url-or-email |
-| `PTL-LIC` | 001–003 | SPDX or `other`, license link for `other`, no `proprietary` |
-| `PTL-FIL` | 001–005 | AGENTS.md and README.md on disk, `rel:"agents"` and `rel:"describedby"` markdown links; README.md non-empty with a title heading, and (heuristically, a warning) mentioning license and provenance on collections |
-| `PTL-AST` | 001–006 | asset href/type/roles, required COG media type for primary raster data, https-not-s3, `file:size` and `file:checksum` present (a warning, per the SHOULD) with the checksum multihash-encoded; catalogs carry no assets |
-| `PTL-CNF` | 001–004 | versioned Portolan schema URI declared, consistent with the root; dataset versioning declares the STAC version extension; a registered extension is pinned at the version the profile's extension registry names |
-| `PTL-PRO` | 001–004 | mirror `via`/`canonical` links and `updated` sync time; officials carry no upstream links |
-| `PTL-VIZ` | 001–006 | thumbnail on geospatial collections, style assets for visual derivatives, PMTiles `rel:"pmtiles"` registration, large-vector-without-visual nudge, MapLibre style media type in PMTiles collections, the `default` role on one of several styles |
-| `PTL-STR` | 000–001 | STAC 1.1.0 core structural validity, offline against the vendored core schemas; `000` warns when the pass could not run |
-| `PTL-DAT` | 000–016 | asset bytes vs metadata and the format MUSTs: `file:checksum`, `file:size`, format magic, bbox/CRS; valid COG with internal overviews, embedded band statistics, and valid percent (a MUST on nodata bands); GeoParquet version (1.1/2.x), spatial ordering, per-row-group statistics (bbox covering column or native 2.x `GeospatialStatistics`), and row-group size; square internal tiles within 512px; a single Parquet schema across local partition files; the tabular SHOULDs (`table:columns`, `extent.temporal` when the file carries a temporal column) on plain-Parquet collection assets; an item mirror whose row count, ids, geometry, datetime, or bbox diverge from the collection's items; `000` warns when the geospatial stack cannot import. Source/alternate assets are exempt from the format MUSTs; plain (non-geo) Parquet is exempt from the GeoParquet rules, which bind an item mirror like any other spatial table |
-| `PTL-LIV` | 000–005 | the hosting server's Data Storage MUSTs, probed per host over absolute `https` asset hrefs: ranged GET honored (`206`, `Accept-Ranges: bytes`), HEAD `Content-Length` present and matching `file:size`, CORS origin allowed, required headers exposed, preflight accepting `GET`/`HEAD` with `Range` and the conditional-request headers; source/alternate assets are exempt; `000` warns when nothing is probeable or a host is unreachable |
-| `PTL-PRT` | 001 | a partitioned collection declares the partition extension and carries `partition:scheme`, `partition:keys`, and `partition:glob` |
-| `PTL-COL` | 001–004 | a single-file collection exposes its data as a collection-level asset, not wrapped in a lone item; collections never nest; collection IDs follow the naming convention and are unique within their language tree; raster scenes sit on items rather than on the collection |
-| `PTL-CAT` | 001 | a catalog or collection with twenty or more ungrouped children (collections or items, not subcatalogs) should group them into subcatalogs |
-| `PTL-MIR` | 001–002 | a raster collection with scene items publishes an `items.parquet` mirror (a warning, per the SHOULD), and a published mirror is registered as a collection-level asset with the `collection-mirror` role and type `application/vnd.apache.parquet`, per the stac-geoparquet spec |
+|---|---|---|
+| `PTL-GEN` | 000–001 | Requires a root `catalog.json` and parseable object files. |
+| `PTL-LNK` | 001–010 | Checks required structural links, child and item completeness, link types, relative links, and resolved target objects. Prohibits self links. Requires a `rel:"icon"` logo to have a renderable media type, title, and relative `href`. Keeps `child` and `item` links out of alternate-language trees. |
+| `PTL-TTL` | 001–003 | Requires non-empty titles and descriptions, human-readable titles, and titles on child and item links. |
+| `PTL-BBX` | 001 | Requires finite, sentinel-free WGS84 bounding boxes with south less than or equal to north. Supports 2D and 3D boxes. |
+| `PTL-TMP` | 001–002 | Requires an item datetime or interval, RFC 3339 values, and a start before or equal to the end. |
+| `PTL-PRV` | 001–003 | Requires at least one producer and exactly one host. The host must appear last and include a URL or email address. |
+| `PTL-LIC` | 001–003 | Requires an SPDX identifier or `other`, a license link for `other`, and no `proprietary` value. |
+| `PTL-FIL` | 001–005 | Requires `AGENTS.md` and `README.md` on disk. Requires Markdown links with `rel:"agents"` and `rel:"describedby"`. Requires a non-empty README with a title heading. Warns heuristically when a collection README omits license or provenance information. |
+| `PTL-AST` | 001–006 | Checks asset `href`, media type, and roles. Requires the COG media type for primary raster data and HTTPS instead of S3 URLs. Requires `file:size` and multihash-encoded `file:checksum`; their absence produces a warning under the SHOULD requirement. Prohibits assets on catalogs. |
+| `PTL-CNF` | 001–004 | Requires a versioned Portolan schema URI that agrees with the root catalog. Requires the STAC version extension for dataset versioning. Requires each registered extension to use the version in the profile's extension registry. |
+| `PTL-PRO` | 001–004 | Checks mirror `via` and `canonical` links plus the `updated` synchronization time. Prohibits upstream links on official catalogs. |
+| `PTL-VIZ` | 001–006 | Requires thumbnails on geospatial collections, style assets for visual derivatives, and `rel:"pmtiles"` registration for PMTiles. Reports large vectors without a visual derivative. Requires the MapLibre style media type in PMTiles collections. Requires the `default` role on one of several styles. |
+| `PTL-STR` | 000–001 | Checks STAC 1.1.0 core structure offline with the included core schemas. Rule `000` warns when the pass cannot run. |
+| `PTL-DAT` | 000–016 | Compares asset bytes with metadata and format MUST requirements. Checks `file:checksum`, `file:size`, format signatures, bounding boxes, and coordinate reference systems. Requires valid COGs with internal overviews, embedded band statistics, and valid percentages for nodata bands. Requires GeoParquet 1.1 or 2.x, spatial ordering, per-row-group statistics, and suitable row-group size. Statistics can use a bounding-box covering column or native 2.x `GeospatialStatistics`. Requires square internal tiles no larger than 512 pixels. Requires one Parquet schema across local partition files. Applies the tabular SHOULD requirements for `table:columns` and `extent.temporal` to plain-Parquet collection assets with temporal columns. Compares an item mirror's row count, IDs, geometry, datetime, and bounding box with the collection's items. Rule `000` warns when the geospatial stack cannot load. Source and alternate assets are exempt from format MUST requirements. Plain Parquet is exempt from GeoParquet rules. Those rules apply to an item mirror like any other spatial table. |
+| `PTL-LIV` | 000–005 | Checks the hosting server's Data Storage MUST requirements for absolute HTTPS asset URLs. For each host, checks ranged GET support through `206` and `Accept-Ranges: bytes`, `Content-Length` on HEAD, CORS origins, exposed headers, and preflight support. Preflight must allow `GET`, `HEAD`, `Range`, and conditional-request headers. HEAD size must match `file:size`. Source and alternate assets are exempt. Rule `000` warns when no asset is available to probe or a host is unavailable. |
+| `PTL-PRT` | 001 | Requires a partitioned collection to declare the partition extension and provide `partition:scheme`, `partition:keys`, and `partition:glob`. |
+| `PTL-COL` | 001–004 | Requires a single-file collection to expose data through a collection asset instead of one item. Prohibits nested collections. Requires collection IDs to follow the naming convention and remain unique within their language tree. Requires raster scenes to appear on items instead of the collection. |
+| `PTL-CAT` | 001 | Recommends subcatalogs when a catalog or collection has at least 20 ungrouped collections or items. Subcatalogs do not count as ungrouped children. |
+| `PTL-MIR` | 001–002 | Recommends an `items.parquet` mirror for a raster collection with scene items. Requires a published mirror to be a collection asset with the `collection-mirror` role and `application/vnd.apache.parquet` media type, as the stac-geoparquet specification defines. |
 
-`rashid.registry.CHECKS` is the same list in machine-readable form: every check id mapped to its description, the strongest severity it can emit, and the spec requirements it enforces. The per-rule summary and the JSON `summary.by_rule` block read from it, and `rashid.describe(rule_id)` returns one description.
+`rashid.registry.CHECKS` provides the same list in machine-readable form. It maps each check ID to its description, highest possible severity, and specification requirements.
 
-The catalog tree is loaded from a local directory. `CatalogGraph` (`src/rashid/catalog.py`) is the single I/O layer for the metadata, loaded in one pass, so a remote (HTTP) catalog loader can slot in later; the data pass already reads asset bytes over `https`.
+The per-rule summary and JSON `summary.by_rule` object read this registry. Call `rashid.describe(rule_id)` to get a rule's description.
 
-## Network cost
+The catalog tree loads from a local directory. `CatalogGraph` in `src/rashid/catalog.py` provides the only metadata I/O layer and loads the tree in one pass. This design allows a future HTTP catalog loader. The data pass already reads asset bytes through HTTPS.
 
-The data and live passes are the only ones that reach the network by default, and the data pass is the only one that transfers asset bytes.
+## Network Cost
 
-| Pass | Requests | What it transfers |
-|------|----------|-------------------|
-| Metadata | none | the catalog's JSON, read from the local tree |
-| Structural | none | nothing, the core schemas ship in the wheel |
-| Schema | only under `--schema-allow-network` | one schema document, when the build does not bundle that version |
-| Data | zero or more per remote asset | asset bytes, as below |
-| Live | two per host, plus one HEAD per distinct asset URL | response headers, and one byte for the range probe |
+Only the data and live passes use the network by default. Only the data pass transfers asset bytes.
 
-Most data checks read only what they need at a known offset, a COG header, a Parquet footer, or one geometry column, over HTTP range requests or `/vsicurl/`. Two cannot. `PTL-DAT-001` recomputes the multihash and `PTL-DAT-002` counts the bytes, so an asset carrying a `file:checksum` rashid can compute, or an integer `file:size`, is read in full. An asset carrying neither is read only as far as the 16 bytes of format magic, and is not fetched at all when it declares no media type to confirm.
+| Pass | Requests | Data transferred |
+|---|---|---|
+| Metadata | None | Catalog JSON from the local tree. |
+| Structural | None | Nothing. The core schemas ship in the wheel. |
+| Schema | Only with `--schema-allow-network` | One schema document when the package does not include the requested version. |
+| Data | Zero or more requests for each remote asset | Asset bytes, as described below. |
+| Live | Two requests for each host, plus one HEAD for each distinct asset URL | Response headers and one byte for the range check. |
 
-`PORTO-CORE-028` makes `file:size` and `file:checksum` a SHOULD, so a publisher who cannot compute them over bytes it does not host may omit them and stay conformant. Where they are present rashid verifies them, which is why a fully-populated catalog of large remote assets cannot be byte-verified without transferring all of it. That follows from what the metadata claims, not from how rashid reads.
+Most data checks read only the required bytes at known offsets. Examples include a COG header, a Parquet footer, or one geometry column. These checks use HTTP range requests or `/vsicurl/`.
 
-### `--data-scope`
+Two checks can require the complete asset. `PTL-DAT-001` recomputes the multihash, and `PTL-DAT-002` counts the bytes.
 
-`--data-scope all`, the default, reads local files and remote `https` assets alike. `--data-scope local` runs every data rule against the assets that live inside the catalog tree and leaves remote assets untouched, reading none of their bytes.
+rashid reads an asset in full when it has either of these values:
 
-Use `local` when the metadata is yours and the assets sit on a host you do not control, which is the shape of a mirror. It keeps the checks that bind the catalog's own files, such as GeoParquet ordering, row-group statistics, and the item-mirror comparison on a collection's `items.parquet`, all of which `--no-data` drops along with everything else. The catalog in [issue #86](https://github.com/portolan-sdi/rashid/issues/86) is the case that prompted it. Its 924 Items name 1848 remote assets on a host the operator does not run, declaring 1.86 TB between them, against three local files totalling 1.2 MB.
+- A `file:checksum` that rashid can compute.
+- An integer `file:size`.
 
-Pairing it with `--live` recovers most of what the narrowed scope gives up on remote assets. `PTL-LIV-002` compares each one's declared `file:size` against the `Content-Length` its host returns on HEAD, which settles every size without transferring a byte. Only `file:checksum` still needs the object itself.
+If an asset has neither value, rashid reads only the 16-byte format signature. It does not fetch the asset when no media type is available to confirm.
 
-The library takes a reader factory rather than a flag. `validate(path, data_reader_factory=LocalOnlyReader)` is the equivalent, using `LocalOnlyReader` from `rashid.data.reader`, and `validate_data(graph, reader_factory=LocalOnlyReader)` scopes the pass on its own.
+`PORTO-CORE-028` defines `file:size` and `file:checksum` as SHOULD requirements. A publisher can omit them when it cannot process bytes on another host and remain conformant.
 
-Two settings drop the pass rather than narrowing it. `--no-data` skips it, and so does disabling every rule from `PTL-DAT-001` to `PTL-DAT-017` through `RulesConfig`. Disabling any subset only silences those findings, after the pass has run.
+When these values exist, rashid verifies them. Therefore, complete byte validation can transfer every byte of large remote assets. The metadata claims require this transfer; the reader implementation does not.
+
+## Limit Data Checks to Local Assets
+
+`--data-scope all` is the default. It reads local files and remote HTTPS assets.
+
+`--data-scope local` runs every data rule against assets inside the catalog tree. It leaves remote assets untouched and reads none of their bytes.
+
+Use `local` when you own the metadata but do not control the asset host, as with a mirror. This option preserves checks for the catalog's files. Those checks include GeoParquet ordering, row-group statistics, and item-mirror comparisons for a collection's `items.parquet`.
+
+`--no-data` omits all those checks. The catalog in [issue #86](https://github.com/portolan-sdi/rashid/issues/86) prompted the local scope option. Its 924 items identify 1,848 remote assets and declare 1.86 TB. The operator does not control that host. Its three local files total 1.2 MB.
+
+Combine `--data-scope local` with `--live` to recover most checks for remote assets. `PTL-LIV-002` compares each declared `file:size` with the `Content-Length` from HEAD. This check verifies every size without transferring asset bytes. Only `file:checksum` requires the object itself.
+
+The Python API accepts a reader factory instead of a scope flag:
+
+```python
+from rashid import validate
+from rashid.data.reader import LocalOnlyReader
+
+report = validate("path/to/catalog", data_reader_factory=LocalOnlyReader)
+```
+
+Pass the same factory to run the data pass directly:
+
+```python
+from rashid.data import validate_data
+from rashid.data.reader import LocalOnlyReader
+
+report = validate_data(graph, reader_factory=LocalOnlyReader)
+```
+
+Two settings omit the data pass instead of limiting it:
+
+- `--no-data` skips the pass.
+- A `RulesConfig` that disables every rule from `PTL-DAT-001` through `PTL-DAT-017` skips the pass.
+
+If you disable only some data rules, the pass still runs and suppresses only those findings.
 
 ## Development
 
+Install the development dependencies:
+
 ```bash
-uv sync                       # install (the dev dependency group is included)
+uv sync
+```
+
+Install the repository hooks:
+
+```bash
 uv run pre-commit install \
   --hook-type pre-commit \
   --hook-type commit-msg \
-  --hook-type pre-push        # wire the quality gates
+  --hook-type pre-push
 ```
 
-Commits follow [Conventional Commits](https://www.conventionalcommits.org) — enforced by commitizen on the `commit-msg` hook.
+Commits follow [Conventional Commits](https://www.conventionalcommits.org). The commit message hook uses commitizen to enforce the format.
