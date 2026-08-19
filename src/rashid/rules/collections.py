@@ -196,10 +196,15 @@ class CollectionIdRule(Rule):
     unique within the catalog." A nested collection's ID is a POSIX path from
     the catalog root (core.md, Nested Catalogs, Flat Collections), so the
     convention applies per path segment. SHOULD-level, so a WARNING.
+
+    Uniqueness is judged inside one language tree. core.md,
+    Alternate-Language Trees: an object repeated across trees keeps one ID,
+    because that ID is what lets a client match the translations of one
+    collection to each other, and a validator does not report the repeat.
     """
 
     id = "PTL-COL-003"
-    spec_ids = ("PORTO-CORE-016",)
+    spec_ids = ("PORTO-CORE-016", "PORTO-CORE-080")
     default_severity = Severity.WARNING
     description = (
         "collection IDs should be lowercase [a-z0-9_-], start with a letter, and be unique"
@@ -221,8 +226,11 @@ class CollectionIdRule(Rule):
             )
         # Report a duplicate on every collection after the first, so the first
         # occurrence (in path order) stays clean and each clash is flagged once.
+        here = graph.language_root_of(node)
         for other in graph.iter("collection"):
-            if other is not node and other.id == node.id and other.path < node.path:
+            if other is node or other.id != node.id or other.path >= node.path:
+                continue
+            if graph.language_root_of(other) is here:
                 yield self.finding(
                     node,
                     f"collection id '{node.id}' is not unique within the catalog"

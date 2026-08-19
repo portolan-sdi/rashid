@@ -47,10 +47,16 @@ def _icon_links(node: Node) -> Iterable[tuple[int, dict[str, Any]]]:
 
 
 class RequiredLinksRule(Rule):
-    """Every object carries its required structural links."""
+    """Every object carries its required structural links.
+
+    The root of an alternate-language tree is exempt from ``parent``, the same
+    way the catalog's own root is. core.md, Alternate-Language Trees: each
+    tree keeps its own root catalog with no ``parent`` link, and a validator
+    does not report that as a failure.
+    """
 
     id = "PTL-LNK-001"
-    spec_ids = ("PORTO-CORE-019", "PORTO-CORE-032")
+    spec_ids = ("PORTO-CORE-019", "PORTO-CORE-032", "PORTO-CORE-080")
     default_severity = Severity.ERROR
     description = "catalogs/collections need root+parent links; items need root, parent, collection"
     kinds = ("catalog", "collection", "item")
@@ -58,7 +64,7 @@ class RequiredLinksRule(Rule):
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         rels = {link.get("rel") for link in links_of(node)}
         required = ["root", "parent", "collection"] if node.kind == "item" else ["root", "parent"]
-        if node is graph.root:
+        if node is graph.language_root_of(node):
             required.remove("parent")
         for rel in required:
             if rel not in rels:
@@ -72,10 +78,18 @@ class RequiredLinksRule(Rule):
 
 
 class ChildLinkCompletenessRule(Rule):
-    """A child or item link exists for every object the node contains."""
+    """A child or item link exists for every object the node contains.
+
+    An alternate-language tree sits in a subdirectory, so the walk that builds
+    the graph reads its root catalog as an object the catalog contains. core.md,
+    Alternate-Language Trees says otherwise: a translation stays outside the
+    containment tree, and a validator does not report the missing ``child``
+    link as a failure. :meth:`CatalogGraph.translation_roots` names the objects
+    that carve-out covers.
+    """
 
     id = "PTL-LNK-002"
-    spec_ids = ("PORTO-CORE-032",)
+    spec_ids = ("PORTO-CORE-032", "PORTO-CORE-080")
     default_severity = Severity.ERROR
     description = "every contained object is reachable through a child or item link"
     kinds = ("catalog", "collection")
@@ -90,8 +104,9 @@ class ChildLinkCompletenessRule(Rule):
                 target = graph.resolve_link(node, href)
                 if target is not None:
                     linked.add(target.path)
+        translations = graph.translation_roots()
         for contained in graph.children_of(node):
-            if contained.path in linked:
+            if contained.path in linked or contained in translations:
                 continue
             expected = "item" if contained.kind == "item" else "child"
             yield self.finding(
@@ -193,10 +208,16 @@ class LinkResolutionRule(Rule):
     layout an item's parent is the organizing catalog while its collection
     link points at the collection above. The check therefore compares the
     target against the nearest collection ancestor, not the direct parent.
+
+    A ``root`` link is judged against the root of the language tree the object
+    sits in. core.md, Alternate-Language Trees: each tree keeps its own root
+    catalog, and that is what the tree's own ``root`` links point at, so a
+    translated object pointing at the catalog's primary root would be the
+    error here rather than the fix.
     """
 
     id = "PTL-LNK-006"
-    spec_ids = ("PORTO-CORE-015", "PORTO-CORE-035", "PORTO-CORE-036")
+    spec_ids = ("PORTO-CORE-015", "PORTO-CORE-035", "PORTO-CORE-036", "PORTO-CORE-080")
     default_severity = Severity.ERROR
     description = "structural links must resolve against the file tree to the correct object"
     kinds = ("catalog", "collection", "item")
@@ -241,7 +262,7 @@ class LinkResolutionRule(Rule):
                 )
                 continue
             wrong: str | None = None
-            if rel == "root" and target is not graph.root:
+            if rel == "root" and target is not graph.language_root_of(node):
                 wrong = "must point to the root catalog"
             elif rel == "parent" and target is not parent:
                 wrong = "must point to the containing object" + (
@@ -349,3 +370,55 @@ class IconRelativeHrefRule(Rule):
                     " e.g. './_assets/logo.png'",
                     actual=href,
                 )
+
+
+class ContainmentStaysInLanguageRule(Rule):
+    """A child or item link does not reach into an alternate-language tree.
+
+    core.md, Alternate-Language Trees: a translated tree stays outside the
+    containment tree, so the catalog must not reach its objects through a
+    ``child`` or ``item`` link. A publisher who links the translation as a
+    child instead of an alternate gets two catalogs of the same data in a
+    client's tree, one of them in a language the reader did not ask for.
+
+    The constraint runs one way. A translated collection reaching back into
+    the source tree for the items it did not translate is the shallow layout
+    the best-practices page recommends, and is not reported here.
+    """
+
+    id = "PTL-LNK-010"
+    spec_ids = ("PORTO-CORE-080",)
+    default_severity = Severity.ERROR
+    description = "child and item links must not reach into an alternate-language tree"
+    kinds = ("catalog", "collection")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        translations = graph.translation_roots()
+        if not translations:
+            return
+        here = graph.language_root_of(node)
+        for index, link in enumerate(links_of(node)):
+            rel = link.get("rel")
+            if rel not in ("child", "item"):
+                continue
+            href = link.get("href")
+            if not isinstance(href, str):
+                continue
+            target = graph.resolve_link(node, href)
+            if target is None:
+                continue  # PTL-LNK-005 reports a link that does not resolve
+            there = graph.language_root_of(target)
+            if there is here or there not in translations:
+                continue
+            language = there.data.get("language")
+            code = language.get("code") if isinstance(language, dict) else None
+            named = f" ({code})" if isinstance(code, str) else ""
+            yield self.finding(
+                node,
+                f"link rel:'{rel}' reaches into the alternate-language tree at"
+                f" '{there.path}'{named}",
+                json_pointer=f"/links/{index}",
+                fix_hint="change the link to rel:'alternate' with type 'application/json'"
+                " and an hreflang naming the target's language",
+                actual=href,
+            )

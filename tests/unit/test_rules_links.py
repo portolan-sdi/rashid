@@ -9,6 +9,7 @@ from tests.conftest import (
     findings_for,
     mutate_json,
     rule_ids,
+    write_language_trees,
     write_organizing_catalog_layout,
 )
 
@@ -375,3 +376,108 @@ def test_icon_link_on_a_collection_is_checked(catalog: CatalogBuilder) -> None:
     findings = findings_for(validate(root), "PTL-LNK-007")
     assert len(findings) == 1
     assert findings[0].path == "roads/collection.json"
+
+
+def test_translation_root_needs_no_parent_link(catalog: CatalogBuilder) -> None:
+    """core.md, Alternate-Language Trees: each tree keeps its own root catalog."""
+    report = validate(write_language_trees(catalog))
+    assert findings_for(report, "PTL-LNK-001") == []
+
+
+def test_catalog_needs_no_child_link_to_a_translation(catalog: CatalogBuilder) -> None:
+    """The translation is joined by an alternate link, so it is not a child."""
+    report = validate(write_language_trees(catalog))
+    assert findings_for(report, "PTL-LNK-002") == []
+
+
+def test_root_links_inside_a_translation_point_at_its_own_root(
+    catalog: CatalogBuilder,
+) -> None:
+    report = validate(write_language_trees(catalog))
+    assert findings_for(report, "PTL-LNK-006") == []
+
+
+def test_root_link_inside_a_translation_may_not_point_at_the_primary_root(
+    catalog: CatalogBuilder,
+) -> None:
+    root = write_language_trees(catalog)
+    mutate_json(
+        root / "ro" / "roads" / "collection.json",
+        lambda d: d["links"].__setitem__(
+            0, {"rel": "root", "href": "../../catalog.json", "type": "application/json"}
+        ),
+    )
+    findings = findings_for(validate(root), "PTL-LNK-006")
+    assert len(findings) == 1
+    assert findings[0].path == "ro/roads/collection.json"
+    assert "root catalog" in findings[0].message
+
+
+def test_child_link_into_a_translation_is_reported(catalog: CatalogBuilder) -> None:
+    """Linking the translation as a child puts the same data in the tree twice."""
+    root = write_language_trees(catalog)
+    mutate_json(
+        root / "catalog.json",
+        lambda d: d["links"].append(
+            {
+                "rel": "child",
+                "href": "./ro/catalog.json",
+                "type": "application/json",
+                "title": "Romanian",
+            }
+        ),
+    )
+    findings = findings_for(validate(root), "PTL-LNK-010")
+    assert len(findings) == 1
+    assert findings[0].path == "catalog.json"
+    assert "ro/catalog.json" in findings[0].message
+    assert "(ro)" in findings[0].message
+    assert findings[0].fix_hint is not None
+
+
+def test_a_translation_may_link_items_it_did_not_translate(catalog: CatalogBuilder) -> None:
+    """The constraint runs one way: reaching back into the source tree is fine."""
+    catalog.collection("roads").item("roads-2024")
+    root = write_language_trees(catalog, collection_id="rivers")
+    mutate_json(
+        root / "ro" / "rivers" / "collection.json",
+        lambda d: d["links"].append(
+            {
+                "rel": "item",
+                "href": "../../roads/roads-2024/roads-2024.json",
+                "type": "application/geo+json",
+                "title": "Drumuri 2024",
+                "hreflang": "en",
+            }
+        ),
+    )
+    assert findings_for(validate(root), "PTL-LNK-010") == []
+
+
+def test_a_catalog_without_translations_reports_no_language_findings(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.collection("roads")
+    assert findings_for(validate(catalog.write()), "PTL-LNK-010") == []
+
+
+def test_a_broken_child_link_is_left_to_the_rules_that_own_it(catalog: CatalogBuilder) -> None:
+    """PTL-LNK-010 reads the target, so a link with no readable target is not its business."""
+    root = write_language_trees(catalog)
+    mutate_json(
+        root / "catalog.json",
+        lambda d: d["links"].extend(
+            [
+                {"rel": "child", "href": 7, "type": "application/json", "title": "Numeric"},
+                {
+                    "rel": "child",
+                    "href": "./gone/catalog.json",
+                    "type": "application/json",
+                    "title": "Missing",
+                },
+            ]
+        ),
+    )
+    report = validate(root)
+    assert findings_for(report, "PTL-LNK-010") == []
+    assert "PTL-LNK-006" in rule_ids(report)

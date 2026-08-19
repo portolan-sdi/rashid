@@ -40,6 +40,7 @@ from rashid.rules.license import (
 )
 from rashid.rules.links import (
     ChildLinkCompletenessRule,
+    ContainmentStaysInLanguageRule,
     IconMediaTypeRule,
     IconRelativeHrefRule,
     IconTitleRule,
@@ -86,6 +87,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     IconMediaTypeRule(),
     IconTitleRule(),
     IconRelativeHrefRule(),
+    ContainmentStaysInLanguageRule(),
     BboxValidRule(),
     DatetimePresentRule(),
     DatetimeValidRule(),

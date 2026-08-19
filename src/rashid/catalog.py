@@ -58,6 +58,16 @@ def is_absolute_href(href: str) -> bool:
     return href.startswith("/") or bool(urlparse(href).scheme)
 
 
+def _is_within(path: PurePosixPath, prefix: PurePosixPath) -> bool:
+    """True when ``path`` sits at or below the directory ``prefix``.
+
+    Only ever asked about a translation root's directory, which is a real
+    subdirectory: the one file that could make ``prefix`` the catalog root is
+    the root ``catalog.json``, and that is not a translation of itself.
+    """
+    return path.parts[: len(prefix.parts)] == prefix.parts
+
+
 @dataclass
 class CatalogGraph:
     """The catalog file tree loaded into memory.
@@ -71,6 +81,7 @@ class CatalogGraph:
     root_path: Path
     nodes: dict[PurePosixPath, Node] = field(default_factory=dict)
     dir_listing: dict[PurePosixPath, set[str]] = field(default_factory=dict)
+    _translation_roots: list[Node] | None = field(default=None, repr=False, compare=False)
 
     @property
     def root(self) -> Node | None:
@@ -79,6 +90,62 @@ class CatalogGraph:
         if node is not None and node.kind == "catalog":
             return node
         return None
+
+    def translation_roots(self) -> list[Node]:
+        """The root catalogs of the catalog's alternate-language trees.
+
+        core.md, Alternate-Language Trees: a catalog may carry its metadata in
+        more than one language, as one tree of STAC objects per language joined
+        by ``alternate`` links. Such a tree translates the catalog rather than
+        extending it, so it hangs off the root catalog's ``alternate`` links
+        and never off its ``child`` links. Following those links is the only
+        way to find it, since the walk that builds the graph sees a translation
+        as an ordinary directory of STAC files.
+
+        Only the root catalog's own ``alternate`` links count, and only those
+        declaring ``application/json``. ``alternate`` also covers other media
+        types, so the type is what separates a translation from an HTML
+        rendering of the same object.
+        """
+        if self._translation_roots is None:
+            self._translation_roots = self._find_translation_roots()
+        return self._translation_roots
+
+    def _find_translation_roots(self) -> list[Node]:
+        root = self.root
+        if root is None:
+            return []
+        raw = root.data.get("links")
+        found: list[Node] = []
+        for link in raw if isinstance(raw, list) else []:
+            if not isinstance(link, dict):
+                continue
+            if link.get("rel") != "alternate" or link.get("type") != "application/json":
+                continue
+            href = link.get("href")
+            if not isinstance(href, str):
+                continue
+            target = self.resolve_link(root, href)
+            if target is not None and target.kind == "catalog" and target is not root:
+                found.append(target)
+        return found
+
+    def language_root_of(self, node: Node) -> Node | None:
+        """The root catalog of the language tree ``node`` sits in.
+
+        A node inside an alternate-language tree answers with that tree's root
+        catalog. Every other node answers with the catalog's own root, so a
+        caller can compare two nodes' answers to tell whether they share a
+        language tree.
+        """
+        best: Node | None = None
+        for translation in self.translation_roots():
+            prefix = translation.path.parent
+            if not _is_within(node.path, prefix):
+                continue
+            if best is None or len(prefix.parts) > len(best.path.parent.parts):
+                best = translation
+        return best if best is not None else self.root
 
     @classmethod
     def load(cls, root_path: Path) -> CatalogGraph:
