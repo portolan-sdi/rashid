@@ -73,6 +73,32 @@ def test_cli_missing_path_is_usage_error() -> None:
     assert result.exit_code == 2
 
 
+def test_validate_accepts_the_root_catalog_json(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", license="proprietary")
+    root = catalog.write()
+    assert rule_ids(validate(root / "catalog.json")) == rule_ids(validate(root))
+
+
+def test_cli_accepts_the_root_catalog_json(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", license="proprietary")
+    root = catalog.write()
+    from_dir = CliRunner().invoke(main, ["check", "--no-structural", "--json", str(root)])
+    from_file = CliRunner().invoke(
+        main, ["check", "--no-structural", "--json", str(root / "catalog.json")]
+    )
+    assert from_file.exit_code == from_dir.exit_code == 1
+    assert json.loads(from_file.output) == json.loads(from_dir.output)
+
+
+def test_cli_rejects_a_file_that_is_not_the_root_catalog(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    result = CliRunner().invoke(main, ["check", str(root / "roads" / "collection.json")])
+    assert result.exit_code == 1
+    assert "PTL-GEN-000" in result.output
+    assert "catalog.json" in result.output
+
+
 def _noisy(catalog: CatalogBuilder, count: int) -> Path:
     """A catalog whose every collection trips one warning: ``count`` findings.
 

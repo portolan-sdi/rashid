@@ -7,7 +7,7 @@
 
 Validator and linter for [Portolan](https://www.portolan-sdi.org/) catalogs. The name comes from the Arabic root ر ش د, whose participles رَاشِدٌ and رَشِيدٌ mean ["taking, or following, a right way or course or direction"](https://arabiclexicon.hawramani.com/?p=5472#205af1).
 
-rashid reads a catalog directory and reports every rule it breaks.
+rashid reads a catalog directory, or the root `catalog.json` inside it, and reports every rule it breaks.
 
 ## Install
 

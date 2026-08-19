@@ -40,7 +40,7 @@ def main() -> None:
 @main.command()
 @click.argument(
     "catalog_path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=click.Path(exists=True, path_type=Path),
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit the report as JSON.")
 @click.option(
@@ -113,7 +113,9 @@ def check(
     """Validate CATALOG_PATH: the Portolan metadata pass, the STAC 1.1.0
     structural pass (unless --no-structural), and — with --schema / --data /
     --live — the bundled Portolan profile schema, the asset bytes, and the
-    hosting servers."""
+    hosting servers.
+
+    CATALOG_PATH is the catalog directory, or the catalog.json inside it."""
     if list_all and force_summary:
         raise click.UsageError("--all and --summary ask for opposite things.")
     if data_scope != "all" and not data:
