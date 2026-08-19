@@ -74,6 +74,7 @@ _COVERED: frozenset[str] = frozenset(
         "PTL-COL-001",
         "PTL-COL-002",
         "PTL-COL-004",
+        "PTL-COL-005",
         "PTL-FIL-001",
         "PTL-FIL-002",
         "PTL-FIL-003",

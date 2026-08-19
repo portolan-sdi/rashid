@@ -21,6 +21,7 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
+from rashid import validate  # noqa: E402
 from rashid.catalog import CatalogGraph  # noqa: E402
 from rashid.data import (  # noqa: E402
     DAT_MIRROR,
@@ -305,8 +306,13 @@ def test_drift_under_an_organizing_catalog_is_flagged(catalog: CatalogBuilder) -
     assert "roads-2024" in findings[0].message
 
 
-def test_itemless_collection_with_a_populated_mirror_is_flagged(tmp_path: Path) -> None:
-    """Zero items against a mirror holding rows is the stale mirror itself."""
+def test_itemless_collection_is_left_to_the_metadata_pass(tmp_path: Path) -> None:
+    """A mirror over zero items is a structural defect, so PTL-COL-005 owns it.
+
+    The data pass stands down rather than report the same fault a second time
+    in row-level terms. PTL-COL-005 reports it from metadata alone, which is
+    what makes the case survive a missing ``data`` extra.
+    """
     root = _build(tmp_path / "catalog", list(_ITEM_IDS))
     for item_id in _ITEM_IDS:
         shutil.rmtree(root / "scenes" / item_id)
@@ -314,6 +320,7 @@ def test_itemless_collection_with_a_populated_mirror_is_flagged(tmp_path: Path) 
         root / "scenes" / "collection.json",
         lambda d: d.__setitem__("links", [link for link in d["links"] if link["rel"] != "item"]),
     )
-    messages = [f.message for f in _mirror_findings(root)]
-    assert any("holds 2 row(s) for 0 item(s)" in m for m in messages)
-    assert any("2 mirror row(s) with no item" in m for m in messages)
+    assert _mirror_findings(root) == []
+    structural = [f for f in validate(root).findings if f.rule_id == "PTL-COL-005"]
+    assert len(structural) == 1
+    assert "publishes no items" in structural[0].message

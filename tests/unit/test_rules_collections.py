@@ -15,6 +15,7 @@ from tests.conftest import (
     default_asset,
     findings_for,
     mutate_json,
+    nest_items_under_organizing_catalog,
     write_language_trees,
 )
 
@@ -268,6 +269,200 @@ def test_roleless_raster_assets_are_out_of_scope(catalog: CatalogBuilder) -> Non
     report = validate(root)
     assert findings_for(report, "PTL-COL-004") == []
     assert findings_for(report, "PTL-AST-001") != []
+
+
+# --- PTL-COL-005: the item tree a collection owes ---------------------------
+
+
+_MIRROR_ASSET = {
+    "href": "./items.parquet",
+    "type": "application/vnd.apache.parquet",
+    "title": "Item mirror",
+    "roles": ["collection-mirror"],
+}
+
+
+def _write_scenes(collection_dir: Path, *names: str) -> None:
+    """Put scene files in the collection directory. The bytes are never read."""
+    for name in names:
+        (collection_dir / name).write_bytes(b"II*\x00")
+
+
+def test_scene_files_without_items_are_flagged(catalog: CatalogBuilder) -> None:
+    """The GHSL shape: scene files on disk, nothing in the metadata about them."""
+    catalog.collection("roads")
+    root = catalog.write()
+    _write_scenes(root / "roads", "pop-1975.tif", "pop-1990.tif", "pop-2000.tif")
+    findings = findings_for(validate(root), "PTL-COL-005")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+    assert findings[0].path == "roads/collection.json"
+    assert findings[0].json_pointer == "/links"
+    assert "3 raster scene file(s)" in findings[0].message
+    assert "publishes no items" in findings[0].message
+    for spec_id in ("PORTO-CORE-015", "PORTO-CORE-032", "PORTO-CORE-071"):
+        assert spec_id in findings[0].message
+
+
+def test_scene_file_names_are_truncated(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _write_scenes(root / "roads", *[f"pop-{year}.tif" for year in range(2000, 2006)])
+    message = findings_for(validate(root), "PTL-COL-005")[0].message
+    assert "pop-2000.tif, pop-2001.tif, pop-2002.tif, and 3 more" in message
+
+
+def test_one_scene_file_is_out_of_scope(catalog: CatalogBuilder) -> None:
+    """PORTO-CORE-071 binds several scenes; one stray file is not that."""
+    catalog.collection("roads")
+    root = catalog.write()
+    _write_scenes(root / "roads", "scene.tif")
+    assert findings_for(validate(root), "PTL-COL-005") == []
+
+
+def test_declared_collection_level_cogs_are_left_to_the_scene_rule(
+    catalog: CatalogBuilder,
+) -> None:
+    """Declared scene COGs are PTL-COL-004's; the two never both report."""
+    catalog.collection("roads")
+    root = catalog.write()
+    _make_cog(_collection(root), href="./scene-a.tif")
+    mutate_json(
+        _collection(root),
+        lambda d: d["assets"].__setitem__("scene-b", _cog_asset("./scene-b.tif")),
+    )
+    _write_scenes(root / "roads", "scene-a.tif", "scene-b.tif")
+    report = validate(root)
+    assert findings_for(report, "PTL-COL-005") == []
+    assert len(findings_for(report, "PTL-COL-004")) == 1
+
+
+def test_declared_source_geotiffs_are_not_scenes(catalog: CatalogBuilder) -> None:
+    """PORTO-FMT-035 lets an upstream GeoTIFF stay; a declared file is exempt."""
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(
+        _collection(root),
+        lambda d: d["assets"].update(
+            {
+                "source-a": {
+                    "href": "./upstream-a.tif",
+                    "type": "image/tiff",
+                    "title": "Upstream A",
+                    "roles": ["source"],
+                },
+                "source-b": {
+                    "href": "./upstream-b.tif",
+                    "type": "image/tiff",
+                    "title": "Upstream B",
+                    "roles": ["source"],
+                },
+            }
+        ),
+    )
+    _write_scenes(root / "roads", "upstream-a.tif", "upstream-b.tif")
+    assert findings_for(validate(root), "PTL-COL-005") == []
+
+
+def test_single_collection_level_cog_on_disk_is_clean(catalog: CatalogBuilder) -> None:
+    """PORTO-CORE-072's shape, with the file actually present."""
+    catalog.collection("roads")
+    root = catalog.write()
+    _make_cog(_collection(root))
+    _write_scenes(root / "roads", "scene.tif")
+    assert findings_for(validate(root), "PTL-COL-005") == []
+
+
+def test_scene_items_alongside_stray_files_are_clean(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection("roads")
+    collection.item("scene-a")
+    collection.item("scene-b")
+    root = catalog.write()
+    _drop_collection_data(root)
+    _make_cog(_item_json(root, "scene-a"), href="./scene-a.tif")
+    _make_cog(_item_json(root, "scene-b"), href="./scene-b.tif")
+    _write_scenes(root / "roads", "leftover-a.tif", "leftover-b.tif")
+    assert findings_for(validate(root), "PTL-COL-005") == []
+
+
+def test_items_under_an_organizing_catalog_are_clean(catalog: CatalogBuilder) -> None:
+    """Containment moves, ownership does not: items_of still finds them."""
+    collection = catalog.collection("roads")
+    collection.item("scene-a")
+    collection.item("scene-b")
+    root = catalog.write()
+    nest_items_under_organizing_catalog(root, root / "roads")
+    _write_scenes(root / "roads", "scene-a.tif", "scene-b.tif")
+    assert findings_for(validate(root), "PTL-COL-005") == []
+
+
+def test_partitioned_collection_with_raster_parts_is_clean(catalog: CatalogBuilder) -> None:
+    """PORTO-CORE-021 lets a partitioned collection leave its parts off items."""
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(
+        _collection(root),
+        lambda d: d.update(
+            {
+                "partition:scheme": "hive",
+                "partition:fields": ["year"],
+                "partition:count": 2,
+            }
+        ),
+    )
+    _write_scenes(root / "roads", "year=2024.tif", "year=2025.tif")
+    assert findings_for(validate(root), "PTL-COL-005") == []
+
+
+def test_registered_mirror_without_items_is_flagged(catalog: CatalogBuilder) -> None:
+    """The mirror is a claim that items exist, and it stands on its own."""
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(_collection(root), lambda d: d["assets"].__setitem__("mirror", _MIRROR_ASSET))
+    findings = findings_for(validate(root), "PTL-COL-005")
+    assert len(findings) == 1
+    assert findings[0].json_pointer == "/assets/mirror"
+    assert "registers item mirror 'mirror'" in findings[0].message
+    assert "PORTO-FMT-042" in findings[0].message
+
+
+def test_mirror_with_items_is_clean(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection("roads")
+    collection.item("scene-a")
+    collection.item("scene-b")
+    root = catalog.write()
+    mutate_json(_collection(root), lambda d: d["assets"].__setitem__("mirror", _MIRROR_ASSET))
+    assert findings_for(validate(root), "PTL-COL-005") == []
+
+
+def test_itemless_collection_without_scenes_or_mirror_is_clean(
+    catalog: CatalogBuilder,
+) -> None:
+    """A single-file collection owes no items (PORTO-CORE-017)."""
+    catalog.collection("roads")
+    assert findings_for(validate(catalog.write()), "PTL-COL-005") == []
+
+
+def test_scene_files_and_a_mirror_report_once(catalog: CatalogBuilder) -> None:
+    """The GHSL collection showed both signals; the disk one is the report."""
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(_collection(root), lambda d: d["assets"].__setitem__("mirror", _MIRROR_ASSET))
+    _write_scenes(root / "roads", "pop-1975.tif", "pop-1990.tif")
+    findings = findings_for(validate(root), "PTL-COL-005")
+    assert len(findings) == 1
+    assert "raster scene file(s)" in findings[0].message
+
+
+def test_scene_files_in_one_language_tree_do_not_fault_the_other(
+    catalog: CatalogBuilder,
+) -> None:
+    collection = catalog.collection("roads")
+    collection.item("scene-a")
+    collection.item("scene-b")
+    root = write_language_trees(catalog, "fr", "roads")
+    _write_scenes(root / "roads", "scene-a.tif", "scene-b.tif")
+    assert findings_for(validate(root), "PTL-COL-005") == []
 
 
 # --- PTL-COL-002: no nested collections ------------------------------------

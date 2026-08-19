@@ -106,11 +106,16 @@ def _undecided_because(node: Node, graph: CatalogGraph) -> str:
     Only called where :func:`is_geospatial` returned None, so all three
     signals are known to be missing; the item clause reports which of the two
     ways that happened, since publishing items and giving them geometries are
-    separate edits.
+    separate edits. It reports absent geometry evidence and nothing more:
+    whether the collection owes items at all is ``PTL-COL-005``'s question,
+    and a structural fault must not reach the reader only through a sentence
+    about thumbnails.
     """
     items = sum(1 for child in graph.children_of(node) if child.kind == "item")
     if items == 0:
-        seen = "it has no items"
+        # Phrased as absent geometry evidence, not as a structural verdict:
+        # whether the collection owes items at all is PTL-COL-005's question.
+        seen = "no item supplies a geometry"
     elif items == 1:
         seen = "its one item declares no geometry"
     else:

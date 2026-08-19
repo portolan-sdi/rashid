@@ -45,6 +45,22 @@ Four rules account for these separate trees:
 
 The rule permits several items, several data files, and partitioned collections. If collection assets omit `roles`, rashid cannot decide whether the rule applies. `PTL-AST-001` reports that omission instead.
 
+`PTL-COL-005` reports a collection that owes items but publishes none. Two signals show this fault, and each one is sufficient:
+
+- Two or more raster scene files sit in the collection directory, and no asset of the collection declares them.
+- The collection registers an `items.parquet` mirror. That registration is itself a claim that items exist.
+
+The disk signal takes precedence when both apply, so one collection produces one finding. The message names the requirements that the structure breaks.
+
+The mirror signal reads metadata only. It therefore applies when the `data` extra is absent, when the Parquet file is unreadable, and when the asset is remote. `PTL-DAT-016` stands back from a collection with no items and keeps its row-level comparisons for collections that have them.
+
+Any declaration exempts a file, including a `source` original and an alternate representation. The rule counts undeclared files only, so it never overlaps `PTL-COL-004`. The following structures are also exempt:
+
+- A collection with one scene file. The specification makes a lone COG a collection asset with no item directory.
+- A partitioned collection. The specification permits partitions that are not items.
+- A collection whose items sit under a catalog below it. Containment moves, but ownership does not.
+- A collection in an alternate-language tree. Each tree is judged against its own directory and its own items.
+
 `PTL-VIZ-001` reports when metadata cannot identify a collection as geospatial or tabular. The specification identifies tabular data through a Parquet geometry column, which requires the data pass.
 
 If the collection has no thumbnail, the rule produces a warning and names the missing signals. The requirement is a MUST, so silence could imply that the collection passed. A collection with a thumbnail meets the requirement either way and produces no finding.
@@ -58,6 +74,8 @@ The following metadata signals identify a geospatial collection:
 - A geometry column in `table:columns` on the collection or any non-`source` asset.
 
 A declared column list without a geometry column identifies a tabular collection. The collection is then exempt from the thumbnail requirement.
+
+The rule's message reports absent geometry evidence only. `PTL-COL-005` answers whether the collection owes items at all, so a structural fault never reaches the reader through a sentence about thumbnails.
 
 ## Rule Groups
 
@@ -79,7 +97,7 @@ A declared column list without a geometry column identifies a tabular collection
 | `PTL-DAT` | 000–016 | Compares asset bytes with metadata and format MUST requirements. Checks `file:checksum`, `file:size`, format signatures, bounding boxes, and coordinate reference systems. Requires valid COGs with internal overviews, embedded band statistics, and valid percentages for nodata bands. Requires GeoParquet 1.1 or 2.x, spatial ordering, per-row-group statistics, and suitable row-group size. Statistics can use a bounding-box covering column or native 2.x `GeospatialStatistics`. Requires square internal tiles no larger than 512 pixels. Requires one Parquet schema across local partition files. Applies the tabular SHOULD requirements for `table:columns` and `extent.temporal` to plain-Parquet collection assets with temporal columns. Compares an item mirror's row count, IDs, geometry, datetime, and bounding box with the collection's items. Rule `000` warns when the geospatial stack cannot load. Source and alternate assets are exempt from format MUST requirements. Plain Parquet is exempt from GeoParquet rules. Those rules apply to an item mirror like any other spatial table. |
 | `PTL-LIV` | 000–005 | Checks the hosting server's Data Storage MUST requirements for absolute HTTPS asset URLs. For each host, checks ranged GET support through `206` and `Accept-Ranges: bytes`, `Content-Length` on HEAD, CORS origins, exposed headers, and preflight support. Preflight must allow `GET`, `HEAD`, `Range`, and conditional-request headers. HEAD size must match `file:size`. Source and alternate assets are exempt. Rule `000` warns when no asset is available to probe or a host is unavailable. |
 | `PTL-PRT` | 001 | Requires a partitioned collection to declare the partition extension and provide `partition:scheme`, `partition:keys`, and `partition:glob`. |
-| `PTL-COL` | 001–004 | Requires a single-file collection to expose data through a collection asset instead of one item. Prohibits nested collections. Requires collection IDs to follow the naming convention and remain unique within their language tree. Requires raster scenes to appear on items instead of the collection. |
+| `PTL-COL` | 001–005 | Requires a single-file collection to expose data through a collection asset instead of one item. Prohibits nested collections. Requires collection IDs to follow the naming convention and remain unique within their language tree. Requires raster scenes to appear on items instead of the collection. Requires a collection to publish the items that its scene files or its item mirror imply. |
 | `PTL-CAT` | 001 | Recommends subcatalogs when a catalog or collection has at least 20 ungrouped collections or items. Subcatalogs do not count as ungrouped children. |
 | `PTL-MIR` | 001–002 | Recommends an `items.parquet` mirror for a raster collection with scene items. Requires a published mirror to be a collection asset with the `collection-mirror` role and `application/vnd.apache.parquet` media type, as the stac-geoparquet specification defines. |
 
