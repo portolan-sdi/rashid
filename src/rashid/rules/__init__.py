@@ -15,6 +15,7 @@ from rashid.rules.bbox import BboxValidRule
 from rashid.rules.catalogs import SubcatalogFanoutRule
 from rashid.rules.collections import (
     CollectionIdRule,
+    MissingItemTreeRule,
     NestedCollectionRule,
     RasterSceneItemRule,
     SingleFileCollectionRule,
@@ -120,6 +121,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     PartitionFieldsRule(),
     SingleFileCollectionRule(),
     RasterSceneItemRule(),
+    MissingItemTreeRule(),
     NestedCollectionRule(),
     CollectionIdRule(),
     SubcatalogFanoutRule(),

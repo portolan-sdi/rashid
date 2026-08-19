@@ -948,15 +948,19 @@ def _check_mirror(
     a field-by-field equality rule would fault conformant files.
 
     Skipped when the graph is unavailable, when the node is not a collection,
-    or when the collection's items carry no ids to join on. A collection the
-    walk finds no items under is not skipped: zero items against a mirror
-    holding rows is the stale mirror this requirement is about.
+    when the collection's items carry no ids to join on, or when it has no
+    items at all. That last case is a structural defect rather than a
+    row-level one, and ``PTL-COL-005`` owns it: a mirror on an item-less
+    collection is reported there, from metadata alone, without the data extra
+    and without reading the Parquet bytes.
     """
     if graph is None or node.kind != "collection":
         return []
     items = graph.items_of(node)
+    if not items:
+        return []  # PTL-COL-005 owns the item-less collection
     identified = {item.id: item for item in items if isinstance(item.id, str) and item.id}
-    if items and not identified:
+    if not identified:
         return []  # unidentified items; PTL-STR/PTL-GEN own that gap
 
     try:

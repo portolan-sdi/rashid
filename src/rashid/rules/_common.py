@@ -17,7 +17,11 @@ STRUCTURAL_RELS = ("root", "parent", "child", "item", "collection")
 COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
 _TIFF_MEDIA_TYPE = "image/tiff"
 _COG_PARAMETERS = {"application=geotiff", "profile=cloud-optimized"}
-_TIFF_SUFFIXES = (".tif", ".tiff")
+
+# The filename suffixes a raster scene carries. Public because scene files
+# are also counted straight off the directory listing, where no asset
+# declares a media type to read.
+TIFF_SUFFIXES = (".tif", ".tiff")
 
 
 def links_of(node: Node) -> list[dict[str, Any]]:
@@ -70,7 +74,7 @@ def is_raster_data_asset(asset: dict[str, Any]) -> bool:
     href = asset.get("href")
     if not isinstance(href, str):
         return False
-    return urlparse(href).path.lower().endswith(_TIFF_SUFFIXES)
+    return urlparse(href).path.lower().endswith(TIFF_SUFFIXES)
 
 
 def parse_rfc3339(value: object) -> datetime | None:
