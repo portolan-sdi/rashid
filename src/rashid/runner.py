@@ -160,6 +160,9 @@ def validate(
 ) -> Report:
     """Validate a local Portolan catalog tree.
 
+    ``catalog_path`` is the catalog directory, or the root ``catalog.json``
+    inside it; both name the same catalog.
+
     The metadata pass always runs. The STAC 1.1.0 structural pass runs by
     default too, against the core schemas shipped in the wheel (see
     :mod:`rashid.structural`) — fully offline. ``structural=False`` skips it,
@@ -210,13 +213,23 @@ def validate(
     config = config or RulesConfig()
     root = Path(catalog_path)
 
+    # Shell completion lands on the file, and the root catalog.json names the
+    # same catalog as the directory holding it. Any other file is refused:
+    # a subcatalog's collection.json would otherwise validate its own
+    # directory as a catalog root without saying so.
+    if root.is_file() and root.name == ROOT_CATALOG.name:
+        root = root.parent
+
     if not root.is_dir():
         return Report(
             findings=[
                 Finding(
                     rule_id=GEN_MISSING_ROOT,
                     severity=Severity.ERROR,
-                    message=f"catalog root is not a directory: {root}",
+                    message=(
+                        f"catalog root is not a directory: {root}"
+                        f" (pass the catalog directory or its {ROOT_CATALOG})"
+                    ),
                     path=".",
                 )
             ]
