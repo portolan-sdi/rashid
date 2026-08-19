@@ -38,6 +38,13 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   mirror). A mirror runs the GeoParquet checks above as well: the spec binds
   it to them like any other spatial table.
 
+The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
+run over an asset and over every file a local relative ``partition:glob``
+matches. A partitioned collection publishes its data through the glob and
+declares no ``data`` asset, so the glob is the only place those bytes appear.
+Each rule reports once per collection, at ``/partition:glob``, naming how many
+partition files failed.
+
 ``PTL-DAT-007`` also carries formats.md's covering-column recommendation: a
 GeoParquet 2.x file that satisfies the statistics MUST through native
 ``GeospatialStatistics`` alone, without the RECOMMENDED ``bbox`` covering
@@ -64,6 +71,7 @@ import struct
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -226,6 +234,7 @@ def check_node(
     """
     defects: list[DataDefect] = []
     defects.extend(_check_partition_schemas(node))
+    defects.extend(_check_partition_geoparquet(node, reader))
     for key, asset in _assets_of(node):
         href = asset.get("href")
         if not isinstance(href, str) or not href:
@@ -789,7 +798,9 @@ def _bbox_mismatch_message(
 # --- GeoParquet cloud-native structure -------------------------------------
 
 
-def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
+def _check_geoparquet(
+    key: str, located: Locator, *, subject: str | None = None
+) -> list[DataDefect]:
     """A GeoParquet asset MUST have bounded row groups, per-row-group spatial
     statistics, and spatial ordering (formats.md:30,64,75).
 
@@ -797,7 +808,12 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
     type. A file with no ``geo`` metadata key is plain Parquet — legitimate
     tabular data — so it is skipped rather than faulted; these rules apply only
     to actual GeoParquet.
+
+    ``subject`` names the file in the message. It defaults to the asset the key
+    belongs to; the partition pass passes the matched path instead, since a
+    partition file is addressed by the collection's glob and is nobody's asset.
     """
+    subject = subject or f"asset '{key}'"
     try:
         source: Any = located.open_binary() if located.is_remote else located.source
         parquet = pq.ParquetFile(source)
@@ -809,7 +825,7 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
         return []  # plain Parquet, not GeoParquet — nothing to enforce here
 
     defects: list[DataDefect] = []
-    defects.extend(_check_geoparquet_version(key, geo))
+    defects.extend(_check_geoparquet_version(key, geo, subject=subject))
     meta = parquet.metadata
     row_counts = [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
     if any(n > _MAX_ROW_GROUP_ROWS for n in row_counts):
@@ -817,13 +833,13 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
             DataDefect(
                 DAT_ROWGROUP_SIZE,
                 Severity.ERROR,
-                f"asset '{key}' has a row group of {max(row_counts)} rows, "
+                f"{subject} has a row group of {max(row_counts)} rows, "
                 f"over the {_MAX_ROW_GROUP_ROWS} limit",
                 key,
             )
         )
 
-    bboxes, stat_defects = _rowgroup_stat_defects(key, parquet, geo)
+    bboxes, stat_defects = _rowgroup_stat_defects(key, parquet, geo, subject=subject)
     defects.extend(stat_defects)
     if bboxes is None:
         return defects  # without per-row-group boxes, ordering cannot be judged
@@ -834,7 +850,13 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
     # Rows first: the rule is about row order and applies to every file, so it
     # is checked at any row-group count (formats.md:30).
     row_defects = _row_ordering_defects(
-        key, parquet, geo, sum(row_counts), groups, report_unreadable=not metrics_apply
+        key,
+        parquet,
+        geo,
+        sum(row_counts),
+        groups,
+        report_unreadable=not metrics_apply,
+        subject=subject,
     )
     defects.extend(row_defects)
     if any(d.severity is Severity.ERROR for d in row_defects):
@@ -847,7 +869,7 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
             DataDefect(
                 DAT_ORDERING,
                 Severity.ERROR,
-                f"asset '{key}' rows are not spatially ordered: row groups overlap heavily "
+                f"{subject} rows are not spatially ordered: row groups overlap heavily "
                 "and lack locality, so a reader cannot skip them",
                 key,
             )
@@ -855,13 +877,16 @@ def _check_geoparquet(key: str, located: Locator) -> list[DataDefect]:
     return defects
 
 
-def _check_geoparquet_version(key: str, geo: dict[str, Any]) -> list[DataDefect]:
+def _check_geoparquet_version(
+    key: str, geo: dict[str, Any], *, subject: str | None = None
+) -> list[DataDefect]:
     """The ``geo`` metadata MUST declare GeoParquet 1.1 or 2.x.
 
     formats.md:25: "Data MUST be provided in GeoParquet 1.1 or 2.0". A file
     with ``geo`` metadata but an older version (1.0, the common legacy case)
     lacks the covering-column machinery the rest of the format MUSTs assume.
     """
+    subject = subject or f"asset '{key}'"
     version = geo.get("version")
     if isinstance(version, str) and (
         version == "1.1" or version.startswith("1.1.") or version.startswith("2.")
@@ -872,7 +897,7 @@ def _check_geoparquet_version(key: str, geo: dict[str, Any]) -> list[DataDefect]
         DataDefect(
             DAT_GEOPARQUET_VERSION,
             Severity.ERROR,
-            f"asset '{key}' geo metadata declares {described}; data must be GeoParquet 1.1 or 2.x",
+            f"{subject} geo metadata declares {described}; data must be GeoParquet 1.1 or 2.x",
             key,
         )
     ]
@@ -1378,7 +1403,7 @@ def _has_temporal_extent(node: Node) -> bool:
 
 
 def _rowgroup_stat_defects(
-    key: str, parquet: Any, geo: dict[str, Any]
+    key: str, parquet: Any, geo: dict[str, Any], *, subject: str | None = None
 ) -> tuple[list[tuple[float, float, float, float]] | None, list[DataDefect]]:
     """Per-row-group [minx, miny, maxx, maxy] boxes, plus statistics defects.
 
@@ -1391,6 +1416,7 @@ def _rowgroup_stat_defects(
     adds page-level min/max stats that enable finer-grained pruning" — that
     SHOULD surfaces as a WARNING.
     """
+    subject = subject or f"asset '{key}'"
     boxes = _covering_bboxes(parquet, geo)
     if boxes is not None:
         return boxes, []
@@ -1400,7 +1426,7 @@ def _rowgroup_stat_defects(
             DataDefect(
                 DAT_ROWGROUP_STATS,
                 Severity.ERROR,
-                f"asset '{key}' provides no per-row-group spatial statistics "
+                f"{subject} provides no per-row-group spatial statistics "
                 "(no bbox covering column with min/max stats, nor native GeospatialStatistics)",
                 key,
             )
@@ -1409,7 +1435,7 @@ def _rowgroup_stat_defects(
         DataDefect(
             DAT_ROWGROUP_STATS,
             Severity.WARNING,
-            f"asset '{key}' relies on native GeospatialStatistics without a bbox "
+            f"{subject} relies on native GeospatialStatistics without a bbox "
             "covering column; a covering column remains recommended for "
             "page-level pruning",
             key,
@@ -1502,6 +1528,7 @@ def _row_ordering_defects(
     groups: int,
     *,
     report_unreadable: bool,
+    subject: str | None = None,
 ) -> list[DataDefect]:
     """Check row order, whatever the file's row-group layout.
 
@@ -1519,6 +1546,7 @@ def _row_ordering_defects(
     ``report_unreadable`` is off when the row-group checks also run, since an
     unreadable covering column then leaves row order checked, not unchecked.
     """
+    subject = subject or f"asset '{key}'"
     if rows < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
         return []  # too few rows for a chunk's box to describe anything
     row_boxes = _row_bboxes(parquet, geo)
@@ -1529,7 +1557,7 @@ def _row_ordering_defects(
             DataDefect(
                 DAT_ORDERING,
                 Severity.INFO,
-                f"asset '{key}' holds {rows} rows in {_plural(groups, 'row group')} "
+                f"{subject} holds {rows} rows in {_plural(groups, 'row group')} "
                 "with no bbox covering column to read, so spatial ordering could "
                 "not be evaluated",
                 key,
@@ -1541,7 +1569,7 @@ def _row_ordering_defects(
         DataDefect(
             DAT_ORDERING,
             Severity.ERROR,
-            f"asset '{key}' rows are not spatially ordered: {rows} rows in "
+            f"{subject} rows are not spatially ordered: {rows} rows in "
             f"{_plural(groups, 'row group')} do not cluster spatially, so a reader "
             "cannot skip any part of the file",
             key,
@@ -1650,6 +1678,29 @@ def _bbox_union(
 # --- partition schema consistency ------------------------------------------
 
 
+def _partition_files(node: Node) -> list[tuple[str, Path]]:
+    """Local files the collection's ``partition:glob`` matches, sorted.
+
+    The glob is expanded against the collection's own directory. A remote or
+    absolute pattern (``s3://``, ``https://``, ``/data``) cannot be listed from
+    the local tree, and one that normalizes outside the catalog is not the
+    catalog's to read, so both yield nothing. Each entry pairs the relative
+    match, which names the file in a message, with its path on disk.
+    """
+    pattern = node.data.get("partition:glob")
+    if not isinstance(pattern, str) or not pattern.strip():
+        return []
+    if urlparse(pattern).scheme or pattern.startswith("/"):
+        return []  # remote or absolute: not listable from here
+    normalized = posixpath.normpath(pattern)
+    if normalized.startswith(".."):
+        return []  # escapes the catalog tree
+    base = node.abs_path.parent
+    return [
+        (match, base / match) for match in sorted(globmodule.glob(normalized, root_dir=str(base)))
+    ]
+
+
 def _check_partition_schemas(node: Node) -> list[DataDefect]:
     """Every partition file MUST share a single Parquet schema.
 
@@ -1662,19 +1713,10 @@ def _check_partition_schemas(node: Node) -> list[DataDefect]:
     listed from the local tree, so it is skipped. Unreadable files degrade to
     silence — the byte checks own reporting broken assets.
     """
-    pattern = node.data.get("partition:glob")
-    if not isinstance(pattern, str) or not pattern.strip():
-        return []
-    if urlparse(pattern).scheme or pattern.startswith("/"):
-        return []  # remote or absolute: not listable from here
-    normalized = posixpath.normpath(pattern)
-    if normalized.startswith(".."):
-        return []  # escapes the catalog tree
-    base = node.abs_path.parent
     schemas: list[tuple[str, dict[str, str]]] = []
-    for match in sorted(globmodule.glob(normalized, root_dir=str(base))):
+    for match, path in _partition_files(node):
         try:
-            parquet = pq.ParquetFile(str(base / match))
+            parquet = pq.ParquetFile(str(path))
         except Exception:  # noqa: BLE001 # nosec B112 - unreadable partition: the byte checks own it
             continue
         arrow = parquet.schema_arrow
@@ -1698,6 +1740,87 @@ def _check_partition_schemas(node: Node) -> list[DataDefect]:
             )
         )
     return defects
+
+
+def _check_partition_geoparquet(node: Node, reader: AssetReader) -> list[DataDefect]:
+    """The GeoParquet MUSTs apply to partition files, not only to assets.
+
+    A partitioned collection addresses its data by ``partition:glob`` and
+    carries no ``data`` asset, which is the layout formats.md:113 prescribes.
+    The per-asset loop therefore never reaches those files, leaving
+    ``PTL-DAT-006``, ``007``, ``008``, and ``012`` unenforced on the only
+    bytes the collection publishes. This runs the same checks over every
+    matched file.
+
+    A collection can hold hundreds of partitions written by one job, so a
+    single bad setting would report hundreds of near-identical errors. Each
+    rule reports once, naming how many files failed and quoting one of them.
+    """
+    files = _partition_files(node)
+    if not files:
+        return []
+    already_read = _asset_paths(node, reader)
+    found: list[DataDefect] = []
+    checked = 0
+    for match, path in files:
+        if str(path) in already_read:
+            continue  # a declared asset: the per-asset loop reports it
+        checked += 1
+        found.extend(
+            _check_geoparquet(
+                match,
+                Locator(is_remote=False, source=str(path)),
+                subject=f"partition file '{match}'",
+            )
+        )
+    return _fold_partition_defects(found, checked)
+
+
+def _asset_paths(node: Node, reader: AssetReader) -> set[str]:
+    """Local paths the per-asset loop already reads on this node.
+
+    A glob wide enough to match a declared asset would otherwise fault the same
+    file twice, once per pass.
+    """
+    paths: set[str] = set()
+    for _key, asset in _assets_of(node):
+        href = asset.get("href")
+        if not isinstance(href, str) or not href:
+            continue
+        located = reader.locate(node, href)
+        if located is not None and not located.is_remote:
+            paths.add(located.source)
+    return paths
+
+
+def _fold_partition_defects(defects: list[DataDefect], total: int) -> list[DataDefect]:
+    """One defect per rule and severity, bound to the glob rather than an asset.
+
+    Order follows first appearance, so the report reads in the order the files
+    were walked. A lone failure keeps its own message; several keep the first
+    as the example, since partitions of one dataset fail the same way.
+    """
+    groups: dict[tuple[str, Severity], list[DataDefect]] = {}
+    for defect in defects:
+        groups.setdefault((defect.rule_id, defect.severity), []).append(defect)
+    folded: list[DataDefect] = []
+    for (rule_id, severity), members in groups.items():
+        first = members[0]
+        message = first.message
+        if len(members) > 1:
+            message = (
+                f"{len(members)} of {total} partition files fail this check; e.g. {first.message}"
+            )
+        folded.append(
+            DataDefect(
+                rule_id,
+                severity,
+                message,
+                "",
+                json_pointer="/partition:glob",
+            )
+        )
+    return folded
 
 
 def _schema_difference(reference: dict[str, str], other: dict[str, str]) -> str | None:
