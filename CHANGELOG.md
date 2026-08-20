@@ -1,3 +1,19 @@
+## v0.1.7 (2026-08-20)
+
+### Feat
+
+- catch up to portolan-spec v0.1.2
+- **rules**: flag a collection whose scenes or mirror imply items it never published
+- accept a catalog.json path where a catalog directory is expected
+- accept a catalog that carries alternate-language trees
+- report the fan-out on collections as well as catalogs
+- warn when a catalog leaves twenty or more children ungrouped
+
+### Fix
+
+- **data**: run GeoParquet byte checks over partition files
+- **ci**: restore the moving tag on repo-checks
+
 ## v0.1.6 (2026-08-14)
 
 ### Feat
