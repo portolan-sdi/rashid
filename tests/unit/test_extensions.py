@@ -10,6 +10,7 @@ constrains more than enum values.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -285,3 +286,99 @@ def test_disabling_the_rule_skips_the_pass(catalog: CatalogBuilder) -> None:
         catalog.write(), config=RulesConfig(disabled=frozenset({"PTL-EXT-001"})), data=False
     )
     assert "PTL-EXT-001" not in _ids(report.findings)
+
+
+def test_a_missing_jsonschema_degrades_to_one_warning(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog.collection("roads", stac_extensions=[PROJECTION_URI])
+    from rashid import extensions as extensions_module
+
+    def no_jsonschema(*_args: object, **_kwargs: object) -> None:
+        raise ImportError("No module named 'jsonschema'")
+
+    monkeypatch.setattr(extensions_module, "default_validator", no_jsonschema)
+    findings = validate_extensions(_graph(catalog))
+    assert _ids(findings) == ["PTL-EXT-000"]
+    assert findings[0].severity is Severity.WARNING
+    assert "jsonschema" in findings[0].message
+
+
+def test_an_unparseable_object_is_skipped(catalog: CatalogBuilder) -> None:
+    """The runner reports it as PTL-GEN-001; this pass has no JSON to validate."""
+    catalog.collection("roads", stac_extensions=[PROJECTION_URI])
+    root = catalog.write()
+    (root / "roads" / "collection.json").write_text("{ not json", encoding="utf-8")
+    assert validate_extensions(CatalogGraph.load(root)) == []
+
+
+def test_a_pinned_extension_missing_from_the_wheel_is_reported_not_validated(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A vendoring gap must degrade to PTL-EXT-002, never to a false pass.
+
+    test_the_vendored_closure_covers_every_registered_extension stops this
+    reaching a release. If one ever did, the object is unvalidated, and the
+    report has to say so.
+    """
+    catalog.collection("roads", stac_extensions=[PROJECTION_URI])
+    from rashid import extensions as extensions_module
+
+    monkeypatch.setattr(extensions_module, "vendored_extension_schemas", dict)
+    findings = validate_extensions(_graph(catalog))
+    assert _ids(findings) == ["PTL-EXT-002"]
+    assert findings[0].actual == PROJECTION_URI
+
+
+@pytest.mark.parametrize(
+    ("subschema", "expected"),
+    [
+        ({"properties": {"rel": {"const": "wms"}}}, "rel of 'wms'"),
+        ({"properties": {"rel": {"enum": ["a", "b"]}}}, "rel of 'a' or 'b'"),
+        ({"const": "x"}, "'x'"),
+        ({"enum": ["x", "y"]}, "'x' or 'y'"),
+    ],
+)
+def test_a_contains_failure_names_the_requirement(subschema: dict, expected: str) -> None:
+    """The raw jsonschema message prints the array and never the requirement."""
+    from rashid._jsonschema import _contains_requirement
+
+    assert _contains_requirement(subschema) == expected
+
+
+@pytest.mark.parametrize(
+    "subschema",
+    [
+        True,
+        {"properties": {"rel": {"type": "string"}}},
+        {"type": "object"},
+    ],
+)
+def test_an_inexpressible_contains_requirement_falls_back(subschema: object) -> None:
+    """No const or enum to name, so describe() keeps the raw message."""
+    from rashid._jsonschema import _contains_requirement
+
+    assert _contains_requirement(subschema) is None
+
+
+def test_the_extension_store_is_empty_without_a_vendored_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A build with no extensions/ tree yields no store, rather than raising."""
+    from importlib import resources
+
+    from rashid import _jsonschema as jsonschema_mod
+
+    package_root = tmp_path / "rashid"
+    (package_root / "_schemas").mkdir(parents=True)
+    original = resources.files
+    monkeypatch.setattr(
+        resources,
+        "files",
+        lambda package: package_root if package == "rashid" else original(package),
+    )
+    jsonschema_mod.vendored_extension_schemas.cache_clear()
+    try:
+        assert jsonschema_mod.vendored_extension_schemas() == {}
+    finally:
+        jsonschema_mod.vendored_extension_schemas.cache_clear()
