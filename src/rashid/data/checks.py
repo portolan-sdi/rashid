@@ -1550,16 +1550,27 @@ def _row_ordering_defects(
     if rows < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
         return []  # too few rows for a chunk's box to describe anything
     row_boxes = _row_bboxes(parquet, geo)
-    if row_boxes is None:
+    # Re-apply the floor to the boxes that survived, not to the row count. Rows
+    # without geometry carry no covering box, so a file can hold enough rows and
+    # still leave too few boxes for a chunk's box to describe anything. Below the
+    # floor the chunks hold at most one box each, which measures nothing: one box
+    # leaves ``_is_spatially_ordered`` no consecutive pair to divide by, and a
+    # handful yields a verdict drawn from a sample far under the floor.
+    if row_boxes is None or len(row_boxes) < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
         if not report_unreadable:
             return []
+        if row_boxes is None:
+            why = "with no bbox covering column to read"
+        else:
+            measured = len(row_boxes)
+            verb = "carries" if measured == 1 else "carry"
+            why = f"of which {measured} {verb} a covering box"
         return [
             DataDefect(
                 DAT_ORDERING,
                 Severity.INFO,
                 f"{subject} holds {rows} rows in {_plural(groups, 'row group')} "
-                "with no bbox covering column to read, so spatial ordering could "
-                "not be evaluated",
+                f"{why}, so spatial ordering could not be evaluated",
                 key,
             )
         ]
@@ -1603,6 +1614,12 @@ def _row_bboxes(
     Reads the four covering leaves and not the geometry, so the cost is four
     float64 columns. Returns None when the file has no 1.1 covering column, or
     when its leaves sit deeper than the single struct level the spec uses.
+
+    Rows whose covering values are null are skipped rather than abandoning the
+    file. GeoParquet permits a null geometry, writers give those rows a null
+    covering box, and a row with no geometry has no position — so it cannot be
+    out of spatial order, and one of them must not cost the whole file its
+    ordering check. Returns None only when no row has a box at all.
     """
     columns = geo.get("columns")
     if not isinstance(columns, dict):
@@ -1623,7 +1640,7 @@ def _row_bboxes(
     boxes: list[tuple[float, float, float, float]] = []
     for corner_values in zip(*corners, strict=True):
         if any(value is None for value in corner_values):
-            return None
+            continue  # geometry-less row: no position, so nothing to order
         boxes.append(
             (
                 float(corner_values[0]),
@@ -1632,7 +1649,7 @@ def _row_bboxes(
                 float(corner_values[3]),
             )
         )
-    return boxes
+    return boxes or None
 
 
 def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bool:
