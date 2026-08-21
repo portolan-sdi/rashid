@@ -6,6 +6,7 @@
     "Web Map Links": "https://stac-extensions.github.io/web-map-links/v1.3.0/schema.json",
     "Version": "https://stac-extensions.github.io/version/v1.2.0/schema.json",
     "Raster": "https://stac-extensions.github.io/raster/v2.0.0/schema.json",
+    "Language": "https://stac-extensions.github.io/language/v1.0.0/schema.json",
     "Vector": "https://stac-extensions.github.io/vector/v0.1.0/schema.json",
     "Partition": "https://schemas.portolan-sdi.org/incubating/partition/v1.0.0/schema.json",
     "Table": "https://stac-extensions.github.io/table/v1.2.0/schema.json",

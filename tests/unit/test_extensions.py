@@ -20,7 +20,7 @@ from rashid._jsonschema import SchemaError, vendored_extension_schemas
 from rashid.catalog import CatalogGraph
 from rashid.extensions import default_validator, validate_extensions
 from rashid.model import Severity
-from tests.conftest import CatalogBuilder
+from tests.conftest import CatalogBuilder, mutate_json, write_language_trees
 
 pytestmark = pytest.mark.unit
 
@@ -30,6 +30,7 @@ WEB_MAP_LINKS_URI = "https://stac-extensions.github.io/web-map-links/v1.3.0/sche
 RASTER_UNPINNED_URI = "https://stac-extensions.github.io/raster/v1.1.0/schema.json"
 # Never registered. The reproducer extension from issue #155.
 EO_URI = "https://stac-extensions.github.io/eo/v2.0.0/schema.json"
+LANGUAGE_URI = "https://stac-extensions.github.io/language/v1.0.0/schema.json"
 
 
 def _graph(catalog: CatalogBuilder) -> CatalogGraph:
@@ -382,3 +383,49 @@ def test_the_extension_store_is_empty_without_a_vendored_tree(
         assert jsonschema_mod.vendored_extension_schemas() == {}
     finally:
         jsonschema_mod.vendored_extension_schemas.cache_clear()
+
+
+# --- the registry drives the pass, end to end -----------------------------
+#
+# The Language extension is the worked example. The profile's registry pins
+# it, so the vendoring script fetches its schema and this pass applies it,
+# with no Language-specific code anywhere in rashid. These tests prove the
+# schema is evaluated, not merely resolved: an empty report alone cannot tell
+# a clean validation from a skipped one.
+
+
+def test_the_language_extension_is_pinned_and_vendored() -> None:
+    from rashid.rules.conformance import registered_extension
+
+    assert registered_extension(LANGUAGE_URI) == ("Language", "v1.0.0")
+    assert LANGUAGE_URI in vendored_extension_schemas()
+
+
+def test_a_valid_language_tree_passes(catalog: CatalogBuilder) -> None:
+    root = write_language_trees(catalog)
+    assert validate_extensions(CatalogGraph.load(root)) == []
+
+
+def test_a_catalog_declaring_language_without_the_field_is_an_error(
+    catalog: CatalogBuilder,
+) -> None:
+    """The schema requires `language` on a Catalog that declares the extension."""
+    root = write_language_trees(catalog)
+    mutate_json(root / "ro" / "catalog.json", lambda data: data.pop("language"))
+    findings = validate_extensions(CatalogGraph.load(root))
+    assert _ids(findings) == ["PTL-EXT-001"]
+    assert findings[0].path == "ro/catalog.json"
+    assert "Language v1.0.0" in findings[0].message
+    assert "'language' is a required property" in findings[0].message
+
+
+def test_a_malformed_language_code_is_an_error(catalog: CatalogBuilder) -> None:
+    """The schema constrains the code to a BCP 47 tag, not any string."""
+    root = write_language_trees(catalog)
+    mutate_json(
+        root / "ro" / "catalog.json",
+        lambda data: data["language"].__setitem__("code", "not a language tag"),
+    )
+    findings = validate_extensions(CatalogGraph.load(root))
+    assert _ids(findings) == ["PTL-EXT-001"]
+    assert findings[0].json_pointer == "/language/code"
