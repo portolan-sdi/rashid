@@ -1550,16 +1550,27 @@ def _row_ordering_defects(
     if rows < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
         return []  # too few rows for a chunk's box to describe anything
     row_boxes = _row_bboxes(parquet, geo)
-    if row_boxes is None:
+    # Re-apply the floor to the boxes that survived, not to the row count. Rows
+    # without geometry carry no covering box, so a file can hold enough rows and
+    # still leave too few boxes for a chunk's box to describe anything. Below the
+    # floor the chunks hold at most one box each, which measures nothing: one box
+    # leaves ``_is_spatially_ordered`` no consecutive pair to divide by, and a
+    # handful yields a verdict drawn from a sample far under the floor.
+    measured = 0 if row_boxes is None else len(row_boxes)
+    if measured < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
         if not report_unreadable:
             return []
+        if row_boxes is None:
+            why = "with no bbox covering column to read"
+        else:
+            verb = "carries" if measured == 1 else "carry"
+            why = f"of which {measured} {verb} a covering box"
         return [
             DataDefect(
                 DAT_ORDERING,
                 Severity.INFO,
                 f"{subject} holds {rows} rows in {_plural(groups, 'row group')} "
-                "with no bbox covering column to read, so spatial ordering could "
-                "not be evaluated",
+                f"{why}, so spatial ordering could not be evaluated",
                 key,
             )
         ]

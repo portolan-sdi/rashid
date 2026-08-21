@@ -249,6 +249,51 @@ def test_null_geometry_rows_do_not_mask_unordered_rows(tmp_path: Path) -> None:
     assert defects[0].severity is Severity.ERROR
 
 
+def test_one_surviving_box_is_unevaluated_not_a_crash(tmp_path: Path) -> None:
+    """A single box leaves no consecutive pair, so the criteria cannot divide.
+
+    The applicability guard counts rows, but the verdict comes from the boxes
+    that survive the NULL skip. One box in a 300-row file used to reach
+    ``_is_spatially_ordered`` and raise ZeroDivisionError.
+    """
+    points = assets.hilbert_sorted(assets.scattered_points(300))
+    path = tmp_path / "one_box.parquet"
+    assets.write_geoparquet(
+        path,
+        points=points,
+        row_group_size=len(points),
+        null_rows=set(range(1, len(points))),
+    )
+    defects = _gpq(path)
+    ordering = [d for d in defects if d.rule_id == DAT_ORDERING]
+    assert [d.severity for d in ordering] == [Severity.INFO]
+    assert "1 carries a covering box" in ordering[0].message
+    assert "could not be evaluated" in ordering[0].message
+
+
+def test_a_handful_of_boxes_is_unevaluated_not_an_error(tmp_path: Path) -> None:
+    """Below the floor the sample says nothing, so it must not fault the file."""
+    points = assets.hilbert_sorted(assets.scattered_points(300))
+    keep = {0, 50, 100, 150, 200, 250}
+    # The surviving boxes are wide and overlap each other, the shape the
+    # criteria reject. Six of them still describe nothing about 300 rows.
+    boxes = [
+        (-80.0, -40.0, 80.0, 40.0) if i in keep else (x, y, x, y) for i, (x, y) in enumerate(points)
+    ]
+    path = tmp_path / "six_boxes.parquet"
+    assets.write_geoparquet(
+        path,
+        points=points,
+        bboxes=boxes,
+        row_group_size=len(points),
+        null_rows=set(range(len(points))) - keep,
+    )
+    defects = _gpq(path)
+    ordering = [d for d in defects if d.rule_id == DAT_ORDERING]
+    assert [d.severity for d in ordering] == [Severity.INFO]
+    assert "6 carry a covering box" in ordering[0].message
+
+
 def test_all_null_geometry_is_never_faulted_as_disorder(tmp_path: Path) -> None:
     """No row carries a box, so there is nothing to measure and nothing to fault.
 
