@@ -28,6 +28,7 @@ from typing import Any
 import pytest
 
 from rashid import validate
+from rashid.model import Severity
 from tests.conftest import (
     CatalogBuilder,
     default_asset,
@@ -317,6 +318,12 @@ def test_a_catalog_may_publish_an_alternate_language_tree(catalog: CatalogBuilde
     to it, and called the repeated collection ID a duplicate, so a publisher
     following the extension could not pass. The whole report is asserted,
     because any one of those three would defeat the permission on its own.
+
+    The one finding allowed is the extension pass saying it did not validate
+    against the Language extension, which the Portolan registry does not pin.
+    That is INFO: it records a gap in coverage, not a defect in the catalog,
+    and the permission stands.
     """
     report = validate(write_language_trees(catalog))
-    assert report.findings == []
+    assert [finding.rule_id for finding in report.findings] == ["PTL-EXT-002"]
+    assert report.findings[0].severity is Severity.INFO

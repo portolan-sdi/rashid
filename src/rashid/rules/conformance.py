@@ -181,6 +181,26 @@ def _registry() -> dict[str, tuple[str, str]]:
     return registered
 
 
+def registered_extension(uri: str) -> tuple[str, str] | None:
+    """``(name, version)`` when ``uri`` is a registered extension's pinned URI.
+
+    ``None`` covers three cases the extension pass treats alike: a URI that is
+    not a versioned schema URI, an extension the registry does not list, and a
+    registered extension declared at a version the registry no longer pins.
+    The last matters most. A catalog declaring Raster v1.1.0 must not be
+    validated against the pinned v2.0.0 schema — that invents errors about
+    fields the older version never had. ``PTL-CNF-004`` already reports the
+    version itself; the extension pass just declines to guess.
+    """
+    parsed = _EXTENSION_URI_PATTERN.match(uri)
+    if parsed is None:
+        return None
+    entry = _registry().get(parsed["base"])
+    if entry is None or entry[1] != parsed["version"]:
+        return None
+    return entry
+
+
 class ExtensionVersionRule(Rule):
     """A registered extension is declared at the version the registry pins.
 

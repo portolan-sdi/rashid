@@ -264,7 +264,11 @@ def test_remote_schema_fetch_sends_a_named_user_agent(monkeypatch: pytest.Monkey
         seen.append(request)
         return _Response()
 
-    monkeypatch.setattr(schema_mod.urllib.request, "urlopen", fake_urlopen)
+    # The fetch itself lives in rashid._jsonschema, shared with the extension
+    # pass; schema._fetch_schema delegates to it.
+    from rashid import _jsonschema as jsonschema_mod
+
+    monkeypatch.setattr(jsonschema_mod.urllib.request, "urlopen", fake_urlopen)
     schema_mod._fetch_schema("https://schemas.portolan-sdi.org/portolan/v0.1.0/schema.json")
 
     (request,) = seen
