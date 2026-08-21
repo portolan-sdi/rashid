@@ -22,11 +22,16 @@ Severities follow the Portolan specification. MUST requirements produce errors, 
 - `PTL-CNF-004` produces a warning when an extension version is behind the registry. The registry can advance after a catalog pins the current version, so the catalog is behind rather than broken.
 - `PTL-TTL-002` produces a warning because its machine-generated title check is heuristic. A severity override can promote it.
 - `PTL-PRO-002` produces an info finding when a mirror lacks a `canonical` link. Metadata cannot show whether the upstream publisher provides STAC.
+- `PTL-EXT-002` produces an info finding when an object declares an extension the profile's registry does not pin. The finding records that rashid did not validate against that schema. It does not claim the object is wrong.
 - `PTL-VIZ-004` produces an info finding when a large vector lacks a visual derivative. The render-path MUST depends on whether source rendering is viable, which metadata cannot prove. The 100 MB threshold is also heuristic.
 
 `PTL-CNF-004` reads `src/rashid/_schemas/extension-registry.json`. This file contains the profile's registry table from `stac/README.md` in the specification.
 
 At vendor time, `scripts/vendor_spec_fixtures.py` parses that table. The rule ignores extensions that the registry does not list. `PTL-CNF-001` and `PTL-CNF-002` handle the Portolan schema URI's version.
+
+The same file drives `PTL-EXT-001` and the schema vendoring. `scripts/vendor_stac_schemas.py` reads the registry and fetches the `$ref` closure of every pinned extension into `src/rashid/_schemas/extensions/`. A version pinned in the specification therefore arrives with its schema on the next spec sync, and rashid needs no code change to validate against it.
+
+`PTL-EXT-001` validates an object only against the exact version the registry pins. A registered extension declared at another version takes the `PTL-EXT-002` path instead. Judging older content by a newer schema would report fields that the declared version never defined, and `PTL-CNF-004` already reports the version itself.
 
 ## Understand Special Cases
 
@@ -94,6 +99,7 @@ The rule's message reports absent geometry evidence only. `PTL-COL-005` answers 
 | `PTL-PRO` | 001–004 | Checks mirror `via` and `canonical` links plus the `updated` synchronization time. Prohibits upstream links on official catalogs. |
 | `PTL-VIZ` | 001–006 | Requires thumbnails on geospatial collections, style assets for visual derivatives, and `rel:"pmtiles"` registration for PMTiles. Reports large vectors without a visual derivative. Requires the MapLibre style media type in PMTiles collections. Requires the `default` role on one of several styles. |
 | `PTL-STR` | 000–001 | Checks STAC 1.1.0 core structure offline with the included core schemas. Rule `000` warns when the pass cannot run. |
+| `PTL-EXT` | 000–002 | Checks every object against the schemas of the STAC extensions it declares, offline, using the versions the profile's extension registry pins. Rule `000` warns when the pass cannot run. Rule `002` reports once per catalog that an unpinned extension was not validated; `--schema-allow-network` fetches and validates it instead. |
 | `PTL-DAT` | 000–016 | Compares asset bytes with metadata and format MUST requirements. Checks `file:checksum`, `file:size`, format signatures, bounding boxes, and coordinate reference systems. Requires valid COGs with internal overviews, embedded band statistics, and valid percentages for nodata bands. Requires GeoParquet 1.1 or 2.x, spatial ordering, per-row-group statistics, and suitable row-group size. Statistics can use a bounding-box covering column or native 2.x `GeospatialStatistics`. Requires square internal tiles no larger than 512 pixels. Requires one Parquet schema across local partition files. Applies the tabular SHOULD requirements for `table:columns` and `extent.temporal` to plain-Parquet collection assets with temporal columns. Compares an item mirror's row count, IDs, geometry, datetime, and bounding box with the collection's items. Rule `000` warns when the geospatial stack cannot load. Source and alternate assets are exempt from format MUST requirements. Plain Parquet is exempt from GeoParquet rules. Those rules apply to an item mirror like any other spatial table. |
 | `PTL-LIV` | 000–005 | Checks the hosting server's Data Storage MUST requirements for absolute HTTPS asset URLs. For each host, checks ranged GET support through `206` and `Accept-Ranges: bytes`, `Content-Length` on HEAD, CORS origins, exposed headers, and preflight support. Preflight must allow `GET`, `HEAD`, `Range`, and conditional-request headers. HEAD size must match `file:size`. Source and alternate assets are exempt. Rule `000` warns when no asset is available to probe or a host is unavailable. |
 | `PTL-PRT` | 001 | Requires a partitioned collection to declare the partition extension and provide `partition:scheme`, `partition:keys`, and `partition:glob`. |
