@@ -32,6 +32,7 @@ from rashid.data import (
 )
 from rashid.data import ReaderFactory as DataReaderFactory
 from rashid.data import Validator as DataValidator
+from rashid.extensions import EXT_INVALID, validate_extensions
 from rashid.live import (
     LIV_CORS_EXPOSE,
     LIV_CORS_ORIGIN,
@@ -100,6 +101,8 @@ _LIVE_RULE_IDS = frozenset(
 
 # Structural/schema validators map one object's raw JSON to schema errors.
 _Validator = Callable[[dict[str, Any]], list[SchemaError]]
+# The extension validator also takes the schema URI the object declared.
+_ExtensionValidator = Callable[[dict[str, Any], str], list[SchemaError]]
 
 
 def _optional_passes(
@@ -108,6 +111,8 @@ def _optional_passes(
     *,
     structural: bool,
     structural_validator: _Validator | None,
+    extensions: bool,
+    extensions_validator: _ExtensionValidator | None,
     schema: bool,
     schema_validator: _Validator | None,
     schema_allow_network: bool,
@@ -118,10 +123,18 @@ def _optional_passes(
     live_prober: LiveProber | None,
     live_base_url: str | None,
 ) -> list[Finding]:
-    """Run the opt-in structural, schema, data, and live passes, honouring disable ids."""
+    """Run the structural, extension, schema, data, and live passes, honouring disable ids."""
     findings: list[Finding] = []
     if structural and STR_INVALID not in config.disabled:
         findings.extend(validate_structural(graph, structural_validator))
+    if extensions and EXT_INVALID not in config.disabled:
+        findings.extend(
+            f
+            for f in validate_extensions(
+                graph, extensions_validator, allow_network=schema_allow_network
+            )
+            if f.rule_id not in config.disabled
+        )
     if schema and SCH_INVALID not in config.disabled:
         findings.extend(
             validate_schema(graph, schema_validator, allow_network=schema_allow_network)
@@ -148,6 +161,8 @@ def validate(
     *,
     structural: bool = True,
     structural_validator: Callable[[dict[str, Any]], list[SchemaError]] | None = None,
+    extensions: bool = True,
+    extensions_validator: _ExtensionValidator | None = None,
     schema: bool = False,
     schema_validator: Callable[[dict[str, Any]], list[SchemaError]] | None = None,
     schema_allow_network: bool = False,
@@ -169,6 +184,16 @@ def validate(
     as does disabling ``PTL-STR-001`` via ``config``.
     ``structural_validator`` injects an alternate validator, chiefly for
     testing.
+
+    The extension pass runs by default too, validating every object against
+    the schemas of the STAC extensions it declares (see
+    :mod:`rashid.extensions`) — offline, from the schemas the profile's
+    extension registry pins, shipped in the wheel. An extension the registry
+    does not pin is reported once as ``PTL-EXT-002`` rather than validated,
+    unless ``schema_allow_network`` is set, which fetches it.
+    ``extensions=False`` skips the pass, as does disabling ``PTL-EXT-001``
+    via ``config``. ``extensions_validator`` injects an alternate validator,
+    chiefly for testing.
 
     When ``schema`` is true the Portolan profile schema pass runs too, applying
     the published JSON Schema to every object (see :mod:`rashid.schema`). The
@@ -285,6 +310,8 @@ def validate(
             config,
             structural=structural,
             structural_validator=structural_validator,
+            extensions=extensions,
+            extensions_validator=extensions_validator,
             schema=schema,
             schema_validator=schema_validator,
             schema_allow_network=schema_allow_network,
