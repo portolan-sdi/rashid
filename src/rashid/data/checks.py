@@ -1556,13 +1556,13 @@ def _row_ordering_defects(
     # floor the chunks hold at most one box each, which measures nothing: one box
     # leaves ``_is_spatially_ordered`` no consecutive pair to divide by, and a
     # handful yields a verdict drawn from a sample far under the floor.
-    measured = 0 if row_boxes is None else len(row_boxes)
-    if measured < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
+    if row_boxes is None or len(row_boxes) < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
         if not report_unreadable:
             return []
         if row_boxes is None:
             why = "with no bbox covering column to read"
         else:
+            measured = len(row_boxes)
             verb = "carries" if measured == 1 else "carry"
             why = f"of which {measured} {verb} a covering box"
         return [
