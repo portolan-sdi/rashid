@@ -86,7 +86,8 @@ def _resolve_structural_href(
     if base is None or not href.startswith(base):
         return False, None
     root = graph.language_root_of(node)
-    assert root is not None  # _published_base found a self link on it
+    if root is None:  # unreachable: _published_base read a self link off it
+        return False, None
     return True, graph.resolve_link(root, href[len(base) :])
 
 
