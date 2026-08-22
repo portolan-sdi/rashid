@@ -105,33 +105,105 @@ def test_item_link_with_wrong_type(catalog: CatalogBuilder) -> None:
     assert "expected 'application/geo+json'" in findings[0].message
 
 
-def test_absolute_structural_href(catalog: CatalogBuilder) -> None:
+def _absolutize_child(d: dict) -> None:
+    for link in d["links"]:
+        if link["rel"] == "child":
+            link["href"] = "https://example.org/roads/collection.json"
+
+
+def _add_root_self(d: dict) -> None:
+    d["links"].append(
+        {
+            "rel": "self",
+            "href": "https://example.org/catalog.json",
+            "type": "application/json",
+        }
+    )
+
+
+def test_absolute_child_link_resolves_through_root_self(catalog: CatalogBuilder) -> None:
+    # The spec takes no position on relative versus absolute links. The root
+    # self link names the published base (PORTO-CORE-081), so an absolute
+    # child href under it maps onto the tree and resolves normally.
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(root / "catalog.json", lambda d: (_add_root_self(d), _absolutize_child(d)))
+    report = validate(root)
+    assert findings_for(report, "PTL-LNK-002") == []
+    assert findings_for(report, "PTL-LNK-006") == []
+
+
+def test_absolute_dangling_child_link_reported_through_root_self(
+    catalog: CatalogBuilder,
+) -> None:
     catalog.collection("roads")
     root = catalog.write()
 
-    def absolutize(d: dict) -> None:
+    def dangle(d: dict) -> None:
         for link in d["links"]:
             if link["rel"] == "child":
-                link["href"] = "https://example.org/roads/collection.json"
+                link["href"] = "https://example.org/gone/collection.json"
 
-    mutate_json(root / "catalog.json", absolutize)
-    report = validate(root)
-    findings = findings_for(report, "PTL-LNK-004")
+    mutate_json(root / "catalog.json", lambda d: (_add_root_self(d), dangle(d)))
+    findings = findings_for(validate(root), "PTL-LNK-006")
     assert len(findings) == 1
-    assert "must be relative" in findings[0].message
-    # LNK-006 does not double-report absolute hrefs
-    assert all("child" not in f.message for f in findings_for(report, "PTL-LNK-006"))
+    assert "does not resolve" in findings[0].message
 
 
-def test_self_link_is_rejected(catalog: CatalogBuilder) -> None:
+def test_absolute_child_link_without_root_self_is_not_judged(
+    catalog: CatalogBuilder,
+) -> None:
+    # Without a published base the validator cannot say what the URL points
+    # at, so it reports nothing rather than guess a missing child link.
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(root / "catalog.json", _absolutize_child)
+    report = validate(root)
+    assert findings_for(report, "PTL-LNK-002") == []
+    assert findings_for(report, "PTL-LNK-006") == []
+
+
+def test_structural_link_without_href(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+
+    def strip_href(d: dict) -> None:
+        for link in d["links"]:
+            if link["rel"] == "child":
+                link.pop("href")
+
+    mutate_json(root / "catalog.json", strip_href)
+    findings = findings_for(validate(root), "PTL-LNK-006")
+    assert len(findings) == 1
+    assert "has no href" in findings[0].message
+
+
+def test_self_link_is_accepted(catalog: CatalogBuilder) -> None:
+    # PORTO-CORE-034 is retired; the spec takes no position on self links,
+    # and PORTO-CORE-081 recommends one on a published root catalog.
+    catalog.collection("roads")
     root = catalog.write()
     mutate_json(
         root / "catalog.json",
         lambda d: d["links"].append(
-            {"rel": "self", "href": "./catalog.json", "type": "application/json"}
+            {
+                "rel": "self",
+                "href": "https://example.org/catalog.json",
+                "type": "application/json",
+            }
         ),
     )
-    assert len(findings_for(validate(root), "PTL-LNK-005")) == 1
+    mutate_json(
+        root / "roads" / "collection.json",
+        lambda d: d["links"].append(
+            {
+                "rel": "self",
+                "href": "https://example.org/roads/collection.json",
+                "type": "application/json",
+            }
+        ),
+    )
+    assert validate(root).passed
 
 
 def test_dangling_child_link(catalog: CatalogBuilder) -> None:
@@ -218,8 +290,6 @@ def test_clean_catalog_has_no_link_findings(catalog: CatalogBuilder) -> None:
         "PTL-LNK-001",
         "PTL-LNK-002",
         "PTL-LNK-003",
-        "PTL-LNK-004",
-        "PTL-LNK-005",
         "PTL-LNK-006",
     }
 

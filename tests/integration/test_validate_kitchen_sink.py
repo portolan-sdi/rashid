@@ -42,12 +42,6 @@ def test_kitchen_sink(catalog: CatalogBuilder) -> None:
             ),  # LNK-001
         ),
     )
-    mutate_json(
-        root / "catalog.json",
-        lambda d: d["links"].append(
-            {"rel": "self", "href": "./catalog.json", "type": "application/json"}
-        ),  # LNK-005
-    )
 
     # Metadata-pass fixture: structural off so the expected set stays exactly
     # the hand rules (the same mutations legitimately trip STAC core too).
@@ -67,7 +61,6 @@ def test_kitchen_sink(catalog: CatalogBuilder) -> None:
         "PTL-CNF-001",
         "PTL-BBX-001",
         "PTL-LNK-001",
-        "PTL-LNK-005",
         "PTL-VIZ-001",  # geospatial (item has geometry) but no thumbnail asset
     }
     # findings are stable-sorted by (path, rule_id)

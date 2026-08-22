@@ -46,8 +46,6 @@ from rashid.rules.links import (
     IconRelativeHrefRule,
     IconTitleRule,
     LinkResolutionRule,
-    NoSelfLinkRule,
-    RelativeLinksRule,
     RequiredLinksRule,
     StructuralLinkTypeRule,
 )
@@ -82,8 +80,6 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     RequiredLinksRule(),
     ChildLinkCompletenessRule(),
     StructuralLinkTypeRule(),
-    RelativeLinksRule(),
-    NoSelfLinkRule(),
     LinkResolutionRule(),
     IconMediaTypeRule(),
     IconTitleRule(),

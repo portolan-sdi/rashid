@@ -46,6 +46,51 @@ def _icon_links(node: Node) -> Iterable[tuple[int, dict[str, Any]]]:
             yield index, link
 
 
+def _published_base(node: Node, graph: CatalogGraph) -> str | None:
+    """The URL prefix the tree is published under, from the root self link.
+
+    core.md, Links: a catalog served over the internet from a single fixed
+    URL SHOULD carry an absolute ``self`` link on its root catalog
+    (PORTO-CORE-081). That link names the published location of the root
+    file, so the URL minus the root file name is the base every file in the
+    tree is served under.
+    """
+    root = graph.language_root_of(node)
+    if root is None:
+        return None
+    for link in links_of(root):
+        if link.get("rel") != "self":
+            continue
+        href = link.get("href")
+        if isinstance(href, str) and is_absolute_href(href):
+            prefix, sep, tail = href.rpartition("/")
+            if tail == root.path.name:
+                return prefix + sep
+    return None
+
+
+def _resolve_structural_href(
+    node: Node, graph: CatalogGraph, href: str
+) -> tuple[bool, Node | None]:
+    """Resolve a structural href to ``(judgeable, target)``.
+
+    A relative href resolves against the file tree (core.md, Links). An
+    absolute href is judgeable only when the root self link names the
+    published base and the href sits under it; the remainder then resolves
+    from the root. Without that base the pass cannot say what the URL points
+    at, and the caller reports nothing rather than guess.
+    """
+    if not is_absolute_href(href):
+        return True, graph.resolve_link(node, href)
+    base = _published_base(node, graph)
+    if base is None or not href.startswith(base):
+        return False, None
+    root = graph.language_root_of(node)
+    if root is None:  # unreachable: _published_base read a self link off it
+        return False, None
+    return True, graph.resolve_link(root, href[len(base) :])
+
+
 class RequiredLinksRule(Rule):
     """Every object carries its required structural links.
 
@@ -96,14 +141,22 @@ class ChildLinkCompletenessRule(Rule):
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         linked: set[object] = set()
+        unjudged = False
         for link in links_of(node):
             if link.get("rel") not in ("child", "item"):
                 continue
             href = link.get("href")
-            if isinstance(href, str):
-                target = graph.resolve_link(node, href)
-                if target is not None:
+            if isinstance(href, str) and href:
+                judgeable, target = _resolve_structural_href(node, graph, href)
+                if not judgeable:
+                    unjudged = True
+                elif target is not None:
                     linked.add(target.path)
+        if unjudged:
+            # An absolute child or item link with no published base to map it
+            # onto the tree may well point at a contained object, so a
+            # missing-link finding here would be a guess. Report nothing.
+            return
         translations = graph.translation_roots()
         for contained in graph.children_of(node):
             if contained.path in linked or contained in translations:
@@ -144,62 +197,13 @@ class StructuralLinkTypeRule(Rule):
                 )
 
 
-class RelativeLinksRule(Rule):
-    """Structural links are relative."""
-
-    id = "PTL-LNK-004"
-    spec_ids = ("PORTO-CORE-034",)
-    default_severity = Severity.ERROR
-    description = "structural links must be relative for catalog portability"
-    kinds = ("catalog", "collection", "item")
-
-    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for index, link in enumerate(links_of(node)):
-            rel = link.get("rel")
-            if rel not in STRUCTURAL_RELS:
-                continue
-            href = link.get("href")
-            if not isinstance(href, str) or not href:
-                yield self.finding(
-                    node,
-                    f"link rel:'{rel}' has no href",
-                    json_pointer=f"/links/{index}/href",
-                    fix_hint="set the link's href to the target's path relative to this file,"
-                    " e.g. '../catalog.json'",
-                )
-            elif is_absolute_href(href):
-                yield self.finding(
-                    node,
-                    f"structural link rel:'{rel}' must be relative, got '{href}'",
-                    json_pointer=f"/links/{index}/href",
-                    fix_hint="replace the absolute URL with a path relative to this file,"
-                    " e.g. '../catalog.json'",
-                    actual=href,
-                )
-
-
-class NoSelfLinkRule(Rule):
-    """Objects carry no self link."""
-
-    id = "PTL-LNK-005"
-    spec_ids = ("PORTO-CORE-034",)
-    default_severity = Severity.ERROR
-    description = "objects must not include a self link (pystac SELF_CONTAINED convention)"
-    kinds = ("catalog", "collection", "item")
-
-    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for index, link in enumerate(links_of(node)):
-            if link.get("rel") == "self":
-                yield self.finding(
-                    node,
-                    "object includes a rel:'self' link",
-                    json_pointer=f"/links/{index}",
-                    fix_hint="remove the self link; Portolan catalogs are self-contained",
-                )
-
-
 class LinkResolutionRule(Rule):
-    """Every relative structural link resolves to the correct object.
+    """Every structural link the pass can place resolves to the correct object.
+
+    A relative href resolves against the file tree directly. An absolute
+    href resolves through the published base the root self link names
+    (PORTO-CORE-081); without that base the pass cannot judge it and stays
+    quiet, since the spec permits absolute links.
 
     core.md, Links requires each link to resolve to "the correct object",
     which for an item's rel:'collection' link is the collection that encloses
@@ -230,10 +234,21 @@ class LinkResolutionRule(Rule):
             if rel not in STRUCTURAL_RELS:
                 continue
             href = link.get("href")
-            if not isinstance(href, str) or not href or is_absolute_href(href):
-                continue  # PTL-LNK-004 reports these
             pointer = f"/links/{index}/href"
-            target = graph.resolve_link(node, href)
+            if not isinstance(href, str) or not href:
+                yield self.finding(
+                    node,
+                    f"link rel:'{rel}' has no href",
+                    json_pointer=pointer,
+                    fix_hint="set the link's href to the target's path, e.g. '../catalog.json'",
+                )
+                continue
+            judgeable, target = _resolve_structural_href(node, graph, href)
+            if not judgeable:
+                # The spec permits absolute structural links, and without a
+                # published base from a root self link this pass cannot say
+                # what the URL points at. It leaves the link unreported.
+                continue
             if target is None:
                 resolved = graph.resolve_path(node, href)
                 if resolved is not None and graph.file_exists(resolved):
@@ -406,7 +421,7 @@ class ContainmentStaysInLanguageRule(Rule):
                 continue
             target = graph.resolve_link(node, href)
             if target is None:
-                continue  # PTL-LNK-005 reports a link that does not resolve
+                continue  # PTL-LNK-006 reports a link that does not resolve
             there = graph.language_root_of(target)
             if there is here or there not in translations:
                 continue
