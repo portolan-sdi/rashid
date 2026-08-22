@@ -202,6 +202,23 @@ def test_a_mirror_named_only_by_href_is_still_checked(catalog: CatalogBuilder) -
     assert any(f"'{MIRROR_ROLE}' role" in m for m in messages)
 
 
+def test_mirror_on_an_itemless_collection_is_left_to_the_structural_rule(
+    catalog: CatalogBuilder,
+) -> None:
+    """A mirror over nothing is a missing item tree, which PTL-COL-005 reports.
+
+    Neither PTL-MIR rule piles on: PTL-MIR-001 nudges towards a mirror that is
+    already there, and PTL-MIR-002 finds the registration correct.
+    """
+    catalog.collection("scenes")
+    root = catalog.write()
+    _register(root, _mirror_asset())
+    report = validate(root)
+    assert findings_for(report, "PTL-MIR-001") == []
+    assert findings_for(report, "PTL-MIR-002") == []
+    assert len(findings_for(report, "PTL-COL-005")) == 1
+
+
 def test_collection_without_any_mirror_signal_is_out_of_scope(catalog: CatalogBuilder) -> None:
     catalog.collection("scenes").item("seg1")
     root = catalog.write()

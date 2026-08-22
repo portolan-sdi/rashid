@@ -12,8 +12,10 @@ from rashid.rules.assets import (
     CogMediaTypeRule,
 )
 from rashid.rules.bbox import BboxValidRule
+from rashid.rules.catalogs import SubcatalogFanoutRule
 from rashid.rules.collections import (
     CollectionIdRule,
+    MissingItemTreeRule,
     NestedCollectionRule,
     RasterSceneItemRule,
     SingleFileCollectionRule,
@@ -39,6 +41,7 @@ from rashid.rules.license import (
 )
 from rashid.rules.links import (
     ChildLinkCompletenessRule,
+    ContainmentStaysInLanguageRule,
     IconMediaTypeRule,
     IconRelativeHrefRule,
     IconTitleRule,
@@ -83,6 +86,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     IconMediaTypeRule(),
     IconTitleRule(),
     IconRelativeHrefRule(),
+    ContainmentStaysInLanguageRule(),
     BboxValidRule(),
     DatetimePresentRule(),
     DatetimeValidRule(),
@@ -115,8 +119,10 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     PartitionFieldsRule(),
     SingleFileCollectionRule(),
     RasterSceneItemRule(),
+    MissingItemTreeRule(),
     NestedCollectionRule(),
     CollectionIdRule(),
+    SubcatalogFanoutRule(),
     ItemMirrorPresentRule(),
     ItemMirrorRegistrationRule(),
 )

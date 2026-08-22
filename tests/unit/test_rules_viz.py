@@ -73,11 +73,41 @@ def test_undecidable_collection_without_thumbnail_warns(catalog: CatalogBuilder)
     assert len(findings) == 1
     assert findings[0].severity is Severity.WARNING
     assert "cannot be decided from metadata" in findings[0].message
-    assert "it has no items" in findings[0].message
+    assert "no item supplies a geometry" in findings[0].message
     assert "table:columns" in findings[0].message
     assert "PMTiles, COG, or COPC" in findings[0].message
     assert findings[0].json_pointer == "/assets"
     assert "table:columns" in (findings[0].fix_hint or "")
+
+
+def test_missing_items_are_reported_outside_the_thumbnail_message(
+    catalog: CatalogBuilder,
+) -> None:
+    """A collection that owes items gets a structural error, not a hint in prose.
+
+    PTL-VIZ-001 still reports what it cannot decide, but the absent items now
+    reach the reader as PTL-COL-005, an ERROR that names them directly.
+    """
+    catalog.collection(
+        "scenes",
+        assets={
+            "data": default_asset(),
+            "mirror": {
+                "href": "./items.parquet",
+                "type": "application/vnd.apache.parquet",
+                "title": "Item mirror",
+                "roles": ["collection-mirror"],
+            },
+        },
+    )
+    report = validate(catalog.write())
+    structural = findings_for(report, "PTL-COL-005")
+    assert len(structural) == 1
+    assert structural[0].severity is Severity.ERROR
+    assert "publishes no items" in structural[0].message
+    thumbnail = findings_for(report, "PTL-VIZ-001")
+    assert len(thumbnail) == 1
+    assert "no item supplies a geometry" in thumbnail[0].message
 
 
 @pytest.mark.parametrize(

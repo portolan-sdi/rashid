@@ -17,7 +17,8 @@ import pytest
 
 from rashid.model import Report
 
-PORTOLAN_URI = "https://schemas.portolan-sdi.org/portolan/v0.1.1/schema.json"
+PORTOLAN_URI = "https://schemas.portolan-sdi.org/portolan/v0.1.2/schema.json"
+LANGUAGE_URI = "https://stac-extensions.github.io/language/v1.0.0/schema.json"
 # multihash: varint(0x12 sha2-256) + varint(0x20) + sha256(b"")
 VALID_MULTIHASH = "1220e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
@@ -253,6 +254,68 @@ class CatalogBuilder:
 @pytest.fixture
 def catalog(tmp_path: Path) -> CatalogBuilder:
     return CatalogBuilder(tmp_path / "catalog")
+
+
+def write_language_trees(
+    catalog: CatalogBuilder,
+    tag: str = "ro",
+    collection_id: str = "roads",
+) -> Path:
+    """Build a catalog with one alternate-language tree and return the root.
+
+    core.md, Alternate-Language Trees: the translation is a second tree of STAC
+    objects, joined to the first by ``alternate`` links and never by ``child``
+    links, and one collection keeps its ID in both trees::
+
+        catalog.json                 (en, the source language)
+        roads/collection.json
+        ro/catalog.json              (the translation, its own root)
+        ro/roads/collection.json
+
+    Both roots declare the STAC Language extension, as a real multilingual
+    catalog does, so a rule reading ``language`` sees what it would in the
+    field.
+    """
+    catalog.collection(collection_id)
+    root = catalog.write()
+
+    translation = CatalogBuilder(
+        root / tag, catalog.catalog_id, f"{catalog.title} [{tag}]", **catalog.overrides
+    )
+    translation.collection(collection_id)
+    translation.write()
+
+    def link_source(data: dict[str, Any]) -> None:
+        data["stac_extensions"] = [*data["stac_extensions"], LANGUAGE_URI]
+        data["language"] = {"code": "en", "name": "English"}
+        data["languages"] = [{"code": tag, "name": tag}]
+        data["links"].append(
+            {
+                "rel": "alternate",
+                "href": f"./{tag}/catalog.json",
+                "type": "application/json",
+                "hreflang": tag,
+                "title": tag,
+            }
+        )
+
+    def link_translation(data: dict[str, Any]) -> None:
+        data["stac_extensions"] = [*data["stac_extensions"], LANGUAGE_URI]
+        data["language"] = {"code": tag, "name": tag}
+        data["languages"] = [{"code": "en", "name": "English"}]
+        data["links"].append(
+            {
+                "rel": "alternate",
+                "href": "../catalog.json",
+                "type": "application/json",
+                "hreflang": "en",
+                "title": "English",
+            }
+        )
+
+    mutate_json(root / "catalog.json", link_source)
+    mutate_json(root / tag / "catalog.json", link_translation)
+    return root
 
 
 def write_organizing_catalog_layout(

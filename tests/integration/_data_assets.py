@@ -117,18 +117,24 @@ def write_geoparquet(
     version: str = "1.1.0",
     columns: dict[str, list[object]] | None = None,
     bboxes: list[tuple[float, float, float, float]] | None = None,
+    null_rows: set[int] | None = None,
 ) -> None:
     """A GeoParquet file of WKB points, one per entry in ``points``.
 
     ``bboxes`` overrides the covering column, which otherwise holds each
     point's own degenerate box. Passing the two separately lets a test drift
     the geometry without drifting the covering, and the reverse.
+
+    ``null_rows`` gives those row indices a null geometry and a null covering
+    box, the shape a writer produces for geometry-less features (GeoParquet
+    permits them, and gpio sorts them to the end of the file).
     """
     pts = points if points is not None else ordered_points()
     xs = [p[0] for p in pts]
     ys = [p[1] for p in pts]
     boxes = bboxes if bboxes is not None else [(x, y, x, y) for x, y in pts]
-    wkb = [struct.pack("<BIdd", 1, 1, x, y) for x, y in pts]
+    nulls = null_rows or set()
+    wkb = [None if i in nulls else struct.pack("<BIdd", 1, 1, x, y) for i, (x, y) in enumerate(pts)]
     cols: dict[str, object] = {
         "geometry": pa.array(wkb, type=pa.binary()),
         "value": list(range(len(pts))),
@@ -149,7 +155,13 @@ def write_geoparquet(
     }
     if covering:
         cols["bbox"] = pa.StructArray.from_arrays(
-            [pa.array([box[i] for box in boxes], pa.float64()) for i in range(4)],
+            [
+                pa.array(
+                    [None if r in nulls else box[i] for r, box in enumerate(boxes)],
+                    pa.float64(),
+                )
+                for i in range(4)
+            ],
             names=["xmin", "ymin", "xmax", "ymax"],
         )
         meta["columns"]["geometry"]["covering"] = {  # type: ignore[index]

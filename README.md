@@ -5,9 +5,11 @@
 [![CI](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml/badge.svg)](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Validator and linter for [Portolan](https://www.portolan-sdi.org/) catalogs. The name comes from the Arabic root ر ش د, whose participles رَاشِدٌ and رَشِيدٌ mean ["taking, or following, a right way or course or direction"](https://arabiclexicon.hawramani.com/?p=5472#205af1).
+rashid checks whether a [Portolan](https://www.portolan-sdi.org/) catalog follows the standard.
 
-rashid reads a catalog directory and reports every rule it breaks.
+Give it a catalog directory or its root `catalog.json`. rashid checks the metadata, structure, and asset bytes. It reports each problem with a stable rule ID.
+
+The name comes from the Arabic root ر ش د. Its participles رَاشِدٌ and رَشِيدٌ mean ["taking, or following, a right way or course or direction"](https://arabiclexicon.hawramani.com/?p=5472#205af1).
 
 ## Install
 
@@ -15,71 +17,76 @@ rashid reads a catalog directory and reports every rule it breaks.
 uv tool install rashid
 ```
 
-## Check a catalog
+rashid requires Python 3.10 or later.
+
+## Check a Catalog
 
 ```bash
 rashid check path/to/catalog
 ```
 
-An exit code of 0 means the catalog broke no MUST. An exit code of 1 means it broke at least one.
+Exit code `0` means the catalog breaks no MUST requirement. Exit code `1` means it breaks at least one.
 
-The default run covers the metadata, structural, and data passes, all offline for local assets. Two passes stay opt-in: `--schema` (redundant with the hand rules by construction; useful as a cross-check on catalogs from other tooling) and `--live` (probes the hosting servers, so it needs the network and a published catalog).
+By default, rashid checks:
+
+- Portolan metadata requirements.
+- STAC 1.1.0 core structure with schemas included in the package.
+- Local and remote asset bytes against their metadata and format rules.
+
+Use `--no-data` when you only need a metadata and structure result. Use `--data-scope local` to keep byte checks inside the catalog directory.
 
 ```bash
-rashid check path/to/catalog --live --live-base-url https://data.example.org/my-catalog/
+rashid check path/to/catalog --data-scope local
 ```
 
-`--no-data` skips byte verification when only the metadata verdict is needed. `--data-scope local` keeps every data rule and reads only the assets inside the catalog tree, which bounds the transfer when the remote assets are large. Add `--json` for a machine-readable report.
+Use `--live` to check HTTP range support and CORS on published assets. Relative asset links also require the catalog's public base URL.
 
-### Reading a large report
-
-A rule broken once per asset produces one finding per asset, so a catalog of a few hundred files can break one rule ten thousand times. Past 50 findings rashid counts each rule instead of listing it, and quotes a few examples:
-
-```
-1 error(s), 60 warning(s), 0 info(s) across 62 files.
-Too many to list; showing a summary (--all to list every finding).
-
-error    PTL-LIC-003   1x  the deprecated license value 'proprietary' must not be used
-    parks/collection.json: license 'proprietary' is deprecated and must not be used
-
-warning  PTL-TTL-002  60x  titles must be human-readable, not raw slugs or ns:LayerName identifiers
-    roads_0/collection.json: title 'road_centerlines_0' looks like a raw slug, not a human-readable title
-    roads_1/collection.json: title 'road_centerlines_1' looks like a raw slug, not a human-readable title
-    roads_10/collection.json: title 'road_centerlines_10' looks like a raw slug, not a human-readable title
-    ... 57 more in 60 files
+```bash
+rashid check path/to/catalog \
+  --live \
+  --live-base-url https://data.example.org/my-catalog/
 ```
 
-`--all` lists every finding however many there are, and `--summary` counts them however few. `--json` reports both: a `summary.by_rule` block alongside the complete `findings` array.
+Use `--json` for a machine-readable report.
 
-## What it checks
+## Read the Report
 
-Validation runs as five separable passes.
+Each finding contains a rule ID, severity, message, and file path. MUST requirements produce errors, and SHOULD requirements produce warnings.
 
-**Metadata.** Every spec requirement rashid can check from the catalog's JSON, without reading asset bytes.
+A catalog can produce thousands of similar findings. After 50 findings, rashid groups results by rule and shows representative examples.
 
-**Structural.** STAC 1.1.0 core validity, checked offline against the schemas vendored in the wheel. Only the core schema applies. Declared extensions belong to the metadata pass, which keeps an unpublished extension schema from failing the tree.
+Use `--all` to list every finding. Use `--summary` to group any report by rule. JSON output always contains the complete `findings` array and a `summary.by_rule` object.
 
-**Schema.** The published [Portolan profile schema](https://schemas.portolan-sdi.org/portolan/), applied to every object. rashid also implements those requirements in code, which yields precise messages and fix hints. Running both catches drift between them, at the cost of reporting some defects twice. Opt in with `--schema`.
+## Choose Additional Checks
 
-**Data.** Asset bytes, local files and remote https URLs alike, checked against the declared metadata and the format rules. rashid recomputes checksum and size, confirms media type by magic number, and enforces storage rules a metadata reader cannot see. Expect a real catalog to fail here on rules its metadata satisfies, because this pass is stricter than what current tooling emits. On by default. `--no-data` skips it, and `--data-scope local` narrows it to the catalog tree. [docs/rules.md](docs/rules.md) records what each pass transfers.
+rashid provides five separate validation passes:
 
-**Live hosting.** The servers behind remote https assets, probed for HTTP range support and CORS. Those are properties of the server rather than of any file. Range and CORS cost one probe per host, and each asset costs one HEAD. Opt in with `--live`.
+- **Metadata** checks Portolan requirements in catalog JSON.
+- **Structural** checks STAC 1.1.0 core structure offline.
+- **Schema** checks each object against the packaged Portolan profile schema.
+- **Data** reads asset bytes and verifies checksums, sizes, formats, and extents.
+- **Live hosting** checks HTTP range support and CORS on remote servers.
 
-A pass that cannot run reports a warning rather than passing quietly.
+Metadata, structural, and data checks run by default. Use `--schema` as a cross-check against the published profile schema. Use `--live` for checks that require a published catalog and network access.
 
-## Use it as a library
+If a pass cannot run, rashid reports a warning. It does not treat the skipped pass as successful.
+
+For transfer details and every rule ID, see [the rule reference](docs/rules.md).
+
+## Use rashid from Python
 
 ```python
 from rashid import validate
 
 report = validate("path/to/catalog")
+
 for finding in report.errors:
     print(finding.message)
 ```
 
-`validate()` runs the metadata, structural, and data passes by default, matching the CLI; `schema` and `live` opt the remaining two in, and `structural=False` / `data=False` opt the defaults out. `data_reader_factory=LocalOnlyReader` narrows the data pass to the catalog tree, as `--data-scope local` does.
+`validate()` uses the same default passes as the command-line interface. Set `schema=True` or `live=True` to add those passes.
 
-`RulesConfig` skips rules or changes their severity.
+Use `RulesConfig` to disable rules or change their severity.
 
 ```python
 from rashid import RulesConfig, Severity, validate
@@ -88,56 +95,18 @@ config = RulesConfig(
     disabled=frozenset({"PTL-VIZ-004"}),
     severity_overrides={"PTL-TTL-002": Severity.ERROR},
 )
+
 report = validate("path/to/catalog", config=config)
 ```
 
-`Report` also carries `passed`, `warnings`, `infos`, and `to_dict()`.
+The public `rashid.api` module also provides helpers for tools that repair catalogs. Names from this module remain available across 0.x releases. Other internal modules can change in a patch release.
 
-### Helpers for tools that fix what rashid reports
+## Documentation
 
-A tool that rewrites catalog metadata has to read that metadata the way rashid reads it. Reimplementing a check produces code that passes its own tests and still disagrees with the rule it was written against. `rashid.api` publishes the helpers rashid's rules use.
-
-```python
-from rashid.api import has_cog, is_cog_media_type, links_of, roles_of
-
-if has_cog(item):  # true only for the required COG media type
-    ...
-```
-
-The module also exports `STRUCTURAL_RELS` and `parse_rfc3339`, along with the multihash codec behind `file:checksum`.
-
-```python
-import hashlib
-from rashid.api import SHA2_256, encode_multihash
-
-checksum = encode_multihash(SHA2_256, hashlib.sha256(data).digest())
-```
-
-`decode_multihash` and `is_well_formed_multihash` read those values back.
-
-`SPDX_LICENSE_IDS` is the license list PTL-LIC-001 validates against, and `canonical_spdx_id` is the case-insensitive lookup behind its hint. Gate on these rather than on a shorter hand-written list, which rejects real identifiers the rule accepts.
-
-```python
-from rashid.api import canonical_spdx_id
-
-canonical_spdx_id("apache-2.0")  # "Apache-2.0"
-canonical_spdx_id("Apache 2.0")  # None
-```
-
-A name imported from `rashid.api` stays available across 0.x releases. The modules behind it are private, and importing from them directly can break in any patch release.
-
-## Rules
-
-Every finding carries a stable id shaped `PTL-GROUP-NNN`, a severity, a message, and the file path. MUST requirements become errors, and SHOULD requirements become warnings.
-
-[docs/rules.md](docs/rules.md) lists the rule groups, the severity exceptions, and the codes rashid emits when a pass degrades.
-
-## Contributing
-
-[docs/contributing.md](docs/contributing.md) covers hook setup, the two-stage gate, and how to run the tests.
-
-`SPEC_REF` records the portolan-spec commit the vendored fixtures were built from. A nightly workflow re-vendors them and opens a pull request when the spec moves.
+- [Rule reference](docs/rules.md) describes every validation pass, rule group, and degraded-pass code.
+- [Contributing guide](docs/contributing.md) covers development setup, tests, and repository checks.
+- [Portolan specification](https://github.com/portolan-sdi/portolan-spec) defines the standard that rashid implements.
 
 ## License
 
-Apache-2.0.
+rashid is available under the [Apache License 2.0](LICENSE).

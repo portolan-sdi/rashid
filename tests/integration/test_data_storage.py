@@ -214,6 +214,107 @@ def test_small_single_row_group_collection_is_not_judged(tmp_path: Path) -> None
     assert _gpq(path) == []
 
 
+def test_null_geometry_rows_do_not_cost_a_sorted_file_its_check(tmp_path: Path) -> None:
+    """A geometry-less row has no position, so it cannot be out of spatial order.
+
+    GeoParquet permits a null geometry and writers give those rows a null
+    covering box, sorted to the end of the file. Reading the covering column
+    row by row must skip them rather than treat the whole column as unreadable,
+    which left every file containing one with its ordering unevaluated and the
+    misleading claim that it had no covering column at all.
+    """
+    points = assets.hilbert_sorted(assets.scattered_points(5000))
+    path = tmp_path / "sorted_with_nulls.parquet"
+    assets.write_geoparquet(
+        path,
+        points=points,
+        row_group_size=len(points),
+        null_rows={4997, 4998, 4999},
+    )
+    assert _gpq(path) == []
+
+
+def test_null_geometry_rows_do_not_mask_unordered_rows(tmp_path: Path) -> None:
+    """Skipping them must not turn the check off: bad ordering still fails."""
+    points = assets.scattered_points(5000)
+    path = tmp_path / "scattered_with_nulls.parquet"
+    assets.write_geoparquet(
+        path,
+        points=points,
+        row_group_size=len(points),
+        null_rows={4997, 4998, 4999},
+    )
+    defects = _gpq(path)
+    assert [d.rule_id for d in defects] == [DAT_ORDERING]
+    assert defects[0].severity is Severity.ERROR
+
+
+def test_one_surviving_box_is_unevaluated_not_a_crash(tmp_path: Path) -> None:
+    """A single box leaves no consecutive pair, so the criteria cannot divide.
+
+    The applicability guard counts rows, but the verdict comes from the boxes
+    that survive the NULL skip. One box in a 300-row file used to reach
+    ``_is_spatially_ordered`` and raise ZeroDivisionError.
+    """
+    points = assets.hilbert_sorted(assets.scattered_points(300))
+    path = tmp_path / "one_box.parquet"
+    assets.write_geoparquet(
+        path,
+        points=points,
+        row_group_size=len(points),
+        null_rows=set(range(1, len(points))),
+    )
+    defects = _gpq(path)
+    ordering = [d for d in defects if d.rule_id == DAT_ORDERING]
+    assert [d.severity for d in ordering] == [Severity.INFO]
+    assert "1 carries a covering box" in ordering[0].message
+    assert "could not be evaluated" in ordering[0].message
+
+
+def test_a_handful_of_boxes_is_unevaluated_not_an_error(tmp_path: Path) -> None:
+    """Below the floor the sample says nothing, so it must not fault the file."""
+    points = assets.hilbert_sorted(assets.scattered_points(300))
+    keep = {0, 50, 100, 150, 200, 250}
+    # The surviving boxes are wide and overlap each other, the shape the
+    # criteria reject. Six of them still describe nothing about 300 rows.
+    boxes = [
+        (-80.0, -40.0, 80.0, 40.0) if i in keep else (x, y, x, y) for i, (x, y) in enumerate(points)
+    ]
+    path = tmp_path / "six_boxes.parquet"
+    assets.write_geoparquet(
+        path,
+        points=points,
+        bboxes=boxes,
+        row_group_size=len(points),
+        null_rows=set(range(len(points))) - keep,
+    )
+    defects = _gpq(path)
+    ordering = [d for d in defects if d.rule_id == DAT_ORDERING]
+    assert [d.severity for d in ordering] == [Severity.INFO]
+    assert "6 carry a covering box" in ordering[0].message
+
+
+def test_all_null_geometry_is_never_faulted_as_disorder(tmp_path: Path) -> None:
+    """No row carries a box, so there is nothing to measure and nothing to fault.
+
+    A covering column holding no usable value at all is PTL-DAT-007's business;
+    what must not happen is ordering being reported as violated on a file whose
+    order was never measured.
+    """
+    points = assets.hilbert_sorted(assets.scattered_points(5000))
+    path = tmp_path / "all_null.parquet"
+    assets.write_geoparquet(
+        path,
+        points=points,
+        row_group_size=len(points),
+        null_rows=set(range(len(points))),
+    )
+    parquet = pq.ParquetFile(path)
+    assert checks._row_bboxes(parquet, checks._geo_metadata(parquet) or {}) is None
+    ordering = [d for d in _gpq(path) if d.rule_id == DAT_ORDERING]
+    assert [d for d in ordering if d.severity is Severity.ERROR] == []
+
+
 def test_single_row_group_without_readable_row_boxes_reports_unevaluated() -> None:
     """Honest silence, not a false pass, when the boxes cannot be read.
 
@@ -625,6 +726,181 @@ def test_single_partition_file_has_nothing_to_compare(tmp_path: Path) -> None:
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
     assert checks._check_partition_schemas(_partitioned_collection(tmp_path)) == []
+
+
+# --- partition bytes (PTL-DAT-006/007/008/012 over the glob) -----------------
+#
+# A partitioned collection carries no data asset, so the per-asset loop reaches
+# none of its bytes. These drive the pass that walks the glob instead.
+
+
+class _NoAssets:
+    """A reader for a collection that declares no asset."""
+
+    def stream(self, node: Node, href: str) -> Iterator[bytes] | None:
+        return None
+
+    def locate(self, node: Node, href: str) -> Locator | None:
+        return None
+
+
+def _partition_bytes(node: Node, reader: object | None = None) -> list:
+    return checks._check_partition_geoparquet(node, reader or _NoAssets())
+
+
+def test_conformant_partitions_are_clean(tmp_path: Path) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assets.write_geoparquet(parts / "b.parquet")
+    assert _partition_bytes(_partitioned_collection(tmp_path)) == []
+
+
+def test_oversized_partition_row_group_flags_dat_008(tmp_path: Path) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assets.write_geoparquet(
+        parts / "b.parquet", points=assets.ordered_points(150_001), row_group_size=200_000
+    )
+    defects = _partition_bytes(_partitioned_collection(tmp_path))
+    assert [d.rule_id for d in defects] == [DAT_ROWGROUP_SIZE]
+    assert defects[0].severity is Severity.ERROR
+    assert defects[0].json_pointer == "/partition:glob"
+    assert defects[0].message.startswith("partition file 'parts/b.parquet' has a row group")
+
+
+def test_legacy_geoparquet_partition_flags_dat_012(tmp_path: Path) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assets.write_geoparquet(parts / "b.parquet", version="1.0.0")
+    ids = [d.rule_id for d in _partition_bytes(_partitioned_collection(tmp_path))]
+    assert DAT_GEOPARQUET_VERSION in ids
+
+
+def test_partition_without_rowgroup_stats_flags_dat_007(tmp_path: Path) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assets.write_geoparquet(parts / "b.parquet", covering=False)
+    defects = _partition_bytes(_partitioned_collection(tmp_path))
+    assert [d.rule_id for d in defects] == [DAT_ROWGROUP_STATS]
+    assert defects[0].severity is Severity.ERROR
+
+
+def test_unordered_partition_rows_flag_dat_006(tmp_path: Path) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assets.write_geoparquet(parts / "b.parquet", points=assets.interleaved_points())
+    defects = _partition_bytes(_partitioned_collection(tmp_path))
+    assert [d.rule_id for d in defects] == [DAT_ORDERING]
+    assert defects[0].severity is Severity.ERROR
+
+
+def test_one_defect_reports_the_file_alone(tmp_path: Path) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assets.write_geoparquet(parts / "b.parquet", version="1.0.0")
+    defects = _partition_bytes(_partitioned_collection(tmp_path))
+    message = next(d for d in defects if d.rule_id == DAT_GEOPARQUET_VERSION).message
+    assert message.startswith("partition file 'parts/b.parquet' geo metadata")
+    assert "partition files fail" not in message
+
+
+def test_many_failing_partitions_fold_into_one_defect(tmp_path: Path) -> None:
+    """Hundreds of partitions come from one job, so one bad setting reports once."""
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    for name in ("b", "c", "d"):
+        assets.write_geoparquet(parts / f"{name}.parquet", version="1.0.0")
+    defects = [
+        d
+        for d in _partition_bytes(_partitioned_collection(tmp_path))
+        if d.rule_id == DAT_GEOPARQUET_VERSION
+    ]
+    assert len(defects) == 1
+    assert defects[0].message.startswith("3 of 4 partition files fail this check;")
+    assert "partition file 'parts/b.parquet'" in defects[0].message
+
+
+def test_partition_severities_fold_separately(tmp_path: Path) -> None:
+    """An ERROR and a WARNING of one rule stay two findings, not one."""
+    defects = [
+        checks.DataDefect(DAT_ROWGROUP_STATS, Severity.ERROR, "e", "x"),
+        checks.DataDefect(DAT_ROWGROUP_STATS, Severity.WARNING, "w", "x"),
+    ]
+    folded = checks._fold_partition_defects(defects, 2)
+    assert [d.severity for d in folded] == [Severity.ERROR, Severity.WARNING]
+
+
+def test_plain_parquet_partitions_are_left_alone(tmp_path: Path) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet", geo=False, covering=False)
+    assets.write_geoparquet(parts / "b.parquet", geo=False, covering=False)
+    assert _partition_bytes(_partitioned_collection(tmp_path)) == []
+
+
+def test_unreadable_partition_is_silent(tmp_path: Path) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "a.parquet").write_bytes(b"not parquet")
+    assert _partition_bytes(_partitioned_collection(tmp_path)) == []
+
+
+@pytest.mark.parametrize(
+    "glob",
+    ["s3://bucket/parts/*.parquet", "https://example.org/parts/*.parquet", "/abs/*.parquet"],
+)
+def test_unlistable_partition_glob_is_skipped(tmp_path: Path, glob: str) -> None:
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet", version="1.0.0")
+    assert _partition_bytes(_partitioned_collection(tmp_path, glob=glob)) == []
+
+
+def test_escaping_partition_glob_reads_no_bytes(tmp_path: Path) -> None:
+    node = _partitioned_collection(tmp_path, glob="../elsewhere/*.parquet")
+    assert _partition_bytes(node) == []
+
+
+def test_collection_without_a_glob_reads_no_bytes(tmp_path: Path) -> None:
+    node = _partitioned_collection(tmp_path)
+    del node.data["partition:glob"]
+    assert _partition_bytes(node) == []
+
+
+def test_a_file_that_is_also_an_asset_reports_once(tmp_path: Path) -> None:
+    """A glob wide enough to match a declared asset must not fault it twice."""
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet", version="1.0.0")
+    node = _partitioned_collection(tmp_path)
+    node.data["assets"] = {
+        "data": {"href": "./parts/a.parquet", "type": "application/vnd.apache.parquet"}
+    }
+    reader = _FileReader("./parts/a.parquet", parts / "a.parquet")
+    assert _partition_bytes(node, reader) == []
+    ids = [d.rule_id for d in checks.check_node(node, reader)]
+    assert ids.count(DAT_GEOPARQUET_VERSION) == 1
+
+
+def test_assetless_partitioned_collection_reports_through_check_node(tmp_path: Path) -> None:
+    """Issue #130: the shape formats.md prescribes reached none of these checks."""
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assets.write_geoparquet(
+        parts / "b.parquet", points=assets.ordered_points(150_001), row_group_size=200_000
+    )
+    node = _partitioned_collection(tmp_path)
+    assert node.data.get("assets") is None
+    defects = checks.check_node(node, _NoAssets())
+    assert [d.rule_id for d in defects] == [DAT_ROWGROUP_SIZE]
 
 
 # --- tabular collections (PTL-DAT-015) --------------------------------------

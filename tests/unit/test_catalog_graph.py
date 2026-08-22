@@ -6,7 +6,12 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from rashid.catalog import CatalogGraph
-from tests.conftest import CatalogBuilder, write_organizing_catalog_layout
+from tests.conftest import (
+    CatalogBuilder,
+    mutate_json,
+    write_language_trees,
+    write_organizing_catalog_layout,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -154,3 +159,71 @@ def test_missing_root_directory(tmp_path: Path) -> None:
     graph = CatalogGraph.load(tmp_path)
     assert graph.root is None
     assert graph.nodes == {}
+
+
+def test_translation_roots_follow_alternate_links(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(write_language_trees(catalog))
+    assert [str(node.path) for node in graph.translation_roots()] == ["ro/catalog.json"]
+
+
+def test_language_root_of_places_every_node_in_a_tree(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(write_language_trees(catalog))
+    trees = {
+        str(node.path): str(graph.language_root_of(node).path)  # type: ignore[union-attr]
+        for node in graph.iter()
+    }
+    assert trees == {
+        "catalog.json": "catalog.json",
+        "roads/collection.json": "catalog.json",
+        "ro/catalog.json": "ro/catalog.json",
+        "ro/roads/collection.json": "ro/catalog.json",
+    }
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        pytest.param("not-a-link", id="link-is-not-an-object"),
+        pytest.param({"rel": "alternate", "type": "application/json"}, id="link-has-no-href"),
+        pytest.param(
+            {"rel": "alternate", "href": 7, "type": "application/json"}, id="href-is-not-a-string"
+        ),
+        pytest.param(
+            {"rel": "alternate", "href": "./ro/catalog.json", "type": "text/html"},
+            id="alternate-is-another-media-type",
+        ),
+        pytest.param(
+            {"rel": "alternate", "href": "./roads/collection.json", "type": "application/json"},
+            id="alternate-is-not-a-catalog",
+        ),
+        pytest.param(
+            {
+                "rel": "alternate",
+                "href": "https://example.org/ro/catalog.json",
+                "type": "application/json",
+            },
+            id="alternate-is-absolute",
+        ),
+    ],
+)
+def test_a_malformed_alternate_link_names_no_translation(
+    catalog: CatalogBuilder, link: object
+) -> None:
+    """Discovery is deliberately narrow: anything it cannot read is not a tree."""
+    catalog.collection("roads")
+    root = catalog.write()
+    (root / "ro").mkdir()
+    mutate_json(root / "catalog.json", lambda data: data["links"].append(link))
+    assert CatalogGraph.load(root).translation_roots() == []
+
+
+def test_a_catalog_without_a_readable_root_names_no_translations(tmp_path: Path) -> None:
+    """Discovery starts at the root catalog, so an absent root ends it."""
+    root = tmp_path / "catalog"
+    (root / "roads").mkdir(parents=True)
+    (root / "roads" / "collection.json").write_text(
+        json.dumps({"type": "Collection", "id": "roads"}), encoding="utf-8"
+    )
+    graph = CatalogGraph.load(root)
+    assert graph.root is None
+    assert graph.translation_roots() == []
