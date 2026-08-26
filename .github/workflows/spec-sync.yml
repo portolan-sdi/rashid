@@ -43,13 +43,29 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Check the vendored STAC closure against upstream
-        run: uv run python scripts/vendor_stac_schemas.py --check
-
+      # Fixtures first: this writes _schemas/extension-registry.json, and the
+      # schema vendoring below reads it to learn which extension schemas to
+      # fetch. Run in the other order and a spec release that repins an
+      # extension vendors against the previous registry.
       - name: Re-vendor fixtures from spec main
         run: |
           uv run python scripts/vendor_spec_fixtures.py \
             --spec "$RUNNER_TEMP/portolan-spec"
+
+      - name: Re-vendor the STAC and extension schema closures
+        run: uv run python scripts/vendor_stac_schemas.py
+
+      # A published schema is immutable per version in principle. A new file
+      # is a routine consequence of the spec pinning a new version; an edit to
+      # a file already vendored means upstream changed a published schema
+      # under us, which can change verdicts between rashid releases.
+      - name: Flag edits to already-vendored schemas
+        run: |
+          edited=$(git diff --name-only -- src/rashid/_schemas)
+          if [ -n "$edited" ]; then
+            echo "::warning::upstream edited schemas already vendored here:"
+            echo "$edited"
+          fi
 
       - name: Detect fixture drift
         id: drift
@@ -80,14 +96,23 @@ jobs:
           git push -f origin "$BRANCH"
           cat > "$RUNNER_TEMP/pr-body.md" <<'BODY'
           Automated re-vendor of the portolan-spec fixtures from `main` (`__SHORT__`),
-          via `scripts/vendor_spec_fixtures.py`.
+          via `scripts/vendor_spec_fixtures.py`, followed by the schema closures
+          via `scripts/vendor_stac_schemas.py`.
+
+          The extension schemas follow the profile's extension registry. If the spec
+          repinned an extension, this PR carries the new version's schema and drops
+          the old one, with no code change.
 
           The test run on this PR is the verdict:
 
-          - **Green** — a data-only change (new or edited catalog objects). Review and merge.
+          - **Green** — a data-only change (new or edited catalog objects, newly
+            pinned extension schemas). Review and merge.
           - **Red on `test_schema_uri_invariant`** — the spec changed its schema URI or shape.
             rashid needs a matching code change (e.g. `SCHEMA_URI_PATTERN`, `DEFAULT_SCHEMA_URI`)
             on this branch before it can merge.
+          - **Red on `test_the_vendored_closure_covers_every_registered_extension`** —
+            the registry names an extension whose schema did not vendor. Check the
+            vendoring step's log for a refused host.
           BODY
           sed -i "s/__SHORT__/${SHORT}/" "$RUNNER_TEMP/pr-body.md"
           if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -q OPEN; then

@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 import rashid.data as _data_pass
+import rashid.extensions as _extension_pass
 import rashid.live as _live_pass
 import rashid.runner as _runner
 import rashid.schema as _schema_pass
@@ -80,6 +81,18 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
     "PTL-STR-001": (
         Severity.ERROR,
         "every object is valid STAC 1.1.0",
+    ),
+    "PTL-EXT-000": (
+        Severity.WARNING,
+        "the extension schema pass could run",
+    ),
+    "PTL-EXT-001": (
+        Severity.ERROR,
+        "every object satisfies the schemas of the extensions it declares",
+    ),
+    "PTL-EXT-002": (
+        Severity.INFO,
+        "every declared extension was validated against its schema",
     ),
     "PTL-SCH-000": (
         Severity.WARNING,
@@ -188,7 +201,14 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
 }
 
 # The pass modules that declare a SPEC_IDS registry.
-_PASS_MODULES = (_runner, _structural_pass, _schema_pass, _data_pass, _live_pass)
+_PASS_MODULES = (
+    _runner,
+    _structural_pass,
+    _extension_pass,
+    _schema_pass,
+    _data_pass,
+    _live_pass,
+)
 
 
 class RegistryError(RuntimeError):
