@@ -82,7 +82,7 @@ The rule's message reports absent geometry evidence only. `PTL-COL-005` answers 
 | Group | Rules | Checks |
 |---|---|---|
 | `PTL-GEN` | 000–001 | Requires a root `catalog.json` and parseable object files. |
-| `PTL-LNK` | 001–010 | Checks required structural links, child and item completeness, link types, relative links, and resolved target objects. Prohibits self links. Requires a `rel:"icon"` logo to have a renderable media type, title, and relative `href`. Keeps `child` and `item` links out of alternate-language trees. |
+| `PTL-LNK` | 001–010 | Checks required structural links, child and item completeness, link types, and resolved target objects. Resolves an absolute link through the published base the root `self` link names. Requires a `rel:"icon"` logo to have a renderable media type, title, and relative `href`. Keeps `child` and `item` links out of alternate-language trees. |
 | `PTL-TTL` | 001–003 | Requires non-empty titles and descriptions, human-readable titles, and titles on child and item links. |
 | `PTL-BBX` | 001 | Requires finite, sentinel-free WGS84 bounding boxes with south less than or equal to north. Supports 2D and 3D boxes. |
 | `PTL-TMP` | 001–002 | Requires an item datetime or interval, RFC 3339 values, and a start before or equal to the end. |
