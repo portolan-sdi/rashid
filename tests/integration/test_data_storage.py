@@ -148,6 +148,26 @@ def test_five_row_groups_ordered_is_clean(tmp_path: Path) -> None:
     assert _gpq(path) == []
 
 
+def test_five_row_groups_use_only_footer_for_ordering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The footer settles PTL-DAT-006 without a covering-column read (#166)."""
+    path = tmp_path / "footer_only.parquet"
+    assets.write_geoparquet(path, points=assets.ordered_points(10))
+    parquet = pq.ParquetFile(path)
+
+    class _FooterOnlyParquet:
+        metadata = parquet.metadata
+        schema_arrow = parquet.schema_arrow
+
+        def read(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("PTL-DAT-006 read row data")
+
+    monkeypatch.setattr(checks.pq, "ParquetFile", lambda source: _FooterOnlyParquet())
+
+    assert _gpq(path) == []
+
+
 @pytest.mark.parametrize("groups", [5, 6, 7])
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_hilbert_sorted_rows_pass_where_the_criteria_apply(

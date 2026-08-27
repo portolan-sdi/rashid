@@ -847,33 +847,34 @@ def _check_geoparquet(
     groups = len(bboxes)
     metrics_apply = groups >= _MIN_ORDERING_ROW_GROUPS
 
-    # Rows first: the rule is about row order and applies to every file, so it
-    # is checked at any row-group count (formats.md:30).
+    # At five or more groups the footer metrics settle the rule without reading
+    # the covering column. This keeps the common remote-file path proportional
+    # to row groups instead of rows (#166).
+    if metrics_apply:
+        if not _is_spatially_ordered(bboxes):
+            defects.append(
+                DataDefect(
+                    DAT_ORDERING,
+                    Severity.ERROR,
+                    f"{subject} rows are not spatially ordered: row groups overlap heavily "
+                    "and lack locality, so a reader cannot skip them",
+                    key,
+                )
+            )
+        return defects
+
+    # Below five groups the footer criteria cannot resolve. The spec still
+    # binds row order, so inspect rows only for these small-group files.
     row_defects = _row_ordering_defects(
         key,
         parquet,
         geo,
         sum(row_counts),
         groups,
-        report_unreadable=not metrics_apply,
+        report_unreadable=True,
         subject=subject,
     )
     defects.extend(row_defects)
-    if any(d.severity is Severity.ERROR for d in row_defects):
-        return defects  # already faulted on ordering; one finding is enough
-
-    # The row-group criteria are the footer-metadata proxy on top, and they only
-    # resolve at five or more groups (PORTO-FMT-044).
-    if metrics_apply and not _is_spatially_ordered(bboxes):
-        defects.append(
-            DataDefect(
-                DAT_ORDERING,
-                Severity.ERROR,
-                f"{subject} rows are not spatially ordered: row groups overlap heavily "
-                "and lack locality, so a reader cannot skip them",
-                key,
-            )
-        )
     return defects
 
 
