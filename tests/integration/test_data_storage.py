@@ -170,6 +170,35 @@ def test_many_row_groups_use_only_footer_for_ordering(
     assert _gpq(path) == []
 
 
+def test_footer_shortcut_reads_rows_when_covering_values_are_null(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NULL covering values make the conservative shortcut unavailable."""
+    path = tmp_path / "footer_with_nulls.parquet"
+    points = assets.hilbert_sorted(assets.scattered_points(6000))
+    assets.write_geoparquet(
+        path,
+        points=points,
+        row_group_size=100,
+        null_rows={5997, 5998, 5999},
+    )
+    parquet = pq.ParquetFile(path)
+    reads = 0
+
+    class _TrackedParquet:
+        metadata = parquet.metadata
+        schema_arrow = parquet.schema_arrow
+
+        def read(self, *args: object, **kwargs: object) -> object:
+            nonlocal reads
+            reads += 1
+            return parquet.read(*args, **kwargs)
+
+    monkeypatch.setattr(checks.pq, "ParquetFile", lambda source: _TrackedParquet())
+    assert _gpq(path) == []
+    assert reads == 1
+
+
 def test_footer_pass_does_not_mask_unordered_rows(tmp_path: Path) -> None:
     """Disjoint row groups do not prove that rows inside them are ordered."""
     groups = 5
@@ -191,6 +220,18 @@ def test_footer_pass_does_not_mask_unordered_rows(tmp_path: Path) -> None:
     defects = _gpq(path)
     assert [d.rule_id for d in defects] == [DAT_ORDERING]
     assert defects[0].severity is Severity.ERROR
+
+
+def test_incomplete_covering_cannot_prove_zero_nulls() -> None:
+    incomplete = {
+        "primary_column": "geometry",
+        "columns": {"geometry": {"covering": {"bbox": {"xmin": ["bbox", "xmin"]}}}},
+    }
+    assert not checks._covering_has_no_nulls(object(), incomplete)
+
+
+def test_empty_row_groups_have_no_conservative_chunks() -> None:
+    assert checks._conservative_chunk_bboxes([], []) == []
 
 
 @pytest.mark.parametrize("groups", [5, 6, 7])
