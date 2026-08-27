@@ -847,23 +847,9 @@ def _check_geoparquet(
     groups = len(bboxes)
     metrics_apply = groups >= _MIN_ORDERING_ROW_GROUPS
 
-    # Rows first: the rule is about row order and applies to every file, so it
-    # is checked at any row-group count (formats.md:30).
-    row_defects = _row_ordering_defects(
-        key,
-        parquet,
-        geo,
-        sum(row_counts),
-        groups,
-        report_unreadable=not metrics_apply,
-        subject=subject,
-    )
-    defects.extend(row_defects)
-    if any(d.severity is Severity.ERROR for d in row_defects):
-        return defects  # already faulted on ordering; one finding is enough
-
-    # The row-group criteria are the footer-metadata proxy on top, and they only
-    # resolve at five or more groups (PORTO-FMT-044).
+    # A failed footer check settles the rule. A passing footer check can also
+    # settle the row check when conservative footer bounds prove that the
+    # synthetic row chunks pass. Otherwise inspect the rows themselves.
     if metrics_apply and not _is_spatially_ordered(bboxes):
         defects.append(
             DataDefect(
@@ -874,6 +860,20 @@ def _check_geoparquet(
                 key,
             )
         )
+        return defects
+    if metrics_apply and _footer_proves_row_ordering(parquet, geo, bboxes, row_counts):
+        return defects
+
+    row_defects = _row_ordering_defects(
+        key,
+        parquet,
+        geo,
+        sum(row_counts),
+        groups,
+        report_unreadable=not metrics_apply,
+        subject=subject,
+    )
+    defects.extend(row_defects)
     return defects
 
 
@@ -1586,6 +1586,78 @@ def _row_ordering_defects(
             key,
         )
     ]
+
+
+def _footer_proves_row_ordering(
+    parquet: Any,
+    geo: dict[str, Any],
+    bboxes: list[tuple[float, float, float, float]],
+    row_counts: list[int],
+) -> bool:
+    """Can row-group bounds prove that the synthetic row chunks pass?
+
+    Each synthetic chunk gets the union of every row group it intersects. That
+    box can be larger than the chunk's exact box, but never smaller. Passing
+    with these conservative boxes therefore proves that the exact boxes pass.
+
+    This shortcut requires a complete covering column. Native statistics do
+    not expose per-row null counts, and null rows change the synthetic chunk
+    boundaries after :func:`_row_bboxes` removes them.
+    """
+    covering_boxes = _covering_bboxes(parquet, geo)
+    if covering_boxes != bboxes or not _covering_has_no_nulls(parquet, geo):
+        return False
+    chunk_boxes = _conservative_chunk_bboxes(bboxes, row_counts)
+    return len(chunk_boxes) >= _MIN_ORDERING_ROW_GROUPS and _is_spatially_ordered(chunk_boxes)
+
+
+def _covering_has_no_nulls(parquet: Any, geo: dict[str, Any]) -> bool:
+    """Do all four covering leaves have known zero null counts?"""
+    primary = geo.get("primary_column")
+    columns = geo.get("columns")
+    if not isinstance(columns, dict):
+        return False
+    covering = columns.get(primary, {}).get("covering", {}).get("bbox")
+    if not isinstance(covering, dict):
+        return False
+    try:
+        paths = [".".join(covering[corner]) for corner in ("xmin", "ymin", "xmax", "ymax")]
+    except (KeyError, TypeError):
+        return False
+    meta = parquet.metadata
+    index = _column_index(meta)
+    if not all(path in index for path in paths):
+        return False
+    for i in range(meta.num_row_groups):
+        group = meta.row_group(i)
+        try:
+            if any(group.column(index[path]).statistics.null_count != 0 for path in paths):
+                return False
+        except AttributeError:
+            return False
+    return True
+
+
+def _conservative_chunk_bboxes(
+    bboxes: list[tuple[float, float, float, float]], row_counts: list[int]
+) -> list[tuple[float, float, float, float]]:
+    """Bound each synthetic row chunk with the row groups it intersects."""
+    rows = sum(row_counts)
+    if rows == 0:
+        return []
+    size = -(-rows // _ORDERING_CHUNKS)
+    group_ranges: list[tuple[int, int, tuple[float, float, float, float]]] = []
+    group_start = 0
+    for count, bbox in zip(row_counts, bboxes, strict=True):
+        group_ranges.append((group_start, group_start + count, bbox))
+        group_start += count
+    chunks = []
+    for start in range(0, rows, size):
+        end = min(start + size, rows)
+        intersecting = [bbox for left, right, bbox in group_ranges if left < end and right > start]
+        if intersecting:
+            chunks.append(_bbox_union(intersecting))
+    return chunks
 
 
 def _plural(n: int, noun: str) -> str:

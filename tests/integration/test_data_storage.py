@@ -148,6 +148,92 @@ def test_five_row_groups_ordered_is_clean(tmp_path: Path) -> None:
     assert _gpq(path) == []
 
 
+def test_many_row_groups_use_only_footer_for_ordering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Conservative footer bounds can prove the row-level check (#166)."""
+    path = tmp_path / "footer_only.parquet"
+    points = assets.hilbert_sorted(assets.scattered_points(6000))
+    assets.write_geoparquet(path, points=points, row_group_size=100)
+    parquet = pq.ParquetFile(path)
+    assert parquet.metadata.num_row_groups == 60
+
+    class _FooterOnlyParquet:
+        metadata = parquet.metadata
+        schema_arrow = parquet.schema_arrow
+
+        def read(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("PTL-DAT-006 read row data")
+
+    monkeypatch.setattr(checks.pq, "ParquetFile", lambda source: _FooterOnlyParquet())
+
+    assert _gpq(path) == []
+
+
+def test_footer_shortcut_reads_rows_when_covering_values_are_null(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NULL covering values make the conservative shortcut unavailable."""
+    path = tmp_path / "footer_with_nulls.parquet"
+    points = assets.hilbert_sorted(assets.scattered_points(6000))
+    assets.write_geoparquet(
+        path,
+        points=points,
+        row_group_size=100,
+        null_rows={5997, 5998, 5999},
+    )
+    parquet = pq.ParquetFile(path)
+    reads = 0
+
+    class _TrackedParquet:
+        metadata = parquet.metadata
+        schema_arrow = parquet.schema_arrow
+
+        def read(self, *args: object, **kwargs: object) -> object:
+            nonlocal reads
+            reads += 1
+            return parquet.read(*args, **kwargs)
+
+    monkeypatch.setattr(checks.pq, "ParquetFile", lambda source: _TrackedParquet())
+    assert _gpq(path) == []
+    assert reads == 1
+
+
+def test_footer_pass_does_not_mask_unordered_rows(tmp_path: Path) -> None:
+    """Disjoint row groups do not prove that rows inside them are ordered."""
+    groups = 5
+    rows_per_group = 1200
+    points = []
+    for group in range(groups):
+        offset = -90.0 if group % 2 == 0 else 90.0
+        points.extend(
+            (x * 4.0 / 9.0 + offset, y)
+            for x, y in assets.scattered_points(rows_per_group, seed=group)
+        )
+    path = tmp_path / "footer_false_positive.parquet"
+    assets.write_geoparquet(path, points=points, row_group_size=rows_per_group)
+    parquet = pq.ParquetFile(path)
+    geo = checks._geo_metadata(parquet) or {}
+    bboxes, _ = checks._rowgroup_stat_defects("data", parquet, geo)
+    assert bboxes is not None and checks._is_spatially_ordered(bboxes)
+
+    defects = _gpq(path)
+    assert [d.rule_id for d in defects] == [DAT_ORDERING]
+    assert defects[0].severity is Severity.ERROR
+
+
+def test_incomplete_covering_cannot_prove_zero_nulls() -> None:
+    incomplete = {
+        "primary_column": "geometry",
+        "columns": {"geometry": {"covering": {"bbox": {"xmin": ["bbox", "xmin"]}}}},
+    }
+    assert not checks._covering_has_no_nulls(object(), incomplete)
+
+
+def test_empty_row_groups_have_no_conservative_chunks() -> None:
+    assert checks._conservative_chunk_bboxes([], []) == []
+
+
 @pytest.mark.parametrize("groups", [5, 6, 7])
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_hilbert_sorted_rows_pass_where_the_criteria_apply(
