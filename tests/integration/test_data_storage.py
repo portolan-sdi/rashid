@@ -148,13 +148,15 @@ def test_five_row_groups_ordered_is_clean(tmp_path: Path) -> None:
     assert _gpq(path) == []
 
 
-def test_five_row_groups_use_only_footer_for_ordering(
+def test_many_row_groups_use_only_footer_for_ordering(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The footer settles PTL-DAT-006 without a covering-column read (#166)."""
+    """Conservative footer bounds can prove the row-level check (#166)."""
     path = tmp_path / "footer_only.parquet"
-    assets.write_geoparquet(path, points=assets.ordered_points(10))
+    points = assets.hilbert_sorted(assets.scattered_points(6000))
+    assets.write_geoparquet(path, points=points, row_group_size=100)
     parquet = pq.ParquetFile(path)
+    assert parquet.metadata.num_row_groups == 60
 
     class _FooterOnlyParquet:
         metadata = parquet.metadata
@@ -166,6 +168,29 @@ def test_five_row_groups_use_only_footer_for_ordering(
     monkeypatch.setattr(checks.pq, "ParquetFile", lambda source: _FooterOnlyParquet())
 
     assert _gpq(path) == []
+
+
+def test_footer_pass_does_not_mask_unordered_rows(tmp_path: Path) -> None:
+    """Disjoint row groups do not prove that rows inside them are ordered."""
+    groups = 5
+    rows_per_group = 1200
+    points = []
+    for group in range(groups):
+        offset = -90.0 if group % 2 == 0 else 90.0
+        points.extend(
+            (x * 4.0 / 9.0 + offset, y)
+            for x, y in assets.scattered_points(rows_per_group, seed=group)
+        )
+    path = tmp_path / "footer_false_positive.parquet"
+    assets.write_geoparquet(path, points=points, row_group_size=rows_per_group)
+    parquet = pq.ParquetFile(path)
+    geo = checks._geo_metadata(parquet) or {}
+    bboxes, _ = checks._rowgroup_stat_defects("data", parquet, geo)
+    assert bboxes is not None and checks._is_spatially_ordered(bboxes)
+
+    defects = _gpq(path)
+    assert [d.rule_id for d in defects] == [DAT_ORDERING]
+    assert defects[0].severity is Severity.ERROR
 
 
 @pytest.mark.parametrize("groups", [5, 6, 7])
