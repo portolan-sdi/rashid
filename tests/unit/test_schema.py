@@ -381,18 +381,14 @@ def test_unbundled_version_fetches_when_allowed(
     assert findings == []
 
 
-def test_root_self_link_splits_the_two_passes(catalog: CatalogBuilder) -> None:
-    """The metadata pass accepts a root self link. The v0.1.2 schema rejects it.
+def test_root_self_link_passes_both_passes(catalog: CatalogBuilder) -> None:
+    """Both passes accept a root self link.
 
     portolan-sdi/portolan-spec#160 retires PORTO-CORE-034 and recommends an
     absolute self link on a published root catalog (PORTO-CORE-081). The
-    released v0.1.2 profile schema still forbids one, and a released schema
-    never changes, so the edit belongs to the next version directory. The two
-    passes therefore disagree about the same file until that version lands.
-
-    This test pins the disagreement on purpose. It fails when the bundled
-    schema stops rejecting the link, and that failure is the signal to delete
-    it along with the note in the profile changelog.
+    metadata pass dropped the matching rules first, and the v0.2.0 profile
+    schema drops them too. The two passes agreed to disagree until that
+    version landed, and this test replaces the one that pinned the split.
     """
     root = catalog.write()
     mutate_json(
@@ -407,8 +403,6 @@ def test_root_self_link_splits_the_two_passes(catalog: CatalogBuilder) -> None:
     )
 
     report = validate(root, schema=True, data=False)
-
     errors = [f for f in report.findings if f.severity is Severity.ERROR]
-    assert [f.rule_id for f in errors] == ["PTL-SCH-001"]
-    assert errors[0].path == "catalog.json"
+    assert errors == [], errors
     assert _schema_uri_for(CatalogGraph.load(root)) == PORTOLAN_URI

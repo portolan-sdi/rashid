@@ -1,7 +1,7 @@
 {
   "$comment": "The Portolan STAC profile's extension registry (stac/README.md), vendored by scripts/vendor_spec_fixtures.py. Do not edit by hand.",
   "extensions": {
-    "Portolan": "https://schemas.portolan-sdi.org/portolan/v0.1.2/schema.json",
+    "Portolan": "https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json",
     "File Info": "https://stac-extensions.github.io/file/v2.1.0/schema.json",
     "Web Map Links": "https://stac-extensions.github.io/web-map-links/v1.3.0/schema.json",
     "Version": "https://stac-extensions.github.io/version/v1.2.0/schema.json",

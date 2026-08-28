@@ -52,7 +52,7 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
 }
 
 # The pinned v0.1 profile schema, used when the root declares no single URI.
-DEFAULT_SCHEMA_URI = "https://schemas.portolan-sdi.org/portolan/v0.1.2/schema.json"
+DEFAULT_SCHEMA_URI = "https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"
 
 # A validator maps one object's raw JSON to a list of schema errors;
 # an empty list means the object satisfies the Portolan profile schema.
