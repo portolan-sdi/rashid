@@ -42,7 +42,7 @@ def test_two_portolan_uris_on_one_object(catalog: CatalogBuilder) -> None:
             "stac_extensions",
             [
                 PORTOLAN_URI,
-                "https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json",
+                "https://schemas.portolan-sdi.org/portolan/v0.1.2/schema.json",
             ],
         ),
     )
@@ -70,14 +70,14 @@ def test_version_mismatch_with_root_is_warning(catalog: CatalogBuilder) -> None:
         root / "roads" / "collection.json",
         lambda d: d.__setitem__(
             "stac_extensions",
-            ["https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"],
+            ["https://schemas.portolan-sdi.org/portolan/v0.1.2/schema.json"],
         ),
     )
     report = validate(root)
     findings = findings_for(report, "PTL-CNF-002")
     assert len(findings) == 1
     assert findings[0].severity is Severity.WARNING
-    assert "v0.2.0" in findings[0].message
+    assert "v0.1.2" in findings[0].message
     assert report.passed  # a mixed-version catalog remains valid
 
 
@@ -212,7 +212,7 @@ def test_portolan_schema_uri_version_is_left_to_cnf_002(catalog: CatalogBuilder)
         root / "roads" / "collection.json",
         lambda d: d.__setitem__(
             "stac_extensions",
-            ["https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"],
+            ["https://schemas.portolan-sdi.org/portolan/v0.1.2/schema.json"],
         ),
     )
     report = validate(root)

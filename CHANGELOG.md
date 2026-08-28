@@ -1,3 +1,16 @@
+## v0.1.8 (2026-08-28)
+
+### Feat
+
+- **schema**: bundle the portolan-spec v0.2.0 profile schema
+- **rules**: drop PTL-LNK-004 and resolve absolute links through the root self base
+- **rules**: drop PTL-LNK-005, the self-link rule
+
+### Fix
+
+- **data**: read PTL-DAT-006 from GeoParquet footers (#167)
+- **rules**: replace an assert with a guard for the bandit gate
+
 ## v0.1.7 (2026-08-20)
 
 ### Feat
