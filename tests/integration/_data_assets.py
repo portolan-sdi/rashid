@@ -36,19 +36,22 @@ def ordered_points(n: int = 6) -> list[tuple[float, float]]:
 
 
 def interleaved_points(n: int = 10) -> list[tuple[float, float]]:
-    """Each consecutive pair spans the whole extent, so row groups overlap.
+    """Each consecutive pair spans the whole extent, so no row group can be skipped.
 
     Ten points at the default ``row_group_size`` of 2 give five row groups,
     which is where PORTO-FMT-006's tests start applying (formats.md:41). A
     shorter file is exempt, so a test that wants an ordering finding needs at
     least this many rows.
+
+    Every pair is corner-to-corner, so every row-group box IS the file extent —
+    which is what an unsorted file looks like, and leaves a reader nothing to
+    prune. An earlier version inset each pair by a growing margin, which made the
+    boxes concentric rather than co-extensive: nested boxes still let a reader
+    skip the inner ones, so that shape prunes at about half the achievable rate
+    and no longer reads as unordered under formats.md:38.
     """
     minx, miny, maxx, maxy = BBOX
-    points = []
-    for i in range(n):
-        inset = 0.2 * (i // 2)
-        points.append((minx + inset, miny + inset) if i % 2 == 0 else (maxx - inset, maxy - inset))
-    return points
+    return [(minx, miny) if i % 2 == 0 else (maxx, maxy) for i in range(n)]
 
 
 def scattered_points(n: int, seed: int = 0) -> list[tuple[float, float]]:

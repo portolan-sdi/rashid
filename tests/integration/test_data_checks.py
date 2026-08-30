@@ -494,16 +494,35 @@ def test_spatial_ordering_needs_a_skippable_layout() -> None:
     assert not checks._is_spatially_ordered(spanning)
 
 
-def test_spatial_ordering_holds_the_flat_locality_limit() -> None:
-    # Five overlapping row groups whose boxes average 35% of the extent, clear of
-    # the 27% a Hilbert sort reaches at this count. The limit is formats.md's flat
-    # 30% with no relaxation for low group counts, since PORTO-FMT-044 exempts a
-    # thin file outright rather than judging it against a softened threshold.
+def test_overlapping_strips_prune_and_are_ordered() -> None:
+    # Five overlapping vertical strips, each 35% of the extent: an x-sorted
+    # layout. The old flat 30% area limit failed it, but a reader querying a
+    # window can still skip most of the strips, which is what formats.md:38 now
+    # measures. Ordering that prunes is ordering.
     wide = [(1.625 * i, 0.0, 1.625 * i + 3.5, 10.0) for i in range(5)]
-    extent = checks._bbox_union(wide)
-    ratio = sum(checks._bbox_area(b) for b in wide) / len(wide) / checks._bbox_area(extent)
-    assert ratio == pytest.approx(0.35)
-    assert not checks._is_spatially_ordered(wide)
+    assert checks._is_spatially_ordered(wide)
+
+
+def test_spatial_ordering_fails_below_half_the_achievable_rate() -> None:
+    # Five boxes that each span the extent: nothing can be skipped, so the
+    # achieved rate is 0% of what five row groups allow (formats.md:38).
+    spanning = [(0.0, 0.0, 10.0, 10.0)] * 5
+    assert not checks._is_spatially_ordered(spanning)
+
+
+def test_spatial_ordering_ignores_consecutive_overlap() -> None:
+    # PORTO-FMT-049: a perfect grid tiling padded so neighbours touch. Every
+    # consecutive pair overlaps, which the retired criterion faulted, but the
+    # layout prunes as well as nine row groups allow.
+    grid = checks._ideal_grid_boxes((0.0, 0.0, 9.0, 9.0), 9)
+    touching = [(a - 0.05, b - 0.05, c + 0.05, d + 0.05) for a, b, c, d in grid]
+    pairs = len(touching) - 1
+    overlaps = sum(checks._bbox_overlaps(touching[i], touching[i + 1]) for i in range(pairs))
+    # Well over the 30% the retired criterion allowed; not all 8, because the
+    # pair that wraps from the end of one grid row to the start of the next are
+    # diagonal neighbours rather than adjacent.
+    assert overlaps / pairs > 0.30, "fixture must trip the retired overlap criterion"
+    assert checks._is_spatially_ordered(touching)
 
 
 def test_spatial_ordering_zero_extent_is_ordered() -> None:

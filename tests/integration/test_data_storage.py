@@ -200,14 +200,30 @@ def test_footer_shortcut_reads_rows_when_covering_values_are_null(
 
 
 def test_footer_pass_does_not_mask_unordered_rows(tmp_path: Path) -> None:
-    """Disjoint row groups do not prove that rows inside them are ordered."""
-    groups = 5
-    rows_per_group = 1200
+    """Tight row groups do not prove that rows inside them are ordered.
+
+    More row groups than ``_ORDERING_CHUNKS``, each one a tight cluster, so the
+    footer check passes on the row groups the file actually has. The clusters
+    alternate between two far-apart longitudes, so every synthetic row chunk
+    straddles two of them and spans half the world -- which is the row rule's
+    question, and a different one.
+    """
+    groups = 20
+    rows_per_group = 300
+
+    # Twenty tight clusters tiling a 5x4 grid, visited in an order that alternates
+    # between opposite ends of that grid. Each row group is therefore a small box
+    # (the footer check passes), while each synthetic row chunk joins two clusters
+    # from opposite corners and spans most of the extent (the row rule does not).
+    def cell(k: int) -> tuple[float, float]:
+        return (k % 5) * 40.0 - 80.0, (k // 5) * 30.0 - 45.0
+
+    order = [(i // 2) if i % 2 == 0 else (groups - 1 - i // 2) for i in range(groups)]
     points = []
-    for group in range(groups):
-        offset = -90.0 if group % 2 == 0 else 90.0
+    for group, k in enumerate(order):
+        cx, cy = cell(k)
         points.extend(
-            (x * 4.0 / 9.0 + offset, y)
+            (x * 2.0 / 9.0 + cx, y * 2.0 / 9.0 + cy)
             for x, y in assets.scattered_points(rows_per_group, seed=group)
         )
     path = tmp_path / "footer_false_positive.parquet"
