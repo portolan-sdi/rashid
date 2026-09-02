@@ -5,7 +5,7 @@
 [![CI](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml/badge.svg)](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-rashid checks whether a [Portolan](https://www.portolan-sdi.org/) catalog follows the standard.
+rashid checks whether a [Portolan](https://www.portolan-sdi.org/) catalog follows the specification.
 
 Give it a catalog directory or its root `catalog.json`. rashid checks the metadata, structure, and asset bytes. It reports each problem with a stable rule ID.
 
@@ -105,7 +105,7 @@ The public `rashid.api` module also provides helpers for tools that repair catal
 
 - [Rule reference](docs/rules.md) describes every validation pass, rule group, and degraded-pass code.
 - [Contributing guide](docs/contributing.md) covers development setup, tests, and repository checks.
-- [Portolan specification](https://github.com/portolan-sdi/portolan-spec) defines the standard that rashid implements.
+- [Portolan specification](https://github.com/portolan-sdi/portolan-spec) defines the requirements that rashid implements.
 
 ## License
 
