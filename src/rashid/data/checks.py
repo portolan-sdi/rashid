@@ -66,6 +66,7 @@ import hashlib
 import json
 import math
 import posixpath
+import random
 import re
 import struct
 from collections.abc import Iterator
@@ -139,20 +140,37 @@ _DENSIFY_PTS = 21
 # formats.md:75 — a GeoParquet row group MUST hold no more than this many rows.
 _MAX_ROW_GROUP_ROWS = 150_000
 
-# formats.md:38 — spatial ordering passes on either criterion.
-_MAX_OVERLAP_FRACTION = 0.30  # < 30% of consecutive row-group pairs may overlap
-# Row-group boxes average < 30% of the file extent. formats.md sets the figure from
-# what a Hilbert sort achieves: boxes land near 27% of the extent at five row groups
-# and fall away as groups are added. A flat 25% rejected well-sorted five- and
-# six-group files for their row-group count rather than their ordering.
+# formats.md:38 — the footer check estimates how many row groups a query window
+# covering _QUERY_FRACTION of each dimension lets a reader skip, and compares that
+# against an ideal grid tiling of the extent into the same number of row groups. A
+# file passes at half the achievable rate.
+_QUERY_FRACTION = 0.10
+_QUERY_SAMPLES = 20
+_QUERY_SEED = 42
+# 0.70 is placed from real data: across 206 files with five or more row groups from
+# every catalog in the Portolan registry, one genuinely unsorted file scored 0.00,
+# eight under-sorted files fell between 0.53 and 0.70, and the remaining 197 ran
+# from 0.72 up with a median of 0.98. Every file in that band reached 0.87-0.97
+# after a spatial sort, so the bar separates files a re-sort would measurably
+# improve from files already as good as their row-group count allows.
+_MIN_SKIP_EFFICIENCY = 0.70
+
+# The row rule keeps a flat limit on how much of the extent a chunk's box covers.
+# Its reference never moves — the rows are always split into _ORDERING_CHUNKS
+# groups, so perfect tiling is always about 1/10 of the extent — which is why a
+# flat figure is principled here and a relative one is needed for the footer
+# check, whose row-group count varies. Measured over ten chunks: Hilbert-sorted
+# clustered data averages 0.20 of the extent, x-only sorted 0.10 and a sorted
+# coastline 0.13, while rows scattered within two far-apart bands average 0.45
+# and globally unsorted rows 1.00. The limit sits in that gap.
 _MAX_LOCALITY_RATIO = 0.30
 
-# formats.md:55 — both checks measure a percentage across the row groups, and with
-# fewer than five groups that percentage cannot land on a useful value. Three groups
-# can only produce an overlap of 0%, 50%, or 100%, and two or three boxes cannot
-# average less than 30% of the extent however well the rows are sorted. PORTO-FMT-044
-# forbids failing a file on a threshold its row-group count puts out of reach, so
-# below five groups neither check runs.
+# formats.md:56 — below five row groups the grid reference is unreliable rather than
+# the threshold unreachable. Measured on Hilbert-sorted clustered data, a perfectly
+# sorted file reaches as little as 11% of the grid's rate at two row groups and 30%
+# at three, because a grid of two or three cells is a poor model of what a sort can
+# achieve on clustered data. PORTO-FMT-044 forbids failing a file on a threshold its
+# row-group count puts out of reach, so below five groups the check does not run.
 _MIN_ORDERING_ROW_GROUPS = 5
 
 # Row ordering is a separate rule that applies to every file, whatever its row-group
@@ -1574,7 +1592,7 @@ def _row_ordering_defects(
                 key,
             )
         ]
-    if _is_spatially_ordered(_chunked_bboxes(row_boxes)):
+    if _rows_are_locally_grouped(_chunked_bboxes(row_boxes)):
         return []
     return [
         DataDefect(
@@ -1608,7 +1626,10 @@ def _footer_proves_row_ordering(
     if covering_boxes != bboxes or not _covering_has_no_nulls(parquet, geo):
         return False
     chunk_boxes = _conservative_chunk_bboxes(bboxes, row_counts)
-    return len(chunk_boxes) >= _MIN_ORDERING_ROW_GROUPS and _is_spatially_ordered(chunk_boxes)
+    # The row rule's own predicate, not the footer's: this shortcut exists to
+    # settle the ROW check without reading rows, so it has to prove the thing
+    # that check would have asked.
+    return len(chunk_boxes) >= _MIN_ORDERING_ROW_GROUPS and _rows_are_locally_grouped(chunk_boxes)
 
 
 def _covering_has_no_nulls(parquet: Any, geo: dict[str, Any]) -> bool:
@@ -1724,25 +1745,107 @@ def _row_bboxes(
     return boxes or None
 
 
-def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bool:
-    """True if row groups are spatially ordered by either spec criterion (formats.md:38).
+def _ideal_grid_boxes(
+    extent: tuple[float, float, float, float], count: int
+) -> list[tuple[float, float, float, float]]:
+    """The best layout this box count allows: a near-square tiling of the extent.
 
-    Callers must hold the applicability guard themselves. Below
-    ``_MIN_ORDERING_ROW_GROUPS`` the two criteria say nothing, so a file that
-    thin is either left alone or measured over its rows instead; see
-    :func:`_check_geoparquet` and :func:`_row_ordering_defects`.
+    The reference the actual layout is judged against, so that "ordered" means
+    "as good as this row-group count allows" rather than a fixed figure that only
+    holds at one count. A grid is what a perfect space-filling-curve sort
+    converges to, and it is generous towards clustered data, which cannot tile
+    evenly — hence a threshold of half the achievable rate rather than all of it.
     """
-    pairs = len(bboxes) - 1
-    overlaps = sum(_bbox_overlaps(bboxes[i], bboxes[i + 1]) for i in range(pairs))
-    if overlaps / pairs < _MAX_OVERLAP_FRACTION:
-        return True  # low overlap
+    if count <= 0:
+        return []
+    cols = math.ceil(math.sqrt(count))
+    rows = math.ceil(count / cols)
+    width = (extent[2] - extent[0]) / cols
+    height = (extent[3] - extent[1]) / rows
+    boxes = []
+    for i in range(count):
+        row, col = divmod(i, cols)
+        boxes.append(
+            (
+                extent[0] + col * width,
+                extent[1] + row * height,
+                extent[0] + (col + 1) * width,
+                extent[1] + (row + 1) * height,
+            )
+        )
+    return boxes
 
+
+def _mean_skip_rate(
+    boxes: list[tuple[float, float, float, float]],
+    windows: list[tuple[float, float, float, float]],
+) -> float:
+    """Mean fraction of boxes a reader can skip across the sample query windows."""
+    if not boxes:
+        return 0.0
+    return sum(
+        sum(1 for b in boxes if not _bbox_overlaps(w, b)) / len(boxes) for w in windows
+    ) / len(windows)
+
+
+def _sample_windows(
+    extent: tuple[float, float, float, float],
+) -> list[tuple[float, float, float, float]]:
+    """Reproducible query windows spanning ``_QUERY_FRACTION`` of each dimension."""
+    rng = random.Random(_QUERY_SEED)  # noqa: S311  # nosec B311 - sampling, not security
+    width = (extent[2] - extent[0]) * _QUERY_FRACTION
+    height = (extent[3] - extent[1]) * _QUERY_FRACTION
+    windows = []
+    for _ in range(_QUERY_SAMPLES):
+        x = rng.uniform(extent[0], extent[2] - width)  # noqa: S311
+        y = rng.uniform(extent[1], extent[3] - height)  # noqa: S311
+        windows.append((x, y, x + width, y + height))
+    return windows
+
+
+def _rows_are_locally_grouped(bboxes: list[tuple[float, float, float, float]]) -> bool:
+    """True if each synthetic row chunk covers a small part of the extent.
+
+    The row rule (formats.md:30) asks whether nearby features are nearby in the
+    file, which is not the same question as whether a reader can skip row groups.
+    Rows scattered within two far-apart bands still let a reader skip half the
+    file, so a pruning test passes them; their chunk boxes each span half the
+    extent, so this one does not.
+
+    A flat limit is right here because :data:`_ORDERING_CHUNKS` is constant: the
+    rows are always split the same number of ways, so the reference never moves.
+    """
     extent = _bbox_union(bboxes)
     extent_area = _bbox_area(extent)
     if extent_area == 0:
         return True  # a single location — nothing to order
     mean_ratio = sum(_bbox_area(b) for b in bboxes) / len(bboxes) / extent_area
     return mean_ratio < _MAX_LOCALITY_RATIO
+
+
+def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bool:
+    """True if this layout prunes as well as its box count allows (formats.md:38).
+
+    The footer check. Callers must hold the applicability guard themselves; with
+    a single box there is nothing to skip past.
+
+    Deliberately not the fraction of consecutive pairs that overlap
+    (PORTO-FMT-049): row groups produced by a space-filling-curve sort are
+    spatially adjacent by construction, so their boxes touch. For perfectly tiled
+    data that fraction runs about 0.75 at thirteen boxes, 0.88 at fifty-nine and
+    0.96 at five hundred and eighty-nine — it is near 1.0 for the best possible
+    file, and cannot separate boxes that each span the extent from boxes that
+    tile it.
+    """
+    extent = _bbox_union(bboxes)
+    if _bbox_area(extent) == 0:
+        return True  # a single location — nothing to order
+
+    windows = _sample_windows(extent)
+    achievable = _mean_skip_rate(_ideal_grid_boxes(extent, len(bboxes)), windows)
+    if achievable <= 0:
+        return True  # no layout could skip anything here — nothing to fall short of
+    return _mean_skip_rate(bboxes, windows) / achievable >= _MIN_SKIP_EFFICIENCY
 
 
 def _bbox_area(b: tuple[float, float, float, float]) -> float:
