@@ -153,6 +153,9 @@ _QUERY_FRACTION = 0.10
 # after a spatial sort, so the bar separates files a re-sort would measurably
 # improve from files already as good as their row-group count allows.
 _MIN_SKIP_EFFICIENCY = 0.70
+# A reference skip rate at or under this is zero: one row group, a window as
+# large as the extent, or an extent with no area. Float noise, not a layout.
+_NO_SKIP = 1e-9
 
 # formats.md:56 — below eight row groups the grid reference is unreliable rather
 # than the bar unreachable: a grid of so few cells is a poor model of what a curve
@@ -1763,7 +1766,9 @@ def _axis_hit_probability(low: float, high: float, start: float, stop: float, si
     span = stop - start - size
     if span <= 0:
         return 1.0
-    return max(0.0, min(high, stop - size) - max(low - size, start)) / span
+    overlap = min(high, stop - size) - max(low - size, start)
+    # Clamped: a box spanning the extent evaluates to 1 up to an ulp either way.
+    return min(1.0, max(0.0, overlap / span))
 
 
 def _mean_skip_rate(
@@ -1790,7 +1795,7 @@ def _mean_skip_rate(
         * _axis_hit_probability(b[1], b[3], extent[1], extent[3], height)
         for b in boxes
     )
-    return 1.0 - hits / len(boxes)
+    return max(0.0, 1.0 - hits / len(boxes))
 
 
 @dataclass(frozen=True)
@@ -1815,8 +1820,12 @@ class _PruningScore:
     @property
     def efficiency(self) -> float | None:
         """``achieved / achievable``, clipped at 1.0 since clustered data can
-        beat the grid; ``None`` where no layout could skip anything."""
-        if self.achievable <= 0.0:
+        beat the grid; ``None`` where no layout could skip anything.
+
+        The tolerance absorbs the ulp a box-equals-extent hit probability can
+        carry, so one row group is undefined here as it is in gpio.
+        """
+        if self.achievable <= _NO_SKIP:
             return None
         return min(1.0, self.achieved / self.achievable)
 
