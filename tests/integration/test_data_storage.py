@@ -333,6 +333,20 @@ def test_a_row_without_a_box_stays_in_its_chunk() -> None:
     assert chunks[9] == (18.0, 0.0, 18.0, 1.0)
 
 
+def test_a_whole_chunk_of_null_boxes_is_left_out_and_said_so(tmp_path: Path) -> None:
+    """Chunk 2 of ten holds only geometry-less rows: nine boxes, a nine-cell
+    reference, and the message says how many chunks carried a box."""
+    points = assets.scattered_points(2000)
+    path = tmp_path / "chunk_of_nulls.parquet"
+    assets.write_geoparquet(
+        path, points=points, row_group_size=len(points), null_rows=set(range(400, 600))
+    )
+    defects = _gpq(path)
+    assert [d.severity for d in defects] == [Severity.ERROR]
+    assert "split into 10 chunks in file order, 9 of which carry a box" in defects[0].message
+    assert "of the 9 chunks against 0.83 for an ideal tiling" in defects[0].message
+
+
 def test_a_chunk_with_no_boxed_row_contributes_no_box() -> None:
     boxes: list = [(float(i), 0.0, float(i), 1.0) for i in range(20)]
     boxes[4] = boxes[5] = None

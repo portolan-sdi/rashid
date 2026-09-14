@@ -10,6 +10,7 @@ checks are exercised end-to-end in ``test_data_catalog``.
 from __future__ import annotations
 
 import hashlib
+import json
 import struct
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -1006,3 +1007,59 @@ def test_bbox_agreement() -> None:
 def test_bbox_agreement_drops_the_z_ordinates() -> None:
     item = _mirror_item(bbox=[4.0, 50.0, 0.0, 6.0, 52.0, 100.0])
     assert checks._bbox_agrees(item, [4.0, 50.0, 6.0, 52.0])
+
+
+# --- the shared test vectors -------------------------------------------------
+
+_VECTORS = json.loads(
+    (
+        Path(__file__).resolve().parent.parent / "fixtures" / "spatial-metric-vectors.json"
+    ).read_text()
+)
+
+
+def _assert_expected(score: checks._PruningScore, expected: dict) -> None:
+    assert score.count == expected["count"]
+    assert score.achieved == pytest.approx(expected["achieved"], abs=1e-6)
+    assert score.achievable == pytest.approx(expected["achievable"], abs=1e-6)
+    if expected["efficiency"] is None:
+        assert score.efficiency is None
+    else:
+        assert score.efficiency == pytest.approx(expected["efficiency"], abs=1e-6)
+    if expected["area_sum"] is None:
+        assert score.area_sum is None  # 0/0 on a zero-area extent: undefined, never 0.0
+    else:
+        assert score.area_sum == pytest.approx(expected["area_sum"], abs=1e-6)
+    assert score.below_bar is expected["below_bar"]
+
+
+@pytest.mark.parametrize("name", sorted(_VECTORS["layouts"]))
+def test_shared_layout_vectors(name: str) -> None:
+    """The vectors gpio#774 pins too, so the two tools cannot drift apart."""
+    vector = _VECTORS["layouts"][name]
+    _assert_expected(checks._pruning_score([tuple(b) for b in vector["boxes"]]), vector["expected"])
+
+
+@pytest.mark.parametrize("name", sorted(_VECTORS["rows"]))
+def test_shared_row_vectors(name: str) -> None:
+    vector = _VECTORS["rows"][name]
+    chunks = checks._chunked_bboxes([tuple(b) if b is not None else None for b in vector["boxes"]])
+    assert [list(c) for c in chunks] == vector["expected_chunks"]
+    _assert_expected(checks._pruning_score(chunks), vector["expected"])
+
+
+def test_an_unboxed_chunk_shrinks_the_reference() -> None:
+    """n is the number of chunks that carry a box (PORTO-FMT-006's test, spec 2555a86).
+
+    Twenty-three rows whose chunks 2 and 5 hold only null boxes: eight chunk
+    boxes are scored against the eight-cell grid, not the ten-cell one.
+    """
+    rows: list = [(float(i), 0.0, float(i) + 1.0, 1.0) for i in range(23)]
+    for i in (4, 5, 11, 12):
+        rows[i] = None
+    chunks = checks._chunked_bboxes(rows)
+    assert len(chunks) == 8
+    score = checks._pruning_score(chunks)
+    extent = checks._bbox_union(chunks)
+    assert score.achievable == checks._mean_skip_rate(checks._ideal_grid_boxes(extent, 8), extent)
+    assert score.achievable != checks._mean_skip_rate(checks._ideal_grid_boxes(extent, 10), extent)

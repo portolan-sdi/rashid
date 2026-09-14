@@ -82,8 +82,9 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     # not judged, and the rows are measured in file-order chunks (FMT-006's
     # abstract test) instead, rather than faulted on a threshold their row-group
     # count cannot express. FMT-051 puts the area sum beside every verdict,
-    # FMT-052 makes a file under the row floor an INFO rather than silence, and
-    # FMT-049 keeps consecutive-pair overlap out of the verdict.
+    # FMT-052 makes a file under the row floor an INFO rather than silence,
+    # FMT-053 pins the reference to the near-square grid, and FMT-049 keeps
+    # consecutive-pair overlap out of the verdict.
     DAT_ORDERING: (
         "PORTO-FMT-006",
         "PORTO-FMT-043",
@@ -93,6 +94,7 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
         "PORTO-FMT-050",
         "PORTO-FMT-051",
         "PORTO-FMT-052",
+        "PORTO-FMT-053",
     ),
     # ERROR when neither statistics source exists; WARNING when a 2.x file
     # relies on native statistics without the RECOMMENDED covering column.

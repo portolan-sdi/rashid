@@ -1605,14 +1605,18 @@ def _row_ordering_defects(
     score = _pruning_score(chunks)
     if not score.below_bar:
         return []
+    # n is the number of chunks that carry a box (PORTO-FMT-006's test), so the
+    # reference shrinks with them rather than staying at ten cells.
+    split = f"split into {_ORDERING_CHUNKS} chunks in file order"
+    if len(chunks) < _ORDERING_CHUNKS:
+        split += f", {len(chunks)} of which carry a box"
     summary = _pruning_summary(score, f"the {_plural(len(chunks), 'chunk')}", judged=True)
     return [
         DataDefect(
             DAT_ORDERING,
             Severity.ERROR,
             f"{subject} rows are not spatially ordered: {rows} rows in "
-            f"{_plural(groups, 'row group')}, split into {_plural(len(chunks), 'chunk')} in "
-            f"file order, {summary}",
+            f"{_plural(groups, 'row group')}, {split}, {summary}",
             key,
         )
     ]
@@ -1650,8 +1654,8 @@ def _chunked_bboxes(
     every implementation splits an ``N`` not divisible by ten the same way
     (``numpy.array_split`` does not). A row without a box stays in its chunk
     and does not extend the box. A chunk with no boxed row at all contributes
-    no box, which the spec leaves open; it takes a file whose geometry-less
-    rows run for a tenth of it.
+    no box and is left out: ``n`` is then the number of chunks that carry a
+    box, and the reference shrinks to match (spec at 2555a86).
     """
     total = len(row_boxes)
     chunks = []
