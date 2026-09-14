@@ -1834,10 +1834,17 @@ class _PruningScore:
         return min(1.0, self.achieved / self.achievable)
 
     @property
-    def below_bar(self) -> bool:
-        """The verdict. An undefined efficiency is no verdict, not a failure."""
+    def below_bar(self) -> bool | None:
+        """The verdict, or ``None`` where there is none.
+
+        An undefined efficiency is no verdict, not a failure and not a pass: a
+        reader that took ``False`` for "pass" would print one for a layout the
+        spec does not judge (PORTO-FMT-054's vectors pin ``null``).
+        """
         efficiency = self.efficiency
-        return efficiency is not None and efficiency < _MIN_SKIP_EFFICIENCY
+        if efficiency is None:
+            return None
+        return efficiency < _MIN_SKIP_EFFICIENCY
 
 
 def _pruning_score(

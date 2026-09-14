@@ -543,7 +543,7 @@ def test_spatial_ordering_zero_extent_is_not_judged() -> None:
     score = checks._pruning_score([(1.0, 1.0, 1.0, 1.0), (1.0, 1.0, 1.0, 1.0)])
     assert score.efficiency is None
     assert score.area_sum is None
-    assert not score.below_bar
+    assert score.below_bar is None  # no verdict: neither a failure nor a pass
 
 
 # --- the shared metric's cross-checks (spec#188, rashid#174, gpio#774) ------
@@ -629,12 +629,12 @@ def test_degenerate_layouts_have_a_defined_score() -> None:
     single = checks._pruning_score([_UNIT])
     assert single.achievable == 0.0
     assert single.efficiency is None
-    assert not single.below_bar
+    assert single.below_bar is None
 
     whole_extent_window = checks._pruning_score(checks._ideal_grid_boxes(_UNIT, 8), fraction=1.0)
     assert whole_extent_window.achieved == 0.0
     assert whole_extent_window.efficiency is None
-    assert not whole_extent_window.below_bar
+    assert whole_extent_window.below_bar is None
 
 
 def test_empty_layouts_have_nothing_to_skip() -> None:
@@ -1035,7 +1035,8 @@ def _assert_expected(score: checks._PruningScore, expected: dict) -> None:
 
 @pytest.mark.parametrize("name", sorted(_VECTORS["layouts"]))
 def test_shared_layout_vectors(name: str) -> None:
-    """The vectors gpio#774 pins too, so the two tools cannot drift apart."""
+    """PORTO-FMT-054: the spec's abstract test vectors, vendored verbatim from
+    specs/portolan/abstract-tests/spatial-metric-vectors.json."""
     vector = _VECTORS["layouts"][name]
     _assert_expected(checks._pruning_score([tuple(b) for b in vector["boxes"]]), vector["expected"])
 

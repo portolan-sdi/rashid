@@ -1,11 +1,13 @@
 {
  "_comment": [
-  "Shared test vectors for the spatial-ordering metric of portolan-spec#188 (formats.md at 2555a86).",
-  "rashid#174 and geoparquet-io#774 both pin these. Boxes are [xmin, ymin, xmax, ymax]; query fraction 0.10.",
-  "Representation: efficiency is null when the reference skip rate is zero (one box, a zero-area extent,",
-  "a window as large as the extent); area_sum is null when the extent has no area (0/0), never 0.0.",
-  "'layouts' score a set of boxes directly. 'rows' hold per-row boxes in file order, null for a row without",
-  "a bbox covering; they are split into ten chunks by floor(k*N/10) and scored with n = chunks that carry a box."
+  "Abstract test vectors for the pruning-efficiency metric in specs/portolan/formats.md (GeoParquet, Pruning efficiency).",
+  "PORTO-FMT-054: a validator MUST reproduce every expected value here. rashid and geoparquet-io vendor this file verbatim.",
+  "Boxes are [xmin, ymin, xmax, ymax]; query fraction 0.10; bar 0.70. Values are rounded to six decimals.",
+  "efficiency is null when the reference skip rate is zero (n = 1, or an extent with no width and no height).",
+  "area_sum is null when the extent has no area (0/0), never 0.0. below_bar is null wherever efficiency is null.",
+  "'layouts' score a set of boxes directly. 'rows' hold per-row boxes in file order, null for a row without a bbox covering;",
+  "they are split into ten chunks by floor(k*N/10) <= i < floor((k+1)*N/10), a null row does not extend its chunk's box,",
+  "a chunk with no boxed rows contributes no box, and n is the number of chunks that carry a box (expected_chunks lists them)."
  ],
  "layouts": {
   "uniform-hilbert-n13": {
@@ -455,7 +457,7 @@
     "achievable": 0.0,
     "efficiency": null,
     "area_sum": 1.0,
-    "below_bar": false
+    "below_bar": null
    }
   }
  },
