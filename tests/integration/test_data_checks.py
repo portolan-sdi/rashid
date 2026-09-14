@@ -10,6 +10,7 @@ checks are exercised end-to-end in ``test_data_catalog``.
 from __future__ import annotations
 
 import hashlib
+import json
 import struct
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -466,48 +467,194 @@ def test_consistency_unreadable_is_info() -> None:
     assert defects[0].severity is Severity.INFO
 
 
+_UNIT = (0.0, 0.0, 1.0, 1.0)
+
+
 def test_spatial_ordering_low_overlap() -> None:
     disjoint = [(0.0, 0.0, 1.0, 1.0), (2.0, 2.0, 3.0, 3.0), (4.0, 4.0, 5.0, 5.0)]
-    assert checks._is_spatially_ordered(disjoint)
+    assert not checks._pruning_score(disjoint).below_bar
 
 
 def test_spatial_ordering_high_overlap_fails() -> None:
     piled = [(0.0, 0.0, 5.0, 5.0)] * 4
-    assert not checks._is_spatially_ordered(piled)
+    assert checks._pruning_score(piled).below_bar
 
 
 def test_spatial_ordering_high_locality_despite_overlap() -> None:
     # Every consecutive pair overlaps (low-overlap fails), but each box is a small
-    # fraction of the extent, so the locality criterion carries the ordering.
+    # fraction of the extent, so a query window skips most of them.
     boxes = [(float(i), 0.0, float(i) + 2.0, 1.0) for i in range(10)]
     assert not all(  # sanity: neighbours really do overlap
         not checks._bbox_overlaps(boxes[i], boxes[i + 1]) for i in range(len(boxes) - 1)
     )
-    assert checks._is_spatially_ordered(boxes)
+    assert not checks._pruning_score(boxes).below_bar
 
 
 def test_spatial_ordering_needs_a_skippable_layout() -> None:
     # Row groups that all but span the extent. Every consecutive pair overlaps,
     # and each box covers nearly the whole extent, so a reader skips none of
-    # them and neither criterion carries the file.
+    # them.
     spanning = [(0.0, 0.0, 10.0, 10.0)] + [(0.05 * i, 0.05 * i, 10.0, 10.0) for i in range(1, 5)]
-    assert not checks._is_spatially_ordered(spanning)
+    assert checks._pruning_score(spanning).below_bar
 
 
-def test_spatial_ordering_holds_the_flat_locality_limit() -> None:
-    # Five overlapping row groups whose boxes average 35% of the extent, clear of
-    # the 27% a Hilbert sort reaches at this count. The limit is formats.md's flat
-    # 30% with no relaxation for low group counts, since PORTO-FMT-044 exempts a
-    # thin file outright rather than judging it against a softened threshold.
+def test_overlapping_strips_prune_and_are_ordered() -> None:
+    # Five overlapping vertical strips, each 35% of the extent: an x-sorted
+    # layout. The old flat 30% area limit failed it, but a reader querying a
+    # window can still skip most of the strips, which is what formats.md:38 now
+    # measures. Ordering that prunes is ordering. Against the full-tiling
+    # reference the strips sit close to the bar: skip 0.544 of 0.741 achievable.
     wide = [(1.625 * i, 0.0, 1.625 * i + 3.5, 10.0) for i in range(5)]
-    extent = checks._bbox_union(wide)
-    ratio = sum(checks._bbox_area(b) for b in wide) / len(wide) / checks._bbox_area(extent)
-    assert ratio == pytest.approx(0.35)
-    assert not checks._is_spatially_ordered(wide)
+    score = checks._pruning_score(wide)
+    assert score.achieved == pytest.approx(0.544, abs=0.001)
+    assert score.achievable == pytest.approx(0.741, abs=0.001)
+    assert score.efficiency == pytest.approx(0.735, abs=0.001)
+    assert not score.below_bar
 
 
-def test_spatial_ordering_zero_extent_is_ordered() -> None:
-    assert checks._is_spatially_ordered([(1.0, 1.0, 1.0, 1.0), (1.0, 1.0, 1.0, 1.0)])
+def test_spatial_ordering_fails_below_the_bar() -> None:
+    # Five boxes that each span the extent: nothing can be skipped, so the
+    # achieved rate is 0% of what five row groups allow (formats.md:38).
+    spanning = [(0.0, 0.0, 10.0, 10.0)] * 5
+    score = checks._pruning_score(spanning)
+    assert score.efficiency == 0.0
+    assert score.below_bar
+
+
+def test_spatial_ordering_ignores_consecutive_overlap() -> None:
+    # PORTO-FMT-049: a perfect grid tiling padded so neighbours touch. Every
+    # consecutive pair overlaps, which the retired criterion faulted, but the
+    # layout prunes as well as nine row groups allow.
+    grid = checks._ideal_grid_boxes((0.0, 0.0, 9.0, 9.0), 9)
+    touching = [(a - 0.05, b - 0.05, c + 0.05, d + 0.05) for a, b, c, d in grid]
+    pairs = len(touching) - 1
+    overlaps = sum(checks._bbox_overlaps(touching[i], touching[i + 1]) for i in range(pairs))
+    # Well over the 30% the retired criterion allowed; not all 8, because the
+    # pair that wraps from the end of one grid row to the start of the next are
+    # diagonal neighbours rather than adjacent.
+    assert overlaps / pairs > 0.30, "fixture must trip the retired overlap criterion"
+    assert not checks._pruning_score(touching).below_bar
+
+
+def test_spatial_ordering_zero_extent_is_not_judged() -> None:
+    # Both axes degenerate: every window hits every box, nothing could be
+    # skipped by any layout, so the efficiency is undefined and there is no
+    # verdict rather than a failure.
+    score = checks._pruning_score([(1.0, 1.0, 1.0, 1.0), (1.0, 1.0, 1.0, 1.0)])
+    assert score.efficiency is None
+    assert score.area_sum is None
+    assert score.below_bar is None  # no verdict: neither a failure nor a pass
+
+
+# --- the shared metric's cross-checks (spec#188, rashid#174, gpio#774) ------
+
+
+@pytest.mark.parametrize("count", [2, 3, 5, 8, 13, 100])
+def test_perfect_tiling_scores_exactly_one(count: int) -> None:
+    """Cross-check 1: the reference layout is its own best case."""
+    score = checks._pruning_score(checks._ideal_grid_boxes(_UNIT, count))
+    assert score.efficiency == 1.0
+    assert score.area_sum == pytest.approx(1.0)
+
+
+def test_every_box_spanning_the_extent_scores_zero() -> None:
+    """Cross-check 2: nothing to skip, whatever the count."""
+    score = checks._pruning_score([_UNIT] * 8)
+    assert score.achieved == 0.0
+    assert score.efficiency == 0.0
+    assert score.area_sum == pytest.approx(8.0)
+
+
+def test_closed_form_matches_the_sampled_mean() -> None:
+    """Cross-check 3: the expectation is the quantity the 20-window sample estimated.
+
+    The retired estimator drew 20 windows from ``random.Random(seed)`` with a
+    fixed seed, so its verdict depended on the seed. The closed form is that
+    estimator's expectation, and the mean over 2000 seeds shows it, to two
+    decimals, on both the actual boxes and the reference.
+    """
+    import random
+
+    boxes = [(0.0, 0.0, 0.3, 0.3), (0.2, 0.1, 0.6, 0.5), (0.5, 0.5, 1.0, 1.0), (0.0, 0.6, 0.5, 1.0)]
+    extent = checks._bbox_union(boxes)
+    reference = checks._ideal_grid_boxes(extent, len(boxes))
+
+    def sampled(layout: list[tuple[float, float, float, float]]) -> float:
+        width = (extent[2] - extent[0]) * checks._QUERY_FRACTION
+        height = (extent[3] - extent[1]) * checks._QUERY_FRACTION
+        total = 0.0
+        for seed in range(2000):
+            rng = random.Random(seed)
+            for _ in range(20):
+                x = rng.uniform(extent[0], extent[2] - width)
+                y = rng.uniform(extent[1], extent[3] - height)
+                window = (x, y, x + width, y + height)
+                total += sum(1 for b in layout if not checks._bbox_overlaps(window, b))
+        return total / (2000 * 20 * len(layout))
+
+    assert checks._mean_skip_rate(boxes, extent) == pytest.approx(sampled(boxes), abs=0.005)
+    assert checks._mean_skip_rate(reference, extent) == pytest.approx(sampled(reference), abs=0.005)
+
+
+def test_reference_tiling_covers_the_extent() -> None:
+    """Cross-check 4: at n=3 the old 2x2 grid left a cell empty.
+
+    A window landing on the empty quarter skipped every reference box, which
+    inflated the achievable rate from 0.609 to 0.691 and every efficiency by
+    13%. The last row of the tiling now stretches to the full width.
+    """
+    tiling = checks._ideal_grid_boxes(_UNIT, 3)
+    assert tiling == [(0.0, 0.0, 0.5, 0.5), (0.5, 0.0, 1.0, 0.5), (0.0, 0.5, 1.0, 1.0)]
+    assert sum(checks._bbox_area(b) for b in tiling) == pytest.approx(1.0)
+    assert checks._mean_skip_rate(tiling, _UNIT) == pytest.approx(0.609, abs=0.001)
+    old_grid = [(0.0, 0.0, 0.5, 0.5), (0.5, 0.0, 1.0, 0.5), (0.0, 0.5, 0.5, 1.0)]
+    assert checks._mean_skip_rate(old_grid, _UNIT) == pytest.approx(0.691, abs=0.001)
+
+
+@pytest.mark.parametrize("count", [1, 2, 5, 7, 8, 12, 100])
+def test_reference_tiling_has_no_gap_at_any_count(count: int) -> None:
+    tiling = checks._ideal_grid_boxes(_UNIT, count)
+    assert len(tiling) == count
+    assert sum(checks._bbox_area(b) for b in tiling) == pytest.approx(1.0)
+    assert checks._bbox_union(tiling) == _UNIT
+
+
+def test_degenerate_layouts_have_a_defined_score() -> None:
+    """Cross-check 5: no exception on a line, one box, or a window as big as the extent."""
+    line = [(float(i), 2.0, float(i) + 1.0, 2.0) for i in range(8)]
+    on_a_line = checks._pruning_score(line)
+    assert on_a_line.efficiency == 1.0  # the x axis alone judges it, and it tiles
+    assert on_a_line.area_sum is None
+
+    single = checks._pruning_score([_UNIT])
+    assert single.achievable == 0.0
+    assert single.efficiency is None
+    assert single.below_bar is None
+
+    whole_extent_window = checks._pruning_score(checks._ideal_grid_boxes(_UNIT, 8), fraction=1.0)
+    assert whole_extent_window.achieved == 0.0
+    assert whole_extent_window.efficiency is None
+    assert whole_extent_window.below_bar is None
+
+
+def test_empty_layouts_have_nothing_to_skip() -> None:
+    assert checks._ideal_grid_boxes(_UNIT, 0) == []
+    assert checks._mean_skip_rate([], _UNIT) == 0.0
+
+
+def test_efficiency_is_clipped_at_one() -> None:
+    # Clustered data can beat the grid: eight tight boxes in a corner of the
+    # extent skip more than eight tiles would.
+    tight = [(0.1 * i, 0.0, 0.1 * i + 0.01, 0.01) for i in range(8)]
+    score = checks._pruning_score(tight)
+    assert score.achieved > score.achievable
+    assert score.efficiency == 1.0
+
+
+def test_area_sum_is_the_zero_window_expectation() -> None:
+    # Two boxes each a quarter of the extent: their areas sum to half of it.
+    halves = [(0.0, 0.0, 0.5, 0.5), (0.5, 0.5, 1.0, 1.0)]
+    assert checks._pruning_score(halves).area_sum == pytest.approx(0.5)
 
 
 @pytest.mark.parametrize(
@@ -860,3 +1007,60 @@ def test_bbox_agreement() -> None:
 def test_bbox_agreement_drops_the_z_ordinates() -> None:
     item = _mirror_item(bbox=[4.0, 50.0, 0.0, 6.0, 52.0, 100.0])
     assert checks._bbox_agrees(item, [4.0, 50.0, 6.0, 52.0])
+
+
+# --- the shared test vectors -------------------------------------------------
+
+_VECTORS = json.loads(
+    (
+        Path(__file__).resolve().parent.parent / "fixtures" / "spatial-metric-vectors.json"
+    ).read_text()
+)
+
+
+def _assert_expected(score: checks._PruningScore, expected: dict) -> None:
+    assert score.count == expected["count"]
+    assert score.achieved == pytest.approx(expected["achieved"], abs=1e-6)
+    assert score.achievable == pytest.approx(expected["achievable"], abs=1e-6)
+    if expected["efficiency"] is None:
+        assert score.efficiency is None
+    else:
+        assert score.efficiency == pytest.approx(expected["efficiency"], abs=1e-6)
+    if expected["area_sum"] is None:
+        assert score.area_sum is None  # 0/0 on a zero-area extent: undefined, never 0.0
+    else:
+        assert score.area_sum == pytest.approx(expected["area_sum"], abs=1e-6)
+    assert score.below_bar is expected["below_bar"]
+
+
+@pytest.mark.parametrize("name", sorted(_VECTORS["layouts"]))
+def test_shared_layout_vectors(name: str) -> None:
+    """PORTO-FMT-054: the spec's abstract test vectors, vendored verbatim from
+    specs/portolan/abstract-tests/spatial-metric-vectors.json."""
+    vector = _VECTORS["layouts"][name]
+    _assert_expected(checks._pruning_score([tuple(b) for b in vector["boxes"]]), vector["expected"])
+
+
+@pytest.mark.parametrize("name", sorted(_VECTORS["rows"]))
+def test_shared_row_vectors(name: str) -> None:
+    vector = _VECTORS["rows"][name]
+    chunks = checks._chunked_bboxes([tuple(b) if b is not None else None for b in vector["boxes"]])
+    assert [list(c) for c in chunks] == vector["expected_chunks"]
+    _assert_expected(checks._pruning_score(chunks), vector["expected"])
+
+
+def test_an_unboxed_chunk_shrinks_the_reference() -> None:
+    """n is the number of chunks that carry a box (PORTO-FMT-006's test, spec 2555a86).
+
+    Twenty-three rows whose chunks 2 and 5 hold only null boxes: eight chunk
+    boxes are scored against the eight-cell grid, not the ten-cell one.
+    """
+    rows: list = [(float(i), 0.0, float(i) + 1.0, 1.0) for i in range(23)]
+    for i in (4, 5, 11, 12):
+        rows[i] = None
+    chunks = checks._chunked_bboxes(rows)
+    assert len(chunks) == 8
+    score = checks._pruning_score(chunks)
+    extent = checks._bbox_union(chunks)
+    assert score.achievable == checks._mean_skip_rate(checks._ideal_grid_boxes(extent, 8), extent)
+    assert score.achievable != checks._mean_skip_rate(checks._ideal_grid_boxes(extent, 10), extent)
