@@ -30,9 +30,11 @@ from rashid.data import (  # noqa: E402
     DAT_CHECKSUM,
     DAT_CONSISTENCY,
     DAT_FORMAT,
+    DAT_ORDERING,
     DAT_SIZE,
     validate_data,
 )
+from rashid.model import Severity  # noqa: E402
 from tests.conftest import CatalogBuilder, mutate_json, thumbnail_asset  # noqa: E402
 from tests.integration import _data_assets as assets  # noqa: E402
 
@@ -123,15 +125,28 @@ def _item(root: Path, name: str) -> Path:
     return root / "layers" / name / f"{name}.json"
 
 
+def _too_small_to_judge(findings: list) -> list:
+    """The pristine GeoParquet fixtures hold six rows each, under both ordering
+    floors, so a clean run carries one INFO per file saying they were not
+    judged (PORTO-FMT-052). Everything else must be silent."""
+    ordering = [f for f in findings if f.rule_id == DAT_ORDERING]
+    assert all(f.severity is Severity.INFO for f in ordering)
+    assert all("could not be evaluated" in f.message for f in ordering)
+    return [f for f in findings if f.rule_id != DAT_ORDERING]
+
+
 def test_pristine_catalog_is_clean(catalog_root: Path) -> None:
     findings = _data_findings(catalog_root)
-    assert findings == [], [f"{f.rule_id} {f.message}" for f in findings]
+    assert _too_small_to_judge(findings) == [], [f"{f.rule_id} {f.message}" for f in findings]
+    assert len(findings) == 3  # layers.parquet, extra.parquet, points.parquet
 
 
 def test_pristine_passes_full_validate(catalog_root: Path) -> None:
     report = validate(catalog_root, data=True)
     assert report.passed
-    assert not any(f.rule_id.startswith("PTL-DAT") for f in report.findings)
+    assert (
+        _too_small_to_judge([f for f in report.findings if f.rule_id.startswith("PTL-DAT")]) == []
+    )
 
 
 def test_wrong_checksum_flags_dat_001(catalog_root: Path) -> None:
@@ -225,7 +240,7 @@ def test_collection_root_proj_epsg_is_reported_once_at_the_declaration(
 def test_collection_root_proj_epsg_agreeing_with_the_data_is_clean(catalog_root: Path) -> None:
     mutate_json(_collection(catalog_root), lambda d: d.__setitem__("proj:epsg", 4326))
     findings = _data_findings(catalog_root)
-    assert findings == [], [f"{f.rule_id} {f.message}" for f in findings]
+    assert _too_small_to_judge(findings) == [], [f"{f.rule_id} {f.message}" for f in findings]
 
 
 def test_item_properties_proj_epsg_points_at_the_properties(catalog_root: Path) -> None:

@@ -35,13 +35,13 @@ def ordered_points(n: int = 6) -> list[tuple[float, float]]:
     ]
 
 
-def interleaved_points(n: int = 10) -> list[tuple[float, float]]:
+def interleaved_points(n: int = 16) -> list[tuple[float, float]]:
     """Each consecutive pair spans the whole extent, so no row group can be skipped.
 
-    Ten points at the default ``row_group_size`` of 2 give five row groups,
-    which is where PORTO-FMT-006's tests start applying (formats.md:41). A
-    shorter file is exempt, so a test that wants an ordering finding needs at
-    least this many rows.
+    Sixteen points at the default ``row_group_size`` of 2 give eight row
+    groups, which is where PORTO-FMT-006's row-group check starts judging
+    (formats.md:41). A shorter file is reported and not judged, so a test that
+    wants an ordering finding needs at least this many rows.
 
     Every pair is corner-to-corner, so every row-group box IS the file extent —
     which is what an unsorted file looks like, and leaves a reader nothing to
