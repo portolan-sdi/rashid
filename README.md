@@ -39,7 +39,7 @@ Use `--no-data` when you only need a metadata and structure result. Use `--data-
 rashid check path/to/catalog --data-scope local
 ```
 
-Use `--live` to check HTTP range support and CORS on published assets. Relative asset links also require the catalog's public base URL.
+Use `--live` to check HTTP range support and CORS on published assets. Relative asset links also require the catalog's public base URL. With the base URL, rashid also confirms that every linked document exists on the publish host.
 
 ```bash
 rashid check path/to/catalog \

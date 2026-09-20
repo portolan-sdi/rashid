@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from importlib.metadata import version
+from pathlib import PurePosixPath
 from typing import Any
 from urllib.request import Request
 
@@ -22,6 +23,7 @@ from rashid.live import (
     LIV_CORS_ORIGIN,
     LIV_CORS_PREFLIGHT,
     LIV_HEAD_LENGTH,
+    LIV_LINK_TARGET,
     LIV_RANGE,
     LIV_UNAVAILABLE,
     ProbeResponse,
@@ -353,8 +355,9 @@ def test_upstream_hosts_are_not_probed(catalog: CatalogBuilder) -> None:
     prober = FakeProber()
     findings = validate_live(graph, prober, base_url="https://data.example.org/cat")
     assert prober.range_calls == []
-    assert prober.head_calls == []
-    assert _ids(findings) == [LIV_UNAVAILABLE]  # nothing probeable remains
+    # the remaining HEADs are the link-target probes, all on the publish host
+    assert all(u.startswith("https://data.example.org/cat/") for u in prober.head_calls)
+    assert _ids(findings) == [LIV_UNAVAILABLE]  # no asset is probeable
 
 
 def test_absolute_href_on_the_publish_host_is_probed(catalog: CatalogBuilder) -> None:
@@ -365,7 +368,8 @@ def test_absolute_href_on_the_publish_host_is_probed(catalog: CatalogBuilder) ->
     graph = CatalogGraph.load(catalog.write())
     prober = FakeProber()
     findings = validate_live(graph, prober, base_url="https://data.example.org/cat")
-    assert prober.head_calls == ["https://data.example.org/cat/roads/data.parquet"]
+    assert prober.range_calls == ["https://data.example.org/cat/roads/data.parquet"]
+    assert "https://data.example.org/cat/roads/data.parquet" in prober.head_calls
     assert findings == []
 
 
@@ -466,7 +470,14 @@ def test_disabling_all_liv_rules_skips_pass(catalog: CatalogBuilder) -> None:
     prober = FakeProber()
     config = RulesConfig(
         disabled=frozenset(
-            {LIV_RANGE, LIV_HEAD_LENGTH, LIV_CORS_ORIGIN, LIV_CORS_EXPOSE, LIV_CORS_PREFLIGHT}
+            {
+                LIV_RANGE,
+                LIV_HEAD_LENGTH,
+                LIV_CORS_ORIGIN,
+                LIV_CORS_EXPOSE,
+                LIV_CORS_PREFLIGHT,
+                LIV_LINK_TARGET,
+            }
         )
     )
     report = validate(root, config=config, live=True, live_prober=prober)
@@ -537,8 +548,9 @@ def test_base_url_skips_hrefs_escaping_the_tree(catalog: CatalogBuilder) -> None
     graph = CatalogGraph.load(catalog.write())
     prober = FakeProber()
     findings = validate_live(graph, prober, base_url="https://data.example.org/cat")
-    assert prober.head_calls == []
-    assert LIV_UNAVAILABLE in _ids(findings)  # nothing probeable after the skip
+    assert prober.range_calls == []  # no asset host to probe
+    assert not any(u.endswith("outside.parquet") for u in prober.head_calls)
+    assert LIV_UNAVAILABLE in _ids(findings)  # no asset probeable after the skip
 
 
 def test_non_https_base_url_is_rejected(catalog: CatalogBuilder) -> None:
@@ -580,6 +592,276 @@ def test_runner_threads_live_base_url(catalog: CatalogBuilder) -> None:
         live_base_url="https://data.example.org/cat",
     )
     assert "https://data.example.org/cat/roads/data.parquet" in prober.head_calls
+
+
+# --- base_url: every link target must exist on the publish host (#189) --------
+#
+# The defect these guard: a publisher uploads the assets but not the nested
+# catalog.json and item documents. Every asset probe passes; the tree's child
+# and item links answer 404; a STAC browser hangs on the collection.
+
+_BASE = "https://data.example.org/cat"
+
+
+class StatusProber(FakeProber):
+    """A fake whose HEAD answers per URL: 200 unless ``statuses`` says otherwise."""
+
+    def __init__(self, statuses: dict[str, int] | None = None) -> None:
+        super().__init__()
+        self.statuses = statuses or {}
+
+    def head(self, url: str) -> ProbeResponse:
+        self.head_calls.append(url)
+        status = self.statuses.get(url, 200)
+        return ProbeResponse(status=status, headers={"content-length": "1234"})
+
+
+def _nested_tree(catalog: CatalogBuilder) -> CatalogGraph:
+    """root -> sector catalog -> roads collection -> two items, all relative links."""
+    sector = catalog.subcatalog("sector-1")
+    roads = sector.collection("roads")
+    roads.item("seg1")
+    roads.item("seg2")
+    return CatalogGraph.load(catalog.write())
+
+
+def _link_findings(findings: list) -> list:
+    return [f for f in findings if f.rule_id == LIV_LINK_TARGET]
+
+
+def _link_index(graph: CatalogGraph, path: str, rel: str, href: str) -> int:
+    """The index of the ``rel`` link to ``href`` in the links array of ``path``."""
+    node = graph.nodes[PurePosixPath(path)]
+    for index, link in enumerate(node.data["links"]):
+        if link["rel"] == rel and link["href"] == href:
+            return index
+    raise AssertionError(f"{path} has no {rel} link to {href}")
+
+
+def test_complete_published_tree_has_no_link_findings(catalog: CatalogBuilder) -> None:
+    graph = _nested_tree(catalog)
+    prober = StatusProber()
+    findings = validate_live(graph, prober, base_url=_BASE)
+    assert _link_findings(findings) == []
+    # the documents behind child, item, parent, root, agents, describedby all got a HEAD
+    for rel in (
+        "catalog.json",
+        "sector-1/catalog.json",
+        "sector-1/roads/collection.json",
+        "sector-1/roads/seg1/seg1.json",
+        "sector-1/roads/seg2/seg2.json",
+        "sector-1/roads/AGENTS.md",
+        "sector-1/roads/README.md",
+    ):
+        assert f"{_BASE}/{rel}" in prober.head_calls
+
+
+def test_missing_nested_catalog_is_one_error_on_the_child_link(catalog: CatalogBuilder) -> None:
+    graph = _nested_tree(catalog)
+    missing = f"{_BASE}/sector-1/catalog.json"
+    findings = validate_live(graph, StatusProber({missing: 404}), base_url=_BASE)
+    (finding,) = _link_findings(findings)
+    assert finding.severity is Severity.ERROR
+    assert finding.path == "catalog.json"  # the document that links to the missing one
+    assert finding.object_id == "root"
+    index = _link_index(graph, "catalog.json", "child", "./sector-1/catalog.json")
+    assert finding.json_pointer == f"/links/{index}/href"
+    assert "rel:'child'" in finding.message
+    assert "404" in finding.message
+    assert missing in finding.message
+    assert finding.actual == 404
+
+
+def test_missing_item_document_is_an_error_on_the_item_link(catalog: CatalogBuilder) -> None:
+    graph = _nested_tree(catalog)
+    missing = f"{_BASE}/sector-1/roads/seg2/seg2.json"
+    findings = validate_live(graph, StatusProber({missing: 404}), base_url=_BASE)
+    (finding,) = _link_findings(findings)
+    assert finding.path == "sector-1/roads/collection.json"
+    index = _link_index(graph, "sector-1/roads/collection.json", "item", "./seg2/seg2.json")
+    assert finding.json_pointer == f"/links/{index}/href"
+    assert "rel:'item'" in finding.message
+
+
+def test_url_named_by_many_links_is_probed_once_and_reported_once(
+    catalog: CatalogBuilder,
+) -> None:
+    # collection.json is the catalog's child, each item's parent, and each
+    # item's collection: five links, one URL, one HEAD, one finding — against
+    # the first link in path order, the catalog's child link.
+    graph = _nested_tree(catalog)
+    url = f"{_BASE}/sector-1/roads/collection.json"
+    prober = StatusProber({url: 404})
+    findings = validate_live(graph, prober, base_url=_BASE)
+    assert prober.head_calls.count(url) == 1
+    (finding,) = _link_findings(findings)
+    assert finding.path == "sector-1/catalog.json"
+    assert "rel:'child'" in finding.message
+
+
+def test_root_link_from_every_object_is_probed_once(catalog: CatalogBuilder) -> None:
+    graph = _nested_tree(catalog)
+    prober = StatusProber()
+    validate_live(graph, prober, base_url=_BASE)
+    assert prober.head_calls.count(f"{_BASE}/catalog.json") == 1
+
+
+def test_link_on_another_host_is_not_probed(catalog: CatalogBuilder) -> None:
+    # PORTO-CORE-073: the publish host is probed, upstream servers are not.
+    catalog.collection(
+        "roads",
+        links=[
+            {"rel": "root", "href": "../catalog.json", "type": "application/json"},
+            {"rel": "parent", "href": "../catalog.json", "type": "application/json"},
+            {"rel": "license", "href": "https://spdx.org/licenses/CC-BY-4.0.html"},
+            {"rel": "via", "href": "https://upstream.example.gov/source.json"},
+        ],
+    )
+    graph = CatalogGraph.load(catalog.write())
+    prober = StatusProber({"https://spdx.org/licenses/CC-BY-4.0.html": 404})
+    findings = validate_live(graph, prober, base_url=_BASE)
+    assert all(u.startswith(f"{_BASE}/") for u in prober.head_calls)
+    assert _link_findings(findings) == []
+
+
+def test_absolute_link_on_the_publish_host_is_probed_as_declared(
+    catalog: CatalogBuilder,
+) -> None:
+    root = CatalogBuilder(
+        catalog.root,
+        links=[
+            {"rel": "self", "href": f"{_BASE}/catalog.json", "type": "application/json"},
+            {"rel": "root", "href": "./catalog.json", "type": "application/json"},
+        ],
+    )
+    graph = CatalogGraph.load(root.write())
+    prober = StatusProber({f"{_BASE}/catalog.json": 404})
+    findings = validate_live(graph, prober, base_url=_BASE)
+    assert prober.head_calls == [f"{_BASE}/catalog.json"]
+    (finding,) = _link_findings(findings)
+    assert "rel:'self'" in finding.message  # the first link naming the URL
+
+
+def test_without_base_url_no_link_is_probed(catalog: CatalogBuilder) -> None:
+    """Regression guard: no base_url means the asset-only pass of before #189."""
+    catalog.subcatalog("sector-1").collection("roads", assets={"data": _remote_asset()})
+    graph = CatalogGraph.load(catalog.write())
+    prober = StatusProber()
+    findings = validate_live(graph, prober)
+    assert prober.head_calls == [_URL]
+    assert findings == []
+
+
+def test_link_probes_run_in_sorted_url_order(catalog: CatalogBuilder) -> None:
+    graph = _nested_tree(catalog)
+    prober = StatusProber()
+    validate_live(graph, prober, base_url=_BASE)
+    asset_urls = {
+        t.url for targets in live_mod._targets_by_host(graph, _BASE).values() for t in targets
+    }
+    link_calls = [u for u in prober.head_calls if u not in asset_urls]
+    assert link_calls == sorted(link_calls)
+    assert len(link_calls) == len(set(link_calls))
+
+
+def test_link_target_shared_with_an_asset_is_headed_once(catalog: CatalogBuilder) -> None:
+    # A relative rel:'pmtiles' link names the same file as the pmtiles asset.
+    pmtiles = {"href": "./tiles.pmtiles", "type": "application/vnd.pmtiles", "roles": ["data"]}
+    catalog.collection(
+        "roads",
+        assets={"data": pmtiles},
+        links=[
+            {"rel": "root", "href": "../catalog.json", "type": "application/json"},
+            {"rel": "parent", "href": "../catalog.json", "type": "application/json"},
+            {"rel": "pmtiles", "href": "./tiles.pmtiles", "type": "application/vnd.pmtiles"},
+        ],
+    )
+    graph = CatalogGraph.load(catalog.write())
+    prober = StatusProber()
+    validate_live(graph, prober, base_url=_BASE)
+    assert prober.head_calls.count(f"{_BASE}/roads/tiles.pmtiles") == 1
+
+
+def test_head_405_is_reported_not_retried_as_get(catalog: CatalogBuilder) -> None:
+    # PORTO-CORE-043 makes HEAD a MUST for the publish host, so a 405 is the
+    # finding, not a cue to fall back to GET.
+    graph = _nested_tree(catalog)
+    url = f"{_BASE}/sector-1/catalog.json"
+    prober = StatusProber({url: 405})
+    findings = validate_live(graph, prober, base_url=_BASE)
+    (finding,) = _link_findings(findings)
+    assert "405" in finding.message
+    assert prober.range_calls == [f"{_BASE}/sector-1/roads/data.parquet"]  # no extra GET
+
+
+def test_unreachable_publish_host_degrades_to_a_warning(catalog: CatalogBuilder) -> None:
+    # A catalog with no assets: the link probes are the first to touch the host.
+    graph = CatalogGraph.load(catalog.write())
+
+    class DeadProber(StatusProber):
+        def head(self, url: str) -> ProbeResponse:
+            self.head_calls.append(url)
+            raise OSError("connection refused")
+
+    prober = DeadProber()
+    findings = validate_live(graph, prober, base_url=_BASE)
+    assert len(prober.head_calls) == 1  # not hammered after the first failure
+    assert _ids(findings) == [LIV_UNAVAILABLE, LIV_UNAVAILABLE]  # no assets; host down
+    assert "data.example.org" in findings[1].message
+    assert all(f.severity is Severity.WARNING for f in findings)
+
+
+def test_host_dead_for_assets_is_not_asked_about_links(catalog: CatalogBuilder) -> None:
+    graph = _nested_tree(catalog)
+
+    class DeadProber(StatusProber):
+        def get_range(self, url: str) -> ProbeResponse:
+            raise OSError("connection refused")
+
+    prober = DeadProber()
+    findings = validate_live(graph, prober, base_url=_BASE)
+    assert prober.head_calls == []
+    assert _ids(findings) == [LIV_UNAVAILABLE]  # reported once, by the asset probes
+
+
+def test_unparseable_document_contributes_no_link_probes(catalog: CatalogBuilder) -> None:
+    catalog.subcatalog("broken")
+    root = catalog.write()
+    (root / "broken" / "catalog.json").write_text("{ broken", encoding="utf-8")
+    graph = CatalogGraph.load(root)
+    prober = StatusProber({f"{_BASE}/broken/catalog.json": 404})
+    findings = validate_live(graph, prober, base_url=_BASE)
+    # the root's child link still names the broken document, and that HEAD fails
+    (finding,) = _link_findings(findings)
+    assert finding.path == "catalog.json"
+    assert not any(
+        u.startswith(f"{_BASE}/broken/") and u != f"{_BASE}/broken/catalog.json"
+        for u in prober.head_calls
+    )
+
+
+def test_runner_reports_missing_link_targets(catalog: CatalogBuilder) -> None:
+    catalog.subcatalog("sector-1").collection("roads")
+    root = catalog.write()
+    prober = StatusProber({f"{_BASE}/sector-1/catalog.json": 404})
+    report = validate(root, structural=False, live=True, live_prober=prober, live_base_url=_BASE)
+    assert [f.rule_id for f in report.findings if f.rule_id == LIV_LINK_TARGET] == [LIV_LINK_TARGET]
+    assert not report.passed
+
+
+def test_disabling_link_target_rule_silences_it(catalog: CatalogBuilder) -> None:
+    catalog.subcatalog("sector-1").collection("roads")
+    root = catalog.write()
+    prober = StatusProber({f"{_BASE}/sector-1/catalog.json": 404})
+    report = validate(
+        root,
+        structural=False,
+        config=RulesConfig(disabled=frozenset({LIV_LINK_TARGET})),
+        live=True,
+        live_prober=prober,
+        live_base_url=_BASE,
+    )
+    assert LIV_LINK_TARGET not in {f.rule_id for f in report.findings}
 
 
 # --- the default prober's outgoing request headers ---------------------------

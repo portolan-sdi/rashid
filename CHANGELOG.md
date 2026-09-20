@@ -1,3 +1,9 @@
+## Unreleased
+
+### Feat
+
+- **live**: probe every link target under `--live-base-url` and report a document the publish host does not serve as `PTL-LIV-006` (#189)
+
 ## v0.1.8 (2026-08-28)
 
 ### Feat
