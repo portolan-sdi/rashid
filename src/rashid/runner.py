@@ -37,6 +37,7 @@ from rashid.live import (
     LIV_CORS_ORIGIN,
     LIV_CORS_PREFLIGHT,
     LIV_HEAD_LENGTH,
+    LIV_LINK_TARGET,
     LIV_RANGE,
     validate_live,
 )
@@ -95,6 +96,7 @@ _LIVE_RULE_IDS = frozenset(
         LIV_CORS_ORIGIN,
         LIV_CORS_EXPOSE,
         LIV_CORS_PREFLIGHT,
+        LIV_LINK_TARGET,
     }
 )
 
@@ -201,7 +203,10 @@ def validate(
     behind the catalog's assets for HTTP range support and CORS (see
     :mod:`rashid.live`) — absolute ``https`` hrefs as declared, relative hrefs
     when ``live_base_url`` (the https URL the catalog root is published under)
-    is given; it is off by default because it reaches the network.
+    is given. ``live_base_url`` also has the pass HEAD every link target under
+    that base, so a published tree missing the documents its ``child`` and
+    ``item`` links name is reported (``PTL-LIV-006``). The pass is off by
+    default because it reaches the network.
     Disabling every ``PTL-LIV-00x`` rule via ``config`` skips the pass;
     disabling a subset just silences those findings. ``live_prober`` injects an
     alternate prober, chiefly for offline testing.
