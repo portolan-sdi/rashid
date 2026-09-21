@@ -245,6 +245,52 @@ class MissingItemTreeRule(Rule):
             return
 
 
+class CollectionDataReferenceRule(Rule):
+    """A collection with no items must refer to its data itself.
+
+    core.md, Collections: "A collection MUST refer to its primary data"
+    (``PORTO-CORE-082``) — through an asset carrying the ``data`` role, on the
+    collection or on its items, or through ``partition:glob`` on a partitioned
+    collection. A collection whose only assets are a thumbnail or styles gives
+    a client nothing to open.
+
+    The rule fires on the shape where the collection alone owes the reference:
+    no partition fields, no ``data`` asset of its own, and no items. When
+    items exist, the reference is theirs to carry and ``PTL-AST-007`` reports
+    each item that lacks a ``data`` asset, so the two never double-report. A
+    collection whose own assets omit ``roles`` is skipped, since roles are
+    what identify the data asset and ``PTL-AST-001`` already reports that
+    omission. A collection whose directory holds undeclared scene files or
+    that registers an item mirror is ``PTL-COL-005``'s: there the data exists
+    and the items are what is missing, which is the more specific repair.
+    """
+
+    id = "PTL-COL-006"
+    spec_ids = ("PORTO-CORE-082",)
+    default_severity = Severity.ERROR
+    description = "a collection must refer to its primary data"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        if _is_partitioned(node):
+            return
+        if _data_asset_state(node) is not _NO_DATA_ASSET:
+            return
+        if graph.items_of(node):
+            return
+        if _undeclared_scene_files(node, graph) or any(mirror_assets(node)):
+            return  # PTL-COL-005 reports the missing items instead
+        yield self.finding(
+            node,
+            "collection refers to no data: no asset carries the 'data' role, and"
+            " there are no items and no partition fields",
+            json_pointer="/assets",
+            fix_hint="add a collection-level asset for the primary data file with"
+            ' roles ["data"], model each data file as an item, or declare the'
+            " partition:* fields with partition:glob for a partitioned collection",
+        )
+
+
 class NestedCollectionRule(Rule):
     """Collections are leaves; a collection inside a collection is forbidden.
 

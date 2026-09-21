@@ -585,3 +585,58 @@ def test_duplicate_ids_inside_one_language_tree_are_still_reported(
     assert len(findings) == 1
     assert findings[0].path == "roads/collection.json"
     assert "regional/roads/collection.json" in findings[0].message
+
+
+# ---------------------------------------------------------------- PTL-COL-006
+
+
+def test_collection_with_own_data_asset_refers_to_data(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    report = validate(catalog.write())
+    assert findings_for(report, "PTL-COL-006") == []
+
+
+def test_thumbnail_only_collection_without_items_is_flagged(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _drop_collection_data(root)
+    findings = findings_for(validate(root), "PTL-COL-006")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+    assert findings[0].path == "roads/collection.json"
+    assert "no data" in findings[0].message
+
+
+def test_partitioned_collection_refers_to_data_through_the_glob(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _drop_collection_data(root)
+
+    def add_partition_fields(data: dict[str, Any]) -> None:
+        data["partition:scheme"] = "hive"
+        data["partition:keys"] = [{"name": "state", "type": "string"}]
+        data["partition:glob"] = "s3://bucket/latest/state=*/roads.parquet"
+
+    mutate_json(_collection(root), add_partition_fields)
+    assert findings_for(validate(root), "PTL-COL-006") == []
+
+
+def test_collection_with_items_leaves_the_reference_to_them(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads").item("seg1")
+    root = catalog.write()
+    _drop_collection_data(root)
+    assert findings_for(validate(root), "PTL-COL-006") == []
+
+
+def test_roleless_assets_are_ptl_ast_001s_finding(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+
+    def drop_roles(data: dict[str, Any]) -> None:
+        data["assets"].pop("data", None)
+        data["assets"]["thumbnail"].pop("roles", None)
+
+    mutate_json(_collection(root), drop_roles)
+    assert findings_for(validate(root), "PTL-COL-006") == []

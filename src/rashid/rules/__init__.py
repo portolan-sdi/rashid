@@ -10,10 +10,12 @@ from rashid.rules.assets import (
     CatalogAssetsRule,
     ChecksumMultihashRule,
     CogMediaTypeRule,
+    ItemDataAssetRule,
 )
 from rashid.rules.bbox import BboxValidRule
 from rashid.rules.catalogs import SubcatalogFanoutRule
 from rashid.rules.collections import (
+    CollectionDataReferenceRule,
     CollectionIdRule,
     MissingItemTreeRule,
     NestedCollectionRule,
@@ -100,6 +102,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     AssetFileFieldsRule(),
     ChecksumMultihashRule(),
     CatalogAssetsRule(),
+    ItemDataAssetRule(),
     SchemaUriDeclaredRule(),
     SchemaUriConsistencyRule(),
     VersionExtensionRule(),
@@ -118,6 +121,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     SingleFileCollectionRule(),
     RasterSceneItemRule(),
     MissingItemTreeRule(),
+    CollectionDataReferenceRule(),
     NestedCollectionRule(),
     CollectionIdRule(),
     SubcatalogFanoutRule(),
