@@ -7,7 +7,7 @@
 
 rashid checks whether a [Portolan](https://www.portolan-sdi.org/) catalog follows the specification.
 
-Give it a catalog directory or its root `catalog.json`. rashid checks the metadata, structure, and asset bytes. It reports each problem with a stable rule ID.
+Give it a catalog directory, its root `catalog.json`, or the URL of a published catalog. rashid checks the metadata, structure, asset bytes, and hosting. It reports each problem with a stable rule ID.
 
 The name comes from the Arabic root ر ش د. Its participles رَاشِدٌ and رَشِيدٌ mean ["taking, or following, a right way or course or direction"](https://arabiclexicon.hawramani.com/?p=5472#205af1).
 
@@ -39,12 +39,23 @@ Use `--no-data` when you only need a metadata and structure result. Use `--data-
 rashid check path/to/catalog --data-scope local
 ```
 
-Use `--live` to check HTTP range support and CORS on published assets. Relative asset links also require the catalog's public base URL. With the base URL, rashid also confirms that every linked document exists on the publish host.
+## Check a Published Catalog
+
+Give `rashid check` the URL of the root `catalog.json`, or of the directory that holds it.
 
 ```bash
-rashid check path/to/catalog \
-  --live \
-  --live-base-url https://data.example.org/my-catalog/
+rashid check https://data.example.org/my-catalog/catalog.json
+```
+
+rashid fetches the root catalog and follows its `child`, `item`, and JSON `alternate` links. It fetches `AGENTS.md` and `README.md` beside each catalog and collection. It then runs the same passes as for a directory. The URL is the publish base, so the hosting checks run by default: HTTP range support and CORS on the assets, and one HEAD for each link target that the crawl did not fetch. A `child` or `item` link that answers `404` on the host is a `PTL-LIV-006` error. A root `self` link that names a different location is a `PTL-LIV-007` warning.
+
+A crawl sees only what a link names. rashid reports this limit once as `PTL-GEN-002`: an object that no link reaches (`PTL-LNK-002`) and scene files beside a collection (`PTL-COL-005`) stay invisible. Sync the tree to disk and check the directory for the full view.
+
+Use `--live` to run the hosting checks on a directory. rashid reads the publish base from the root catalog's absolute `self` link. When the root has no `self` link, pass `--live-base-url`.
+
+```bash
+rashid check path/to/catalog --live
+rashid check path/to/catalog --live --live-base-url https://data.example.org/my-catalog/
 ```
 
 Use `--json` for a machine-readable report.
@@ -67,7 +78,7 @@ rashid provides five separate validation passes:
 - **Data** reads asset bytes and verifies checksums, sizes, formats, and extents.
 - **Live hosting** checks HTTP range support and CORS on remote servers.
 
-Metadata, structural, and data checks run by default. Use `--schema` as a cross-check against the published profile schema. Use `--live` for checks that require a published catalog and network access.
+Metadata, structural, and data checks run by default. The live hosting pass also runs by default for a catalog URL. Use `--schema` as a cross-check against the published profile schema. Use `--live` to run the hosting checks on a directory.
 
 If a pass cannot run, rashid reports a warning. It does not treat the skipped pass as successful.
 
@@ -79,12 +90,13 @@ For transfer details and every rule ID, see [the rule reference](docs/rules.md).
 from rashid import validate
 
 report = validate("path/to/catalog")
+published = validate("https://data.example.org/my-catalog/catalog.json")
 
 for finding in report.errors:
     print(finding.message)
 ```
 
-`validate()` uses the same default passes as the command-line interface. Set `schema=True` or `live=True` to add those passes.
+`validate()` uses the same default passes as the command-line interface. Set `schema=True` or `live=True` to add those passes. For a URL, `live` is on unless you pass `live=False`.
 
 Use `RulesConfig` to disable rules or change their severity.
 

@@ -2,6 +2,8 @@
 
 ### Feat
 
+- **check**: accept the https URL of a published catalog; rashid follows the links from the root, runs every pass over the fetched tree, and turns the live pass on with the URL as the publish base; `PTL-GEN-002` names what a crawl cannot see (#160)
+- **live**: read the publish base from the root catalog's absolute `self` link when `--live-base-url` is absent, and report a `self` link that disagrees with the base as `PTL-LIV-007` (#160)
 - **live**: probe every link target under `--live-base-url` and report a document the publish host does not serve as `PTL-LIV-006` (#189)
 
 ## v0.1.8 (2026-08-28)
