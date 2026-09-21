@@ -65,7 +65,7 @@ class FetchError(Exception):
 
 @dataclass(frozen=True)
 class Fetched:
-    """One GET's outcome: the status and, for a 2xx, the body."""
+    """What one GET returned: the status and, for a 2xx, the body."""
 
     status: int
     body: bytes = b""
