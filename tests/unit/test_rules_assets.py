@@ -233,3 +233,26 @@ def test_item_asset_template_needs_cog_media_type(catalog: CatalogBuilder) -> No
     findings = findings_for(validate(catalog.write()), "PTL-AST-006")
     assert len(findings) == 1
     assert findings[0].json_pointer == "/item_assets/data/type"
+
+
+# ---------------------------------------------------------------- PTL-AST-007
+
+
+def test_item_with_a_data_asset_is_clean(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads").item("seg1")
+    report = validate(catalog.write())
+    assert findings_for(report, "PTL-AST-007") == []
+
+
+def test_item_without_a_data_asset_is_flagged(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads").item("seg1", assets={"preview": _asset(roles=["thumbnail"])})
+    findings = findings_for(validate(catalog.write()), "PTL-AST-007")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+    assert findings[0].path == "roads/seg1/seg1.json"
+    assert "'data' role" in findings[0].message
+
+
+def test_item_with_a_roleless_asset_is_ptl_ast_001s_finding(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads").item("seg1", assets={"mystery": _asset(roles=None)})
+    assert findings_for(validate(catalog.write()), "PTL-AST-007") == []

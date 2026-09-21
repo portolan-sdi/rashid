@@ -14,7 +14,12 @@ from rashid._multihash import is_well_formed_multihash
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import COG_MEDIA_TYPE, is_cog_media_type, is_raster_data_asset
+from rashid.rules._common import (
+    COG_MEDIA_TYPE,
+    is_cog_media_type,
+    is_raster_data_asset,
+    roles_of,
+)
 
 
 def _assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
@@ -250,3 +255,41 @@ class ChecksumMultihashRule(Rule):
                     "e.g. '1220' + sha256 hex",
                     actual=checksum,
                 )
+
+
+class ItemDataAssetRule(Rule):
+    """Every item carries at least one asset with the ``data`` role.
+
+    core.md, Items: "Where items do exist, each one MUST carry at least one
+    asset with the `data` role" (``PORTO-CORE-083``). An item exists to attach
+    per-file metadata to a data file, so an item without one describes
+    nothing. An item with an asset that omits ``roles`` is skipped: the rule
+    cannot decide without roles, and ``PTL-AST-001`` already reports the
+    omission.
+    """
+
+    id = "PTL-AST-007"
+    spec_ids = ("PORTO-CORE-083",)
+    default_severity = Severity.ERROR
+    description = "every item carries at least one asset with the 'data' role"
+    kinds = ("item",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        saw_undecidable_asset = False
+        for _pointer, _key, asset in _assets_of(node):
+            roles = roles_of(asset)
+            if not roles:
+                saw_undecidable_asset = True
+                continue
+            if "data" in roles:
+                return
+        if saw_undecidable_asset:
+            return
+        yield self.finding(
+            node,
+            "item carries no asset with the 'data' role; an item exists to attach"
+            " per-file metadata to a data file",
+            json_pointer="/assets",
+            fix_hint='add an asset for the item\'s data file with roles ["data"], or'
+            " remove the item if it describes no data",
+        )
