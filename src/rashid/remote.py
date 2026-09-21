@@ -178,9 +178,8 @@ def crawl(
                     raise FetchError(outcome)
                 continue
             result.statuses[url] = outcome.status
-            if not outcome.ok:
+            if not outcome.ok or not _write(dest, rel, outcome.body):
                 continue
-            _write(dest, rel, outcome.body)
             if not rel.endswith(".json"):
                 continue
             result.documents += 1
@@ -214,11 +213,24 @@ def _fetch_one(fetcher: Fetcher, url: str) -> Fetched | str:
         return str(exc)
 
 
-def _write(dest: Path, rel: str, body: bytes) -> None:
-    """Write ``body`` at ``dest / rel``; ``rel`` was normalized under the base."""
-    target = dest.joinpath(*rel.split("/"))
+def _write(dest: Path, rel: str, body: bytes) -> bool:
+    """Write ``body`` at ``dest / rel``; False when the path is not below ``dest``.
+
+    ``rel`` was normalized under the base by :func:`_safe_relative`, so this
+    second check should never fail; it exists because the alternative to a
+    redundant check is a fetched document written outside the temporary tree.
+    """
+    root = dest.resolve()
+    target = root.joinpath(*rel.split("/"))
+    try:
+        target.relative_to(root)
+    except ValueError:  # pragma: no cover - guarded upstream
+        return False
+    if target.exists() and not target.is_file():
+        return False
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(body)
+    return True
 
 
 def _follow_paths(base: str, rel: str, body: bytes) -> list[str]:
@@ -263,20 +275,39 @@ def _follow_paths(base: str, rel: str, body: bytes) -> list[str]:
 def _under_base(base: str, directory: str, href: str) -> str | None:
     """The path under ``base`` that ``href`` names; None when it is not the tree's.
 
-    A relative href joins onto the document's directory; one that climbs above
-    the root is not the tree's. An absolute https href is followed only when
-    it starts with the base — a link to another host is another catalog's
-    business, and the live pass's PORTO-CORE-073 scoping says the same.
+    A relative href joins onto the document's directory. An absolute https
+    href is followed only when it starts with the base — a link to another
+    host is another catalog's business, and the live pass's PORTO-CORE-073
+    scoping says the same. Either way the result is normalized and must stay
+    below the root: a catalog is a hostile input here, and a path that climbs
+    out of the tree would otherwise name where its bytes get written.
     """
     parsed = urlparse(href)
     if parsed.scheme or href.startswith("/"):
-        if parsed.scheme.lower() == "https" and href.startswith(base):
-            return href[len(base) :].split("#", 1)[0].split("?", 1)[0]
+        if parsed.scheme.lower() != "https" or not href.startswith(base):
+            return None
+        candidate = href[len(base) :].split("#", 1)[0].split("?", 1)[0]
+    else:
+        candidate = posixpath.join(directory, href.split("#", 1)[0].split("?", 1)[0])
+    return _safe_relative(candidate)
+
+
+def _safe_relative(candidate: str) -> str | None:
+    """``candidate`` normalized as a path strictly below the root, or None.
+
+    Rejects the root itself, anything that climbs above it, an absolute path,
+    a backslash (a separator on the filesystem the tree is written to, and
+    never legitimate in an href), and any segment that is empty or dots-only
+    after normalization.
+    """
+    if not candidate or "\\" in candidate or "\x00" in candidate:
         return None
-    joined = posixpath.normpath(posixpath.join(directory, href))
-    if joined == "." or joined == ".." or joined.startswith("../"):
+    rel = posixpath.normpath(candidate)
+    if rel in (".", "..") or rel.startswith(("../", "/")):
         return None
-    return joined
+    if any(part in ("", ".", "..") for part in rel.split("/")):
+        return None  # pragma: no cover - normpath leaves none; belt and braces
+    return rel
 
 
 __all__ = [

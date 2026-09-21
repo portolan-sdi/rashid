@@ -258,6 +258,64 @@ def test_crawl_ignores_links_that_escape_the_base(catalog: CatalogBuilder, tmp_p
     assert all(url.startswith(_BASE) and ".." not in url for url in fetcher.calls)
 
 
+@pytest.mark.parametrize(
+    "href",
+    [
+        "https://data.example.org/cat/../../../../tmp/rashid-pwned/PWNED.json",
+        "https://data.example.org/cat/sector-1/../../escaped.json",
+        "../escaped.json",
+        "./sector-1/../../escaped.json",
+        "/escaped.json",
+        "..%2Fescaped.json",
+        "sector-1\\..\\..\\escaped.json",
+        "https://data.example.org/cat/",
+        "https://data.example.org/cat",
+        "https://data.example.org/cat-other/catalog.json",
+    ],
+)
+def test_crawl_never_writes_outside_the_destination(
+    catalog: CatalogBuilder, tmp_path: Path, href: str
+) -> None:
+    """A catalog is hostile input: a link must not choose where its bytes land."""
+    root = _nested(catalog)
+    mutate_json(
+        root / "catalog.json",
+        lambda d: d["links"].append({"rel": "child", "href": href, "type": "application/json"}),
+    )
+
+    class Yes(DirFetcher):
+        def get(self, url: str) -> Fetched:
+            self.calls.append(url)
+            return Fetched(status=200, body=b'{"type": "Catalog", "links": []}')
+
+    dest = tmp_path / "dest"
+    before = set(tmp_path.rglob("*"))
+    crawl(_BASE, dest, Yes(root))
+    created = set(tmp_path.rglob("*")) - before
+    assert created and all(p == dest or dest in p.parents for p in created), created
+    assert not Path("/tmp/rashid-pwned").exists()
+
+
+def test_crawl_normalizes_absolute_hrefs_like_relative_ones(
+    catalog: CatalogBuilder, tmp_path: Path
+) -> None:
+    root = _nested(catalog)
+    mutate_json(
+        root / "catalog.json",
+        lambda d: [
+            link.__setitem__("href", f"{_BASE}./sector-1//catalog.json?v=2#top")
+            for link in d["links"]
+            if link["rel"] == "child"
+        ],
+    )
+    fetcher = DirFetcher(root)
+    dest = tmp_path / "dest"
+    result = crawl(_BASE, dest, fetcher)
+    assert f"{_BASE}sector-1/catalog.json" in fetcher.calls
+    assert (dest / "sector-1" / "catalog.json").exists()
+    assert result.documents == 5
+
+
 def test_crawl_follows_json_alternates_for_language_trees(
     catalog: CatalogBuilder, tmp_path: Path
 ) -> None:
