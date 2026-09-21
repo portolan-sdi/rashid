@@ -58,6 +58,31 @@ def is_absolute_href(href: str) -> bool:
     return href.startswith("/") or bool(urlparse(href).scheme)
 
 
+def self_link_base(root: Node | None) -> str | None:
+    """The URL prefix a root catalog is published under, from its ``self`` link.
+
+    core.md, Links: a catalog served over the internet from a single fixed
+    URL SHOULD carry an absolute ``self`` link on its root catalog
+    (PORTO-CORE-081). That link names the published location of the root
+    file, so the URL minus the root file name is the base every file in the
+    tree is served under. None when ``root`` is None, carries no absolute
+    ``self`` link, or its ``self`` link does not end in the root's own file
+    name — a ``self`` naming some other file says nothing about this tree.
+    """
+    if root is None:
+        return None
+    raw = root.data.get("links")
+    for link in raw if isinstance(raw, list) else []:
+        if not isinstance(link, dict) or link.get("rel") != "self":
+            continue
+        href = link.get("href")
+        if isinstance(href, str) and is_absolute_href(href):
+            prefix, sep, tail = href.rpartition("/")
+            if tail == root.path.name:
+                return prefix + sep
+    return None
+
+
 def _is_within(path: PurePosixPath, prefix: PurePosixPath) -> bool:
     """True when ``path`` sits at or below the directory ``prefix``.
 
@@ -76,11 +101,16 @@ class CatalogGraph:
     ``dir_listing`` maps every scanned directory (relative POSIX path, ``.``
     for the root) to the set of filenames it contains, so required-file rules
     can check existence without touching disk again.
+
+    ``base_url`` is the https URL the tree is published under when the tree
+    was read from there — the URL ``rashid check`` was given. None for a tree
+    read from disk; ``--live-base-url`` reaches the live pass directly.
     """
 
     root_path: Path
     nodes: dict[PurePosixPath, Node] = field(default_factory=dict)
     dir_listing: dict[PurePosixPath, set[str]] = field(default_factory=dict)
+    base_url: str | None = None
     _translation_roots: list[Node] | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -90,6 +120,15 @@ class CatalogGraph:
         if node is not None and node.kind == "catalog":
             return node
         return None
+
+    def published_base(self) -> str | None:
+        """The URL prefix the root catalog's ``self`` link says the tree is served under.
+
+        See :func:`self_link_base`. This is the catalog's own claim about its
+        location; ``base_url`` is the caller's. A live pass that is given no
+        base falls back to this one, and one given both compares them.
+        """
+        return self_link_base(self.root)
 
     def translation_roots(self) -> list[Node]:
         """The root catalogs of the catalog's alternate-language trees.

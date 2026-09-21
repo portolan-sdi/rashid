@@ -30,6 +30,7 @@ from urllib.request import Request, urlopen
 
 from rashid._http import user_agent
 from rashid.catalog import CatalogGraph, Node, is_absolute_href
+from rashid.remote import wire_url
 
 _CHUNK = 1 << 16  # 64 KiB
 _TIMEOUT = 30  # seconds per request
@@ -73,7 +74,12 @@ class AssetReader(Protocol):
 
 
 class FilesystemHttpReader:
-    """The default reader: local paths under the catalog root, plus ``https``."""
+    """The default reader: local paths under the catalog root, plus ``https``.
+
+    For a catalog read over https (``graph.base_url`` set), a relative href
+    names a file the crawl did not fetch — assets are not documents — so it
+    resolves to its URL under the base instead of to the tree on disk.
+    """
 
     def __init__(self, graph: CatalogGraph) -> None:
         self._graph = graph
@@ -89,9 +95,11 @@ class FilesystemHttpReader:
         if rel is None:
             return None
         path = self._graph.root_path / Path(*rel.parts)
-        if not path.is_file():
-            return None
-        return Locator(is_remote=False, source=str(path))
+        if path.is_file():
+            return Locator(is_remote=False, source=str(path))
+        if self._graph.base_url is not None:
+            return Locator(is_remote=True, source=wire_url(self._graph.base_url, str(rel)))
+        return None
 
     def stream(self, node: Node, href: str) -> Iterator[bytes] | None:
         located = self.locate(node, href)

@@ -61,9 +61,9 @@ class CheckInfo:
 
 # Title and strongest severity for every check that does not subclass Rule.
 # Keys are the rule ids themselves rather than the modules' constants so this
-# table reads as the id-space it documents. The four ``-000`` entries report
-# that a pass could not run: they cite no requirement and always warn, because
-# an unavailable pass is not a failed one.
+# table reads as the id-space it documents. The four ``-000`` entries and
+# ``PTL-GEN-002`` report that a check could not run: they cite no requirement
+# and always warn, because an unavailable pass is not a failed one.
 _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
     "PTL-GEN-000": (
         Severity.ERROR,
@@ -72,6 +72,10 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
     "PTL-GEN-001": (
         Severity.ERROR,
         "every object file parses as JSON",
+    ),
+    "PTL-GEN-002": (
+        Severity.WARNING,
+        "the whole tree was read, so every check could see every file",
     ),
     "PTL-STR-000": (
         Severity.WARNING,
@@ -188,6 +192,10 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
     "PTL-LIV-006": (
         Severity.ERROR,
         "every link target under the publish base answers HEAD with 2xx",
+    ),
+    "PTL-LIV-007": (
+        Severity.WARNING,
+        "the root self link names the base the catalog is published under",
     ),
 }
 

@@ -55,6 +55,8 @@ host that rejects HEAD is reported, not worked around.
 
 from __future__ import annotations
 
+import posixpath
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.error import HTTPError
@@ -62,8 +64,9 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from rashid._http import user_agent
-from rashid.catalog import CatalogGraph, Kind, Node
+from rashid.catalog import CatalogGraph, Kind, Node, is_absolute_href
 from rashid.model import Finding, Severity
+from rashid.remote import wire_url
 from rashid.rules._common import links_of
 
 LIV_UNAVAILABLE = "PTL-LIV-000"
@@ -73,6 +76,7 @@ LIV_CORS_ORIGIN = "PTL-LIV-003"
 LIV_CORS_EXPOSE = "PTL-LIV-004"
 LIV_CORS_PREFLIGHT = "PTL-LIV-005"
 LIV_LINK_TARGET = "PTL-LIV-006"
+LIV_SELF_BASE = "PTL-LIV-007"
 
 # Requirement IDs from the spec's requirements manifest
 # (specs/portolan/requirements.yaml) enforced by each check;
@@ -91,6 +95,10 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     # tree on object storage as much as on disk (036). The publish host is
     # that tree; the same PORTO-CORE-073 scoping keeps the HEADs off others.
     LIV_LINK_TARGET: ("PORTO-CORE-035", "PORTO-CORE-036", "PORTO-CORE-073"),
+    # core.md, Links: a published root catalog SHOULD carry an absolute self
+    # link (081). When the caller names the publish base too, the two must
+    # agree, or the publish step wrote the catalog to the wrong location.
+    LIV_SELF_BASE: ("PORTO-CORE-081",),
 }
 
 # Assets are declared on collections and items; catalogs carry none.
@@ -279,7 +287,7 @@ def _own_url(graph: CatalogGraph, node: Node, href: str, base: str | None) -> st
     rel = graph.resolve_path(node, href)
     if rel is None:
         return None
-    return f"{base}{rel}"
+    return wire_url(base, str(rel))
 
 
 def _link_targets(graph: CatalogGraph, base: str) -> list[_LinkTarget]:
@@ -473,11 +481,18 @@ class _HeadCache:
     then asked for once. A transport failure marks the host dead so no later
     check keeps hammering it: :meth:`head` returns None once the host failed,
     and the failure is reported once by whichever check hit it.
+
+    ``known`` seeds the cache with statuses the caller already holds. A crawl
+    that fetched a document by GET knows whether it exists, and asking the
+    host again by HEAD would double the requests for nothing. A known status
+    answers :meth:`status` only: it carries no headers, so it never stands in
+    for an asset HEAD, whose ``Content-Length`` check needs the real response.
     """
 
-    def __init__(self, prober: Prober) -> None:
+    def __init__(self, prober: Prober, known: Mapping[str, int] | None = None) -> None:
         self._prober = prober
         self._responses: dict[str, ProbeResponse] = {}
+        self._known: dict[str, int] = dict(known or {})
         self.failed: dict[str, Exception] = {}  # host -> the first transport error
 
     def head(self, url: str) -> ProbeResponse | None:
@@ -494,6 +509,14 @@ class _HeadCache:
             return None
         self._responses[url] = response
         return response
+
+    def status(self, url: str) -> int | None:
+        """The status the host answers for ``url``; None once the host failed."""
+        known = self._known.get(url)
+        if known is not None:
+            return known
+        response = self.head(url)
+        return None if response is None else response.status
 
 
 def _unavailable(message: str, path: str) -> Finding:
@@ -553,8 +576,8 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
         return []
     findings: list[Finding] = []
     for target in targets:
-        response = heads.head(target.url)
-        if response is None:
+        status = heads.status(target.url)
+        if status is None:
             findings.append(
                 _unavailable(
                     f"HEAD probes for link targets on host '{host}' failed: {heads.failed[host]}",
@@ -562,7 +585,7 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
                 )
             )
             break
-        if 200 <= response.status < 300:
+        if 200 <= status < 300:
             continue
         findings.append(
             Finding(
@@ -570,21 +593,109 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
                 severity=Severity.ERROR,
                 message=(
                     f"link rel:{target.rel!r} href '{target.href}': HEAD {target.url}"
-                    f" returned {response.status}, expected 2xx"
+                    f" returned {status}, expected 2xx"
                 ),
                 path=str(target.node.path),
                 object_id=target.node.id,
                 json_pointer=f"/links/{target.index}/href",
                 fix_hint="upload the linked document to the publish host, or correct the href",
                 expected="2xx",
-                actual=response.status,
+                actual=status,
             )
         )
     return findings
 
 
+def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
+    """The root ``self`` link, when present, names the base the caller named.
+
+    core.md, Links: a published root catalog SHOULD carry an absolute ``self``
+    link (PORTO-CORE-081). It is the catalog's own statement of where it is
+    served from, and the caller's ``base`` is where it actually is. When they
+    disagree, either the publish step wrote the tree to the wrong location or
+    the ``self`` link was never updated; every client that trusts the link then
+    resolves the tree's absolute hrefs against the wrong host. The two are
+    compared as URLs, not strings: host case, a default port, and a ``./``
+    segment do not make two spellings of one location disagree.
+    """
+    root = graph.root
+    claimed = graph.published_base()
+    if root is None or claimed is None:
+        return []
+    if _same_location(claimed, base):
+        return []
+    index = next(
+        (
+            i
+            for i, link in enumerate(links_of(root))
+            if link.get("rel") == "self" and is_absolute_href(str(link.get("href", "")))
+        ),
+        0,
+    )
+    return [
+        Finding(
+            rule_id=LIV_SELF_BASE,
+            severity=Severity.WARNING,
+            message=(
+                f"root self link places the catalog under {claimed} but it is"
+                f" published under {base}"
+            ),
+            path=str(root.path),
+            object_id=root.id,
+            json_pointer=f"/links/{index}/href",
+            fix_hint=(
+                f"set the root self link to {base}{root.path.name}, or publish"
+                " the catalog at the location the self link names"
+            ),
+            expected=base,
+            actual=claimed,
+        )
+    ]
+
+
+def _same_location(left: str, right: str) -> bool:
+    """True when two base URLs name one location, whatever their spelling."""
+    return _location_key(left) == _location_key(right)
+
+
+def _location_key(url: str) -> tuple[str, str, str]:
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname or ""
+    port = parsed.port
+    default = {"https": 443, "http": 80}.get(scheme)
+    netloc = host if port is None or port == default else f"{host}:{port}"
+    path = posixpath.normpath(parsed.path or "/")
+    return scheme, netloc, path.rstrip("/") + "/"
+
+
+def _resolve_base(graph: CatalogGraph, base_url: str | None) -> tuple[str | None, bool]:
+    """The publish base to probe under, and whether the caller supplied it.
+
+    The caller's ``base_url`` wins, then the base recorded on the graph (the
+    URL ``rashid check`` was given), then the root ``self`` link
+    (PORTO-CORE-081): a catalog that states its own published location needs
+    no ``--live-base-url``. A ``self`` link that is not an https URL with a
+    host is ignored rather than probed, for the reason :func:`_normalize_base`
+    gives.
+    """
+    named = base_url if base_url is not None else graph.base_url
+    if named is not None:
+        return _normalize_base(named), True
+    claimed = graph.published_base()
+    if claimed is not None:
+        parsed = urlparse(claimed)
+        if parsed.scheme.lower() == "https" and parsed.netloc:
+            return _normalize_base(claimed), False
+    return None, False
+
+
 def validate_live(
-    graph: CatalogGraph, prober: Prober | None = None, *, base_url: str | None = None
+    graph: CatalogGraph,
+    prober: Prober | None = None,
+    *,
+    base_url: str | None = None,
+    known_statuses: Mapping[str, int] | None = None,
 ) -> list[Finding]:
     """Probe the hosts behind the catalog's assets, and the publish host behind
     its links.
@@ -593,14 +704,23 @@ def validate_live(
     URL the catalog root is published under — additionally makes relative
     hrefs probeable by joining their root-relative paths onto it, and turns on
     the link-target check: one HEAD per distinct link URL under the base,
-    ``PTL-LIV-006`` for each that does not answer 2xx. Returns ``PTL-LIV-00x``
-    findings for each Data Storage MUST the hosting server violates. When the
-    tree declares nothing probeable, or a host cannot be reached, the pass
-    degrades to ``PTL-LIV-000`` warnings rather than failing the run.
+    ``PTL-LIV-006`` for each that does not answer 2xx. Without ``base_url`` the
+    pass reads the base off the graph — the URL ``rashid check`` was given —
+    or, failing that, off the root catalog's absolute ``self`` link
+    (PORTO-CORE-081), so a catalog that states its own location needs no flag.
+    When the caller names a base and the ``self`` link names a different one,
+    ``PTL-LIV-007`` reports the disagreement.
+
+    ``known_statuses`` maps URLs to statuses the caller already observed, so
+    the link check does not re-ask a host about documents a crawl just
+    fetched. Returns ``PTL-LIV-00x`` findings for each Data Storage MUST the
+    hosting server violates. When the tree declares nothing probeable, or a
+    host cannot be reached, the pass degrades to ``PTL-LIV-000`` warnings
+    rather than failing the run.
     """
     if prober is None:
         prober = _UrllibProber()
-    base = _normalize_base(base_url) if base_url is not None else None
+    base, named = _resolve_base(graph, base_url)
     by_host = _targets_by_host(graph, base)
     findings: list[Finding] = []
     if not by_host:
@@ -609,16 +729,19 @@ def validate_live(
             if base is not None
             else (
                 "live pass skipped: no absolute https asset hrefs to probe"
-                " (pass base_url to probe relative hrefs)"
+                " (pass base_url, or give the root catalog an absolute self link,"
+                " to probe relative hrefs)"
             )
         )
         findings.append(_unavailable(hint, "."))
         if base is None:
             return findings
-    heads = _HeadCache(prober)
+    heads = _HeadCache(prober, known_statuses)
     for host in sorted(by_host):
         findings.extend(_check_host(host, by_host[host], prober, heads))
     if base is not None:
         base_host = urlparse(base).netloc.lower()
         findings.extend(_check_links(base_host, _link_targets(graph, base), heads))
+        if named:
+            findings.extend(_check_self_base(graph, base))
     return findings

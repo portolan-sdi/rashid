@@ -13,6 +13,7 @@ import click
 
 from rashid.data.reader import LocalOnlyReader
 from rashid.model import Report, Severity
+from rashid.remote import is_catalog_url
 from rashid.runner import validate
 
 _SEVERITY_TAGS = {
@@ -31,6 +32,30 @@ _SUMMARY_THRESHOLD = 50
 _EXAMPLES_PER_RULE = 3
 
 
+class CatalogLocation(click.ParamType[Path | str]):
+    """An existing local path, or the https URL a catalog is published under.
+
+    A path is checked for existence here so a typo fails as a usage error, the
+    way ``click.Path(exists=True)`` failed it before URLs were accepted. A URL
+    is passed through as a string; whether it answers is the runner's to
+    report (``PTL-GEN-000``), since that takes the network.
+    """
+
+    name = "catalog"
+
+    def convert(
+        self, value: object, param: click.Parameter | None, ctx: click.Context | None
+    ) -> Path | str:
+        if isinstance(value, (Path, str)) and is_catalog_url(str(value)):
+            return str(value)
+        if str(value).lower().startswith("http://"):
+            self.fail(f"{str(value)!r} is not https; only https catalog URLs are read.", param, ctx)
+        path = Path(str(value))
+        if not path.exists():
+            self.fail(f"Path {str(value)!r} does not exist.", param, ctx)
+        return path
+
+
 @click.group()
 @click.version_option(package_name="rashid")
 def main() -> None:
@@ -38,10 +63,7 @@ def main() -> None:
 
 
 @main.command()
-@click.argument(
-    "catalog_path",
-    type=click.Path(exists=True, path_type=Path),
-)
+@click.argument("catalog", type=CatalogLocation(), metavar="CATALOG")
 @click.option("--json", "as_json", is_flag=True, help="Emit the report as JSON.")
 @click.option(
     "--structural/--no-structural",
@@ -76,16 +98,17 @@ def main() -> None:
 @click.option(
     "--live/--no-live",
     "live",
-    default=False,
-    help="Also probe the servers behind https assets: HTTP range and CORS (needs network). "
-    "With --live-base-url, also check that every linked document exists on the publish host.",
+    default=None,
+    help="Probe the servers behind the assets: HTTP range and CORS (needs network). "
+    "When the publish base is known, also check that every linked document exists "
+    "there. On by default for a catalog URL, off for a directory.",
 )
 @click.option(
     "--live-base-url",
     metavar="URL",
     default=None,
-    help="Publish base URL; makes relative asset hrefs probeable with --live and turns on "
-    "the check that every link target exists there.",
+    help="Publish base URL for a directory. Not needed for a catalog URL, nor when the "
+    "root catalog carries an absolute self link.",
 )
 @click.option(
     "--all",
@@ -100,30 +123,38 @@ def main() -> None:
     help="Count findings per rule instead of listing them.",
 )
 def check(
-    catalog_path: Path,
+    catalog: Path | str,
     as_json: bool,
     structural: bool,
     schema: bool,
     schema_allow_network: bool,
     data: bool,
     data_scope: str,
-    live: bool,
+    live: bool | None,
     live_base_url: str | None,
     list_all: bool,
     force_summary: bool,
 ) -> None:
-    """Validate CATALOG_PATH: the Portolan metadata pass, the STAC 1.1.0
+    """Validate CATALOG: the Portolan metadata pass, the STAC 1.1.0
     structural pass (unless --no-structural), and — with --schema / --data /
     --live — the bundled Portolan profile schema, the asset bytes, and the
     hosting servers.
 
-    CATALOG_PATH is the catalog directory, or the catalog.json inside it."""
+    CATALOG is the catalog directory, or the catalog.json inside it, or the
+    https URL the catalog is published under. For a URL rashid follows the
+    links from the root catalog and runs the hosting checks by default."""
     if list_all and force_summary:
         raise click.UsageError("--all and --summary ask for opposite things.")
     if data_scope != "all" and not data:
         raise click.UsageError("--data-scope and --no-data ask for opposite things.")
+    if data_scope != "all" and isinstance(catalog, str):
+        raise click.UsageError("--data-scope local reads the tree on disk; a catalog URL has none.")
+    if live_base_url is not None and isinstance(catalog, str):
+        raise click.UsageError(
+            "--live-base-url is not needed with a catalog URL; the URL is the base."
+        )
     report = validate(
-        catalog_path,
+        catalog,
         structural=structural,
         schema=schema,
         schema_allow_network=schema_allow_network,
