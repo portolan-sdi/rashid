@@ -185,6 +185,10 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
         Severity.ERROR,
         "CORS preflight accepts GET and HEAD with Range",
     ),
+    "PTL-LIV-006": (
+        Severity.ERROR,
+        "every link target under the publish base answers HEAD with 2xx",
+    ),
 }
 
 # The pass modules that declare a SPEC_IDS registry.

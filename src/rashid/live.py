@@ -36,6 +36,21 @@ root is published under — by joining the root-relative asset path onto it.
 ``s3`` and friends are ``PTL-AST-002``'s domain. The pass is stdlib-only and
 lives in core; like every optional pass it degrades to ``PTL-LIV-000``
 warnings when it cannot probe rather than failing the run.
+
+Given ``base_url`` the pass also asks whether the documents behind the
+catalog's **links** exist on the publish host (``PTL-LIV-006``). core.md,
+Links: every link MUST resolve (PORTO-CORE-035), against the catalog's own
+tree "whether on a local filesystem or on object storage" (PORTO-CORE-036).
+``PTL-LNK-006`` settles that for the local tree; a publisher that uploads the
+assets but not the nested ``catalog.json`` and item documents leaves a tree
+whose ``child`` and ``item`` links answer 404 while every asset probe passes,
+and only the publish host can say so. Every link target that resolves under
+the base — ``child``, ``item``, ``parent``, ``root``, ``self``, ``agents``,
+``describedby``, ``alternate``, a relative ``license``, and any other rel — is
+HEADed once per distinct URL, in URL order; the same PORTO-CORE-073 host
+scoping as for assets keeps the probes off other hosts. There is no GET
+fallback on a 405: PORTO-CORE-043 makes HEAD a MUST for the publish host, so a
+host that rejects HEAD is reported, not worked around.
 """
 
 from __future__ import annotations
@@ -49,6 +64,7 @@ from urllib.request import Request, urlopen
 from rashid._http import user_agent
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.model import Finding, Severity
+from rashid.rules._common import links_of
 
 LIV_UNAVAILABLE = "PTL-LIV-000"
 LIV_RANGE = "PTL-LIV-001"
@@ -56,6 +72,7 @@ LIV_HEAD_LENGTH = "PTL-LIV-002"
 LIV_CORS_ORIGIN = "PTL-LIV-003"
 LIV_CORS_EXPOSE = "PTL-LIV-004"
 LIV_CORS_PREFLIGHT = "PTL-LIV-005"
+LIV_LINK_TARGET = "PTL-LIV-006"
 
 # Requirement IDs from the spec's requirements manifest
 # (specs/portolan/requirements.yaml) enforced by each check;
@@ -70,10 +87,17 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     LIV_CORS_ORIGIN: ("PORTO-CORE-045", "PORTO-CORE-073"),
     LIV_CORS_EXPOSE: ("PORTO-CORE-045", "PORTO-CORE-073"),
     LIV_CORS_PREFLIGHT: ("PORTO-CORE-045", "PORTO-CORE-073"),
+    # core.md, Links: every link MUST resolve (035), against the catalog's own
+    # tree on object storage as much as on disk (036). The publish host is
+    # that tree; the same PORTO-CORE-073 scoping keeps the HEADs off others.
+    LIV_LINK_TARGET: ("PORTO-CORE-035", "PORTO-CORE-036", "PORTO-CORE-073"),
 }
 
 # Assets are declared on collections and items; catalogs carry none.
 _LIVE_KINDS: tuple[Kind, ...] = ("collection", "item")
+
+# Links are declared on every object kind.
+_LINK_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
 
 _TIMEOUT = 30  # seconds per request
 
@@ -139,6 +163,17 @@ class _Target:
     declared_size: int | None
 
 
+@dataclass(frozen=True)
+class _LinkTarget:
+    """One probeable link target: the first link, in path order, naming its URL."""
+
+    node: Node
+    index: int
+    rel: object
+    href: str
+    url: str
+
+
 def _lower_headers(items: Any) -> dict[str, str]:
     return {str(name).lower(): str(value) for name, value in items}
 
@@ -195,7 +230,6 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
     first target — the probe representative — is deterministic.
     """
     base = _normalize_base(base_url) if base_url is not None else None
-    base_host = urlparse(base).netloc.lower() if base is not None else None
     by_host: dict[str, list[_Target]] = {}
     for node in graph.iter(*_LIVE_KINDS):
         if node.parse_error is not None:
@@ -210,24 +244,11 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
             href = asset.get("href")
             if not isinstance(href, str):
                 continue
-            url = href
-            parsed = urlparse(href)
-            if parsed.scheme.lower() != "https" or not parsed.netloc:
-                if base is None:
-                    continue
-                rel = graph.resolve_path(node, href)
-                if rel is None:
-                    continue  # absolute non-https, or a href escaping the tree
-                url = f"{base}{rel}"
-                parsed = urlparse(url)
-            elif base_host is not None and parsed.netloc.lower() != base_host:
-                # Published under a known host, and this href names a different
-                # one: an upstream copy the publisher does not serve. core.md's
-                # Data Storage MUSTs do not reach it (PORTO-CORE-073), whatever
-                # roles it carries.
+            url = _own_url(graph, node, href, base)
+            if url is None:
                 continue
             size = asset.get("file:size")
-            by_host.setdefault(parsed.netloc.lower(), []).append(
+            by_host.setdefault(urlparse(url).netloc.lower(), []).append(
                 _Target(
                     node=node,
                     key=key,
@@ -236,6 +257,53 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
                 )
             )
     return by_host
+
+
+def _own_url(graph: CatalogGraph, node: Node, href: str, base: str | None) -> str | None:
+    """The URL a href on ``node`` is served from, or None when it is out of scope.
+
+    An absolute ``https`` href is probed as declared, except that once ``base``
+    (already normalized) names the publish host, an href on any other host is a
+    copy someone else serves: core.md's hosting MUSTs do not reach it
+    (PORTO-CORE-073), whatever roles it carries. A relative href joins onto
+    ``base``; without one it cannot be placed. Absolute non-https hrefs and
+    hrefs escaping the tree are never probed.
+    """
+    parsed = urlparse(href)
+    if parsed.scheme.lower() == "https" and parsed.netloc:
+        if base is not None and parsed.netloc.lower() != urlparse(base).netloc.lower():
+            return None
+        return href
+    if base is None:
+        return None
+    rel = graph.resolve_path(node, href)
+    if rel is None:
+        return None
+    return f"{base}{rel}"
+
+
+def _link_targets(graph: CatalogGraph, base: str) -> list[_LinkTarget]:
+    """Every distinct link URL under the publish base, sorted by URL.
+
+    Where several links across the graph name one URL — ``root`` from every
+    object, ``parent`` from every sibling — the first in path order stands for
+    it, so a failure is reported once, against one document and pointer.
+    """
+    first: dict[str, _LinkTarget] = {}
+    for node in graph.iter(*_LINK_KINDS):
+        if node.parse_error is not None:
+            continue
+        for index, link in enumerate(links_of(node)):
+            href = link.get("href")
+            if not isinstance(href, str) or not href:
+                continue
+            url = _own_url(graph, node, href, base)
+            if url is None or url in first:
+                continue
+            first[url] = _LinkTarget(
+                node=node, index=index, rel=link.get("rel"), href=href, url=url
+            )
+    return [first[url] for url in sorted(first)]
 
 
 def _normalize_base(base_url: str) -> str:
@@ -398,7 +466,41 @@ def _check_head(target: _Target, response: ProbeResponse) -> list[Finding]:
     return []
 
 
-def _check_heads(host: str, targets: list[_Target], prober: Prober) -> list[Finding]:
+class _HeadCache:
+    """One HEAD per distinct URL, shared by the asset and link checks.
+
+    A link target that is also an asset (a relative ``pmtiles`` link, say) is
+    then asked for once. A transport failure marks the host dead so no later
+    check keeps hammering it: :meth:`head` returns None once the host failed,
+    and the failure is reported once by whichever check hit it.
+    """
+
+    def __init__(self, prober: Prober) -> None:
+        self._prober = prober
+        self._responses: dict[str, ProbeResponse] = {}
+        self.failed: dict[str, Exception] = {}  # host -> the first transport error
+
+    def head(self, url: str) -> ProbeResponse | None:
+        response = self._responses.get(url)
+        if response is not None:
+            return response
+        host = urlparse(url).netloc.lower()
+        if host in self.failed:
+            return None
+        try:
+            response = self._prober.head(url)
+        except Exception as exc:  # noqa: BLE001 - a dead host is reported once
+            self.failed[host] = exc
+            return None
+        self._responses[url] = response
+        return response
+
+
+def _unavailable(message: str, path: str) -> Finding:
+    return Finding(rule_id=LIV_UNAVAILABLE, severity=Severity.WARNING, message=message, path=path)
+
+
+def _check_heads(host: str, targets: list[_Target], heads: _HeadCache) -> list[Finding]:
     """HEAD each distinct URL once, but check EVERY target against it.
 
     Two assets may share one URL while disagreeing on ``file:size`` — at most
@@ -406,79 +508,117 @@ def _check_heads(host: str, targets: list[_Target], prober: Prober) -> list[Find
     still runs per asset.
     """
     findings: list[Finding] = []
-    responses: dict[str, ProbeResponse] = {}
     for target in targets:
-        response = responses.get(target.url)
+        response = heads.head(target.url)
         if response is None:
-            try:
-                response = prober.head(target.url)
-            except Exception as exc:  # noqa: BLE001 - a dead host is reported once
-                findings.append(
-                    Finding(
-                        rule_id=LIV_UNAVAILABLE,
-                        severity=Severity.WARNING,
-                        message=f"HEAD probes against host '{host}' failed: {exc}",
-                        path=str(target.node.path),
-                    )
+            findings.append(
+                _unavailable(
+                    f"HEAD probes against host '{host}' failed: {heads.failed[host]}",
+                    str(target.node.path),
                 )
-                break
-            responses[target.url] = response
+            )
+            break
         findings.extend(_check_head(target, response))
     return findings
 
 
-def _check_host(host: str, targets: list[_Target], prober: Prober) -> list[Finding]:
+def _check_host(
+    host: str, targets: list[_Target], prober: Prober, heads: _HeadCache
+) -> list[Finding]:
     rep = targets[0]
     try:
         ranged = prober.get_range(rep.url)
         preflighted = prober.preflight(rep.url)
     except Exception as exc:  # noqa: BLE001 - an unreachable host is reported once
+        heads.failed.setdefault(host, exc)
         return [
-            Finding(
-                rule_id=LIV_UNAVAILABLE,
-                severity=Severity.WARNING,
-                message=f"live probes against host '{host}' failed: {exc}",
-                path=str(rep.node.path),
-            )
+            _unavailable(f"live probes against host '{host}' failed: {exc}", str(rep.node.path))
         ]
     findings = _check_range(host, rep, ranged)
     findings.extend(_check_cors(host, rep, ranged))
     findings.extend(_check_preflight(host, rep, preflighted))
-    findings.extend(_check_heads(host, targets, prober))
+    findings.extend(_check_heads(host, targets, heads))
+    return findings
+
+
+def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> list[Finding]:
+    """HEAD every distinct link URL on the publish host; any non-2xx is an error.
+
+    HEAD is a MUST for this host (PORTO-CORE-043), so a 405 is reported as the
+    status it is rather than retried as GET. A host that already failed in
+    transport during the asset probes was reported there and is not asked
+    again; one that fails here is reported once as ``PTL-LIV-000``.
+    """
+    if host in heads.failed:
+        return []
+    findings: list[Finding] = []
+    for target in targets:
+        response = heads.head(target.url)
+        if response is None:
+            findings.append(
+                _unavailable(
+                    f"HEAD probes for link targets on host '{host}' failed: {heads.failed[host]}",
+                    str(target.node.path),
+                )
+            )
+            break
+        if 200 <= response.status < 300:
+            continue
+        findings.append(
+            Finding(
+                rule_id=LIV_LINK_TARGET,
+                severity=Severity.ERROR,
+                message=(
+                    f"link rel:{target.rel!r} href '{target.href}': HEAD {target.url}"
+                    f" returned {response.status}, expected 2xx"
+                ),
+                path=str(target.node.path),
+                object_id=target.node.id,
+                json_pointer=f"/links/{target.index}/href",
+                fix_hint="upload the linked document to the publish host, or correct the href",
+                expected="2xx",
+                actual=response.status,
+            )
+        )
     return findings
 
 
 def validate_live(
     graph: CatalogGraph, prober: Prober | None = None, *, base_url: str | None = None
 ) -> list[Finding]:
-    """Probe the hosts behind the catalog's assets.
+    """Probe the hosts behind the catalog's assets, and the publish host behind
+    its links.
 
     Absolute ``https`` hrefs are probed as declared. ``base_url`` — the https
     URL the catalog root is published under — additionally makes relative
-    hrefs probeable by joining their root-relative paths onto it. Returns
-    ``PTL-LIV-00x`` findings for each Data Storage MUST the hosting server
-    violates. When the tree declares nothing probeable, or a host cannot be
-    reached, the pass degrades to ``PTL-LIV-000`` warnings rather than failing
-    the run.
+    hrefs probeable by joining their root-relative paths onto it, and turns on
+    the link-target check: one HEAD per distinct link URL under the base,
+    ``PTL-LIV-006`` for each that does not answer 2xx. Returns ``PTL-LIV-00x``
+    findings for each Data Storage MUST the hosting server violates. When the
+    tree declares nothing probeable, or a host cannot be reached, the pass
+    degrades to ``PTL-LIV-000`` warnings rather than failing the run.
     """
     if prober is None:
         prober = _UrllibProber()
-    by_host = _targets_by_host(graph, base_url)
+    base = _normalize_base(base_url) if base_url is not None else None
+    by_host = _targets_by_host(graph, base)
+    findings: list[Finding] = []
     if not by_host:
         hint = (
-            "no probeable asset hrefs"
-            if base_url is not None
-            else "no absolute https asset hrefs to probe (pass base_url to probe relative hrefs)"
-        )
-        return [
-            Finding(
-                rule_id=LIV_UNAVAILABLE,
-                severity=Severity.WARNING,
-                message=f"live pass skipped: {hint}",
-                path=".",
+            "asset probes skipped: no probeable asset hrefs"
+            if base is not None
+            else (
+                "live pass skipped: no absolute https asset hrefs to probe"
+                " (pass base_url to probe relative hrefs)"
             )
-        ]
-    findings: list[Finding] = []
+        )
+        findings.append(_unavailable(hint, "."))
+        if base is None:
+            return findings
+    heads = _HeadCache(prober)
     for host in sorted(by_host):
-        findings.extend(_check_host(host, by_host[host], prober))
+        findings.extend(_check_host(host, by_host[host], prober, heads))
+    if base is not None:
+        base_host = urlparse(base).netloc.lower()
+        findings.extend(_check_links(base_host, _link_targets(graph, base), heads))
     return findings

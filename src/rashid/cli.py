@@ -77,13 +77,15 @@ def main() -> None:
     "--live/--no-live",
     "live",
     default=False,
-    help="Also probe the servers behind https assets: HTTP range and CORS (needs network).",
+    help="Also probe the servers behind https assets: HTTP range and CORS (needs network). "
+    "With --live-base-url, also check that every linked document exists on the publish host.",
 )
 @click.option(
     "--live-base-url",
     metavar="URL",
     default=None,
-    help="Publish base URL; makes relative asset hrefs probeable with --live.",
+    help="Publish base URL; makes relative asset hrefs probeable with --live and turns on "
+    "the check that every link target exists there.",
 )
 @click.option(
     "--all",
