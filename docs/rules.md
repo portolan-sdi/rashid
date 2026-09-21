@@ -81,7 +81,7 @@ The rule's message reports absent geometry evidence only. `PTL-COL-005` answers 
 
 | Group | Rules | Checks |
 |---|---|---|
-| `PTL-GEN` | 000–002 | Requires a root `catalog.json` and parseable object files. Rule `002` warns when rashid read the catalog over https by following links: an object that no link names and the scene files beside a collection stay invisible, so `PTL-LNK-002` and `PTL-COL-005` cannot see them. It also warns when the crawl stopped at the document limit or a document could not be fetched. |
+| `PTL-GEN` | 000–002 | Requires a root `catalog.json` and parseable object files. Rule `002` warns when rashid read the catalog over https by following links. A crawl reads only the documents that links point to, so `PTL-LNK-002` cannot report an object without an inbound link, and `PTL-COL-005` cannot report scene files beside a collection. Rule `002` also warns when the crawl stopped at the document limit or when the fetch of a document failed. |
 | `PTL-LNK` | 001–010 | Checks required structural links, child and item completeness, link types, and resolved target objects. Resolves an absolute link through the published base the root `self` link names. Requires a `rel:"icon"` logo to have a renderable media type, title, and relative `href`. Keeps `child` and `item` links out of alternate-language trees. |
 | `PTL-TTL` | 001–003 | Requires non-empty titles and descriptions, human-readable titles, and titles on child and item links. |
 | `PTL-BBX` | 001 | Requires finite, sentinel-free WGS84 bounding boxes with south less than or equal to north. Supports 2D and 3D boxes. |
@@ -113,7 +113,7 @@ Only the data and live passes use the network by default for a directory. A cata
 
 | Pass | Requests | Data transferred |
 |---|---|---|
-| Crawl (catalog URL only) | One GET for each document a link reaches, plus two for the `AGENTS.md` and `README.md` beside each catalog and collection. Eight requests run at a time. The crawl stops at 10000 documents. | The STAC JSON and Markdown of the tree. |
+| Crawl (catalog URL only) | One GET for each document that a `child`, `item`, or JSON `alternate` link points to, plus two for the `AGENTS.md` and `README.md` beside each catalog and collection. rashid sends up to 8 requests at a time and stops at 10000 documents. | The STAC JSON and Markdown of the tree. |
 | Metadata | None | Catalog JSON from the local tree. |
 | Structural | None | Nothing. The core schemas ship in the wheel. |
 | Schema | Only with `--schema-allow-network` | One schema document when the package does not include the requested version. |

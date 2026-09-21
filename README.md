@@ -39,7 +39,7 @@ Use `--no-data` when you only need a metadata and structure result. Use `--data-
 rashid check path/to/catalog --data-scope local
 ```
 
-## Check a Published Catalog
+## Check a published catalog
 
 Give `rashid check` the URL of the root `catalog.json`, or of the directory that holds it.
 
@@ -47,9 +47,9 @@ Give `rashid check` the URL of the root `catalog.json`, or of the directory that
 rashid check https://data.example.org/my-catalog/catalog.json
 ```
 
-rashid fetches the root catalog and follows its `child`, `item`, and JSON `alternate` links. It fetches `AGENTS.md` and `README.md` beside each catalog and collection. It then runs the same passes as for a directory. The URL is the publish base, so the hosting checks run by default: HTTP range support and CORS on the assets, and one HEAD for each link target that the crawl did not fetch. A `child` or `item` link that answers `404` on the host is a `PTL-LIV-006` error. A root `self` link that names a different location is a `PTL-LIV-007` warning.
+rashid fetches the root catalog and follows its `child`, `item`, and JSON `alternate` links. It fetches `AGENTS.md` and `README.md` beside each catalog and collection. It then runs the same passes as for a directory. The URL is the publish base, so the hosting checks run by default: HTTP range support and CORS on the assets, and one HEAD for each link target that the crawl did not fetch. A `child` or `item` link that answers `404` on the host is a `PTL-LIV-006` error. A root `self` link that points to a different location is a `PTL-LIV-007` warning.
 
-A crawl sees only what a link names. rashid reports this limit once as `PTL-GEN-002`: an object that no link reaches (`PTL-LNK-002`) and scene files beside a collection (`PTL-COL-005`) stay invisible. Sync the tree to disk and check the directory for the full view.
+A crawl reads only the documents that links point to. rashid reports this limit once as `PTL-GEN-002`. Two checks depend on a full directory listing and do not run: `PTL-LNK-002`, for an object without an inbound link, and `PTL-COL-005`, for scene files beside a collection. Sync the tree to disk and check the directory for the full view.
 
 Use `--live` to run the hosting checks on a directory. rashid reads the publish base from the root catalog's absolute `self` link. When the root has no `self` link, pass `--live-base-url`.
 
