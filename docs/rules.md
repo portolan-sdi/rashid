@@ -45,7 +45,7 @@ Four rules account for these separate trees:
 
 The rule permits several items, several data files, and partitioned collections. If collection assets omit `roles`, rashid cannot decide whether the rule applies. `PTL-AST-001` reports that omission instead.
 
-`PTL-COL-006` reports a collection that refers to no data. A conforming reference is an asset with the `data` role, on the collection or on its items. A partitioned collection refers to its data through `partition:glob` instead. The rule reports only a collection with no items, so it never overlaps `PTL-AST-007`, which reports each item without a `data` asset. When scene files or an item mirror show that a collection owes items, `PTL-COL-005` owns the finding, because there the repair is the items and not the asset list. If collection assets omit `roles`, rashid cannot decide whether the rule applies, and `PTL-AST-001` reports that omission instead.
+`PTL-COL-006` reports a collection that refers to no data. The conforming reference is an asset with the `data` role, on the collection or on its items. For a partitioned collection, `partition:glob` is the reference. The rule reports only a collection with no items, so it never overlaps `PTL-AST-007`, which reports each item without a `data` asset. When scene files or an item mirror show that a collection owes items, `PTL-COL-005` reports that structure, and the repair there is the items rather than the asset list. If collection assets omit `roles`, rashid cannot decide whether the rule applies, and `PTL-AST-001` reports that omission instead.
 
 `PTL-COL-005` reports a collection that owes items but publishes none. Two signals show this fault, and each one is sufficient:
 
