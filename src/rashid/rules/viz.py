@@ -158,7 +158,7 @@ class ThumbnailRule(Rule):
     id = "PTL-VIZ-001"
     spec_ids = ("PORTO-CORE-067", "PORTO-FMT-033")
     default_severity = Severity.ERROR
-    description = "geospatial collections must include a thumbnail asset (png or jpeg)"
+    description = "geospatial collections must include a thumbnail asset (png, jpeg or webp)"
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
