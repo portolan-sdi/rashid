@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from importlib.metadata import version
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.request import Request
 
@@ -25,12 +25,13 @@ from rashid.live import (
     LIV_HEAD_LENGTH,
     LIV_LINK_TARGET,
     LIV_RANGE,
+    LIV_SELF_BASE,
     LIV_UNAVAILABLE,
     ProbeResponse,
     _UrllibProber,
 )
 from rashid.model import Severity
-from tests.conftest import VALID_MULTIHASH, CatalogBuilder
+from tests.conftest import VALID_MULTIHASH, CatalogBuilder, mutate_json
 
 pytestmark = pytest.mark.unit
 
@@ -477,6 +478,7 @@ def test_disabling_all_liv_rules_skips_pass(catalog: CatalogBuilder) -> None:
                 LIV_CORS_EXPOSE,
                 LIV_CORS_PREFLIGHT,
                 LIV_LINK_TARGET,
+                LIV_SELF_BASE,
             }
         )
     )
@@ -862,6 +864,157 @@ def test_disabling_link_target_rule_silences_it(catalog: CatalogBuilder) -> None
         live_base_url=_BASE,
     )
     assert LIV_LINK_TARGET not in {f.rule_id for f in report.findings}
+
+
+# --- the root self link as the publish base (#160) ----------------------------
+#
+# core.md, Links: a published root catalog SHOULD carry an absolute self link
+# (PORTO-CORE-081). It names the base every file is served under, so a catalog
+# that carries one needs no --live-base-url; and when the caller names a base
+# too, the two must agree.
+
+
+def _self_linked_tree(catalog: CatalogBuilder, self_href: str = f"{_BASE}/catalog.json") -> Path:
+    sector = catalog.subcatalog("sector-1")
+    sector.collection("roads").item("seg1")
+    root = catalog.write()
+    mutate_json(
+        root / "catalog.json",
+        lambda d: d["links"].append({"rel": "self", "href": self_href, "type": "application/json"}),
+    )
+    return root
+
+
+def test_self_link_supplies_the_base_when_none_is_given(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(_self_linked_tree(catalog))
+    prober = StatusProber()
+    findings = validate_live(graph, prober)
+    assert LIV_UNAVAILABLE not in _ids(findings)
+    # relative assets and link targets both resolve under the self link's base
+    assert f"{_BASE}/sector-1/roads/data.parquet" in prober.head_calls
+    assert f"{_BASE}/sector-1/roads/seg1/seg1.json" in prober.head_calls
+    assert all(u.startswith(f"{_BASE}/") for u in prober.head_calls)
+
+
+def test_self_link_base_reports_missing_documents(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(_self_linked_tree(catalog))
+    missing = f"{_BASE}/sector-1/catalog.json"
+    findings = validate_live(graph, StatusProber({missing: 404}))
+    [finding] = _link_findings(findings)
+    assert finding.path == "catalog.json"
+    assert missing in finding.message
+
+
+def test_self_link_base_alone_raises_no_self_base_finding(catalog: CatalogBuilder) -> None:
+    """With no caller base there is nothing to compare the self link against."""
+    graph = CatalogGraph.load(_self_linked_tree(catalog))
+    findings = validate_live(graph, StatusProber())
+    assert LIV_SELF_BASE not in _ids(findings)
+
+
+def test_caller_base_wins_over_the_self_link(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(_self_linked_tree(catalog))
+    prober = StatusProber()
+    validate_live(graph, prober, base_url="https://mirror.example.net/copy")
+    assert all(u.startswith("https://mirror.example.net/copy/") for u in prober.head_calls)
+
+
+def test_self_link_disagreeing_with_the_base_is_reported(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(_self_linked_tree(catalog))
+    findings = validate_live(graph, StatusProber(), base_url="https://mirror.example.net/copy/")
+    [finding] = [f for f in findings if f.rule_id == LIV_SELF_BASE]
+    assert finding.severity is Severity.WARNING
+    assert finding.path == "catalog.json"
+    assert (
+        finding.json_pointer
+        == f"/links/{_link_index(graph, 'catalog.json', 'self', f'{_BASE}/catalog.json')}/href"
+    )
+    assert finding.expected == "https://mirror.example.net/copy/"
+    assert finding.actual == f"{_BASE}/"
+    assert "https://mirror.example.net/copy/catalog.json" in (finding.fix_hint or "")
+
+
+def test_self_link_agreeing_with_the_base_is_silent(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(_self_linked_tree(catalog))
+    for given in (_BASE, f"{_BASE}/"):
+        findings = validate_live(graph, StatusProber(), base_url=given)
+        assert LIV_SELF_BASE not in _ids(findings)
+
+
+def test_relative_self_link_is_not_a_base(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(_self_linked_tree(catalog, self_href="./catalog.json"))
+    prober = FakeProber()
+    findings = validate_live(graph, prober)
+    assert LIV_UNAVAILABLE in _ids(findings)
+    assert prober.head_calls == []
+
+
+def test_http_self_link_is_not_probed(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(
+        _self_linked_tree(catalog, self_href="http://data.example.org/cat/catalog.json")
+    )
+    prober = FakeProber()
+    findings = validate_live(graph, prober)
+    assert LIV_UNAVAILABLE in _ids(findings)
+    assert prober.head_calls == []
+
+
+def test_no_base_hint_names_the_self_link(catalog: CatalogBuilder) -> None:
+    graph = _graph_with_relative(catalog)
+    [finding] = validate_live(graph, FakeProber())
+    assert finding.rule_id == LIV_UNAVAILABLE
+    assert "self link" in finding.message
+
+
+def test_graph_base_url_is_used_when_no_base_is_passed(catalog: CatalogBuilder) -> None:
+    """URL mode records the base on the graph; the pass picks it up."""
+    graph = _nested_tree(catalog)
+    graph.base_url = _BASE
+    prober = StatusProber()
+    findings = validate_live(graph, prober)
+    assert LIV_UNAVAILABLE not in _ids(findings)
+    assert f"{_BASE}/sector-1/roads/seg1/seg1.json" in prober.head_calls
+
+
+def test_known_statuses_replace_link_heads(catalog: CatalogBuilder) -> None:
+    graph = _nested_tree(catalog)
+    known = {f"{_BASE}/sector-1/catalog.json": 404, f"{_BASE}/sector-1/roads/collection.json": 200}
+    prober = StatusProber()
+    findings = validate_live(graph, prober, base_url=_BASE, known_statuses=known)
+    [finding] = _link_findings(findings)
+    assert f"{_BASE}/sector-1/catalog.json" in finding.message
+    assert finding.actual == 404
+    # neither known URL was asked again; the rest still were
+    assert f"{_BASE}/sector-1/catalog.json" not in prober.head_calls
+    assert f"{_BASE}/sector-1/roads/collection.json" not in prober.head_calls
+    assert f"{_BASE}/sector-1/roads/seg1/seg1.json" in prober.head_calls
+
+
+def test_known_status_does_not_stand_in_for_an_asset_head(catalog: CatalogBuilder) -> None:
+    """A known status carries no Content-Length, so the asset check fetches its own."""
+    graph = _graph_with_relative(catalog)
+    asset = f"{_BASE}/roads/data.parquet"
+    prober = StatusProber()
+    findings = validate_live(graph, prober, base_url=_BASE, known_statuses={asset: 200})
+    assert asset in prober.head_calls
+    assert not any(f.rule_id == LIV_HEAD_LENGTH and "'data'" in f.message for f in findings)
+
+
+def test_runner_reports_self_base_and_it_can_be_disabled(catalog: CatalogBuilder) -> None:
+    root = _self_linked_tree(catalog)
+    other = "https://mirror.example.net/copy"
+    report = validate(root, live=True, live_prober=StatusProber(), live_base_url=other, data=False)
+    [finding] = [f for f in report.findings if f.rule_id == LIV_SELF_BASE]
+    assert finding.severity is Severity.WARNING  # a SHOULD: warns, does not fail the run
+    report = validate(
+        root,
+        config=RulesConfig(disabled=frozenset({LIV_SELF_BASE})),
+        live=True,
+        live_prober=StatusProber(),
+        live_base_url=other,
+        data=False,
+    )
+    assert LIV_SELF_BASE not in {f.rule_id for f in report.findings}
 
 
 # --- the default prober's outgoing request headers ---------------------------

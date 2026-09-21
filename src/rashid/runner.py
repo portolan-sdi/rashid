@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Sequence
+import tempfile
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -39,16 +40,27 @@ from rashid.live import (
     LIV_HEAD_LENGTH,
     LIV_LINK_TARGET,
     LIV_RANGE,
+    LIV_SELF_BASE,
     validate_live,
 )
 from rashid.live import Prober as LiveProber
 from rashid.model import Finding, Report, Severity
+from rashid.remote import (
+    DEFAULT_MAX_DOCUMENTS,
+    Crawl,
+    Fetcher,
+    FetchError,
+    crawl,
+    is_catalog_url,
+    split_catalog_url,
+)
 from rashid.rule import Rule
 from rashid.schema import SCH_INVALID, validate_schema
 from rashid.structural import STR_INVALID, validate_structural
 
 GEN_MISSING_ROOT = "PTL-GEN-000"
 GEN_UNPARSEABLE = "PTL-GEN-001"
+GEN_PARTIAL_TREE = "PTL-GEN-002"
 
 # Requirement IDs from the spec's requirements manifest
 # (specs/portolan/requirements.yaml) enforced by each check;
@@ -97,6 +109,7 @@ _LIVE_RULE_IDS = frozenset(
         LIV_CORS_EXPOSE,
         LIV_CORS_PREFLIGHT,
         LIV_LINK_TARGET,
+        LIV_SELF_BASE,
     }
 )
 
@@ -104,40 +117,54 @@ _LIVE_RULE_IDS = frozenset(
 _Validator = Callable[[dict[str, Any]], list[SchemaError]]
 
 
+@dataclasses.dataclass(frozen=True)
+class _PassOptions:
+    """The caller's choices for the opt-in passes, carried as one value."""
+
+    structural: bool
+    structural_validator: _Validator | None
+    schema: bool
+    schema_validator: _Validator | None
+    schema_allow_network: bool
+    data: bool
+    data_validator: DataValidator | None
+    data_reader_factory: DataReaderFactory | None
+    live: bool
+    live_prober: LiveProber | None
+    live_base_url: str | None
+    live_known_statuses: Mapping[str, int] | None = None
+
+
 def _optional_passes(
-    graph: CatalogGraph,
-    config: RulesConfig,
-    *,
-    structural: bool,
-    structural_validator: _Validator | None,
-    schema: bool,
-    schema_validator: _Validator | None,
-    schema_allow_network: bool,
-    data: bool,
-    data_validator: DataValidator | None,
-    data_reader_factory: DataReaderFactory | None,
-    live: bool,
-    live_prober: LiveProber | None,
-    live_base_url: str | None,
+    graph: CatalogGraph, config: RulesConfig, options: _PassOptions
 ) -> list[Finding]:
     """Run the opt-in structural, schema, data, and live passes, honouring disable ids."""
     findings: list[Finding] = []
-    if structural and STR_INVALID not in config.disabled:
-        findings.extend(validate_structural(graph, structural_validator))
-    if schema and SCH_INVALID not in config.disabled:
+    if options.structural and STR_INVALID not in config.disabled:
+        findings.extend(validate_structural(graph, options.structural_validator))
+    if options.schema and SCH_INVALID not in config.disabled:
         findings.extend(
-            validate_schema(graph, schema_validator, allow_network=schema_allow_network)
+            validate_schema(
+                graph, options.schema_validator, allow_network=options.schema_allow_network
+            )
         )
-    if data and not _DATA_RULE_IDS <= config.disabled:
+    if options.data and not _DATA_RULE_IDS <= config.disabled:
         findings.extend(
             f
-            for f in validate_data(graph, data_validator, reader_factory=data_reader_factory)
+            for f in validate_data(
+                graph, options.data_validator, reader_factory=options.data_reader_factory
+            )
             if f.rule_id not in config.disabled
         )
-    if live and not _LIVE_RULE_IDS <= config.disabled:
+    if options.live and not _LIVE_RULE_IDS <= config.disabled:
         findings.extend(
             f
-            for f in validate_live(graph, live_prober, base_url=live_base_url)
+            for f in validate_live(
+                graph,
+                options.live_prober,
+                base_url=options.live_base_url,
+                known_statuses=options.live_known_statuses,
+            )
             if f.rule_id not in config.disabled
         )
     return findings
@@ -156,14 +183,25 @@ def validate(
     data: bool = True,
     data_validator: DataValidator | None = None,
     data_reader_factory: DataReaderFactory | None = None,
-    live: bool = False,
+    live: bool | None = None,
     live_prober: LiveProber | None = None,
     live_base_url: str | None = None,
+    fetcher: Fetcher | None = None,
+    max_documents: int = DEFAULT_MAX_DOCUMENTS,
 ) -> Report:
-    """Validate a local Portolan catalog tree.
+    """Validate a Portolan catalog tree, on disk or published over https.
 
     ``catalog_path`` is the catalog directory, or the root ``catalog.json``
-    inside it; both name the same catalog.
+    inside it; both name the same catalog. It may instead be the https URL
+    the catalog is published under — the root ``catalog.json`` or the
+    directory holding it. rashid then fetches the root and follows its
+    ``child``, ``item``, and JSON ``alternate`` links into a temporary tree
+    (see :mod:`rashid.remote`), and runs the same passes over that. A tree
+    assembled from links holds only what a link names, so the checks that
+    look for unlinked files cannot see them; the report says so once, as a
+    ``PTL-GEN-002`` warning. ``fetcher`` injects an alternate document
+    fetcher and ``max_documents`` caps the crawl; both matter chiefly for
+    testing.
 
     The metadata pass always runs. The STAC 1.1.0 structural pass runs by
     default too, against the core schemas shipped in the wheel (see
@@ -197,16 +235,23 @@ def validate(
     that live in the tree and treats the rest as unfetchable, which is the
     difference between validating a metadata-only mirror and downloading the
     catalog it mirrors. It defaults to
-    :class:`~rashid.data.reader.FilesystemHttpReader`, which reads both.
+    :class:`~rashid.data.reader.FilesystemHttpReader`, which reads both, and
+    for a catalog read over https resolves the tree's relative hrefs under
+    the catalog URL.
 
     When ``live`` is true the live-hosting pass runs too, probing the servers
     behind the catalog's assets for HTTP range support and CORS (see
     :mod:`rashid.live`) — absolute ``https`` hrefs as declared, relative hrefs
-    when ``live_base_url`` (the https URL the catalog root is published under)
-    is given. ``live_base_url`` also has the pass HEAD every link target under
-    that base, so a published tree missing the documents its ``child`` and
-    ``item`` links name is reported (``PTL-LIV-006``). The pass is off by
-    default because it reaches the network.
+    when the publish base is known. That base is ``live_base_url`` (the https
+    URL the catalog root is published under), else the catalog URL when
+    ``catalog_path`` is one, else the root catalog's absolute ``self`` link.
+    Given a base the pass also HEADs every link target under it, so a
+    published tree missing the documents its ``child`` and ``item`` links name
+    is reported (``PTL-LIV-006``), and compares the root ``self`` link against
+    the base (``PTL-LIV-007``). ``live`` is off by default for a tree on disk
+    because it reaches the network, and on by default for a catalog URL: the
+    hosting MUSTs are what a published catalog is checked for, and the
+    network is already in use. ``live=False`` turns it off either way.
     Disabling every ``PTL-LIV-00x`` rule via ``config`` skips the pass;
     disabling a subset just silences those findings. ``live_prober`` injects an
     alternate prober, chiefly for offline testing.
@@ -216,6 +261,27 @@ def validate(
 
         rules = DEFAULT_RULES
     config = config or RulesConfig()
+    url_mode = isinstance(catalog_path, str) and is_catalog_url(catalog_path)
+    options = _PassOptions(
+        structural=structural,
+        structural_validator=structural_validator,
+        schema=schema,
+        schema_validator=schema_validator,
+        schema_allow_network=schema_allow_network,
+        data=data,
+        data_validator=data_validator,
+        data_reader_factory=data_reader_factory,
+        # Off by default on disk, on by default for a URL: see the docstring.
+        live=(live is not False) if url_mode else bool(live),
+        live_prober=live_prober,
+        live_base_url=live_base_url,
+    )
+
+    if url_mode:
+        return _validate_url(
+            str(catalog_path), rules, config, options, fetcher=fetcher, max_documents=max_documents
+        )
+
     root = Path(catalog_path)
 
     # Shell completion lands on the file, and the root catalog.json names the
@@ -241,7 +307,113 @@ def validate(
         )
 
     graph = CatalogGraph.load(root)
-    findings: list[Finding] = []
+    return _validate_graph(graph, rules, config, options)
+
+
+def _validate_url(
+    url: str,
+    rules: Sequence[Rule],
+    config: RulesConfig,
+    options: _PassOptions,
+    *,
+    fetcher: Fetcher | None,
+    max_documents: int,
+) -> Report:
+    """Fetch the published tree under ``url`` into a temporary directory and validate it."""
+    base, root_url = split_catalog_url(url)
+    with tempfile.TemporaryDirectory(prefix="rashid-") as tmp:
+        try:
+            crawled = crawl(base, Path(tmp), fetcher, max_documents=max_documents)
+        except FetchError as exc:
+            return _missing_root(f"root catalog.json cannot be fetched: {exc}")
+        status = crawled.statuses.get(root_url)
+        if status is None or not 200 <= status < 300:
+            return _missing_root(
+                f"root catalog.json cannot be fetched: GET {root_url} returned {status}"
+            )
+        graph = CatalogGraph.load(Path(tmp))
+        graph.base_url = base
+        graph.complete_listing = False
+        return _validate_graph(
+            graph,
+            rules,
+            config,
+            dataclasses.replace(options, live_known_statuses=crawled.statuses),
+            preamble=_partial_tree_findings(crawled, root_url),
+        )
+
+
+def _missing_root(detail: str) -> Report:
+    return Report(
+        findings=[
+            Finding(
+                rule_id=GEN_MISSING_ROOT,
+                severity=Severity.ERROR,
+                message=detail,
+                path=str(ROOT_CATALOG),
+            )
+        ]
+    )
+
+
+def _partial_tree_findings(crawled: Crawl, root_url: str) -> list[Finding]:
+    """What a tree assembled from links cannot show, said once at the root.
+
+    A directory walk sees every file; a crawl sees what a link names. An
+    object no link reaches is the fault ``PTL-LNK-002`` exists to report, and
+    the scene files ``PTL-COL-005`` looks for beside a collection are never
+    linked, so neither check can fire here. Reporting that once follows
+    ``PTL-LIV-000``: a check that could not run is a warning, not a pass.
+    """
+    findings = [
+        Finding(
+            rule_id=GEN_PARTIAL_TREE,
+            severity=Severity.WARNING,
+            message=(
+                f"catalog read by following links from {root_url}: {crawled.documents}"
+                " document(s); a file no link names is invisible, so PTL-LNK-002 cannot"
+                " report an unlinked object and PTL-COL-005 cannot see undeclared scene files"
+            ),
+            path=".",
+            fix_hint="sync the tree to disk and run rashid check on the directory for the full view",
+        )
+    ]
+    if crawled.capped:
+        findings.append(
+            Finding(
+                rule_id=GEN_PARTIAL_TREE,
+                severity=Severity.WARNING,
+                message=(
+                    f"crawl stopped at {crawled.documents} documents; the links past that"
+                    " point were not followed"
+                ),
+                path=".",
+                fix_hint="sync the tree to disk and run rashid check on the directory",
+            )
+        )
+    for failed_url, error in sorted(crawled.errors.items()):
+        findings.append(
+            Finding(
+                rule_id=GEN_PARTIAL_TREE,
+                severity=Severity.WARNING,
+                message=f"document could not be fetched: {error}",
+                path=str(ROOT_CATALOG),
+                fix_hint=f"check that the host serves {failed_url}",
+            )
+        )
+    return findings
+
+
+def _validate_graph(
+    graph: CatalogGraph,
+    rules: Sequence[Rule],
+    config: RulesConfig,
+    options: _PassOptions,
+    *,
+    preamble: Sequence[Finding] = (),
+) -> Report:
+    """Run every rule and every requested pass over a loaded graph."""
+    findings: list[Finding] = list(preamble)
 
     root_node = graph.nodes.get(ROOT_CATALOG)
     if root_node is None or graph.root is None:
@@ -284,23 +456,7 @@ def validate(
                 continue
             findings.extend(rule.check(node, graph))
 
-    findings.extend(
-        _optional_passes(
-            graph,
-            config,
-            structural=structural,
-            structural_validator=structural_validator,
-            schema=schema,
-            schema_validator=schema_validator,
-            schema_allow_network=schema_allow_network,
-            data=data,
-            data_validator=data_validator,
-            data_reader_factory=data_reader_factory,
-            live=live,
-            live_prober=live_prober,
-            live_base_url=live_base_url,
-        )
-    )
+    findings.extend(_optional_passes(graph, config, options))
 
     if config.severity_overrides:
         findings = [
