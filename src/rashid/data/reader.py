@@ -30,6 +30,7 @@ from urllib.request import Request, urlopen
 
 from rashid._http import user_agent
 from rashid.catalog import CatalogGraph, Node, is_absolute_href
+from rashid.remote import wire_url
 
 _CHUNK = 1 << 16  # 64 KiB
 _TIMEOUT = 30  # seconds per request
@@ -97,7 +98,7 @@ class FilesystemHttpReader:
         if path.is_file():
             return Locator(is_remote=False, source=str(path))
         if self._graph.base_url is not None:
-            return Locator(is_remote=True, source=f"{self._graph.base_url.rstrip('/')}/{rel}")
+            return Locator(is_remote=True, source=wire_url(self._graph.base_url, str(rel)))
         return None
 
     def stream(self, node: Node, href: str) -> Iterator[bytes] | None:

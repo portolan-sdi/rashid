@@ -941,6 +941,62 @@ def test_self_link_agreeing_with_the_base_is_silent(catalog: CatalogBuilder) -> 
         assert LIV_SELF_BASE not in _ids(findings)
 
 
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "https://DATA.example.org/cat/catalog.json",
+        "https://data.example.org:443/cat/catalog.json",
+        "https://data.example.org/cat/./catalog.json",
+        "HTTPS://data.example.org/cat/catalog.json",
+    ],
+)
+def test_self_link_spellings_of_the_base_are_not_disagreements(
+    catalog: CatalogBuilder, spelling: str
+) -> None:
+    graph = CatalogGraph.load(_self_linked_tree(catalog, self_href=spelling))
+    findings = validate_live(graph, StatusProber(), base_url=_BASE)
+    assert LIV_SELF_BASE not in _ids(findings)
+
+
+def test_self_base_pointer_names_the_absolute_self_link(catalog: CatalogBuilder) -> None:
+    """A relative self link ahead of the absolute one must not steal the pointer."""
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(
+        root / "catalog.json",
+        lambda d: d["links"].extend(
+            [
+                {"rel": "self", "href": "./catalog.json"},
+                {"rel": "self", "href": "https://old.example.org/cat/catalog.json"},
+            ]
+        ),
+    )
+    graph = CatalogGraph.load(root)
+    [finding] = [
+        f
+        for f in validate_live(graph, StatusProber(), base_url=_BASE)
+        if f.rule_id == LIV_SELF_BASE
+    ]
+    index = _link_index(graph, "catalog.json", "self", "https://old.example.org/cat/catalog.json")
+    assert finding.json_pointer == f"/links/{index}/href"
+
+
+def test_self_link_without_a_host_is_ignored_not_fatal(catalog: CatalogBuilder) -> None:
+    graph = CatalogGraph.load(_self_linked_tree(catalog, self_href="https://catalog.json"))
+    prober = FakeProber()
+    findings = validate_live(graph, prober)
+    assert LIV_UNAVAILABLE in _ids(findings)
+    assert prober.head_calls == []
+
+
+def test_relative_asset_hrefs_are_percent_encoded_for_the_wire(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"data": {"href": "./my file.parquet", "roles": ["data"]}})
+    graph = CatalogGraph.load(catalog.write())
+    prober = StatusProber()
+    validate_live(graph, prober, base_url=_BASE)
+    assert f"{_BASE}/roads/my%20file.parquet" in prober.head_calls
+
+
 def test_relative_self_link_is_not_a_base(catalog: CatalogBuilder) -> None:
     graph = CatalogGraph.load(_self_linked_tree(catalog, self_href="./catalog.json"))
     prober = FakeProber()

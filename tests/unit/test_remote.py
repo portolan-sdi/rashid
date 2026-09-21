@@ -25,6 +25,7 @@ from rashid.data.reader import FilesystemHttpReader, LocalOnlyReader
 from rashid.live import LIV_LINK_TARGET, LIV_SELF_BASE, LIV_UNAVAILABLE
 from rashid.model import Severity
 from rashid.remote import (
+    MAX_BODY_BYTES,
     Crawl,
     Fetched,
     FetchError,
@@ -32,6 +33,7 @@ from rashid.remote import (
     crawl,
     is_catalog_url,
     split_catalog_url,
+    wire_url,
 )
 from rashid.runner import GEN_MISSING_ROOT, GEN_PARTIAL_TREE
 from tests.conftest import CatalogBuilder, mutate_json
@@ -121,6 +123,10 @@ def test_is_catalog_url(location: str, expected: bool) -> None:
 )
 def test_split_catalog_url_names_the_same_catalog_either_way(url: str) -> None:
     assert split_catalog_url(url) == (_BASE, _ROOT_URL)
+
+
+def test_split_catalog_url_lowercases_scheme_and_host() -> None:
+    assert split_catalog_url("HTTPS://Data.Example.org/cat/") == (_BASE, _ROOT_URL)
 
 
 def test_split_catalog_url_at_the_host_root() -> None:
@@ -380,6 +386,87 @@ def test_crawl_caps_the_document_count(catalog: CatalogBuilder, tmp_path: Path) 
     assert result.documents == 3
 
 
+def test_crawl_cap_is_exact_across_a_wide_level(catalog: CatalogBuilder, tmp_path: Path) -> None:
+    """Twenty children each with items: the cap counts what is queued, not what is done."""
+    for i in range(20):
+        collection = catalog.collection(f"c{i}")
+        for j in range(3):
+            collection.item(f"i{j}")
+    root = catalog.write()
+    result = crawl(_BASE, tmp_path / "dest", DirFetcher(root), max_documents=5)
+    assert result.capped
+    assert result.documents == 5
+
+
+def test_crawl_follows_only_json_documents(catalog: CatalogBuilder, tmp_path: Path) -> None:
+    """A child link to a TIFF is not a document: not fetched, not written."""
+    root = _nested(catalog)
+    (root / "big.tif").write_bytes(b"II*\x00" * 1000)
+    mutate_json(
+        root / "catalog.json",
+        lambda d: d["links"].append({"rel": "item", "href": "./big.tif", "type": "image/tiff"}),
+    )
+    fetcher = DirFetcher(root)
+    dest = tmp_path / "dest"
+    crawl(_BASE, dest, fetcher)
+    assert f"{_BASE}big.tif" not in fetcher.calls
+    assert not (dest / "big.tif").exists()
+
+
+def test_directory_url_answering_200_does_not_break_the_crawl(
+    catalog: CatalogBuilder, tmp_path: Path
+) -> None:
+    """Some hosts serve an index for a directory URL; the file it leaves must not block."""
+    root = _nested(catalog)
+    mutate_json(
+        root / "catalog.json",
+        lambda d: d["links"].insert(
+            0, {"rel": "child", "href": f"{_BASE}sector-1.json/", "type": "application/json"}
+        ),
+    )
+    mutate_json(
+        root / "sector-1" / "catalog.json",
+        lambda d: d["links"].append(
+            {"rel": "child", "href": "../sector-1.json/inner.json", "type": "application/json"}
+        ),
+    )
+
+    class Index(DirFetcher):
+        def get(self, url: str) -> Fetched:
+            if url.endswith("sector-1.json") or url.endswith("inner.json"):
+                self.calls.append(url)
+                return Fetched(
+                    status=200,
+                    body=b'{"type": "Catalog", "links": [{"rel": "child", "href": "./inner.json"}]}',
+                )
+            return super().get(url)
+
+    result = crawl(_BASE, tmp_path / "dest", Index(root))
+    assert result.documents >= 5
+    assert any("occupies the path" in e or "temporary tree" in e for e in result.errors.values())
+
+
+def test_overlong_name_is_reported_not_raised(catalog: CatalogBuilder, tmp_path: Path) -> None:
+    root = _nested(catalog)
+    long_name = "a" * 300
+    mutate_json(
+        root / "catalog.json",
+        lambda d: d["links"].append(
+            {"rel": "child", "href": f"./{long_name}/collection.json", "type": "application/json"}
+        ),
+    )
+
+    class Yes(DirFetcher):
+        def get(self, url: str) -> Fetched:
+            if long_name in url:
+                return Fetched(status=200, body=b'{"type": "Collection", "links": []}')
+            return super().get(url)
+
+    result = crawl(_BASE, tmp_path / "dest", Yes(root))
+    [error] = result.errors.values()
+    assert "temporary tree" in error
+
+
 def test_crawl_encodes_the_request_url_but_keeps_the_path_as_spelled(
     catalog: CatalogBuilder, tmp_path: Path
 ) -> None:
@@ -395,12 +482,13 @@ def test_crawl_encodes_the_request_url_but_keeps_the_path_as_spelled(
     )
     fetcher = DirFetcher(root)
     dest = tmp_path / "dest"
-    result = crawl(_BASE, dest, DirFetcher(root)) and crawl(_BASE, dest, fetcher)
+    result = crawl(_BASE, dest, fetcher)
     assert f"{_BASE}sector%201/catalog.json" in fetcher.calls
     assert (dest / "sector 1" / "catalog.json").exists()
-    # the status is keyed by the path as the href spells it, which is how the
-    # live pass builds the same URL
-    assert f"{_BASE}sector 1/catalog.json" in result.statuses
+    # the status is keyed by the encoded URL, which is the URL the live pass
+    # builds for the same href through the shared wire_url()
+    assert f"{_BASE}sector%201/catalog.json" in result.statuses
+    assert wire_url(_BASE, "sector 1/catalog.json") in result.statuses
 
 
 # --- the runner in URL mode ----------------------------------------------------
@@ -476,6 +564,9 @@ def test_url_mode_reports_a_document_the_host_lacks(catalog: CatalogBuilder) -> 
     # the crawl already knows the answer; the live pass did not ask again
     assert f"{_BASE}sector-1/catalog.json" not in prober.head_calls
     assert not report.passed
+    # the tree lacks the file too, so the link rule reports it from its side;
+    # each finding is true from its own viewpoint (see the PR notes)
+    assert "PTL-LNK-006" in {f.rule_id for f in report.findings}
 
 
 def test_url_mode_does_not_head_the_documents_it_fetched(catalog: CatalogBuilder) -> None:
@@ -591,6 +682,29 @@ def test_reader_resolves_relative_assets_under_the_base(catalog: CatalogBuilder)
     assert located.source == f"{_BASE}sector-1/roads/data.parquet"
 
 
+def test_reader_encodes_the_remote_url(catalog: CatalogBuilder) -> None:
+    root = _nested(catalog)
+    graph = CatalogGraph.load(root)
+    graph.base_url = _BASE
+    node = graph.nodes[PurePosixPath("sector-1/roads/collection.json")]
+    located = FilesystemHttpReader(graph).locate(node, "./my file.parquet")
+    assert located is not None
+    assert located.source == f"{_BASE}sector-1/roads/my%20file.parquet"
+
+
+def test_url_mode_survives_an_asset_href_with_a_space(catalog: CatalogBuilder) -> None:
+    """One unencoded href must not abort the data or live pass for the whole catalog."""
+    root = _nested(catalog)
+    mutate_json(
+        root / "sector-1" / "roads" / "collection.json",
+        lambda d: d["assets"]["data"].__setitem__("href", "./my file.parquet"),
+    )
+    prober = StatusProber()
+    report = _check_url(root, live_prober=prober)
+    assert LIV_UNAVAILABLE not in {f.rule_id for f in report.findings}
+    assert f"{_BASE}sector-1/roads/my%20file.parquet" in prober.head_calls
+
+
 def test_reader_prefers_the_file_on_disk(catalog: CatalogBuilder) -> None:
     root = _nested(catalog)
     graph = CatalogGraph.load(root)
@@ -643,10 +757,10 @@ def test_cli_still_rejects_a_missing_path() -> None:
     assert "does not exist" in result.output
 
 
-def test_cli_rejects_http_as_a_path() -> None:
+def test_cli_rejects_http_with_a_clear_message() -> None:
     result = CliRunner().invoke(main, ["check", "http://h/cat"])
     assert result.exit_code == 2
-    assert "does not exist" in result.output
+    assert "only https" in result.output
 
 
 def test_cli_refuses_live_base_url_with_a_url() -> None:
@@ -686,15 +800,16 @@ def test_default_fetcher_sends_a_named_user_agent(monkeypatch: pytest.MonkeyPatc
         def __exit__(self, *exc: object) -> None:
             return None
 
-        def read(self) -> bytes:
+        def read(self, n: int = -1) -> bytes:
             return b"{}"
 
     def fake_urlopen(request: Request, **_kwargs: Any) -> _Response:
         requests.append(request)
         return _Response()
 
-    monkeypatch.setattr("rashid.remote.urlopen", fake_urlopen)
-    fetched = _UrllibFetcher().get(_ROOT_URL)
+    fetcher = _UrllibFetcher()
+    monkeypatch.setattr(fetcher._opener, "open", fake_urlopen)
+    fetched = fetcher.get(_ROOT_URL)
     assert fetched == Fetched(status=200, body=b"{}")
     agent = requests[0].get_header("User-agent")
     assert agent is not None and agent.startswith("rashid/")
@@ -706,8 +821,9 @@ def test_default_fetcher_turns_http_errors_into_statuses(monkeypatch: pytest.Mon
     def fake_urlopen(request: Request, **_kwargs: Any) -> None:
         raise HTTPError(_ROOT_URL, 404, "Not Found", None, None)  # type: ignore[arg-type]
 
-    monkeypatch.setattr("rashid.remote.urlopen", fake_urlopen)
-    assert _UrllibFetcher().get(_ROOT_URL) == Fetched(status=404)
+    fetcher = _UrllibFetcher()
+    monkeypatch.setattr(fetcher._opener, "open", fake_urlopen)
+    assert fetcher.get(_ROOT_URL) == Fetched(status=404)
 
 
 def test_default_fetcher_raises_fetch_error_without_a_status(
@@ -718,9 +834,44 @@ def test_default_fetcher_raises_fetch_error_without_a_status(
     def fake_urlopen(request: Request, **_kwargs: Any) -> None:
         raise URLError("name or service not known")
 
-    monkeypatch.setattr("rashid.remote.urlopen", fake_urlopen)
+    fetcher = _UrllibFetcher()
+    monkeypatch.setattr(fetcher._opener, "open", fake_urlopen)
     with pytest.raises(FetchError, match="name or service not known"):
-        _UrllibFetcher().get(_ROOT_URL)
+        fetcher.get(_ROOT_URL)
+
+
+def test_default_fetcher_refuses_a_redirect_to_http() -> None:
+    from rashid.remote import _HttpsOnlyRedirects
+
+    handler = _HttpsOnlyRedirects()
+    req = Request(_ROOT_URL)
+    with pytest.raises(FetchError, match="non-https"):
+        handler.redirect_request(req, None, 301, "Moved", {}, "http://h/catalog.json")
+    followed = handler.redirect_request(req, None, 301, "Moved", {}, "https://h2/catalog.json")
+    assert followed is not None and followed.full_url == "https://h2/catalog.json"
+
+
+def test_default_fetcher_caps_the_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Response:
+        status = 200
+
+        def __enter__(self) -> _Response:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def read(self, n: int = -1) -> bytes:
+            return b"x" * n
+
+    class _Opener:
+        def open(self, request: Request, **_kwargs: Any) -> _Response:
+            return _Response()
+
+    fetcher = _UrllibFetcher()
+    monkeypatch.setattr(fetcher, "_opener", _Opener())
+    with pytest.raises(FetchError, match=f"exceeds {MAX_BODY_BYTES}"):
+        fetcher.get(_ROOT_URL)
 
 
 def test_crawl_result_is_a_plain_record() -> None:

@@ -55,6 +55,7 @@ host that rejects HEAD is reported, not worked around.
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -63,8 +64,9 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from rashid._http import user_agent
-from rashid.catalog import CatalogGraph, Kind, Node
+from rashid.catalog import CatalogGraph, Kind, Node, is_absolute_href
 from rashid.model import Finding, Severity
+from rashid.remote import wire_url
 from rashid.rules._common import links_of
 
 LIV_UNAVAILABLE = "PTL-LIV-000"
@@ -285,7 +287,7 @@ def _own_url(graph: CatalogGraph, node: Node, href: str, base: str | None) -> st
     rel = graph.resolve_path(node, href)
     if rel is None:
         return None
-    return f"{base}{rel}"
+    return wire_url(base, str(rel))
 
 
 def _link_targets(graph: CatalogGraph, base: str) -> list[_LinkTarget]:
@@ -612,16 +614,22 @@ def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
     served from, and the caller's ``base`` is where it actually is. When they
     disagree, either the publish step wrote the tree to the wrong location or
     the ``self`` link was never updated; every client that trusts the link then
-    resolves the tree's absolute hrefs against the wrong host.
+    resolves the tree's absolute hrefs against the wrong host. The two are
+    compared as URLs, not strings: host case, a default port, and a ``./``
+    segment do not make two spellings of one location disagree.
     """
     root = graph.root
     claimed = graph.published_base()
     if root is None or claimed is None:
         return []
-    if _normalize_any(claimed) == base:
+    if _same_location(claimed, base):
         return []
     index = next(
-        (i for i, link in enumerate(links_of(root)) if link.get("rel") == "self"),
+        (
+            i
+            for i, link in enumerate(links_of(root))
+            if link.get("rel") == "self" and is_absolute_href(str(link.get("href", "")))
+        ),
         0,
     )
     return [
@@ -645,9 +653,20 @@ def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
     ]
 
 
-def _normalize_any(url: str) -> str:
-    """One trailing slash, no scheme check: for comparing a claimed base."""
-    return url.rstrip("/") + "/"
+def _same_location(left: str, right: str) -> bool:
+    """True when two base URLs name one location, whatever their spelling."""
+    return _location_key(left) == _location_key(right)
+
+
+def _location_key(url: str) -> tuple[str, str, str]:
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname or ""
+    port = parsed.port
+    default = {"https": 443, "http": 80}.get(scheme)
+    netloc = host if port is None or port == default else f"{host}:{port}"
+    path = posixpath.normpath(parsed.path or "/")
+    return scheme, netloc, path.rstrip("/") + "/"
 
 
 def _resolve_base(graph: CatalogGraph, base_url: str | None) -> tuple[str | None, bool]:
@@ -656,15 +675,18 @@ def _resolve_base(graph: CatalogGraph, base_url: str | None) -> tuple[str | None
     The caller's ``base_url`` wins, then the base recorded on the graph (the
     URL ``rashid check`` was given), then the root ``self`` link
     (PORTO-CORE-081): a catalog that states its own published location needs
-    no ``--live-base-url``. A ``self`` link that is not https is ignored
-    rather than probed, for the reason :func:`_normalize_base` gives.
+    no ``--live-base-url``. A ``self`` link that is not an https URL with a
+    host is ignored rather than probed, for the reason :func:`_normalize_base`
+    gives.
     """
     named = base_url if base_url is not None else graph.base_url
     if named is not None:
         return _normalize_base(named), True
     claimed = graph.published_base()
-    if claimed is not None and urlparse(claimed).scheme.lower() == "https":
-        return _normalize_base(claimed), False
+    if claimed is not None:
+        parsed = urlparse(claimed)
+        if parsed.scheme.lower() == "https" and parsed.netloc:
+            return _normalize_base(claimed), False
     return None, False
 
 

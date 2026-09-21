@@ -248,7 +248,9 @@ def validate(
     Given a base the pass also HEADs every link target under it, so a
     published tree missing the documents its ``child`` and ``item`` links name
     is reported (``PTL-LIV-006``), and compares the root ``self`` link against
-    the base (``PTL-LIV-007``). ``live`` is off by default for a tree on disk
+    the base (``PTL-LIV-007``). With a catalog URL, ``live_base_url`` takes
+    precedence over the URL if both are given; the CLI refuses that pair,
+    since the URL is the base. ``live`` is off by default for a tree on disk
     because it reaches the network, and on by default for a catalog URL: the
     hosting MUSTs are what a published catalog is checked for, and the
     network is already in use. ``live=False`` turns it off either way.
@@ -271,7 +273,8 @@ def validate(
         data=data,
         data_validator=data_validator,
         data_reader_factory=data_reader_factory,
-        # Off by default on disk, on by default for a URL: see the docstring.
+        # None means the mode's default: on for a URL, off on disk (bool(None)
+        # is False, so a caller that never passed ``live`` sees no change).
         live=(live is not False) if url_mode else bool(live),
         live_prober=live_prober,
         live_base_url=live_base_url,
@@ -327,13 +330,14 @@ def _validate_url(
         except FetchError as exc:
             return _missing_root(f"root catalog.json cannot be fetched: {exc}")
         status = crawled.statuses.get(root_url)
-        if status is None or not 200 <= status < 300:
+        if status is None:  # pragma: no cover - crawl raises FetchError for the root
+            return _missing_root(f"root catalog.json cannot be fetched: GET {root_url} failed")
+        if not 200 <= status < 300:
             return _missing_root(
                 f"root catalog.json cannot be fetched: GET {root_url} returned {status}"
             )
         graph = CatalogGraph.load(Path(tmp))
         graph.base_url = base
-        graph.complete_listing = False
         return _validate_graph(
             graph,
             rules,
@@ -396,9 +400,9 @@ def _partial_tree_findings(crawled: Crawl, root_url: str) -> list[Finding]:
             Finding(
                 rule_id=GEN_PARTIAL_TREE,
                 severity=Severity.WARNING,
-                message=f"document could not be fetched: {error}",
+                message=f"document could not be read: {failed_url}: {error}",
                 path=str(ROOT_CATALOG),
-                fix_hint=f"check that the host serves {failed_url}",
+                fix_hint=f"check that the host serves {failed_url} as a plain https document",
             )
         )
     return findings

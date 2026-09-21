@@ -48,6 +48,8 @@ class CatalogLocation(click.ParamType[Path | str]):
     ) -> Path | str:
         if isinstance(value, (Path, str)) and is_catalog_url(str(value)):
             return str(value)
+        if str(value).lower().startswith("http://"):
+            self.fail(f"{str(value)!r} is not https; only https catalog URLs are read.", param, ctx)
         path = Path(str(value))
         if not path.exists():
             self.fail(f"Path {str(value)!r} does not exist.", param, ctx)

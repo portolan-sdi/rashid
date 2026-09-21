@@ -102,19 +102,15 @@ class CatalogGraph:
     for the root) to the set of filenames it contains, so required-file rules
     can check existence without touching disk again.
 
-    ``base_url`` is the https URL the tree is published under when the caller
-    named it — the URL ``rashid check`` was given, or ``--live-base-url``.
-    None for a tree read from disk with neither. ``complete_listing`` is False
-    when the tree was assembled by following links from the root rather than
-    by walking a directory: a file no link names is then invisible, so the
-    checks that look for such files cannot see them.
+    ``base_url`` is the https URL the tree is published under when the tree
+    was read from there — the URL ``rashid check`` was given. None for a tree
+    read from disk; ``--live-base-url`` reaches the live pass directly.
     """
 
     root_path: Path
     nodes: dict[PurePosixPath, Node] = field(default_factory=dict)
     dir_listing: dict[PurePosixPath, set[str]] = field(default_factory=dict)
     base_url: str | None = None
-    complete_listing: bool = True
     _translation_roots: list[Node] | None = field(default=None, repr=False, compare=False)
 
     @property
