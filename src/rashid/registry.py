@@ -84,7 +84,7 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
     ),
     "PTL-EXT-000": (
         Severity.WARNING,
-        "the extension schema pass could run",
+        "the extension schema pass and each declared schema could load",
     ),
     "PTL-EXT-001": (
         Severity.ERROR,

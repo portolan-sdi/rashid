@@ -53,7 +53,8 @@ def main() -> None:
     "extensions",
     default=True,
     help="Validate every object against the schemas of the STAC extensions it "
-    "declares, from the bundled registry-pinned copies (offline).",
+    "declares. Pinned versions use bundled schemas; an older version of a "
+    "registered extension is fetched over https.",
 )
 @click.option(
     "--schema/--no-schema",

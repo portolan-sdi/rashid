@@ -18,7 +18,7 @@ import pytest
 from rashid import RulesConfig, validate
 from rashid._jsonschema import SchemaError, vendored_extension_schemas
 from rashid.catalog import CatalogGraph
-from rashid.extensions import default_validator, validate_extensions
+from rashid.extensions import SchemaUnavailable, default_validator, validate_extensions
 from rashid.model import Severity
 from tests.conftest import CatalogBuilder, mutate_json, write_language_trees
 
@@ -115,14 +115,55 @@ def test_an_unregistered_extension_is_reported_once_for_the_catalog(
     assert "3 object(s)" in findings[0].message
 
 
-def test_a_registered_extension_at_an_unpinned_version_is_not_validated(
-    catalog: CatalogBuilder,
+def test_a_registered_extension_at_an_unpinned_version_is_validated_against_its_own_schema(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Never judge v1.1.0 content by the v2.0.0 schema; PTL-CNF-004 owns the version."""
+    """Never judge v1.1.0 content by the v2.0.0 schema, and never skip it either.
+
+    A skip would let a catalog turn its schema errors into a PTL-CNF-004
+    warning by declaring an older version. The declared version's schema is
+    fetched even without allow_network, because the registry approves the host.
+    """
     catalog.collection("roads", stac_extensions=[RASTER_UNPINNED_URI])
+    fetched: list[str] = []
+
+    def fetch(uri: str) -> dict[str, Any]:
+        fetched.append(uri)
+        return {"$schema": "http://json-schema.org/draft-07/schema#", "required": ["raster:proof"]}
+
+    from rashid import extensions as extensions_module
+
+    monkeypatch.setattr(extensions_module, "_fetch_schema", fetch)
     findings = validate_extensions(_graph(catalog))
-    assert _ids(findings) == ["PTL-EXT-002"]
-    assert findings[0].actual == RASTER_UNPINNED_URI
+    assert fetched == [RASTER_UNPINNED_URI]
+    assert _ids(findings) == ["PTL-EXT-001"]
+    assert "Raster v1.1.0" in findings[0].message
+    assert "'raster:proof' is a required property" in findings[0].message
+
+
+def test_an_older_version_does_not_downgrade_an_error_to_a_warning(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end: the report fails on the schema error, not only warns on the version."""
+    collection = catalog.collection("roads", stac_extensions=[RASTER_UNPINNED_URI])
+    collection.overrides["assets"] = {
+        "data": {"href": "./roads.tif", "type": "image/tiff", "roles": ["data"], "raster:x": 1}
+    }
+    from rashid import extensions as extensions_module
+
+    monkeypatch.setattr(
+        extensions_module,
+        "_fetch_schema",
+        lambda uri: {
+            "properties": {
+                "assets": {"additionalProperties": {"properties": {"raster:x": {"type": "string"}}}}
+            }
+        },
+    )
+    report = validate(catalog.write(), data=False)
+    assert "PTL-CNF-004" in _ids(report.findings)
+    assert "PTL-EXT-001" in _ids(report.findings)
+    assert not report.passed
 
 
 def test_an_unregistered_extension_is_fetched_when_network_is_allowed(
@@ -238,8 +279,68 @@ def test_a_present_map_link_passes_offline(catalog: CatalogBuilder) -> None:
 
 def test_the_default_validator_rejects_a_non_https_fetch() -> None:
     check = default_validator(allow_network=True)
-    with pytest.raises(ValueError, match="https"):
+    with pytest.raises(SchemaUnavailable, match="https"):
         check({}, "file:///etc/passwd")
+
+
+# --- one schema that cannot load ------------------------------------------
+
+
+def test_a_failed_fetch_affects_only_the_uri_that_failed(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dead URI must not stop validation of the objects the pass has not reached.
+
+    The dead extension is on the root catalog, which the pass visits first.
+    The Projection errors on both collections must still be reported.
+    """
+    dead = "https://example.invalid/dead/v1.0.0/schema.json"
+    catalog.overrides["stac_extensions"] = [dead]
+    for name in ("roads", "rails"):
+        collection = catalog.collection(name, stac_extensions=[PROJECTION_URI, dead])
+        collection.overrides["assets"] = {
+            "data": {
+                "href": f"./{name}.parquet",
+                "type": "application/vnd.apache.parquet",
+                "roles": ["data"],
+                "proj:code": 4326,
+            }
+        }
+    fetched: list[str] = []
+
+    def fetch(uri: str) -> dict[str, Any]:
+        fetched.append(uri)
+        raise OSError("Name or service not known")
+
+    from rashid import extensions as extensions_module
+
+    monkeypatch.setattr(extensions_module, "_fetch_schema", fetch)
+    findings = validate_extensions(_graph(catalog), allow_network=True)
+    assert sorted(_ids(findings)) == ["PTL-EXT-000", "PTL-EXT-001", "PTL-EXT-001"]
+    warning = next(f for f in findings if f.rule_id == "PTL-EXT-000")
+    assert warning.severity is Severity.WARNING
+    assert warning.actual == dead
+    assert "Name or service not known" in warning.message
+    assert "3 object(s)" in warning.message
+    # Remembered after the first failure: one wait, not one per object.
+    assert fetched == [dead]
+
+
+def test_an_unresolvable_ref_affects_only_its_uri(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog.collection("roads", stac_extensions=[EO_URI])
+    from rashid import extensions as extensions_module
+
+    monkeypatch.setattr(
+        extensions_module,
+        "_fetch_schema",
+        lambda uri: {"$ref": "https://example.invalid/missing.json"},
+    )
+    findings = validate_extensions(_graph(catalog), allow_network=True)
+    assert _ids(findings) == ["PTL-EXT-000"]
+    assert "unresolvable $ref" in findings[0].message
+    assert findings[0].actual == EO_URI
 
 
 # --- runner and config wiring ---------------------------------------------

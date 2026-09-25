@@ -70,7 +70,7 @@ rashid provides six separate validation passes:
 
 Metadata, structural, extension, and data checks run by default. Use `--schema` as a cross-check against the published profile schema. Use `--live` for checks that require a published catalog and network access.
 
-The extension pass uses the versions that the profile's extension registry pins. rashid packages those schemas, so the pass needs no network. rashid reports an extension outside the registry as an info finding rather than validating it. Use `--schema-allow-network` to fetch and check such a schema.
+The extension pass uses the versions that the profile's extension registry pins. rashid packages those schemas, so a catalog at the pinned versions needs no network. A catalog that declares an older version of a registered extension is checked against that version's schema, which rashid fetches over https. rashid reports an extension outside the registry as an info finding rather than validating it. Use `--schema-allow-network` to fetch and check such a schema.
 
 If a pass cannot run, rashid reports a warning. It does not treat the skipped pass as successful.
 

@@ -13,9 +13,19 @@ The same file drives ``scripts/vendor_stac_schemas.py``, so a version pinned in
 the spec arrives with its schema on the next spec sync and this module needs no
 edit to validate against it.
 
-An extension the registry does not pin is *not* an error. It is reported once
+A registered extension declared at a version the registry does not pin is
+validated against the schema of the version it declares. That schema is not in
+the wheel, so the pass fetches it over https. Validating it against the pinned
+schema would invent errors, and skipping it would let a catalog turn its
+schema errors into a PTL-CNF-004 warning by declaring an older version.
+
+An extension the registry does not list is *not* an error. It is reported once
 as ``PTL-EXT-002`` so the gap is visible rather than silent, and validated only
-when the caller passes ``allow_network=True``. No network is used otherwise.
+when the caller passes ``allow_network=True``.
+
+A schema that cannot be fetched or resolved affects only the objects that
+declare it. It is reported once as a ``PTL-EXT-000`` warning, and the pass
+goes on to validate every other declared extension.
 """
 
 from __future__ import annotations
@@ -32,7 +42,11 @@ from rashid._jsonschema import (
 )
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.model import Finding, Severity
-from rashid.rules.conformance import SCHEMA_URI_PATTERN, registered_extension
+from rashid.rules.conformance import (
+    SCHEMA_URI_PATTERN,
+    registered_at_other_version,
+    registered_extension,
+)
 
 EXT_INVALID = "PTL-EXT-001"
 EXT_UNAVAILABLE = "PTL-EXT-000"
@@ -55,6 +69,14 @@ _EXTENSION_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
 _fetch_schema = fetch_schema
 
 
+class SchemaUnavailable(Exception):
+    """One declared schema could not be fetched or resolved.
+
+    It affects only the objects that declare that URI. Every other exception a
+    validator raises is systemic and stops the pass.
+    """
+
+
 def _compile(schema: dict[str, Any]) -> Any:
     """Compile one extension schema against the vendored closure.
 
@@ -72,24 +94,44 @@ def _compile(schema: dict[str, Any]) -> Any:
 def default_validator(*, allow_network: bool = False) -> Validator:
     """Build a validator over the vendored extension schemas.
 
+    A URI missing from the wheel is fetched when ``allow_network`` is set, or
+    when it is a registered extension at a version the registry does not pin.
+    Anything else raises ``LookupError``. A failed fetch or an unresolvable
+    ``$ref`` raises :class:`SchemaUnavailable`, and is remembered so the pass
+    does not wait on the same dead URI once per object.
+
     ``jsonschema`` is imported lazily by :func:`_compile`: the metadata pass
     never needs it. Compiled validators are memoized per URI — a catalog
     declares the same handful of extensions on every object, and compiling
     each once per object dominates the pass otherwise.
     """
+    from referencing.exceptions import Unresolvable
+
     store = vendored_extension_schemas()
     compiled: dict[str, Any] = {}
+    failed: dict[str, str] = {}
 
     def _validate(data: dict[str, Any], schema_uri: str) -> list[SchemaError]:
+        if schema_uri in failed:
+            raise SchemaUnavailable(failed[schema_uri])
         validator = compiled.get(schema_uri)
         if validator is None:
             schema = store.get(schema_uri)
             if schema is None:
-                if not allow_network:
+                if not allow_network and registered_at_other_version(schema_uri) is None:
                     raise LookupError(f"no vendored schema for {schema_uri}")
-                schema = _fetch_schema(schema_uri)
+                try:
+                    schema = _fetch_schema(schema_uri)
+                except (OSError, ValueError) as exc:
+                    failed[schema_uri] = str(exc)
+                    raise SchemaUnavailable(str(exc)) from exc
             validator = compiled[schema_uri] = _compile(schema)
-        return [describe(error) for error in sorted(validator.iter_errors(data), key=str)]
+        try:
+            errors = sorted(validator.iter_errors(data), key=str)
+        except Unresolvable as exc:
+            failed[schema_uri] = f"unresolvable $ref: {exc}"
+            raise SchemaUnavailable(failed[schema_uri]) from exc
+        return [describe(error) for error in errors]
 
     return _validate
 
@@ -115,12 +157,14 @@ def validate_extensions(
     """Validate every object against the extension schemas it declares.
 
     Returns ``PTL-EXT-001`` errors per violation, each carrying the JSON
-    pointer of the offending value. An extension the registry does not pin
+    pointer of the offending value. An extension the registry does not list
     yields one ``PTL-EXT-002`` info for the whole catalog, not one per object:
     a catalog that declares an unregistered extension declares it everywhere,
-    and hundreds of identical notices would bury the errors. If the validator
-    cannot be built at all, returns a single ``PTL-EXT-000`` warning so the
-    offline metadata findings still surface.
+    and hundreds of identical notices would bury the errors. A schema that
+    cannot be fetched or resolved yields one ``PTL-EXT-000`` warning per URI,
+    and the pass goes on. If the validator cannot be built at all, or fails in
+    a way that is not specific to one URI, returns a single ``PTL-EXT-000``
+    warning so the offline metadata findings still surface.
     """
     if validator is None:
         try:
@@ -139,11 +183,12 @@ def validate_extensions(
 
     findings: list[Finding] = []
     unvalidated: dict[str, int] = {}
+    unavailable: dict[str, tuple[str, str, int]] = {}
     for node in graph.iter(*_EXTENSION_KINDS):
         if node.parse_error is not None:
             continue
         for uri in _declared(node):
-            entry = registered_extension(uri)
+            entry = registered_extension(uri) or registered_at_other_version(uri)
             if entry is None and not allow_network:
                 unvalidated[uri] = unvalidated.get(uri, 0) + 1
                 continue
@@ -152,6 +197,10 @@ def validate_extensions(
                 errors = validator(node.data, uri)
             except LookupError:
                 unvalidated[uri] = unvalidated.get(uri, 0) + 1
+                continue
+            except SchemaUnavailable as exc:
+                _, _, count = unavailable.get(uri, (label, "", 0))
+                unavailable[uri] = (label, str(exc), count + 1)
                 continue
             except Exception as exc:  # noqa: BLE001 - any validator failure is systemic
                 findings.append(
@@ -175,6 +224,19 @@ def validate_extensions(
                 for error in errors
             )
 
+    findings.extend(
+        Finding(
+            rule_id=EXT_UNAVAILABLE,
+            severity=Severity.WARNING,
+            message=(
+                f"the {label} schema could not be loaded ({reason}); "
+                f"{count} object(s) declaring it were not validated against it"
+            ),
+            path=".",
+            actual=uri,
+        )
+        for uri, (label, reason, count) in sorted(unavailable.items())
+    )
     findings.extend(
         Finding(
             rule_id=EXT_UNVALIDATED,

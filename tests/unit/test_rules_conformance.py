@@ -164,7 +164,8 @@ def test_stale_extension_version_is_a_warning(catalog: CatalogBuilder) -> None:
     catalog.collection("roads")
     root = catalog.write()
     mutate_json(root / "roads" / "collection.json", _with_extension(_STALE_RASTER))
-    report = validate(root)
+    # The extension pass would fetch the v1.1.0 schema; this test is about the version alone.
+    report = validate(root, extensions=False)
     findings = findings_for(report, "PTL-CNF-004")
     assert len(findings) == 1
     finding = findings[0]
@@ -183,7 +184,7 @@ def test_version_ahead_of_the_registry_is_flagged(catalog: CatalogBuilder) -> No
     root = catalog.write()
     ahead = "https://stac-extensions.github.io/table/v9.0.0/schema.json"
     mutate_json(root / "roads" / "collection.json", _with_extension(ahead))
-    findings = findings_for(validate(root), "PTL-CNF-004")
+    findings = findings_for(validate(root, extensions=False), "PTL-CNF-004")
     assert len(findings) == 1
     assert findings[0].actual == ahead
 

@@ -189,10 +189,12 @@ def validate(
 
     The extension pass runs by default too, validating every object against
     the schemas of the STAC extensions it declares (see
-    :mod:`rashid.extensions`) — offline, from the schemas the profile's
-    extension registry pins, shipped in the wheel. An extension the registry
-    does not pin is reported once as ``PTL-EXT-002`` rather than validated,
-    unless ``schema_allow_network`` is set, which fetches it.
+    :mod:`rashid.extensions`), from the schemas the profile's extension
+    registry pins, shipped in the wheel. A registered extension declared at
+    another version is validated against that version's schema, fetched over
+    https. An extension the registry does not list is reported once as
+    ``PTL-EXT-002`` rather than validated, unless ``schema_allow_network`` is
+    set, which fetches it.
     ``extensions=False`` skips the pass, as does disabling ``PTL-EXT-001``
     via ``config``. ``extensions_validator`` injects an alternate validator,
     chiefly for testing.
