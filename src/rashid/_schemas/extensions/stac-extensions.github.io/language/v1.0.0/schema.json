@@ -17,7 +17,7 @@
     "links": {
       "type": "array",
       "items": {
-        "$refs": "#/definitions/href_fields"
+        "$ref": "#/definitions/href_fields"
       }
     }
   },
@@ -130,7 +130,7 @@
     "assets": {
       "type": "object",
       "additionalProperties": {
-        "$refs": "#/definitions/href_fields"
+        "$ref": "#/definitions/href_fields"
       }
     },
     "language_code": {
