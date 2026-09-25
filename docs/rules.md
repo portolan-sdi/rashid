@@ -30,7 +30,7 @@ Severities follow the Portolan specification. MUST requirements produce errors, 
 
 At vendor time, `scripts/vendor_spec_fixtures.py` parses that table. The rule ignores extensions that the registry does not list. `PTL-CNF-001` and `PTL-CNF-002` handle the Portolan schema URI's version.
 
-The same file drives `PTL-EXT-001` and the schema vendoring. `scripts/vendor_stac_schemas.py` reads the registry and fetches the `$ref` closure of every pinned extension into `src/rashid/_schemas/extensions/`. A version pinned in the specification therefore arrives with its schema on the next spec sync, and rashid needs no code change to validate against it.
+The same file drives `PTL-EXT-001` and the schema vendoring. `scripts/vendor_stac_schemas.py` reads the registry and fetches the `$ref` closure of every pinned extension into `src/rashid/_schemas/extensions/`. A version pinned in the specification arrives with its schema on the next spec sync. rashid needs no code change to validate against it.
 
 A registered extension declared at a version the registry does not pin is validated against the schema of the version it declares. rashid does not package that schema, so it fetches it over https. A newer schema would report fields that the declared version never defined. A skip would let a catalog turn its schema errors into a `PTL-CNF-004` warning when it declares an older version.
 
