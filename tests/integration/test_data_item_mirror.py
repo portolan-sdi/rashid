@@ -151,19 +151,22 @@ def _rewrite_mirror(root: Path, ids: list[str] | None, **kwargs: Any) -> None:
 
 
 def test_matching_mirror_is_clean(catalog_root: Path) -> None:
+    """Two rows: no ordering check can run, and the one finding says so."""
     findings = validate_data(CatalogGraph.load(catalog_root))
-    assert findings == [], [f"{f.rule_id} {f.message}" for f in findings]
+    assert [(f.rule_id, f.severity) for f in findings] == [(DAT_ORDERING, Severity.INFO)], [
+        f"{f.rule_id} {f.message}" for f in findings
+    ]
 
 
 def test_unordered_mirror_is_flagged(catalog_root: Path) -> None:
     """PORTO-FMT-043: an item index is queried by extent like any other table.
 
-    Ten interleaved rows across five row groups, the count at which
-    PORTO-FMT-006's criteria start applying. The row count no longer matches
-    the collection's two items, which ``PTL-DAT-016`` reports separately; this
-    test reads the storage rules only.
+    Sixteen interleaved rows across eight row groups, the count at which
+    PORTO-FMT-006's row-group check starts judging. The row count no longer
+    matches the collection's two items, which ``PTL-DAT-016`` reports
+    separately; this test reads the storage rules only.
     """
-    scattered = [f"scene-{n}" for n in range(10)]
+    scattered = [f"scene-{n}" for n in range(16)]
     _rewrite_mirror(catalog_root, scattered, ordered=False, row_group_size=2)
     ids = {f.rule_id for f in validate_data(CatalogGraph.load(catalog_root))}
     assert DAT_ORDERING in ids

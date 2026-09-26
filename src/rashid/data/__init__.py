@@ -77,11 +77,28 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     DAT_CONSISTENCY: ("PORTO-FMT-036",),
     # FMT-043 binds an item mirror to the same three GeoParquet MUSTs as
     # vector data, so the checks that enforce them carry it too.
-    # FMT-044 is the applicability guard on FMT-006: the two row-group criteria
-    # run at five or more groups, a single group is measured over its rows, and
-    # two to four are left alone rather than faulted on a threshold they cannot
-    # express.
-    DAT_ORDERING: ("PORTO-FMT-006", "PORTO-FMT-043", "PORTO-FMT-044", "PORTO-FMT-045"),
+    # FMT-050 is the footer check: at eight or more row groups the row-group
+    # boxes decide. FMT-044 is its floor: below that the layout is reported and
+    # not judged, and the rows are measured in file-order chunks (FMT-006's
+    # abstract test) instead, rather than faulted on a threshold their row-group
+    # count cannot express. FMT-051 puts the area sum beside every verdict,
+    # FMT-052 makes a file under the row floor an INFO rather than silence,
+    # FMT-053 pins the reference to the near-square grid, FMT-054 makes the
+    # spec's abstract test vectors binding (tests/fixtures/spatial-metric-
+    # vectors.json, vendored verbatim), and FMT-049 keeps consecutive-pair
+    # overlap out of the verdict.
+    DAT_ORDERING: (
+        "PORTO-FMT-006",
+        "PORTO-FMT-043",
+        "PORTO-FMT-044",
+        "PORTO-FMT-045",
+        "PORTO-FMT-049",
+        "PORTO-FMT-050",
+        "PORTO-FMT-051",
+        "PORTO-FMT-052",
+        "PORTO-FMT-053",
+        "PORTO-FMT-054",
+    ),
     # ERROR when neither statistics source exists; WARNING when a 2.x file
     # relies on native statistics without the RECOMMENDED covering column.
     DAT_ROWGROUP_STATS: ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043", "PORTO-FMT-045"),
