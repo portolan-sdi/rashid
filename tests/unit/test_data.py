@@ -20,6 +20,7 @@ from rashid.data import (
     DAT_CHECKSUM,
     DAT_COG,
     DAT_COG_STATS,
+    DAT_COLUMN_DESCRIPTIONS,
     DAT_CONSISTENCY,
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
@@ -174,6 +175,7 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
             DAT_TABULAR,
             DAT_MIRROR,
             DAT_VECTOR_COLUMNS,
+            DAT_COLUMN_DESCRIPTIONS,
         }
     )
     validate(graph_root, config=RulesConfig(disabled=all_ids), data=True, data_validator=spy)

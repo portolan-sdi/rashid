@@ -15,6 +15,7 @@ from rashid.data import (
     DAT_CHECKSUM,
     DAT_COG,
     DAT_COG_STATS,
+    DAT_COLUMN_DESCRIPTIONS,
     DAT_CONSISTENCY,
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
@@ -97,6 +98,7 @@ _DATA_RULE_IDS = frozenset(
         DAT_TABULAR,
         DAT_MIRROR,
         DAT_VECTOR_COLUMNS,
+        DAT_COLUMN_DESCRIPTIONS,
     }
 )
 

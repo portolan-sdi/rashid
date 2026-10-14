@@ -56,6 +56,7 @@ DAT_PARTITION_SCHEMA = "PTL-DAT-014"
 DAT_TABULAR = "PTL-DAT-015"
 DAT_MIRROR = "PTL-DAT-016"
 DAT_VECTOR_COLUMNS = "PTL-DAT-017"
+DAT_COLUMN_DESCRIPTIONS = "PTL-DAT-018"
 
 # Requirement IDs from the spec's requirements manifest
 # (specs/portolan/requirements.yaml) enforced by each check;
@@ -108,6 +109,10 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
         "PORTO-FMT-048",
         "PORTO-FMT-045",
     ),
+    # Every table:columns entry carries a description (PORTO-FMT-049). A
+    # name and a type are already in the Parquet footer, so an entry with
+    # only those tells a client nothing it could not read from the file.
+    DAT_COLUMN_DESCRIPTIONS: ("PORTO-FMT-049",),
     # A mirror must reproduce the collection's items (PORTO-FMT-042).
     DAT_MIRROR: ("PORTO-FMT-042",),
 }

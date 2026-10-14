@@ -92,6 +92,7 @@ from rashid.data import (
     DAT_CHECKSUM,
     DAT_COG,
     DAT_COG_STATS,
+    DAT_COLUMN_DESCRIPTIONS,
     DAT_CONSISTENCY,
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
@@ -309,6 +310,7 @@ def _check_asset(
         defects.extend(_check_geoparquet(key, located))
         defects.extend(_check_tabular(node, key, asset, located))
         defects.extend(_check_vector_columns(node, key, asset, located))
+        defects.extend(_check_column_descriptions(node, key, asset))
     if expected in {"parquet", "tiff", "pmtiles"}:
         defects.extend(_check_consistency(node, key, asset, expected, located))
     return defects
@@ -1354,6 +1356,63 @@ def _check_vector_columns(
             DAT_VECTOR_COLUMNS,
             Severity.WARNING,
             f"vector asset '{key}': {where} with the table extension (table:columns)",
+            key,
+        )
+    ]
+
+
+def _table_columns(node: Node, asset: dict[str, Any]) -> list[Any] | None:
+    """The declared ``table:columns``, from wherever the extension allows."""
+    holders = [node.data, asset]
+    properties = node.data.get("properties")
+    if isinstance(properties, dict):
+        holders.append(properties)
+    for holder in holders:
+        columns = holder.get("table:columns")
+        if isinstance(columns, list) and len(columns) > 0:
+            return columns
+    return None
+
+
+def _check_column_descriptions(node: Node, key: str, asset: dict[str, Any]) -> list[DataDefect]:
+    """Every ``table:columns`` entry carries a description (PORTO-FMT-049).
+
+    formats.md, Vector Data: "Every entry in ``table:columns`` SHOULD carry a
+    ``description``." A name and a type are already in the Parquet footer, so
+    an entry carrying only those adds nothing a client could not read from the
+    file itself.
+
+    The spec also says, at PORTO-FMT-050, that recording the absence of a
+    definition is itself a description. That keeps this check honest for a
+    mirror of a publisher who ships no data dictionary: such a catalog
+    satisfies the rule by saying so, not by inventing meanings. So this reads
+    presence and nothing more. Judging whether a description is any good is
+    not a validator's job, and a check that tried would push publishers
+    toward filler.
+
+    This needs no file read, so it runs on the metadata alone.
+    """
+    if "data" not in _asset_roles(asset):
+        return []
+    columns = _table_columns(node, asset)
+    if columns is None:
+        return []  # declaring nothing is PTL-DAT-017's business
+    bare = [
+        str(column.get("name", "?"))
+        for column in columns
+        if isinstance(column, dict) and not str(column.get("description") or "").strip()
+    ]
+    if not bare:
+        return []
+    shown = ", ".join(bare[:5])
+    more = f", and {len(bare) - 5} more" if len(bare) > 5 else ""
+    return [
+        DataDefect(
+            DAT_COLUMN_DESCRIPTIONS,
+            Severity.WARNING,
+            f"asset '{key}': {len(bare)} of {len(columns)} table:columns "
+            f"entries carry no description ({shown}{more}). Where no "
+            f"definition can be sourced, record that rather than omit it.",
             key,
         )
     ]

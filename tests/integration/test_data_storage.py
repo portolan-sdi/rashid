@@ -25,6 +25,7 @@ from rashid.catalog import Node  # noqa: E402
 from rashid.data import (  # noqa: E402
     DAT_COG,
     DAT_COG_STATS,
+    DAT_COLUMN_DESCRIPTIONS,
     DAT_GEOPARQUET_VERSION,
     DAT_ORDERING,
     DAT_OVERVIEWS,
@@ -1167,6 +1168,76 @@ def test_plain_parquet_is_not_vector(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False)
     assert _vector(_tabular_collection(), path) == []
+
+
+# --- column descriptions (PTL-DAT-018) --------------------------------------
+#
+# PORTO-FMT-049: every table:columns entry SHOULD carry a description. A name
+# and a type are already in the Parquet footer, so an entry with only those
+# tells a client nothing it could not read from the file.
+
+
+def _described(node: Node, **asset_fields: object) -> list:
+    asset = {"href": "./data.parquet", "roles": ["data"], **asset_fields}
+    return checks._check_column_descriptions(node, "data", asset)
+
+
+def test_columns_without_descriptions_flag_dat_018() -> None:
+    columns = [
+        {"name": "value", "type": "int64"},
+        {"name": "label", "type": "string", "description": "a label"},
+    ]
+    defects = _described(_tabular_collection(**{"table:columns": columns}))
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+    assert defects[0].severity is Severity.WARNING
+    assert "1 of 2" in defects[0].message
+    assert "value" in defects[0].message
+
+
+def test_columns_with_descriptions_are_clean() -> None:
+    assert _described(_tabular_collection(**{"table:columns": _COLUMNS})) == []
+
+
+def test_a_blank_description_does_not_count() -> None:
+    # An empty string satisfies the key but documents nothing.
+    columns = [{"name": "value", "type": "int64", "description": "   "}]
+    defects = _described(_tabular_collection(**{"table:columns": columns}))
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_recording_the_absence_of_a_definition_is_a_description() -> None:
+    # PORTO-FMT-050: where no definition can be sourced, saying so is the
+    # correct answer. A mirror of a publisher who ships no data dictionary
+    # must be able to satisfy this rule without inventing meanings.
+    columns = [
+        {
+            "name": "MATERIAL",
+            "type": "int64",
+            "description": "The publisher documents no meaning for this column.",
+        }
+    ]
+    assert _described(_tabular_collection(**{"table:columns": columns})) == []
+
+
+def test_undeclared_columns_are_not_this_rules_business() -> None:
+    # Declaring nothing at all is PTL-DAT-017's finding, not this one.
+    assert _described(_tabular_collection()) == []
+
+
+def test_item_column_descriptions_are_read_from_properties() -> None:
+    properties = {
+        "datetime": "2024-01-01T00:00:00Z",
+        "table:columns": [{"name": "value", "type": "int64"}],
+    }
+    defects = _described(_vector_item(properties=properties))
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_non_data_roles_carry_no_column_finding() -> None:
+    columns = [{"name": "value", "type": "int64"}]
+    node = _tabular_collection(**{"table:columns": columns})
+    asset = {"href": "./x.parquet", "roles": ["metadata"]}
+    assert checks._check_column_descriptions(node, "x", asset) == []
 
 
 def test_non_data_roles_are_not_vector(tmp_path: Path) -> None:
