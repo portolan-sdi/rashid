@@ -37,6 +37,16 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   count, ids, geometry, datetime, or bbox (MUST, formats.md, Raster § Item
   mirror). A mirror runs the GeoParquet checks above as well: the spec binds
   it to them like any other spatial table.
+- ``PTL-DAT-017`` a GeoParquet data asset's columns are not documented with
+  ``table:columns`` (WARNING)
+- ``PTL-DAT-018`` a classification class disagrees with the COG band it
+  describes, such as a ``color_hint`` that differs from the embedded color
+  table. The color table is authoritative for rendering and the hint only
+  mirrors it, so a difference is a WARNING (PORTO-FMT-054, PORTO-FMT-055).
+- ``PTL-DAT-019`` a COG band drawn through an embedded color table declares no
+  ``classification:classes`` (INFO, uncited). A palette is only a hint, since
+  continuous rasters ship one too. An item asset with no classes of its own is
+  read with its collection's ``item_assets`` template.
 
 The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
 run over an asset and over every file a local relative ``partition:glob``
@@ -81,6 +91,7 @@ import pyarrow.parquet as pq
 import rasterio
 import shapely
 from pyproj import CRS, Transformer
+from rasterio.enums import ColorInterp
 from rio_cogeo.cogeo import cog_validate
 from shapely import from_wkb
 from shapely.errors import ShapelyError
@@ -92,6 +103,7 @@ from rashid._multihash import decode_multihash
 from rashid.catalog import CatalogGraph, Node
 from rashid.data import (
     DAT_CHECKSUM,
+    DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
     DAT_CONSISTENCY,
@@ -100,6 +112,7 @@ from rashid.data import (
     DAT_MIRROR,
     DAT_ORDERING,
     DAT_OVERVIEWS,
+    DAT_PALETTE_CLASSES,
     DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
@@ -112,6 +125,7 @@ from rashid.data import (
 )
 from rashid.data.reader import AssetReader, Locator
 from rashid.model import Severity
+from rashid.rules.classification import BAND_FIELDS, asset_class_lists
 from rashid.rules.item_mirror import is_mirror_asset
 
 # Multihash function code -> hashlib algorithm name.
@@ -415,7 +429,8 @@ def _check_asset(
             # being scoped to assets with the 'data' role.
             defects.extend(_check_mirror(node, key, files, graph))
         if expected == "tiff":
-            defects.extend(_check_raster(key, located, files))
+            classed = _classified_asset(node, key, asset, graph)
+            defects.extend(_check_raster(key, classed, located, files))
         if expected == "parquet":
             defects.extend(_check_geoparquet(key, files))
             defects.extend(_check_tabular(node, key, asset, files))
@@ -638,11 +653,13 @@ def _verify_format(key: str, expected: str | None, head: bytes) -> list[DataDefe
     ]
 
 
-def _check_raster(key: str, located: Locator, files: _AssetFiles) -> list[DataDefect]:
+def _check_raster(
+    key: str, asset: dict[str, Any], located: Locator, files: _AssetFiles
+) -> list[DataDefect]:
     """A raster asset MUST be a valid COG (formats.md:91) with embedded band stats.
 
     ``cog_validate`` takes a path, not a dataset, so it opens the file itself.
-    The other three checks share the one dataset in ``files``.
+    The other checks share the one dataset in ``files``.
     """
     defects: list[DataDefect] = []
     try:
@@ -674,7 +691,223 @@ def _check_raster(key: str, located: Locator, files: _AssetFiles) -> list[DataDe
         defects.extend(_check_cog_stats(key, files))
         defects.extend(_check_overviews(key, files))
         defects.extend(_check_tile_size(key, files))
+        defects.extend(_check_class_colors(key, asset, files))
+        defects.extend(_check_palette_classes(key, asset, files))
     return defects
+
+
+def _classified_asset(
+    node: Node, key: str, asset: dict[str, Any], graph: CatalogGraph | None
+) -> dict[str, Any]:
+    """The asset whose class lists describe this file.
+
+    An item asset that declares no classes inherits the ones its collection's
+    ``item_assets`` template declares for the same key.
+    """
+    if asset_class_lists("", asset) or node.kind != "item" or graph is None:
+        return asset
+    collection = graph.enclosing_collection_of(node)
+    templates = collection.data.get("item_assets") if collection is not None else None
+    template = templates.get(key) if isinstance(templates, dict) else None
+    return template if isinstance(template, dict) and asset_class_lists("", template) else asset
+
+
+def _drawn_classes(asset: dict[str, Any]) -> Iterator[tuple[int | None, int, str, str | None]]:
+    """(file band, class value, field pointer, hint) for each class a reader draws.
+
+    A band list's classes describe the file band at the same position. An
+    asset-level list has no band (None) and describes the asset's only band,
+    so it is compared only against a single-band file. A nodata class is
+    skipped, since its pixels draw transparent whatever the table says, and so
+    is a malformed value, which ``PTL-CLS-002`` reports. A malformed hint
+    becomes None for the same reason.
+    """
+    for found in asset_class_lists("", asset):
+        band = None if found.band_index is None else found.band_index + 1
+        for pointer, entry in found.entries():
+            value, hint = entry.get("value"), entry.get("color_hint")
+            if entry.get("nodata") is True or isinstance(value, bool) or not isinstance(value, int):
+                continue
+            valid = hint.upper() if isinstance(hint, str) and _COLOR_HINT.match(hint) else None
+            yield band, value, pointer.lstrip("/"), valid
+
+
+_COLOR_HINT = re.compile(r"^[0-9A-Fa-f]{6}$")
+_BITFIELDS = "classification:bitfields"
+
+
+def _class_color_defect(
+    key: str,
+    band: int,
+    value: int,
+    field: str,
+    hint: str | None,
+    entry: tuple[int, ...] | None,
+) -> DataDefect | None:
+    """The WARNING one drawn class earns against its band's color table, if any."""
+    if entry is None:
+        return DataDefect(
+            DAT_CLASS_COLORS,
+            Severity.WARNING,
+            f"asset '{key}' class value {value} has no entry in band {band}'s embedded"
+            " color table, so readers cannot draw it",
+            key,
+            f"{field}/value",
+        )
+    if len(entry) > 3 and entry[3] == 0:
+        return DataDefect(
+            DAT_CLASS_COLORS,
+            Severity.WARNING,
+            f"asset '{key}' class value {value} is fully transparent in band {band}'s"
+            " embedded color table, so readers hide it like nodata",
+            key,
+            f"{field}/nodata",
+            expected=True,
+        )
+    actual = "{:02X}{:02X}{:02X}".format(*entry[:3])
+    if hint is None or actual == hint:
+        return None
+    return DataDefect(
+        DAT_CLASS_COLORS,
+        Severity.WARNING,
+        f"asset '{key}' class value {value} has color_hint '{hint}', but band"
+        f" {band}'s embedded color table draws it as '{actual}'",
+        key,
+        f"{field}/color_hint",
+        expected=actual,
+        actual=hint,
+    )
+
+
+_PICTURE = frozenset({ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.alpha})
+
+
+def _picture_defect(key: str, band: int, field: str) -> DataDefect:
+    """The WARNING for a class list on one channel of an RGB(A) picture."""
+    return DataDefect(
+        DAT_CLASS_COLORS,
+        Severity.WARNING,
+        f"asset '{key}' band {band} is a color channel of a picture, so its pixels are"
+        " intensities, not the classes it declares",
+        key,
+        field,
+    )
+
+
+def _check_class_colors(key: str, asset: dict[str, Any], files: _AssetFiles) -> list[DataDefect]:
+    """A class SHOULD agree with the COG band it describes.
+
+    Each disagreement is a WARNING that the legend a client builds from STAC
+    will not match the map.
+
+    - A class list on a red, green, blue or alpha band describes one channel
+      of a picture, whose pixels are intensities, not categories.
+    - A class whose value is the file's nodata is masked by every reader, so
+      it must be marked ``nodata`` to agree with the file.
+    - On a band with an embedded color table (the TIFF ``ColorMap`` tag),
+      which any TIFF reader draws and which therefore wins, a class the table
+      cannot draw (a value past a short table), a class drawn fully
+      transparent, and a ``color_hint`` whose red, green and blue differ from
+      the table entry. Alpha is compared only for full transparency, since a
+      hint carries none.
+    """
+    drawn = list(_drawn_classes(asset))
+    if not drawn:
+        return []
+    try:
+        src = files.raster()
+        tables: dict[int, dict[int, tuple[int, ...]] | None] = {}
+        pictures: set[int] = set()
+        defects: list[DataDefect] = []
+        for band, value, field, hint in drawn:
+            if band is None:
+                band = 1 if src.count == 1 else None
+            if band is None or band > src.count:
+                continue
+            if band not in tables:
+                try:
+                    tables[band] = src.colormap(band)
+                except ValueError:  # the band carries no color table
+                    tables[band] = None
+            if src.colorinterp[band - 1] in _PICTURE:
+                if band not in pictures:
+                    pictures.add(band)
+                    defects.append(_picture_defect(key, band, field.rsplit("/", 1)[0]))
+                continue
+            nodata = src.nodatavals[band - 1]
+            if nodata is not None and nodata == value:
+                defects.append(
+                    DataDefect(
+                        DAT_CLASS_COLORS,
+                        Severity.WARNING,
+                        f"asset '{key}' class value {value} is band {band}'s nodata in the file,"
+                        " so readers hide it, but the class is not marked nodata",
+                        key,
+                        f"{field}/nodata",
+                        expected=True,
+                    )
+                )
+                continue
+            table = tables[band]
+            if table is None:
+                continue
+            defect = _class_color_defect(key, band, value, field, hint, table.get(value))
+            if defect is not None:
+                defects.append(defect)
+    except Exception as exc:  # noqa: BLE001 - unreadable raster is advisory here
+        return [
+            DataDefect(
+                DAT_CLASS_COLORS,
+                Severity.INFO,
+                f"asset '{key}' color table could not be read ({exc})",
+                key,
+            )
+        ]
+    return defects
+
+
+def _check_palette_classes(key: str, asset: dict[str, Any], files: _AssetFiles) -> list[DataDefect]:
+    """A band drawn through a color table may be classified without saying so.
+
+    A palette band (an embedded TIFF ``ColorMap``) often holds categories, and
+    without ``classification:classes`` a client can draw it but cannot say
+    what any color means. A palette does not prove it, though (JRC water
+    occurrence is a continuous percentage with one), and only the producer
+    can declare a raster classified (PORTO-FMT-049), so this is an INFO hint.
+    """
+    described = {
+        0 if found.band_index is None else found.band_index
+        for found in asset_class_lists("", asset)
+    }
+    # A bit-packed band names its values with classification:bitfields.
+    for field in BAND_FIELDS:
+        bands = asset.get(field)
+        if isinstance(bands, list):
+            described.update(
+                index
+                for index, band in enumerate(bands)
+                if isinstance(band, dict) and _BITFIELDS in band
+            )
+    try:
+        src = files.raster()
+        palette = [
+            index
+            for index, interp in enumerate(src.colorinterp)
+            if interp == ColorInterp.palette and index not in described
+        ]
+    except Exception:  # noqa: BLE001 - an unreadable raster is reported by PTL-DAT-002
+        return []
+    return [
+        DataDefect(
+            DAT_PALETTE_CLASSES,
+            Severity.INFO,
+            f"asset '{key}' band {index + 1} draws through an embedded color table but"
+            " declares no classification:classes",
+            key,
+            f"bands/{index}",
+        )
+        for index in palette
+    ]
 
 
 # OGC 21-026 /req/optimized_geotiff/small-sizes: square internal tiles "sized

@@ -21,6 +21,7 @@ from rashid.catalog import CatalogGraph, Node
 from rashid.config import RulesConfig
 from rashid.data import (
     DAT_CHECKSUM,
+    DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
     DAT_CONSISTENCY,
@@ -29,6 +30,7 @@ from rashid.data import (
     DAT_MIRROR,
     DAT_ORDERING,
     DAT_OVERVIEWS,
+    DAT_PALETTE_CLASSES,
     DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
@@ -341,6 +343,8 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
     all_ids = frozenset(
         {
             DAT_CHECKSUM,
+            DAT_CLASS_COLORS,
+            DAT_PALETTE_CLASSES,
             DAT_SIZE,
             DAT_FORMAT,
             DAT_COG,
