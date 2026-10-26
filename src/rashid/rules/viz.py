@@ -144,6 +144,11 @@ def _pmtiles_registration(node: Node) -> tuple[bool, bool]:
     return has_asset, has_link
 
 
+def _is_cog(asset: dict[str, Any]) -> bool:
+    media_type = asset.get("type")
+    return isinstance(media_type, str) and media_type.startswith("image/tiff")
+
+
 class ThumbnailRule(Rule):
     """Every geospatial collection carries a thumbnail asset.
 
@@ -209,7 +214,9 @@ class StylesForDerivativeRule(Rule):
     """A collection with a visualization derivative registers style assets.
 
     Self-rendering collections (no derivative) are exempt: whether the data
-    asset is display-ready is not decidable from metadata.
+    asset is display-ready is not decidable from metadata. So is a collection
+    whose only visualization derivatives are COGs, since PORTO-CORE-067
+    exempts a display-ready COG render path from the style file.
     """
 
     id = "PTL-VIZ-002"
@@ -219,9 +226,11 @@ class StylesForDerivativeRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        has_visual = any("visual" in roles_of(asset) for _p, _k, asset in _assets_of(node))
+        visuals = [asset for _p, _k, asset in _assets_of(node) if "visual" in roles_of(asset)]
         has_pmtiles_asset, has_pmtiles_link = _pmtiles_registration(node)
-        if not (has_visual or has_pmtiles_asset or has_pmtiles_link):
+        if not (visuals or has_pmtiles_asset or has_pmtiles_link):
+            return
+        if not (has_pmtiles_asset or has_pmtiles_link) and all(map(_is_cog, visuals)):
             return
         if not any("style" in roles_of(asset) for _p, _k, asset in _assets_of(node)):
             yield self.finding(
