@@ -8,7 +8,7 @@ version = "0.3.0"
 description = "Validator and linter for Portolan catalogs"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "Portolan contributors" }]
 # The data pass reads asset bytes to verify checksum, size, format, and extent —
 # the core of what a catalog validator is for — so its geospatial stack is a
@@ -16,17 +16,16 @@ authors = [{ name = "Portolan contributors" }]
 # keep `import rashid` cheap: the heavy imports stay confined to
 # rashid.data.checks and load only when the pass runs.
 #
-# Floors sit at the newest release that still resolves on Python 3.10; rasterio,
-# rio-cogeo, and pyproj all dropped 3.10 in their latest majors, and 3.11+ picks
-# those up through the lock. pyarrow is the exception: 21 is the oldest release
-# whose reader exposes native GeospatialStatistics (checks._native_bboxes
+# Floors stay at releases that resolved on Python 3.10, the previous minimum.
+# Raising them is a separate change. pyarrow is the exception: 21 is the
+# oldest release whose reader exposes native GeospatialStatistics (checks._native_bboxes
 # feature-detects it either way), and consumers cap pyarrow below 25 over an
 # abseil ABI break, so a >=25 floor would make rashid uninstallable next to them
 # (#36; also fixed on main by #49 — the floors agree whichever merges first).
 # shapely joins the stack for the item-mirror comparison in
 # checks._geometry_agrees, which decodes the mirror's WKB and the item's GeoJSON
 # and compares them structurally. Its floor follows the same rule: 2.1 is the
-# newest series shapely ships, and it still resolves on Python 3.10.
+# newest series shapely ships.
 # jsonschema-rs screens each object before jsonschema sees it
 # (rashid._jsonschema.screened), and its registry needs the meta-schemas that
 # jsonschema-specifications carries; jsonschema already depends on it, so
@@ -85,7 +84,7 @@ packages = ["src/rashid"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "C4", "UP"]
@@ -96,7 +95,7 @@ known-first-party = ["rashid"]
 
 [tool.mypy]
 strict = true
-python_version = "3.10"
+python_version = "3.11"
 files = ["src/rashid"]
 
 # jsonschema and jsonschema-specifications ship no py.typed marker.

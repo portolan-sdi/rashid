@@ -71,7 +71,7 @@ import re
 import struct
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -1384,8 +1384,8 @@ def _parse_timestamp(value: str) -> datetime | None:
 def _as_utc(value: datetime) -> datetime:
     """A naive timestamp is read as UTC: stac-geoparquet writes the column so."""
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _sample(ids: list[str], limit: int = 3) -> str:

@@ -1,7 +1,7 @@
 # rashid
 
 [![PyPI](https://img.shields.io/pypi/v/rashid.svg)](https://pypi.org/project/rashid/)
-[![Python versions](https://img.shields.io/pypi/pyversions/rashid.svg)](https://pypi.org/project/rashid/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml/badge.svg)](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -17,7 +17,7 @@ The name comes from the Arabic root ر ش د. Its participles رَاشِدٌ and
 uv tool install rashid
 ```
 
-rashid requires Python 3.10 or later.
+rashid requires Python 3.11 or later.
 
 ## Check a Catalog
 
