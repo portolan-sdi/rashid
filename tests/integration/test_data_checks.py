@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import struct
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -861,11 +861,11 @@ def test_geometry_agreement_reads_structure_not_only_vertices() -> None:
 @pytest.mark.parametrize(
     "value,expected",
     [
-        ("2024-01-01T00:00:00Z", datetime(2024, 1, 1, tzinfo=timezone.utc)),
-        ("2024-01-01t00:00:00z", datetime(2024, 1, 1, tzinfo=timezone.utc)),
-        ("2024-01-01 00:00:00", datetime(2024, 1, 1, tzinfo=timezone.utc)),
-        ("2024-01-01T02:00:00+0200", datetime(2024, 1, 1, tzinfo=timezone.utc)),
-        ("2024-01-01T00:00:00.123456789Z", datetime(2024, 1, 1, 0, 0, 0, 123456, timezone.utc)),
+        ("2024-01-01T00:00:00Z", datetime(2024, 1, 1, tzinfo=UTC)),
+        ("2024-01-01t00:00:00z", datetime(2024, 1, 1, tzinfo=UTC)),
+        ("2024-01-01 00:00:00", datetime(2024, 1, 1, tzinfo=UTC)),
+        ("2024-01-01T02:00:00+0200", datetime(2024, 1, 1, tzinfo=UTC)),
+        ("2024-01-01T00:00:00.123456789Z", datetime(2024, 1, 1, 0, 0, 0, 123456, UTC)),
         ("2024-01-01", None),
         ("not a timestamp", None),
         ("2024-13-01T00:00:00Z", None),
@@ -877,8 +877,8 @@ def test_timestamp_parsing(value: str, expected: datetime | None) -> None:
 
 def test_datetime_agreement_holds_within_the_tolerance() -> None:
     item = _mirror_item(properties={"datetime": "2024-01-01T00:00:00Z"})
-    assert checks._datetime_agrees(item, datetime(2024, 1, 1, 0, 0, 1, tzinfo=timezone.utc))
-    assert not checks._datetime_agrees(item, datetime(2024, 1, 1, 0, 0, 2, tzinfo=timezone.utc))
+    assert checks._datetime_agrees(item, datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC))
+    assert not checks._datetime_agrees(item, datetime(2024, 1, 1, 0, 0, 2, tzinfo=UTC))
 
 
 def test_datetime_agreement_normalizes_the_zone() -> None:
