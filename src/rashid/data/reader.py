@@ -4,8 +4,8 @@ The data pass needs an asset's actual bytes two ways: a whole-object stream
 (checksum and size must see every byte) and seekable random access (a Parquet
 footer or COG/PMTiles header is a small read at a known offset). This module
 provides both over the two href kinds a conformant catalog uses: relative paths
-resolved against the catalog tree, and absolute ``https`` URLs. It is
-stdlib-only (``urllib``); the geospatial parsing lives in :mod:`rashid.data.checks`.
+resolved against the catalog tree, and absolute ``https`` URLs. Remote reads go
+through :mod:`rashid._store`; the geospatial parsing lives in :mod:`rashid.data.checks`.
 
 Non-fetchable hrefs — ``s3``/``http``/``file`` or a relative path that escapes
 the tree — resolve to ``None``; the metadata pass already reports those
@@ -26,22 +26,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
 
-from rashid._http import user_agent
+from rashid import _store
 from rashid.catalog import CatalogGraph, Node, is_absolute_href
+from rashid.remote import wire_url
 
 _CHUNK = 1 << 16  # 64 KiB
-_TIMEOUT = 30  # seconds per request
-
-
-def _headers(**extra: str) -> dict[str, str]:
-    """Request headers, always naming the validator.
-
-    urllib's default agent is blocked by edge providers, which answer it with
-    an error page the reader would otherwise consume as the asset's bytes.
-    """
-    return {"User-Agent": user_agent(), **extra}
 
 
 @dataclass(frozen=True)
@@ -73,7 +63,12 @@ class AssetReader(Protocol):
 
 
 class FilesystemHttpReader:
-    """The default reader: local paths under the catalog root, plus ``https``."""
+    """The default reader: local paths under the catalog root, plus ``https``.
+
+    For a catalog read over https (``graph.base_url`` set), a relative href
+    names a file the crawl did not fetch — assets are not documents — so it
+    resolves to its URL under the base instead of to the tree on disk.
+    """
 
     def __init__(self, graph: CatalogGraph) -> None:
         self._graph = graph
@@ -89,9 +84,11 @@ class FilesystemHttpReader:
         if rel is None:
             return None
         path = self._graph.root_path / Path(*rel.parts)
-        if not path.is_file():
-            return None
-        return Locator(is_remote=False, source=str(path))
+        if path.is_file():
+            return Locator(is_remote=False, source=str(path))
+        if self._graph.base_url is not None:
+            return Locator(is_remote=True, source=wire_url(self._graph.base_url, str(rel)))
+        return None
 
     def stream(self, node: Node, href: str) -> Iterator[bytes] | None:
         located = self.locate(node, href)
@@ -134,16 +131,7 @@ def _file_stream(path: Path) -> Iterator[bytes]:
 
 
 def _http_stream(url: str) -> Iterator[bytes]:
-    _require_https(url)
-    request = Request(url, method="GET", headers=_headers())
-    with urlopen(request, timeout=_TIMEOUT) as response:  # noqa: S310  # nosec B310
-        while chunk := response.read(_CHUNK):
-            yield chunk
-
-
-def _require_https(url: str) -> None:
-    if urlparse(url).scheme.lower() != "https":
-        raise ValueError(f"refusing to fetch non-https URL: {url!r}")
+    return _store.stream(url, _CHUNK)
 
 
 class _HttpRangeFile(io.RawIOBase):
@@ -151,24 +139,13 @@ class _HttpRangeFile(io.RawIOBase):
 
     Enough of the file protocol for ``pyarrow.parquet.ParquetFile`` and the
     PMTiles reader to pull a footer or header without downloading the object.
-    Servers that ignore ``Range`` and return the whole body (200) are handled by
-    slicing; the spec requires range support, so this is a fallback, not the path.
     """
 
     def __init__(self, url: str) -> None:
         super().__init__()
-        _require_https(url)
         self._url = url
         self._pos = 0
-        self._size = self._head_length()
-
-    def _head_length(self) -> int:
-        request = Request(self._url, method="HEAD", headers=_headers())
-        with urlopen(request, timeout=_TIMEOUT) as response:  # noqa: S310  # nosec B310
-            length = response.headers.get("Content-Length")
-        if length is None:
-            raise OSError(f"HEAD {self._url!r} returned no Content-Length")
-        return int(length)
+        self._size = _store.head_size(url)
 
     def readable(self) -> bool:
         return True
@@ -193,17 +170,8 @@ class _HttpRangeFile(io.RawIOBase):
     def readinto(self, buffer: memoryview) -> int:  # type: ignore[override]
         if self._pos >= self._size:
             return 0
-        want = len(buffer)
-        end = min(self._pos + want, self._size) - 1  # inclusive
-        request = Request(
-            self._url,
-            method="GET",
-            headers=_headers(Range=f"bytes={self._pos}-{end}"),
-        )
-        with urlopen(request, timeout=_TIMEOUT) as response:  # noqa: S310  # nosec B310
-            data = response.read()
-            if response.status == 200:  # server ignored Range; slice ourselves
-                data = data[self._pos : end + 1]
+        end = min(self._pos + len(buffer), self._size)
+        data = _store.get_range(self._url, self._pos, end)
         n = len(data)
         buffer[:n] = data
         self._pos += n

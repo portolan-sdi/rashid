@@ -1,13 +1,13 @@
 # rashid
 
 [![PyPI](https://img.shields.io/pypi/v/rashid.svg)](https://pypi.org/project/rashid/)
-[![Python versions](https://img.shields.io/pypi/pyversions/rashid.svg)](https://pypi.org/project/rashid/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml/badge.svg)](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 rashid checks whether a [Portolan](https://www.portolan-sdi.org/) catalog follows the specification.
 
-Give it a catalog directory or its root `catalog.json`. rashid checks the metadata, structure, and asset bytes. It reports each problem with a stable rule ID.
+Give it a catalog directory, its root `catalog.json`, or the URL of a published catalog. rashid checks the metadata, structure, asset bytes, and hosting. It reports each problem with a stable rule ID.
 
 The name comes from the Arabic root ر ش د. Its participles رَاشِدٌ and رَشِيدٌ mean ["taking, or following, a right way or course or direction"](https://arabiclexicon.hawramani.com/?p=5472#205af1).
 
@@ -17,7 +17,7 @@ The name comes from the Arabic root ر ش د. Its participles رَاشِدٌ and
 uv tool install rashid
 ```
 
-rashid requires Python 3.10 or later.
+rashid requires Python 3.11 or later.
 
 ## Check a Catalog
 
@@ -39,12 +39,23 @@ Use `--no-data` when you only need a metadata and structure result. Use `--data-
 rashid check path/to/catalog --data-scope local
 ```
 
-Use `--live` to check HTTP range support and CORS on published assets. Relative asset links also require the catalog's public base URL.
+## Check a published catalog
+
+Give `rashid check` the URL of the root `catalog.json`, or of the directory that holds it.
 
 ```bash
-rashid check path/to/catalog \
-  --live \
-  --live-base-url https://data.example.org/my-catalog/
+rashid check https://data.example.org/my-catalog/catalog.json
+```
+
+rashid fetches the root catalog and follows its `child`, `item`, and JSON `alternate` links. It fetches `AGENTS.md` and `README.md` beside each catalog and collection. It then runs the same passes as for a directory. The URL is the publish base, so the hosting checks run by default: HTTP range support and CORS on the assets, and one HEAD for each link target that the crawl did not fetch. A `child` or `item` link that answers `404` on the host is a `PTL-LIV-006` error. A root `self` link that points to a different location is a `PTL-LIV-007` warning.
+
+A crawl reads only the documents that links point to. rashid reports this limit once as `PTL-GEN-002`. The checks that depend on a full directory listing do not run: `PTL-LNK-002`, for an object without an inbound link, and `PTL-COL-005`, for scene files beside a collection. Sync the tree to disk and check the directory for the full view.
+
+Use `--live` to run the hosting checks on a directory. rashid reads the publish base from the root catalog's absolute `self` link. When the root has no `self` link, pass `--live-base-url`.
+
+```bash
+rashid check path/to/catalog --live
+rashid check path/to/catalog --live --live-base-url https://data.example.org/my-catalog/
 ```
 
 Use `--json` for a machine-readable report.
@@ -59,15 +70,18 @@ Use `--all` to list every finding. Use `--summary` to group any report by rule. 
 
 ## Choose Additional Checks
 
-rashid provides five separate validation passes:
+rashid provides six separate validation passes:
 
 - **Metadata** checks Portolan requirements in catalog JSON.
 - **Structural** checks STAC 1.1.0 core structure offline.
+- **Extension** checks each object against the schemas of the STAC extensions it declares, offline.
 - **Schema** checks each object against the packaged Portolan profile schema.
 - **Data** reads asset bytes and verifies checksums, sizes, formats, and extents.
 - **Live hosting** checks HTTP range support and CORS on remote servers.
 
-Metadata, structural, and data checks run by default. Use `--schema` as a cross-check against the published profile schema. Use `--live` for checks that require a published catalog and network access.
+Metadata, structural, extension, and data checks run by default. The live hosting pass also runs by default for a catalog URL. Use `--schema` as a cross-check against the published profile schema. Use `--live` to run the hosting checks on a directory.
+
+The extension pass uses the versions that the profile's extension registry pins. rashid packages those schemas, so a catalog at the pinned versions needs no network. A catalog that declares an older version of a registered extension is checked against that version's schema, which rashid fetches over https. rashid reports an extension outside the registry as an info finding rather than validating it. Use `--schema-allow-network` to fetch and check such a schema.
 
 If a pass cannot run, rashid reports a warning. It does not treat the skipped pass as successful.
 
@@ -79,12 +93,13 @@ For transfer details and every rule ID, see [the rule reference](docs/rules.md).
 from rashid import validate
 
 report = validate("path/to/catalog")
+published = validate("https://data.example.org/my-catalog/catalog.json")
 
 for finding in report.errors:
     print(finding.message)
 ```
 
-`validate()` uses the same default passes as the command-line interface. Set `schema=True` or `live=True` to add those passes.
+`validate()` uses the same default passes as the command-line interface. Set `schema=True` or `live=True` to add those passes. For a URL, `live` is on unless you pass `live=False`. Set `extensions=False` to skip the extension pass.
 
 Use `RulesConfig` to disable rules or change their severity.
 
@@ -104,7 +119,8 @@ The public `rashid.api` module also provides helpers for tools that repair catal
 ## Documentation
 
 - [Rule reference](docs/rules.md) describes every validation pass, rule group, and degraded-pass code.
-- [Contributing guide](docs/contributing.md) covers development setup, tests, and repository checks.
+- [Contributing guide](https://github.com/portolan-sdi/portolan-ops/blob/main/policies/CONTRIBUTING.md) explains how to propose a change to a Portolan project.
+- [Development guide](docs/development.md) covers setup, tests, repository checks, profiling, and logs.
 - [Portolan specification](https://github.com/portolan-sdi/portolan-spec) defines the requirements that rashid implements.
 
 ## License

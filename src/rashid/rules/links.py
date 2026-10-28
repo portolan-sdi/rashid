@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from rashid.catalog import CatalogGraph, Node, is_absolute_href
+from rashid.catalog import CatalogGraph, Node, is_absolute_href, self_link_base
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
 from rashid.rules._common import STRUCTURAL_RELS, links_of
@@ -47,26 +47,13 @@ def _icon_links(node: Node) -> Iterable[tuple[int, dict[str, Any]]]:
 
 
 def _published_base(node: Node, graph: CatalogGraph) -> str | None:
-    """The URL prefix the tree is published under, from the root self link.
+    """The URL prefix the tree ``node`` sits in is published under.
 
-    core.md, Links: a catalog served over the internet from a single fixed
-    URL SHOULD carry an absolute ``self`` link on its root catalog
-    (PORTO-CORE-081). That link names the published location of the root
-    file, so the URL minus the root file name is the base every file in the
-    tree is served under.
+    Read from the root ``self`` link of ``node``'s own language tree (see
+    :func:`rashid.catalog.self_link_base`), so a translated tree with its own
+    absolute ``self`` link resolves its own absolute hrefs.
     """
-    root = graph.language_root_of(node)
-    if root is None:
-        return None
-    for link in links_of(root):
-        if link.get("rel") != "self":
-            continue
-        href = link.get("href")
-        if isinstance(href, str) and is_absolute_href(href):
-            prefix, sep, tail = href.rpartition("/")
-            if tail == root.path.name:
-                return prefix + sep
-    return None
+    return self_link_base(graph.language_root_of(node))
 
 
 def _resolve_structural_href(

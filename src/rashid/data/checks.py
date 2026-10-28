@@ -37,6 +37,15 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   count, ids, geometry, datetime, or bbox (MUST, formats.md, Raster § Item
   mirror). A mirror runs the GeoParquet checks above as well: the spec binds
   it to them like any other spatial table.
+- ``PTL-DAT-018`` a native geometry column's CRS does not resolve from the
+  file alone (formats.md, Geospatial Parquet). Inline PROJJSON and
+  ``projjson:<key>`` pass, ``<authority>:<code>``/``srid:<n>`` warn, anything
+  else errors (MUST + SHOULD).
+
+A file is geospatial when it carries a ``geo`` key or a native Parquet
+``GEOMETRY``/``GEOGRAPHY`` column; the spec accepts GeoParquet 1.1, 2.0, and
+native-geo Parquet with no ``geo`` key, and every vector rule applies to all
+three forms.
 
 The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
 run over an asset and over every file a local relative ``partition:glob``
@@ -61,16 +70,17 @@ failure the way a wrong one is.
 
 from __future__ import annotations
 
+import contextlib
 import glob as globmodule
 import hashlib
-import json
+import logging
 import math
 import posixpath
 import re
 import struct
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -86,6 +96,7 @@ from shapely.errors import ShapelyError
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
+from rashid import _json, _trace
 from rashid._multihash import decode_multihash
 from rashid.catalog import CatalogGraph, Node
 from rashid.data import (
@@ -96,6 +107,7 @@ from rashid.data import (
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
     DAT_MIRROR,
+    DAT_NATIVE_CRS,
     DAT_ORDERING,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
@@ -190,6 +202,29 @@ _COG_STAT_KEYS = (
 # formats.md:121 — SHOULD per band, MUST when the band has a nodata value.
 _VALID_PERCENT_KEY = "STATISTICS_VALID_PERCENT"
 
+# GDAL options for a remote raster (https://gdal.org/en/stable/user/configoptions.html).
+# On a published host each request waits hundreds of milliseconds for its
+# first byte (#219), so these cut requests rather than bytes:
+# - EMPTY_DIR stops GDAL from listing the asset's directory and probing for
+#   sidecar files. A remote COG's external .ovr then goes unseen by
+#   cog_validate; PTL-DAT-011 still reports the missing internal overviews.
+# - VSI_CACHE keeps the bytes already read in RAM for the one open dataset the
+#   stats, overview, tile, and extent reads share.
+# - GDAL_HTTP_MAX_RETRY retries a 429, 500, 502, 503, or 504, as rashid._store
+#   retries obstore's requests. GDAL's default is no retry. The data pass
+#   reads 32 assets at once, and a host that throttles answers 503 now and
+#   then. A raster open that fails on one would report a valid COG as broken.
+#   The first retry waits 0.5 s, and GDAL grows the wait after each one.
+# GDAL_HTTP_MERGE_CONSECUTIVE_RANGES is YES by default, so it is not set.
+# Local files keep GDAL's defaults, which is how a local .ovr stays visible.
+# rasterio sets these thread-locally on a worker thread.
+_REMOTE_GDAL = {
+    "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
+    "VSI_CACHE": "TRUE",
+    "GDAL_HTTP_MAX_RETRY": "3",
+    "GDAL_HTTP_RETRY_DELAY": "0.5",
+}
+
 
 @dataclass(frozen=True)
 class _EpsgDeclaration:
@@ -238,6 +273,87 @@ class _Wgs84Bounds:
     reprojected: bool = False
 
 
+log = logging.getLogger(__name__)
+
+
+def _parquet_file(source: Any) -> Any:
+    """``pq.ParquetFile(source)``, counted. Each open reads and parses the footer."""
+    _trace.count("parquet.opens")
+    return pq.ParquetFile(source)
+
+
+def _raster_open(path: str) -> Any:
+    """``rasterio.open(path)``, counted. Each open reads the TIFF header."""
+    _trace.count("raster.opens")
+    return rasterio.open(path)
+
+
+class _AssetFiles:
+    """One asset's open Parquet file and raster dataset, shared by its checks.
+
+    Each check used to open the asset itself, so a GeoParquet footer was read
+    three times and a COG header four (#224). On a remote asset each open is
+    its own round of range requests. Here the first check to ask opens the
+    file and the rest reuse it.
+
+    An open that fails is remembered too, and every later call raises the same
+    exception object. Each check keeps its own ``except`` branch, so a check
+    reports what it reported when it opened the file itself, down to the
+    exception text in the message. The traceback is dropped before each raise,
+    so it does not grow by one check's frames per raise.
+
+    The raster dataset is opened by whoever asks first, under the GDAL
+    environment active at that moment. Callers read it under
+    ``rasterio.Env(GDAL_PAM_ENABLED="NO")``, since GTiff loads PAM lazily.
+    """
+
+    def __init__(self, located: Locator) -> None:
+        self._located = located
+        self._parquet: Any = None
+        self._parquet_error: Exception | None = None
+        self._handle: Any = None
+        self._raster: Any = None
+        self._raster_error: Exception | None = None
+
+    def parquet(self) -> Any:
+        if self._parquet_error is not None:
+            raise self._parquet_error.with_traceback(None)
+        if self._parquet is None:
+            try:
+                source: Any = self._located.source
+                if self._located.is_remote:
+                    source = self._handle = self._located.open_binary()
+                self._parquet = _parquet_file(source)
+            except Exception as exc:
+                self._parquet_error = exc
+                raise
+        return self._parquet
+
+    def raster(self) -> Any:
+        if self._raster_error is not None:
+            raise self._raster_error.with_traceback(None)
+        if self._raster is None:
+            try:
+                self._raster = _raster_open(self._located.gdal_path())
+            except Exception as exc:
+                self._raster_error = exc
+                raise
+        return self._raster
+
+    def close(self) -> None:
+        # One close that raises must not leave the other handles open.
+        with contextlib.ExitStack() as stack:
+            for opened in (self._handle, self._parquet, self._raster):
+                if opened is not None:
+                    stack.callback(opened.close)
+
+    def __enter__(self) -> _AssetFiles:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+
 def check_node(
     node: Node, reader: AssetReader, graph: CatalogGraph | None = None
 ) -> list[DataDefect]:
@@ -254,7 +370,9 @@ def check_node(
         href = asset.get("href")
         if not isinstance(href, str) or not href:
             continue  # PTL-AST-001 reports a missing href
-        defects.extend(_check_asset(node, key, asset, href, reader, graph))
+        log.debug("data: %s asset %r: %s", node.path, key, href)
+        with _trace.span("data.asset"):
+            defects.extend(_check_asset(node, key, asset, href, reader, graph))
     return _collapse_shared_fields(defects)
 
 
@@ -295,6 +413,7 @@ def _check_asset(
     reader: AssetReader,
     graph: CatalogGraph | None = None,
 ) -> list[DataDefect]:
+    _trace.count("data.assets")
     defects: list[DataDefect] = []
     media_type = asset.get("type")
     expected = _expected_format(media_type) if isinstance(media_type, str) else None
@@ -310,22 +429,24 @@ def _check_asset(
         # a GeoParquet would fail it for being what it says it is. Its bytes
         # are still checksum/size/format-verified above.
         return defects
-    if is_mirror_asset(asset):
-        # formats.md, Raster § Item mirror: a mirror must reproduce the items
-        # it mirrors (PORTO-FMT-042). It then falls through to the GeoParquet
-        # checks below, which bind it as they bind vector data
-        # (PORTO-FMT-043) — an item index is queried by extent like any other
-        # spatial table. The tabular SHOULDs skip it on their own, being
-        # scoped to assets with the 'data' role.
-        defects.extend(_check_mirror(node, key, located, graph))
-    if expected == "tiff":
-        defects.extend(_check_raster(key, located))
-    if expected == "parquet":
-        defects.extend(_check_geoparquet(key, located))
-        defects.extend(_check_tabular(node, key, asset, located))
-        defects.extend(_check_vector_columns(node, key, asset, located))
-    if expected in {"parquet", "tiff", "pmtiles"}:
-        defects.extend(_check_consistency(node, key, asset, expected, located))
+    gdal_env = rasterio.Env(**_REMOTE_GDAL) if located.is_remote else contextlib.nullcontext()
+    with gdal_env, _AssetFiles(located) as files:
+        if is_mirror_asset(asset):
+            # formats.md, Raster § Item mirror: a mirror must reproduce the
+            # items it mirrors (PORTO-FMT-042). It then falls through to the
+            # GeoParquet checks below, which bind it as they bind vector data
+            # (PORTO-FMT-043) — an item index is queried by extent like any
+            # other spatial table. The tabular SHOULDs skip it on their own,
+            # being scoped to assets with the 'data' role.
+            defects.extend(_check_mirror(node, key, files, graph))
+        if expected == "tiff":
+            defects.extend(_check_raster(key, located, files))
+        if expected == "parquet":
+            defects.extend(_check_geoparquet(key, files))
+            defects.extend(_check_tabular(node, key, asset, files))
+            defects.extend(_check_vector_columns(node, key, asset, files))
+        if expected in {"parquet", "tiff", "pmtiles"}:
+            defects.extend(_check_consistency(node, key, asset, expected, located, files))
     return defects
 
 
@@ -427,6 +548,7 @@ def _consume(stream: Iterator[bytes], hasher: Any) -> tuple[bytes, int]:
             head += chunk[: _HEAD_BYTES - len(head)]
         if hasher is not None:
             hasher.update(chunk)
+    _trace.count("data.bytes_read", count)
     return head, count
 
 
@@ -450,8 +572,8 @@ def _read_head(stream: Iterator[bytes]) -> bytes:
 def _close(stream: Iterator[bytes]) -> None:
     """Release a stream this check is done with, rather than leave it to the collector.
 
-    ``_http_stream`` is a generator holding an open ``urlopen`` response, so a
-    stream dropped part-way keeps a socket until it is reclaimed.
+    ``_http_stream`` is a generator holding an open obstore response, so a
+    stream dropped part-way keeps a connection until it is reclaimed.
     ``AssetReader.stream`` promises only an ``Iterator[bytes]``, which need not
     be closeable, hence the guard.
     """
@@ -541,10 +663,15 @@ def _verify_format(key: str, expected: str | None, head: bytes) -> list[DataDefe
     ]
 
 
-def _check_raster(key: str, located: Locator) -> list[DataDefect]:
-    """A raster asset MUST be a valid COG (formats.md:91) with embedded band stats."""
+def _check_raster(key: str, located: Locator, files: _AssetFiles) -> list[DataDefect]:
+    """A raster asset MUST be a valid COG (formats.md:91) with embedded band stats.
+
+    ``cog_validate`` takes a path, not a dataset, so it opens the file itself.
+    The other three checks share the one dataset in ``files``.
+    """
     defects: list[DataDefect] = []
     try:
+        _trace.count("raster.cog_validates")
         is_valid, errors, _warnings = cog_validate(located.gdal_path(), quiet=True)
     except Exception as exc:  # noqa: BLE001 - a reader failure is not a conformance fault
         return [
@@ -566,9 +693,12 @@ def _check_raster(key: str, located: Locator) -> list[DataDefect]:
                 "type",
             )
         )
-    defects.extend(_check_cog_stats(key, located))
-    defects.extend(_check_overviews(key, located))
-    defects.extend(_check_tile_size(key, located))
+    # GDAL_PAM_ENABLED=NO ignores any .aux.xml sidecar, so only what is
+    # embedded in the file counts — as the spec requires.
+    with rasterio.Env(GDAL_PAM_ENABLED="NO"):
+        defects.extend(_check_cog_stats(key, files))
+        defects.extend(_check_overviews(key, files))
+        defects.extend(_check_tile_size(key, files))
     return defects
 
 
@@ -592,7 +722,7 @@ def _tile_shape(src: Any) -> tuple[int, int] | None:
     return height, width
 
 
-def _check_overviews(key: str, located: Locator) -> list[DataDefect]:
+def _check_overviews(key: str, files: _AssetFiles) -> list[DataDefect]:
     """A raster larger than one internal tile MUST carry internal overviews.
 
     A SHALL of OGC 21-026's Optimized GeoTIFF conformance class (optional in
@@ -605,11 +735,11 @@ def _check_overviews(key: str, located: Locator) -> list[DataDefect]:
     External ``.ovr`` sidecars are already an error inside ``cog_validate``.
     """
     try:
-        with rasterio.Env(GDAL_PAM_ENABLED="NO"), rasterio.open(located.gdal_path()) as src:
-            shape = _tile_shape(src)
-            tile = max(shape) if shape is not None else _MAX_TILE
-            oversized = max(src.width, src.height) > tile
-            has_overviews = bool(src.overviews(1))
+        src = files.raster()
+        shape = _tile_shape(src)
+        tile = max(shape) if shape is not None else _MAX_TILE
+        oversized = max(src.width, src.height) > tile
+        has_overviews = bool(src.overviews(1))
     except Exception:  # noqa: BLE001 - unreadable raster: the COG check owns reporting it
         return []
     if oversized and not has_overviews:
@@ -625,7 +755,7 @@ def _check_overviews(key: str, located: Locator) -> list[DataDefect]:
     return []
 
 
-def _check_tile_size(key: str, located: Locator) -> list[DataDefect]:
+def _check_tile_size(key: str, files: _AssetFiles) -> list[DataDefect]:
     """Internal tiles MUST be square and no larger than 512×512.
 
     OGC 21-026 /req/optimized_geotiff/small-sizes ("square internal tiles,
@@ -636,11 +766,10 @@ def _check_tile_size(key: str, located: Locator) -> list[DataDefect]:
     already reports through PTL-DAT-004.
     """
     try:
-        with rasterio.Env(GDAL_PAM_ENABLED="NO"), rasterio.open(located.gdal_path()) as src:
-            shape = _tile_shape(src)
-            if shape is None:
-                return []
-            tile_height, tile_width = shape
+        shape = _tile_shape(files.raster())
+        if shape is None:
+            return []
+        tile_height, tile_width = shape
     except Exception:  # noqa: BLE001 - unreadable raster: the COG check owns reporting it
         return []
     if tile_height != tile_width:
@@ -666,24 +795,26 @@ def _check_tile_size(key: str, located: Locator) -> list[DataDefect]:
     return []
 
 
-def _check_cog_stats(key: str, located: Locator) -> list[DataDefect]:
+def _check_cog_stats(key: str, files: _AssetFiles) -> list[DataDefect]:
     """Every COG band MUST carry embedded min/max/mean/stddev (formats.md:95),
     and SHOULD carry a valid percent — a MUST when the band has a nodata value
-    (formats.md:121)."""
+    (formats.md:121).
+
+    Only statistics embedded in the file's GDAL_METADATA tag count, which is
+    why :func:`_check_raster` reads the dataset with PAM off.
+    """
     try:
-        # GDAL_PAM_ENABLED=NO ignores any .aux.xml sidecar, so only statistics
-        # embedded in the file's GDAL_METADATA tag count — as the spec requires.
-        with rasterio.Env(GDAL_PAM_ENABLED="NO"), rasterio.open(located.gdal_path()) as src:
-            missing: list[int] = []
-            vp_should: list[int] = []  # valid percent absent, no nodata: SHOULD
-            vp_must: list[int] = []  # valid percent absent with nodata: MUST
-            for bidx in range(1, src.count + 1):
-                tags = src.tags(bidx)
-                if not all(stat in tags for stat in _COG_STAT_KEYS):
-                    missing.append(bidx)
-                if _VALID_PERCENT_KEY not in tags:
-                    has_nodata = src.nodatavals[bidx - 1] is not None
-                    (vp_must if has_nodata else vp_should).append(bidx)
+        src = files.raster()
+        missing: list[int] = []
+        vp_should: list[int] = []  # valid percent absent, no nodata: SHOULD
+        vp_must: list[int] = []  # valid percent absent with nodata: MUST
+        for bidx in range(1, src.count + 1):
+            tags = src.tags(bidx)
+            if not all(stat in tags for stat in _COG_STAT_KEYS):
+                missing.append(bidx)
+            if _VALID_PERCENT_KEY not in tags:
+                has_nodata = src.nodatavals[bidx - 1] is not None
+                (vp_must if has_nodata else vp_should).append(bidx)
     except Exception as exc:  # noqa: BLE001 - unreadable raster is advisory here
         return [
             DataDefect(
@@ -726,10 +857,15 @@ def _check_cog_stats(key: str, located: Locator) -> list[DataDefect]:
 
 
 def _check_consistency(
-    node: Node, key: str, asset: dict[str, Any], expected: str, located: Locator
+    node: Node,
+    key: str,
+    asset: dict[str, Any],
+    expected: str,
+    located: Locator,
+    files: _AssetFiles,
 ) -> list[DataDefect]:
     try:
-        geo = _extract_geo(expected, located)
+        geo = _extract_geo(expected, located, files)
     except Exception as exc:  # noqa: BLE001 - unreadable header is advisory, not fatal
         return [
             DataDefect(
@@ -814,15 +950,18 @@ def _bbox_mismatch_message(
 
 
 def _check_geoparquet(
-    key: str, located: Locator, *, subject: str | None = None
+    key: str, files: _AssetFiles, *, subject: str | None = None
 ) -> list[DataDefect]:
-    """A GeoParquet asset MUST have bounded row groups, per-row-group spatial
-    statistics, and spatial ordering (formats.md:30,64,75).
+    """A geospatial Parquet asset MUST have bounded row groups, per-row-group
+    spatial statistics, and spatial ordering (formats.md:30,64,75).
 
     Parquet and GeoParquet share the ``application/vnd.apache.parquet`` media
-    type. A file with no ``geo`` metadata key is plain Parquet — legitimate
-    tabular data — so it is skipped rather than faulted; these rules apply only
-    to actual GeoParquet.
+    type. A file is geospatial when it carries a ``geo`` metadata key or a
+    column of the native Parquet ``GEOMETRY``/``GEOGRAPHY`` logical type
+    (PORTO-FMT-055); only a file with neither is plain tabular Parquet and
+    skipped. A native-geo file with no ``geo`` key is the spec's third accepted
+    form, so the missing key is not faulted — its CRS rules are
+    (PORTO-FMT-056/057) — and Iceberg writers produce exactly that file (#200).
 
     ``subject`` names the file in the message. It defaults to the asset the key
     belongs to; the partition pass passes the matched path instead, since a
@@ -830,17 +969,21 @@ def _check_geoparquet(
     """
     subject = subject or f"asset '{key}'"
     try:
-        source: Any = located.open_binary() if located.is_remote else located.source
-        parquet = pq.ParquetFile(source)
+        parquet = files.parquet()
     except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
         return []
 
     geo = _geo_metadata(parquet)
-    if geo is None:
-        return []  # plain Parquet, not GeoParquet — nothing to enforce here
+    native = _native_geo_columns(parquet)
+    if geo is None and not native:
+        return []  # plain Parquet, not geospatial — nothing to enforce here
 
     defects: list[DataDefect] = []
-    defects.extend(_check_geoparquet_version(key, geo, subject=subject))
+    if geo is not None:
+        defects.extend(_check_geoparquet_version(key, geo, subject=subject))
+    else:
+        geo = {}
+        defects.extend(_check_native_crs(key, parquet, native, subject=subject))
     meta = parquet.metadata
     row_counts = [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
     if any(n > _MAX_ROW_GROUP_ROWS for n in row_counts):
@@ -919,11 +1062,12 @@ def _ordering_defects(
 def _check_geoparquet_version(
     key: str, geo: dict[str, Any], *, subject: str | None = None
 ) -> list[DataDefect]:
-    """The ``geo`` metadata MUST declare GeoParquet 1.1 or 2.x.
+    """The ``geo`` metadata, when present, MUST declare GeoParquet 1.1 or 2.x.
 
-    formats.md:25: "Data MUST be provided in GeoParquet 1.1 or 2.0". A file
-    with ``geo`` metadata but an older version (1.0, the common legacy case)
-    lacks the covering-column machinery the rest of the format MUSTs assume.
+    formats.md accepts GeoParquet 1.1, 2.0, or native-geo Parquet with no
+    ``geo`` key. A file with ``geo`` metadata but an older version (1.0, the
+    common legacy case) lacks the covering-column machinery the rest of the
+    format MUSTs assume. A file with no ``geo`` key never reaches this check.
     """
     subject = subject or f"asset '{key}'"
     version = geo.get("version")
@@ -947,10 +1091,175 @@ def _geo_metadata(parquet: Any) -> dict[str, Any] | None:
     if raw is None:
         return None
     try:
-        geo = json.loads(raw)
+        geo = _json.loads(raw)
     except (ValueError, TypeError):
         return None
     return geo if isinstance(geo, dict) else None
+
+
+def _native_geo_columns(parquet: Any) -> list[str]:
+    """Columns whose Parquet logical type is ``GEOMETRY`` or ``GEOGRAPHY``.
+
+    Read from the Parquet schema, not the Arrow one, so detection needs no
+    registered geoarrow extension. pyarrow >= 21 names the type through
+    ``logical_type``; an older pyarrow reports it as unknown and the file
+    falls back to the ``geo``-key path.
+    """
+    schema = getattr(parquet.metadata, "schema", None)
+    if schema is None:
+        return []
+    names: list[str] = []
+    for i in range(len(schema)):
+        column = schema.column(i)
+        logical = getattr(column, "logical_type", None)
+        if logical is None:
+            continue
+        try:
+            kind = _json.loads(logical.to_json()).get("Type")
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if kind in ("Geometry", "Geography"):
+            names.append(column.name)
+    return names
+
+
+def _primary_geometry_column(parquet: Any, geo: dict[str, Any]) -> str | None:
+    """The column the per-row-group statistics are read from.
+
+    The ``geo`` key names it; a native-geo file without one defaults to the
+    column named ``geometry``, else the first native geospatial column.
+    """
+    primary = geo.get("primary_column")
+    if isinstance(primary, str):
+        return primary
+    native = _native_geo_columns(parquet)
+    if not native:
+        return None
+    return "geometry" if "geometry" in native else native[0]
+
+
+def _native_crs(parquet: Any, name: str) -> str | None:
+    """The ``crs`` string of a native geospatial column, None when absent."""
+    schema = getattr(parquet.metadata, "schema", None)
+    if schema is None:
+        return None
+    for i in range(len(schema)):
+        column = schema.column(i)
+        if column.name != name:
+            continue
+        logical = getattr(column, "logical_type", None)
+        if logical is None:
+            return None
+        try:
+            crs = _json.loads(logical.to_json()).get("crs")
+        except (ValueError, TypeError, AttributeError):
+            return None
+        return crs if isinstance(crs, str) else None
+    return None
+
+
+# A CRS registry identifier: `<authority>:<code>`, which also matches
+# `srid:<n>`. Resolving one needs a registry, which is why PORTO-FMT-057
+# prefers inline PROJJSON and keeps this form a warning rather than an error.
+_AUTHORITY_CODE = re.compile(r"[A-Za-z][A-Za-z0-9_]*:[A-Za-z0-9_.]+\Z")
+
+
+def _check_native_crs(
+    key: str, parquet: Any, columns: list[str], *, subject: str | None = None
+) -> list[DataDefect]:
+    """The CRS of each native geospatial column resolves from the file alone.
+
+    formats.md: the native ``crs`` value MUST be one the Parquet geospatial
+    specification defines, and an absent value is OGC:CRS84 (PORTO-FMT-056).
+    Inline PROJJSON and a ``projjson:<key>`` reference into the file metadata
+    resolve from the file alone; an ``<authority>:<code>`` or ``srid:<n>``
+    value needs a CRS registry, so it is a warning (PORTO-FMT-057). Anything
+    else is an error. These rules only reach a file with no ``geo`` key —
+    with one, the key's own ``crs`` field governs and the consistency check
+    reads that.
+    """
+    subject = subject or f"asset '{key}'"
+    defects: list[DataDefect] = []
+    for name in columns:
+        crs = _native_crs(parquet, name)
+        if crs is None:
+            continue  # absent: OGC:CRS84 by definition
+        value = crs.strip()
+        if not value or value == "OGC:CRS84":
+            continue
+        if value.startswith("{"):
+            try:
+                _json.loads(value)
+                continue  # inline PROJJSON
+            except ValueError:
+                defects.append(
+                    DataDefect(
+                        DAT_NATIVE_CRS,
+                        Severity.ERROR,
+                        f"{subject} geometry column '{name}' carries a crs that opens "
+                        "like JSON but does not parse; it must be a form the Parquet "
+                        "geospatial specification defines",
+                        key,
+                    )
+                )
+                continue
+        if value.startswith("projjson:"):
+            defects.extend(_projjson_reference_defects(key, parquet, name, value, subject=subject))
+            continue
+        if _AUTHORITY_CODE.match(value):
+            defects.append(
+                DataDefect(
+                    DAT_NATIVE_CRS,
+                    Severity.WARNING,
+                    f"{subject} geometry column '{name}' declares its CRS as '{value}', "
+                    "which needs a CRS registry to resolve; inline PROJJSON lets a "
+                    "reader resolve it from the file alone",
+                    key,
+                )
+            )
+            continue
+        defects.append(
+            DataDefect(
+                DAT_NATIVE_CRS,
+                Severity.ERROR,
+                f"{subject} geometry column '{name}' crs '{value}' is not a form the "
+                "Parquet geospatial specification defines",
+                key,
+            )
+        )
+    return defects
+
+
+def _projjson_reference_defects(
+    key: str, parquet: Any, name: str, value: str, *, subject: str
+) -> list[DataDefect]:
+    """A ``projjson:<key>`` crs resolves against the file's key-value metadata."""
+    meta_key = value[len("projjson:") :]
+    kv = getattr(parquet.metadata, "metadata", None) or {}
+    raw = kv.get(meta_key.encode())
+    if raw is None:
+        return [
+            DataDefect(
+                DAT_NATIVE_CRS,
+                Severity.ERROR,
+                f"{subject} geometry column '{name}' crs names file metadata key "
+                f"'{meta_key}', which the file does not carry",
+                key,
+            )
+        ]
+    try:
+        _json.loads(raw)
+    except (ValueError, TypeError):
+        return [
+            DataDefect(
+                DAT_NATIVE_CRS,
+                Severity.ERROR,
+                f"{subject} geometry column '{name}' crs names file metadata key "
+                f"'{meta_key}', which does not hold PROJJSON",
+                key,
+            )
+        ]
+    return []
 
 
 # --- item mirrors -----------------------------------------------------------
@@ -993,7 +1302,7 @@ class _MirrorRows:
 
 
 def _check_mirror(
-    node: Node, key: str, located: Locator, graph: CatalogGraph | None
+    node: Node, key: str, files: _AssetFiles, graph: CatalogGraph | None
 ) -> list[DataDefect]:
     """A mirror MUST reproduce the collection's items (PORTO-FMT-042).
 
@@ -1028,8 +1337,7 @@ def _check_mirror(
         return []  # unidentified items; PTL-STR/PTL-GEN own that gap
 
     try:
-        source: Any = located.open_binary() if located.is_remote else located.source
-        parquet = pq.ParquetFile(source)
+        parquet = files.parquet()
     except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
         return []
 
@@ -1299,8 +1607,8 @@ def _parse_timestamp(value: str) -> datetime | None:
 def _as_utc(value: datetime) -> datetime:
     """A naive timestamp is read as UTC: stac-geoparquet writes the column so."""
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _sample(ids: list[str], limit: int = 3) -> str:
@@ -1312,7 +1620,7 @@ def _sample(ids: list[str], limit: int = 3) -> str:
 
 
 def _check_tabular(
-    node: Node, key: str, asset: dict[str, Any], located: Locator
+    node: Node, key: str, asset: dict[str, Any], files: _AssetFiles
 ) -> list[DataDefect]:
     """The Tabular Data SHOULDs for a plain-Parquet collection-level data asset.
 
@@ -1329,12 +1637,11 @@ def _check_tabular(
     if node.kind != "collection" or "data" not in _asset_roles(asset):
         return []
     try:
-        source: Any = located.open_binary() if located.is_remote else located.source
-        parquet = pq.ParquetFile(source)
+        parquet = files.parquet()
     except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
         return []
-    if _geo_metadata(parquet) is not None:
-        return []  # GeoParquet: the geospatial storage rules own it
+    if _geo_metadata(parquet) is not None or _native_geo_columns(parquet):
+        return []  # geospatial Parquet: the vector storage rules own it
     defects: list[DataDefect] = []
     if not _has_table_columns(node, asset):
         defects.append(
@@ -1360,7 +1667,7 @@ def _check_tabular(
 
 
 def _check_vector_columns(
-    node: Node, key: str, asset: dict[str, Any], located: Locator
+    node: Node, key: str, asset: dict[str, Any], files: _AssetFiles
 ) -> list[DataDefect]:
     """The table-extension SHOULDs for a GeoParquet data asset.
 
@@ -1375,11 +1682,10 @@ def _check_vector_columns(
     if "data" not in _asset_roles(asset):
         return []
     try:
-        source: Any = located.open_binary() if located.is_remote else located.source
-        parquet = pq.ParquetFile(source)
+        parquet = files.parquet()
     except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
         return []
-    if _geo_metadata(parquet) is None:
+    if _geo_metadata(parquet) is None and not _native_geo_columns(parquet):
         return []  # plain Parquet: the Tabular Data SHOULDs own it
     if _has_table_columns(node, asset):
         return []
@@ -1459,7 +1765,7 @@ def _rowgroup_stat_defects(
     boxes = _covering_bboxes(parquet, geo)
     if boxes is not None:
         return boxes, []
-    boxes = _native_bboxes(parquet, geo)
+    boxes = _native_bboxes(parquet, _primary_geometry_column(parquet, geo))
     if boxes is None:
         return None, [
             DataDefect(
@@ -1483,7 +1789,7 @@ def _rowgroup_stat_defects(
 
 
 def _native_bboxes(
-    parquet: Any, geo: dict[str, Any]
+    parquet: Any, primary: str | None
 ) -> list[tuple[float, float, float, float]] | None:
     """Per-row-group boxes from Parquet native ``GeospatialStatistics``.
 
@@ -1491,7 +1797,6 @@ def _native_bboxes(
     exposes ``geo_statistics``; older versions have no attribute and fall
     through to None, keeping the covering column as the only satisfier).
     """
-    primary = geo.get("primary_column")
     if not isinstance(primary, str):
         return None
     meta = parquet.metadata
@@ -1948,7 +2253,7 @@ def _check_partition_schemas(node: Node) -> list[DataDefect]:
     schemas: list[tuple[str, dict[str, str]]] = []
     for match, path in _partition_files(node):
         try:
-            parquet = pq.ParquetFile(str(path))
+            parquet = _parquet_file(str(path))
         except Exception:  # noqa: BLE001 # nosec B112 - unreadable partition: the byte checks own it
             continue
         arrow = parquet.schema_arrow
@@ -1998,13 +2303,8 @@ def _check_partition_geoparquet(node: Node, reader: AssetReader) -> list[DataDef
         if str(path) in already_read:
             continue  # a declared asset: the per-asset loop reports it
         checked += 1
-        found.extend(
-            _check_geoparquet(
-                match,
-                Locator(is_remote=False, source=str(path)),
-                subject=f"partition file '{match}'",
-            )
-        )
+        with _AssetFiles(Locator(is_remote=False, source=str(path))) as opened:
+            found.extend(_check_geoparquet(match, opened, subject=f"partition file '{match}'"))
     return _fold_partition_defects(found, checked)
 
 
@@ -2107,23 +2407,22 @@ def _detect_format(head: bytes) -> str | None:
 # --- spatial extraction ----------------------------------------------------
 
 
-def _extract_geo(expected: str, located: Locator) -> _Geo | None:
+def _extract_geo(expected: str, located: Locator, files: _AssetFiles) -> _Geo | None:
     if expected == "parquet":
-        return _geo_from_parquet(located)
+        return _geo_from_parquet(files)
     if expected == "tiff":
-        return _geo_from_raster(located)
+        return _geo_from_raster(files)
     if expected == "pmtiles":
         return _geo_from_pmtiles(located)
     return None
 
 
-def _geo_from_parquet(located: Locator) -> _Geo | None:
-    source: Any = located.open_binary() if located.is_remote else located.source
-    parquet = pq.ParquetFile(source)
+def _geo_from_parquet(files: _AssetFiles) -> _Geo | None:
+    parquet = files.parquet()
     raw = (parquet.schema_arrow.metadata or {}).get(b"geo")
     if raw is None:
-        return None
-    geo = json.loads(raw)
+        return _geo_from_native_parquet(parquet)
+    geo = _json.loads(raw)
     primary = geo.get("primary_column")
     column = geo.get("columns", {}).get(primary, {})
     bbox = column.get("bbox")
@@ -2132,8 +2431,58 @@ def _geo_from_parquet(located: Locator) -> _Geo | None:
     return _Geo(bbox=_as_bbox(bbox), epsg=crs.to_epsg(), crs=crs)
 
 
-def _geo_from_raster(located: Locator) -> _Geo | None:
-    with rasterio.open(located.gdal_path()) as src:
+def _geo_from_native_parquet(parquet: Any) -> _Geo | None:
+    """Footprint and CRS of a native-geo file without a ``geo`` key.
+
+    The bbox is the union of the per-row-group ``GeospatialStatistics`` and the
+    CRS comes off the logical type, so the consistency check covers the spec's
+    third accepted form too. A CRS this cannot resolve is the native-CRS
+    check's business, and the footprint comparison stands down rather than
+    assume a datum.
+    """
+    native = _native_geo_columns(parquet)
+    if not native:
+        return None
+    primary = _primary_geometry_column(parquet, {})
+    boxes = _native_bboxes(parquet, primary)
+    if not boxes:
+        return None
+    bbox = [
+        min(box[0] for box in boxes),
+        min(box[1] for box in boxes),
+        max(box[2] for box in boxes),
+        max(box[3] for box in boxes),
+    ]
+    crs = _resolve_native_crs(parquet, primary)
+    if crs is None:
+        return None
+    return _Geo(bbox=bbox, epsg=crs.to_epsg(), crs=crs)
+
+
+def _resolve_native_crs(parquet: Any, primary: str | None) -> CRS | None:
+    """The column's CRS as pyproj understands it, None when unresolvable."""
+    if primary is None:
+        return None
+    value = _native_crs(parquet, primary)
+    if value is None or not value.strip():
+        return CRS.from_epsg(4326)  # absent is OGC:CRS84 by definition
+    value = value.strip()
+    if value.startswith("projjson:"):
+        kv = getattr(parquet.metadata, "metadata", None) or {}
+        raw = kv.get(value[len("projjson:") :].encode())
+        if raw is None:
+            return None
+        value = raw.decode() if isinstance(raw, bytes) else str(raw)
+    try:
+        return CRS.from_user_input(value)
+    except Exception:  # noqa: BLE001 - the native-CRS check reports the bad value
+        return None
+
+
+def _geo_from_raster(files: _AssetFiles) -> _Geo | None:
+    # The dataset the COG checks share, read with PAM off as they read it.
+    with rasterio.Env(GDAL_PAM_ENABLED="NO"):
+        src = files.raster()
         bounds = src.bounds
         crs = CRS.from_wkt(src.crs.to_wkt()) if src.crs else None
         return _Geo(

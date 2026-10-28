@@ -56,13 +56,23 @@ def default_validator() -> Validator:
     """
     from jsonschema import Draft7Validator
 
-    from rashid._jsonschema import _STAC_BASE, STAC_VERSION, describe
+    from rashid._jsonschema import (
+        _STAC_BASE,
+        STAC_VERSION,
+        compile_rust,
+        screened,
+        stac_rust_registry,
+    )
 
     registry = stac_registry()
-    validators = {
-        stac_type: Draft7Validator({"$ref": f"{_STAC_BASE}{path}"}, registry=registry)
-        for stac_type, path in _ROOT_SCHEMAS.items()
-    }
+    rust_registry = stac_rust_registry()
+    validators: dict[str, Validator] = {}
+    for stac_type, path in _ROOT_SCHEMAS.items():
+        root = {"$ref": f"{_STAC_BASE}{path}"}
+        validators[stac_type] = screened(
+            Draft7Validator(root, registry=registry),
+            compile_rust(root, rust_registry, draft7=True),
+        )
 
     def _validate(data: dict[str, Any]) -> list[SchemaError]:
         stac_type = data.get("type")
@@ -78,7 +88,7 @@ def default_validator() -> Validator:
                     json_pointer="/type",
                 )
             ]
-        return [describe(error) for error in sorted(validator.iter_errors(data), key=str)]
+        return validator(data)
 
     return _validate
 

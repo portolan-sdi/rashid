@@ -7,7 +7,6 @@ observes exactly what is on disk.
 
 from __future__ import annotations
 
-import json
 import os
 import posixpath
 from collections.abc import Iterator
@@ -15,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 from urllib.parse import urlparse
+
+from rashid import _json
 
 Kind = Literal["catalog", "collection", "item", "unknown"]
 
@@ -58,6 +59,31 @@ def is_absolute_href(href: str) -> bool:
     return href.startswith("/") or bool(urlparse(href).scheme)
 
 
+def self_link_base(root: Node | None) -> str | None:
+    """The URL prefix a root catalog is published under, from its ``self`` link.
+
+    core.md, Links: a catalog served over the internet from a single fixed
+    URL SHOULD carry an absolute ``self`` link on its root catalog
+    (PORTO-CORE-081). That link names the published location of the root
+    file, so the URL minus the root file name is the base every file in the
+    tree is served under. None when ``root`` is None, carries no absolute
+    ``self`` link, or its ``self`` link does not end in the root's own file
+    name — a ``self`` naming some other file says nothing about this tree.
+    """
+    if root is None:
+        return None
+    raw = root.data.get("links")
+    for link in raw if isinstance(raw, list) else []:
+        if not isinstance(link, dict) or link.get("rel") != "self":
+            continue
+        href = link.get("href")
+        if isinstance(href, str) and is_absolute_href(href):
+            prefix, sep, tail = href.rpartition("/")
+            if tail == root.path.name:
+                return prefix + sep
+    return None
+
+
 def _is_within(path: PurePosixPath, prefix: PurePosixPath) -> bool:
     """True when ``path`` sits at or below the directory ``prefix``.
 
@@ -76,12 +102,33 @@ class CatalogGraph:
     ``dir_listing`` maps every scanned directory (relative POSIX path, ``.``
     for the root) to the set of filenames it contains, so required-file rules
     can check existence without touching disk again.
+
+    ``base_url`` is the https URL the tree is published under when the tree
+    was read from there — the URL ``rashid check`` was given. None for a tree
+    read from disk; ``--live-base-url`` reaches the live pass directly.
+
+    :meth:`iter` and the containment queries (:meth:`parent_of`,
+    :meth:`children_of`, :meth:`items_of`) are answered from indexes built on
+    first use, so the graph must not change after :meth:`load`. Without them, each call scans
+    every node, and a catalog of 100,000 items under 100 collections costs
+    tens of millions of path lookups.
     """
 
     root_path: Path
     nodes: dict[PurePosixPath, Node] = field(default_factory=dict)
     dir_listing: dict[PurePosixPath, set[str]] = field(default_factory=dict)
+    base_url: str | None = None
     _translation_roots: list[Node] | None = field(default=None, repr=False, compare=False)
+    _by_kinds: dict[frozenset[Kind], list[Node]] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+    _parents: dict[tuple[PurePosixPath, Kind], Node | None] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+    _children: dict[PurePosixPath, list[Node]] | None = field(
+        default=None, repr=False, compare=False
+    )
+    _items: dict[PurePosixPath, list[Node]] | None = field(default=None, repr=False, compare=False)
 
     @property
     def root(self) -> Node | None:
@@ -90,6 +137,15 @@ class CatalogGraph:
         if node is not None and node.kind == "catalog":
             return node
         return None
+
+    def published_base(self) -> str | None:
+        """The URL prefix the root catalog's ``self`` link says the tree is served under.
+
+        See :func:`self_link_base`. This is the catalog's own claim about its
+        location; ``base_url`` is the caller's. A live pass that is given no
+        base falls back to this one, and one given both compares them.
+        """
+        return self_link_base(self.root)
 
     def translation_roots(self) -> list[Node]:
         """The root catalogs of the catalog's alternate-language trees.
@@ -171,7 +227,7 @@ class CatalogGraph:
                 )
                 structural = filename in ("catalog.json", "collection.json")
                 try:
-                    data = json.loads(abs_path.read_text(encoding="utf-8"))
+                    data = _json.loads(abs_path.read_text(encoding="utf-8"))
                 except (ValueError, UnicodeDecodeError) as exc:
                     if structural:
                         graph.nodes[rel] = Node(
@@ -208,11 +264,16 @@ class CatalogGraph:
         return graph
 
     def iter(self, *kinds: Kind) -> Iterator[Node]:
-        """Yield nodes of the given kinds (all nodes when none given)."""
-        for path in sorted(self.nodes):
-            node = self.nodes[path]
-            if not kinds or node.kind in kinds:
-                yield node
+        """Yield nodes of the given kinds (all nodes when none given), sorted by path."""
+        key = frozenset(kinds)
+        selected = self._by_kinds.get(key)
+        if selected is None:
+            selected = self._by_kinds[key] = [
+                self.nodes[path]
+                for path in sorted(self.nodes)
+                if not kinds or self.nodes[path].kind in kinds
+            ]
+        yield from selected
 
     def file_exists(self, rel_path: PurePosixPath) -> bool:
         """True when the walk saw a file at this relative path."""
@@ -247,6 +308,12 @@ class CatalogGraph:
         directly in the collection directory or in a per-item subdirectory).
         The root catalog has no parent.
         """
+        key = (node.path, node.kind)
+        if key not in self._parents:
+            self._parents[key] = self._find_parent(node)
+        return self._parents[key]
+
+    def _find_parent(self, node: Node) -> Node | None:
         if node.path == ROOT_CATALOG:
             return None
         start = node.path.parent
@@ -282,7 +349,16 @@ class CatalogGraph:
 
     def children_of(self, node: Node) -> list[Node]:
         """Objects whose containment parent is ``node``."""
-        return [n for n in self.iter() if self.parent_of(n) is node]
+        if self._children is None:
+            # Built aside and assigned whole: the data pass reads this from
+            # many threads, and none may see a half-filled index.
+            children: dict[PurePosixPath, list[Node]] = {}
+            for n in self.iter():
+                parent = self.parent_of(n)
+                if parent is not None:
+                    children.setdefault(parent.path, []).append(n)
+            self._children = children
+        return list(self._children.get(node.path, [])) if self._owns(node) else []
 
     def items_of(self, node: Node) -> list[Node]:
         """The items ``node`` owns, across any catalogs organizing them.
@@ -294,6 +370,20 @@ class CatalogGraph:
         so a nested collection keeps its own items rather than lending them
         upward.
         """
-        return [
-            n for n in self.iter() if n.kind == "item" and self.enclosing_collection_of(n) is node
-        ]
+        if self._items is None:
+            # Built aside and assigned whole, as in children_of.
+            items: dict[PurePosixPath, list[Node]] = {}
+            for n in self.iter("item"):
+                collection = self.enclosing_collection_of(n)
+                if collection is not None:
+                    items.setdefault(collection.path, []).append(n)
+            self._items = items
+        return list(self._items.get(node.path, [])) if self._owns(node) else []
+
+    def _owns(self, node: Node) -> bool:
+        """True when ``node`` is this graph's own node, not a copy with its path.
+
+        The indexes are keyed by path, but containment compares nodes by
+        identity, so a node from another graph has no children here.
+        """
+        return self.nodes.get(node.path) is node

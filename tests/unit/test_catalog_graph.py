@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
 import pytest
 
-from rashid.catalog import CatalogGraph
+from rashid.catalog import CatalogGraph, Node
 from tests.conftest import (
     CatalogBuilder,
     mutate_json,
@@ -133,6 +137,40 @@ def test_items_of_reaches_items_under_an_organizing_catalog(catalog: CatalogBuil
     assert graph.items_of(collection) == [item]
 
 
+@pytest.mark.parametrize("index", ["items_of", "children_of"])
+def test_index_built_by_one_thread_is_whole_for_another(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch, index: str
+) -> None:
+    """The data pass reads these indexes from many threads at once.
+
+    A slow parent lookup holds the first build open. A second thread that
+    arrives meanwhile must build or wait for the whole index, never read a
+    half-filled one.
+    """
+    roads = catalog.collection("roads")
+    for i in range(30):
+        roads.item(f"seg{i}")
+    graph = _graph(catalog)
+    collection = graph.nodes[PurePosixPath("roads/collection.json")]
+    parent_of = graph.parent_of
+
+    def slow_parent_of(node: Node) -> Node | None:
+        time.sleep(0.002)
+        return parent_of(node)
+
+    monkeypatch.setattr(graph, "parent_of", slow_parent_of)
+    start = threading.Barrier(4)
+
+    def read() -> int:
+        start.wait()
+        return len(getattr(graph, index)(collection))
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        sizes = list(pool.map(lambda _: read(), range(4)))
+
+    assert sizes == [30] * 4
+
+
 def test_items_of_leaves_a_nested_collections_items_to_that_collection(
     catalog: CatalogBuilder,
 ) -> None:
@@ -145,6 +183,44 @@ def test_items_of_leaves_a_nested_collections_items_to_that_collection(
 
     assert graph.items_of(collection) == [item]
     assert graph.items_of(item) == []
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [write_organizing_catalog_layout, write_language_trees],
+    ids=["organizing-catalog", "language-trees"],
+)
+def test_containment_indexes_match_a_scan_of_every_node(
+    catalog: CatalogBuilder, layout: Callable[[CatalogBuilder], Path]
+) -> None:
+    """children_of and items_of answer from indexes; a full scan must agree.
+
+    The scan is the definition the indexes replaced, so any node whose
+    answer differs is a node the index puts under the wrong parent.
+    """
+    nested = catalog.collection("rivers")
+    nested.item("rivers-2024")
+    nested.item("rivers-2025")
+    graph = CatalogGraph.load(layout(catalog))
+    nodes = list(graph.iter())
+    for node in nodes:
+        assert graph.children_of(node) == [n for n in nodes if graph.parent_of(n) is node]
+        assert graph.items_of(node) == [
+            n for n in nodes if n.kind == "item" and graph.enclosing_collection_of(n) is node
+        ]
+
+
+def test_containment_of_a_node_from_another_graph_is_empty(catalog: CatalogBuilder) -> None:
+    """Containment compares nodes by identity, and the indexes keep that."""
+    catalog.collection("roads").item("roads-2024")
+    root = catalog.write()
+    graph = CatalogGraph.load(root)
+    other = CatalogGraph.load(root)
+    collection = other.nodes[PurePosixPath("roads/collection.json")]
+
+    assert graph.children_of(collection) == []
+    assert graph.items_of(collection) == []
+    assert graph.children_of(graph.nodes[collection.path]) != []
 
 
 def test_dir_listing_and_file_exists(catalog: CatalogBuilder) -> None:

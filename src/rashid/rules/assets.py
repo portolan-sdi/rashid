@@ -14,7 +14,16 @@ from rashid._multihash import is_well_formed_multihash
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import COG_MEDIA_TYPE, is_cog_media_type, is_raster_data_asset
+from rashid.rules._common import (
+    COG_MEDIA_TYPE,
+    is_cog_media_type,
+    is_raster_data_asset,
+    roles_of,
+)
+
+
+def _has_data_asset(node: Node) -> bool:
+    return any("data" in roles_of(asset) for _, _, asset in _assets_of(node))
 
 
 def _assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
@@ -225,6 +234,67 @@ class CatalogAssetsRule(Rule):
                 json_pointer="/assets",
                 fix_hint="move the assets onto the collection (or item) that owns the data",
             )
+
+
+class CollectionDataRule(Rule):
+    """Every collection refers to its primary data.
+
+    core.md, Collections: "A collection MUST refer to its primary data. The
+    reference is an asset carrying the ``data`` role — on the collection
+    itself or on its items — or ``partition:glob`` on a partitioned
+    collection." A thumbnail, style, or metadata asset alone describes
+    nothing a client can fetch. A collection whose items exist but carry no
+    data asset fails here too, since no item supplies the reference;
+    PTL-AST-008 also names each such item.
+    """
+
+    id = "PTL-AST-007"
+    spec_ids = ("PORTO-CORE-082",)
+    default_severity = Severity.ERROR
+    description = "every collection must refer to its primary data with a data-role asset"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        if _has_data_asset(node):
+            return
+        glob = node.data.get("partition:glob")
+        if isinstance(glob, str) and glob.strip():
+            return
+        if any(_has_data_asset(item) for item in graph.items_of(node)):
+            return
+        yield self.finding(
+            node,
+            "collection refers to no primary data: no asset with the data role on the"
+            " collection or its items, and no partition:glob",
+            json_pointer="/assets",
+            fix_hint='add the data file as an asset with roles ["data"], on the collection'
+            " for a single file or on each item for several",
+        )
+
+
+class ItemDataRule(Rule):
+    """Every item carries an asset with the data role.
+
+    core.md, Items: "Where items do exist, each one MUST carry at least one
+    asset with the ``data`` role. An item exists to attach per-file metadata
+    to a data file, so an item without one describes nothing."
+    """
+
+    id = "PTL-AST-008"
+    spec_ids = ("PORTO-CORE-083",)
+    default_severity = Severity.ERROR
+    description = "every item must carry at least one asset with the data role"
+    kinds = ("item",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        if _has_data_asset(node):
+            return
+        yield self.finding(
+            node,
+            "item carries no asset with the data role",
+            json_pointer="/assets",
+            fix_hint='add the item\'s data file as an asset with roles ["data"]',
+        )
 
 
 class ChecksumMultihashRule(Rule):

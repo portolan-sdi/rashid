@@ -22,11 +22,17 @@ Severities follow the Portolan specification. MUST requirements produce errors, 
 - `PTL-CNF-004` produces a warning when an extension version is behind the registry. The registry can advance after a catalog pins the current version, so the catalog is behind rather than broken.
 - `PTL-TTL-002` produces a warning because its machine-generated title check is heuristic. A severity override can promote it.
 - `PTL-PRO-002` produces an info finding when a mirror lacks a `canonical` link. Metadata cannot show whether the upstream publisher provides STAC.
+- `PTL-EXT-002` produces an info finding when an object declares an extension the profile's registry does not list. The finding records that rashid did not validate against that schema. It does not claim the object is wrong.
+- `PTL-EXT-000` produces a warning when one extension schema cannot be fetched or resolved. rashid reports it once for each URI and validates every other extension.
 - `PTL-VIZ-004` produces an info finding when a large vector lacks a visual derivative. The render-path MUST depends on whether source rendering is viable, which metadata cannot prove. The 100 MB threshold is also heuristic.
 
 `PTL-CNF-004` reads `src/rashid/_schemas/extension-registry.json`. This file contains the profile's registry table from `stac/README.md` in the specification.
 
 At vendor time, `scripts/vendor_spec_fixtures.py` parses that table. The rule ignores extensions that the registry does not list. `PTL-CNF-001` and `PTL-CNF-002` handle the Portolan schema URI's version.
+
+The same file drives `PTL-EXT-001` and the schema vendoring. `scripts/vendor_stac_schemas.py` reads the registry and fetches the `$ref` closure of every pinned extension into `src/rashid/_schemas/extensions/`. A version pinned in the specification arrives with its schema on the next spec sync. rashid needs no code change to validate against it.
+
+A registered extension declared at a version the registry does not pin is validated against the schema of the version it declares. rashid does not package that schema, so it fetches it over https. A newer schema would report fields that the declared version never defined. A skip would let a catalog turn its schema errors into a `PTL-CNF-004` warning when it declares an older version.
 
 ## Understand Special Cases
 
@@ -81,7 +87,7 @@ The rule's message reports absent geometry evidence only. `PTL-COL-005` answers 
 
 | Group | Rules | Checks |
 |---|---|---|
-| `PTL-GEN` | 000–001 | Requires a root `catalog.json` and parseable object files. |
+| `PTL-GEN` | 000–002 | Requires a root `catalog.json` and parseable object files. Rule `002` warns when rashid read the catalog over https by following links. A crawl reads only the documents that links point to, so `PTL-LNK-002` cannot report an object without an inbound link, and `PTL-COL-005` cannot report scene files beside a collection. Rule `002` also warns when the crawl stopped at the document limit or when the fetch of a document failed. |
 | `PTL-LNK` | 001–010 | Checks required structural links, child and item completeness, link types, and resolved target objects. Resolves an absolute link through the published base the root `self` link names. Requires a `rel:"icon"` logo to have a renderable media type, title, and relative `href`. Keeps `child` and `item` links out of alternate-language trees. |
 | `PTL-TTL` | 001–003 | Requires non-empty titles and descriptions, human-readable titles, and titles on child and item links. |
 | `PTL-BBX` | 001 | Requires finite, sentinel-free WGS84 bounding boxes with south less than or equal to north. Supports 2D and 3D boxes. |
@@ -89,13 +95,14 @@ The rule's message reports absent geometry evidence only. `PTL-COL-005` answers 
 | `PTL-PRV` | 001–003 | Requires at least one producer and exactly one host. The host must appear last and include a URL or email address. |
 | `PTL-LIC` | 001–003 | Requires an SPDX identifier or `other`, a license link for `other`, and no `proprietary` value. |
 | `PTL-FIL` | 001–005 | Requires `AGENTS.md` and `README.md` on disk. Requires Markdown links with `rel:"agents"` and `rel:"describedby"`. Requires a non-empty README with a title heading. Warns heuristically when a collection README omits license or provenance information. |
-| `PTL-AST` | 001–006 | Checks asset `href`, media type, and roles. Requires the COG media type for primary raster data and HTTPS instead of S3 URLs. Requires `file:size` and multihash-encoded `file:checksum`; their absence produces a warning under the SHOULD requirement. Prohibits assets on catalogs. |
+| `PTL-AST` | 001–008 | Checks asset `href`, media type, and roles. Requires the COG media type for primary raster data and HTTPS instead of S3 URLs. Requires `file:size` and multihash-encoded `file:checksum`; their absence produces a warning under the SHOULD requirement. Prohibits assets on catalogs. Rule `007` requires each collection to refer to its data: an asset with the `data` role on the collection or on one of its items, or a `partition:glob`. Rule `008` requires each item to carry an asset with the `data` role. |
 | `PTL-CNF` | 001–004 | Requires a versioned Portolan schema URI that agrees with the root catalog. Requires the STAC version extension for dataset versioning. Requires each registered extension to use the version in the profile's extension registry. |
 | `PTL-PRO` | 001–004 | Checks mirror `via` and `canonical` links plus the `updated` synchronization time. Prohibits upstream links on official catalogs. |
 | `PTL-VIZ` | 001–006 | Requires thumbnails on geospatial collections, style assets for visual derivatives, and `rel:"pmtiles"` registration for PMTiles. Reports large vectors without a visual derivative. Requires the MapLibre style media type in PMTiles collections. Requires the `default` role on one of several styles. |
 | `PTL-STR` | 000–001 | Checks STAC 1.1.0 core structure offline with the included core schemas. Rule `000` warns when the pass cannot run. |
+| `PTL-EXT` | 000–002 | Checks every object against the schemas of the STAC extensions it declares. Pinned versions use packaged schemas. A registered extension at another version uses its fetched schema. Rule `000` warns when the pass or one schema cannot load. Rule `002` reports once per catalog that an unregistered extension was not validated. `--schema-allow-network` fetches and validates it instead. |
 | `PTL-DAT` | 000–016 | Compares asset bytes with metadata and format MUST requirements. Checks `file:checksum`, `file:size`, format signatures, bounding boxes, and coordinate reference systems. Requires valid COGs with internal overviews, embedded band statistics, and valid percentages for nodata bands. Requires GeoParquet 1.1 or 2.x, spatial ordering, per-row-group statistics, and suitable row-group size. Statistics can use a bounding-box covering column or native 2.x `GeospatialStatistics`. Requires square internal tiles no larger than 512 pixels. Requires one Parquet schema across local partition files. Applies the tabular SHOULD requirements for `table:columns` and `extent.temporal` to plain-Parquet collection assets with temporal columns. Compares an item mirror's row count, IDs, geometry, datetime, and bounding box with the collection's items. Rule `000` warns when the geospatial stack cannot load. Source and alternate assets are exempt from format MUST requirements. Plain Parquet is exempt from GeoParquet rules. Those rules apply to an item mirror like any other spatial table. |
-| `PTL-LIV` | 000–005 | Checks the hosting server's Data Storage MUST requirements for absolute HTTPS asset URLs. For each host, checks ranged GET support through `206` and `Accept-Ranges: bytes`, `Content-Length` on HEAD, CORS origins, exposed headers, and preflight support. Preflight must allow `GET`, `HEAD`, `Range`, and conditional-request headers. HEAD size must match `file:size`. Source and alternate assets are exempt. Rule `000` warns when no asset is available to probe or a host is unavailable. |
+| `PTL-LIV` | 000–008 | Checks the hosting server's Data Storage MUST requirements for absolute HTTPS asset URLs. For each host, checks ranged GET support through `206` and `Accept-Ranges: bytes`, `Content-Length` on HEAD, CORS origins, exposed headers, and preflight support. Preflight must allow `GET`, `HEAD`, `Range`, and conditional-request headers. HEAD size must match `file:size`. Source and alternate assets are exempt. The publish base comes from the catalog URL, from `--live-base-url`, or from the root catalog's absolute `self` link. With a base, relative asset hrefs are probed too, and rule `006` sends one HEAD for each distinct link target under the base and reports each target that does not answer `2xx`. This covers `child`, `item`, `parent`, `root`, `self`, `agents`, `describedby`, and every other link that resolves under the base. Links to other hosts are not probed. Rule `007` warns when the root `self` link names a location other than the base the catalog was checked under. Rule `008` reports an asset or link target that redirects to a URL that is not `https`. The probe does not follow that redirect, so no request leaves `https`. When the first asset on a host redirects that way, the range and CORS probes use the next asset whose HEAD stays on `https`. Rule `000` warns when no such asset exists. Rule `000` warns when no asset is available to probe or a host is unavailable. |
 | `PTL-PRT` | 001 | Requires a partitioned collection to declare the partition extension and provide `partition:scheme`, `partition:keys`, and `partition:glob`. |
 | `PTL-COL` | 001–005 | Requires a single-file collection to expose data through a collection asset instead of one item. Prohibits nested collections. Requires collection IDs to follow the naming convention and remain unique within their language tree. Requires raster scenes to appear on items instead of the collection. Requires a collection to publish the items that its scene files or its item mirror imply. |
 | `PTL-CAT` | 001 | Recommends subcatalogs when a catalog or collection has at least 20 ungrouped collections or items. Subcatalogs do not count as ungrouped children. |
@@ -105,19 +112,20 @@ The rule's message reports absent geometry evidence only. `PTL-COL-005` answers 
 
 The per-rule summary and JSON `summary.by_rule` object read this registry. Call `rashid.describe(rule_id)` to get a rule's description.
 
-The catalog tree loads from a local directory. `CatalogGraph` in `src/rashid/catalog.py` provides the only metadata I/O layer and loads the tree in one pass. This design allows a future HTTP catalog loader. The data pass already reads asset bytes through HTTPS.
+The catalog tree loads from a local directory. `CatalogGraph` in `src/rashid/catalog.py` provides the only metadata I/O layer and loads the tree in one pass. For a catalog URL, `src/rashid/remote.py` first fetches the tree into a temporary directory by following the `child`, `item`, and JSON `alternate` links from the root, and by fetching `AGENTS.md` and `README.md` beside each catalog and collection. `CatalogGraph` then loads that directory. The graph records the URL as `base_url`, so the data pass reads relative asset hrefs from the host and the live pass probes under the same base.
 
 ## Network Cost
 
-Only the data and live passes use the network by default. Only the data pass transfers asset bytes.
+Only the data and live passes use the network by default for a directory. A catalog URL adds the crawl, and turns the live pass on. Only the data pass transfers asset bytes.
 
 | Pass | Requests | Data transferred |
 |---|---|---|
+| Crawl (catalog URL only) | One GET for each document that a `child`, `item`, or JSON `alternate` link points to, plus two for the `AGENTS.md` and `README.md` beside each catalog and collection. rashid sends up to 8 requests at a time and stops at 10000 documents. | The STAC JSON and Markdown of the tree. |
 | Metadata | None | Catalog JSON from the local tree. |
 | Structural | None | Nothing. The core schemas ship in the wheel. |
 | Schema | Only with `--schema-allow-network` | One schema document when the package does not include the requested version. |
 | Data | Zero or more requests for each remote asset | Asset bytes, as described below. |
-| Live | Two requests for each host, plus one HEAD for each distinct asset URL | Response headers and one byte for the range check. |
+| Live | Two requests for each host, plus one HEAD for each distinct asset URL. With a publish base, one HEAD for each distinct link target under the base that the crawl did not fetch. | Response headers and one byte for the range check. |
 
 Most data checks read only the required bytes at known offsets. Examples include a COG header, a Parquet footer, or one geometry column. These checks use HTTP range requests or `/vsicurl/`.
 

@@ -1,3 +1,26 @@
+## v0.3.0 (2026-10-12)
+
+### Feat
+
+- **check**: accept the https URL of a published catalog; rashid follows the links from the root, runs every pass over the fetched tree, and turns the live pass on with the URL as the publish base; `PTL-GEN-002` names what a crawl cannot see (#160)
+- **live**: read the publish base from the root catalog's absolute `self` link when `--live-base-url` is absent, and report a `self` link that disagrees with the base as `PTL-LIV-007` (#160)
+- **rules**: require every collection to refer to its primary data (`PTL-AST-007`, PORTO-CORE-082) and every item to carry a `data` asset (`PTL-AST-008`, PORTO-CORE-083)
+
+### Perf
+
+- **check**: index the catalog graph and screen objects with jsonschema-rs; an object that jsonschema-rs rejects still goes through jsonschema, so each finding keeps its message (#214)
+
+## v0.2.0 (2026-10-12)
+
+### Feat
+
+- **validation**: validate objects against declared STAC extension schemas (#159)
+- **live**: probe every link target under `--live-base-url` and report a document the publish host does not serve as `PTL-LIV-006` (#189)
+
+### Fix
+
+- **deps**: lock urllib3 2.8.0 and virtualenv 21.14.5 (#211)
+
 ## v0.1.8 (2026-08-28)
 
 ### Feat

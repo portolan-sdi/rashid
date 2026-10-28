@@ -317,6 +317,10 @@ def test_a_catalog_may_publish_an_alternate_language_tree(catalog: CatalogBuilde
     to it, and called the repeated collection ID a duplicate, so a publisher
     following the extension could not pass. The whole report is asserted,
     because any one of those three would defeat the permission on its own.
+
+    The report stays empty now that the profile's registry pins the Language
+    extension. The extension pass validates both roots against its schema and
+    finds nothing, rather than reporting that it could not check them.
     """
     report = validate(write_language_trees(catalog))
     assert report.findings == []

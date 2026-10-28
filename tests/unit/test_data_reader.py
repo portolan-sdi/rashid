@@ -1,24 +1,21 @@
-"""Unit tests for the asset reader — local resolution and stubbed HTTP.
+"""Unit tests for the asset reader — local resolution and HTTPS reads.
 
-Stdlib-only: the real ``urlopen`` is monkeypatched, so these need no network and
-no ``rashid[data]`` extra. They cover href classification, local streaming, and the
-HTTP range/stream fallbacks the remote path relies on.
+Remote reads go to a local HTTPS server (``tests._https``), so these need no
+network. They cover href classification, local streaming, and the HTTP
+range/stream fallbacks the remote path relies on.
 """
 
 from __future__ import annotations
 
 import io
-import re
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any
-from urllib.request import Request
 
 import pytest
 
-import rashid.data.reader as reader_mod
 from rashid.catalog import CatalogGraph, Node
 from rashid.data.reader import FilesystemHttpReader, Locator, _HttpRangeFile
+from tests._https import HttpsServer, Route
 from tests.conftest import CatalogBuilder
 
 pytestmark = pytest.mark.unit
@@ -80,62 +77,40 @@ def test_stream_missing_is_none(catalog: CatalogBuilder) -> None:
     assert FilesystemHttpReader(graph).stream(item, "./gone.parquet") is None
 
 
-# --- stubbed HTTP ----------------------------------------------------------
+# --- remote reads against a local HTTPS server -----------------------------
+
+_AGENT = f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
 
 
-class _FakeResponse:
-    def __init__(self, body: bytes, status: int, headers: dict[str, str]) -> None:
-        self._body = body
-        self._pos = 0
-        self.status = status
-        self.headers = headers
-
-    def read(self, size: int = -1) -> bytes:
-        if size is None or size < 0:
-            chunk = self._body[self._pos :]
-        else:
-            chunk = self._body[self._pos : self._pos + size]
-        self._pos += len(chunk)
-        return chunk
-
-    def __enter__(self) -> _FakeResponse:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-
-def _fake_server(payload: bytes, *, honor_range: bool = True) -> Any:
-    def fake_urlopen(request: Any, **_kwargs: Any) -> _FakeResponse:
-        if request.get_method() == "HEAD":
-            return _FakeResponse(b"", 200, {"Content-Length": str(len(payload))})
-        rng = request.get_header("Range")
-        if rng and honor_range:
-            start_s, end_s = rng.removeprefix("bytes=").split("-")
-            start, end = int(start_s), int(end_s)
-            return _FakeResponse(payload[start : end + 1], 206, {})
-        return _FakeResponse(payload, 200, {})
-
-    return fake_urlopen
-
-
-def test_http_stream_reads_whole_object(
-    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_http_stream_reads_whole_object(catalog: CatalogBuilder, https_server: HttpsServer) -> None:
     graph, item = _item_graph(catalog)
     payload = bytes(range(256)) * 500
-    monkeypatch.setattr(reader_mod, "urlopen", _fake_server(payload))
+    https_server.routes["/x.parquet"] = Route(body=payload)
 
-    stream = FilesystemHttpReader(graph).stream(item, "https://host/x.parquet")
+    stream = FilesystemHttpReader(graph).stream(item, https_server.url("x.parquet"))
     assert stream is not None
     assert b"".join(stream) == payload
+    (seen,) = https_server.seen
+    assert seen.method == "GET" and seen.headers["user-agent"] == _AGENT
 
 
-def test_range_file_seek_and_read(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_http_stream_failure_is_an_os_error(
+    catalog: CatalogBuilder, https_server: HttpsServer
+) -> None:
+    """The data pass reports an OSError from a stream as an unread asset."""
+    graph, item = _item_graph(catalog)
+
+    stream = FilesystemHttpReader(graph).stream(item, https_server.url("gone.parquet"))
+    assert stream is not None
+    with pytest.raises(OSError, match="returned 404"):
+        b"".join(stream)
+
+
+def test_range_file_seek_and_read(https_server: HttpsServer) -> None:
     payload = bytes(range(256))
-    monkeypatch.setattr(reader_mod, "urlopen", _fake_server(payload))
+    https_server.routes["/x.bin"] = Route(body=payload)
 
-    handle = _HttpRangeFile("https://host/x.bin")
+    handle = _HttpRangeFile(https_server.url("x.bin"))
     assert handle.seekable() and handle.readable()
 
     handle.seek(-4, io.SEEK_END)
@@ -147,32 +122,29 @@ def test_range_file_seek_and_read(monkeypatch: pytest.MonkeyPatch) -> None:
     assert handle.tell() == 15
 
 
-def test_range_file_past_end_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(reader_mod, "urlopen", _fake_server(b"abcd"))
-    handle = _HttpRangeFile("https://host/x.bin")
+def test_range_file_past_end_returns_empty(https_server: HttpsServer) -> None:
+    https_server.routes["/x.bin"] = Route(body=b"abcd")
+    handle = _HttpRangeFile(https_server.url("x.bin"))
     handle.seek(10)
     assert handle.read(4) == b""
 
 
-def test_range_file_slices_when_server_ignores_range(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_range_file_slices_when_server_ignores_range(https_server: HttpsServer) -> None:
     payload = bytes(range(64))
-    monkeypatch.setattr(reader_mod, "urlopen", _fake_server(payload, honor_range=False))
+    https_server.routes["/x.bin"] = Route(body=payload, honor_range=False)
 
-    handle = _HttpRangeFile("https://host/x.bin")
+    handle = _HttpRangeFile(https_server.url("x.bin"))
     handle.seek(8)
     assert handle.read(4) == payload[8:12]
 
 
-def test_range_file_requires_content_length(monkeypatch: pytest.MonkeyPatch) -> None:
-    def no_length(request: Any, **_kwargs: Any) -> _FakeResponse:
-        return _FakeResponse(b"", 200, {})
-
-    monkeypatch.setattr(reader_mod, "urlopen", no_length)
+def test_range_file_requires_content_length(https_server: HttpsServer) -> None:
+    https_server.routes["/x.bin"] = Route(body=b"abcd", length=False)
     with pytest.raises(OSError, match="Content-Length"):
-        _HttpRangeFile("https://host/x.bin")
+        _HttpRangeFile(https_server.url("x.bin"))
 
 
-def test_non_https_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_non_https_refused() -> None:
     with pytest.raises(ValueError, match="non-https"):
         _HttpRangeFile("http://host/x.bin")
 
@@ -185,71 +157,15 @@ def test_local_open_binary_roundtrip(tmp_path: Path) -> None:
         assert handle.read() == b"hello"
 
 
-# --- outgoing request headers ------------------------------------------------
-#
-# The stubs above answer any request, so a missing User-Agent is invisible to
-# them. These record the Request each read path builds and assert on it (#64).
-
-# urllib capitalizes header names, so the stored key is 'User-agent'.
-_AGENT_PATTERN = re.compile(r"^rashid/\S+ \(\+https://github\.com/portolan-sdi/rashid\)$")
-
-
-def _recorder(requests: list[Request], payload: bytes) -> Any:
-    server = _fake_server(payload)
-
-    def fake_urlopen(request: Request, **kwargs: Any) -> _FakeResponse:
-        requests.append(request)
-        return server(request, **kwargs)
-
-    return fake_urlopen
-
-
-def _assert_named_agent(request: Request) -> None:
-    agent = request.get_header("User-agent")
-    assert agent is not None, f"{request.get_method()} sent no User-Agent"
-    assert _AGENT_PATTERN.match(agent), agent
-    assert agent == f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
-
-
-def test_http_stream_sends_a_named_user_agent(
-    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    graph, item = _item_graph(catalog)
-    requests: list[Request] = []
-    monkeypatch.setattr(reader_mod, "urlopen", _recorder(requests, b"payload"))
-
-    stream = FilesystemHttpReader(graph).stream(item, "https://host/x.parquet")
-    assert stream is not None
-    b"".join(stream)
-
-    (request,) = requests
-    assert request.get_method() == "GET"
-    _assert_named_agent(request)
-
-
-def test_range_file_head_sends_a_named_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    requests: list[Request] = []
-    monkeypatch.setattr(reader_mod, "urlopen", _recorder(requests, bytes(range(64))))
-
-    _HttpRangeFile("https://host/x.bin")
-
-    (request,) = requests
-    assert request.get_method() == "HEAD"
-    _assert_named_agent(request)
-
-
-def test_range_read_sends_a_named_user_agent_and_keeps_range(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_range_reads_send_a_named_user_agent_and_keep_range(https_server: HttpsServer) -> None:
     payload = bytes(range(64))
-    requests: list[Request] = []
-    monkeypatch.setattr(reader_mod, "urlopen", _recorder(requests, payload))
+    https_server.routes["/x.bin"] = Route(body=payload)
 
-    handle = _HttpRangeFile("https://host/x.bin")
+    handle = _HttpRangeFile(https_server.url("x.bin"))
     handle.seek(8)
     assert handle.read(4) == payload[8:12]
 
-    ranged = requests[-1]
-    assert ranged.get_method() == "GET"
-    assert ranged.get_header("Range") == "bytes=8-11"
-    _assert_named_agent(ranged)
+    head, ranged = https_server.seen
+    assert head.method == "HEAD" and head.headers["user-agent"] == _AGENT
+    assert ranged.method == "GET" and ranged.headers["user-agent"] == _AGENT
+    assert ranged.headers["range"] == "bytes=8-11"

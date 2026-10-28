@@ -9,13 +9,34 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from rashid import _trace
 from rashid.model import Report
+
+# The local HTTPS server that the obstore tests read from.
+pytest_plugins = ["tests._https"]
+
+
+@pytest.fixture(autouse=True)
+def _trace_isolation() -> Iterator[None]:
+    """Each test starts with zero counters, no spans, and no installed log handlers.
+
+    Counters are process-wide, so without this a count assertion would see
+    the work of every test that ran before it on the same worker.
+    """
+    _trace.enable(None)
+    _trace.reset()
+    _trace._warned.clear()
+    yield
+    _trace.enable(None)
+    _trace.configure_logging(None)
+    _trace.reset()
+
 
 PORTOLAN_URI = "https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"
 LANGUAGE_URI = "https://stac-extensions.github.io/language/v1.0.0/schema.json"

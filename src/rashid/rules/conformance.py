@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable
 from functools import lru_cache
 from importlib import resources
 from typing import Any
 
+from rashid import _json
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
@@ -171,7 +171,7 @@ _EXTENSION_URI_PATTERN = re.compile(
 def _registry() -> dict[str, tuple[str, str]]:
     """Registered extensions, keyed by base URI: base -> (name, pinned version)."""
     resource = resources.files("rashid").joinpath(_REGISTRY_RESOURCE)
-    document: dict[str, Any] = json.loads(resource.read_text(encoding="utf-8"))
+    document: dict[str, Any] = _json.loads(resource.read_bytes())
     registered: dict[str, tuple[str, str]] = {}
     for name, uri in document["extensions"].items():
         parsed = _EXTENSION_URI_PATTERN.match(str(uri))
@@ -179,6 +179,41 @@ def _registry() -> dict[str, tuple[str, str]]:
             continue
         registered[parsed["base"]] = (str(name), parsed["version"])
     return registered
+
+
+def registered_extension(uri: str) -> tuple[str, str] | None:
+    """``(name, version)`` when ``uri`` is a registered extension's pinned URI.
+
+    ``None`` covers a URI that is not a versioned schema URI, an extension the
+    registry does not list, and a registered extension declared at a version
+    the registry does not pin. :func:`registered_at_other_version` tells the
+    last case apart.
+    """
+    parsed = _EXTENSION_URI_PATTERN.match(uri)
+    if parsed is None:
+        return None
+    entry = _registry().get(parsed["base"])
+    if entry is None or entry[1] != parsed["version"]:
+        return None
+    return entry
+
+
+def registered_at_other_version(uri: str) -> tuple[str, str] | None:
+    """``(name, declared version)`` when ``uri`` is a registered extension at an unpinned version.
+
+    A catalog declaring Raster v1.1.0 must not be validated against the pinned
+    v2.0.0 schema, which invents errors about fields v1.1.0 never had. It must
+    not escape validation either, or declaring an older version would turn
+    every schema error into a PTL-CNF-004 warning. The extension pass uses this
+    to validate such objects against the schema of the version they declare.
+    """
+    parsed = _EXTENSION_URI_PATTERN.match(uri)
+    if parsed is None:
+        return None
+    entry = _registry().get(parsed["base"])
+    if entry is None or entry[1] == parsed["version"]:
+        return None
+    return entry[0], parsed["version"]
 
 
 class ExtensionVersionRule(Rule):

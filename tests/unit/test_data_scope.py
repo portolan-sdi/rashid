@@ -4,14 +4,15 @@ A metadata-only mirror declares terabytes of assets on someone else's host and
 a handful of its own; ``--data-scope local`` checks the ones it owns and reads
 nothing else (#86). These tests use a fake validator that streams every asset
 and records what came back, so the scope wiring is covered without the
-geospatial stack, exactly as ``test_data.py`` does. ``urlopen`` is replaced
-throughout: a stub server for the default scope, a sentinel that fails the test
+geospatial stack, exactly as ``test_data.py`` does. The remote read is replaced
+throughout: a stub stream for the default scope, a sentinel that fails the test
 for the local one, which is how "zero remote bytes" is asserted rather than
 assumed.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -84,36 +85,22 @@ def _streaming_validator(consumed: dict[str, int | None]) -> Validator:
 
 
 def _stub_server(payload: bytes) -> Any:
-    class _Response:
-        def __init__(self) -> None:
-            self._pos = 0
-            self.status = 200
-            self.headers = {"Content-Length": str(len(payload))}
+    """A stand-in for the reader's remote stream that answers every URL with ``payload``."""
 
-        def read(self, size: int = -1) -> bytes:
-            chunk = payload[self._pos :] if size < 0 else payload[self._pos : self._pos + size]
-            self._pos += len(chunk)
-            return chunk
+    def fake_stream(url: str) -> Iterator[bytes]:
+        yield payload
 
-        def __enter__(self) -> _Response:
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            return None
-
-    def fake_urlopen(request: Any, **_kwargs: Any) -> _Response:
-        return _Response()
-
-    return fake_urlopen
+    return fake_stream
 
 
 def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make any outgoing request fail the test rather than merely be slow."""
 
-    def refuse(request: Any, **_kwargs: Any) -> None:
-        raise AssertionError(f"the reader reached the network: {request.full_url}")
+    def refuse(url: str) -> None:
+        raise AssertionError(f"the reader reached the network: {url}")
 
-    monkeypatch.setattr(reader_mod, "urlopen", refuse)
+    # Every remote read resolves its URL through _store._locate first.
+    monkeypatch.setattr(reader_mod._store, "_locate", refuse)
 
 
 # --- LocalOnlyReader --------------------------------------------------------
@@ -188,7 +175,7 @@ def test_default_scope_still_reads_remote_assets(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     graph, _item = _mirror_graph(catalog)
-    monkeypatch.setattr(reader_mod, "urlopen", _stub_server(_REMOTE_BYTES))
+    monkeypatch.setattr(reader_mod, "_http_stream", _stub_server(_REMOTE_BYTES))
     consumed: dict[str, int | None] = {}
 
     validate_data(graph, _streaming_validator(consumed))
@@ -200,7 +187,7 @@ def test_explicit_default_factory_matches_the_default(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     graph, _item = _mirror_graph(catalog)
-    monkeypatch.setattr(reader_mod, "urlopen", _stub_server(_REMOTE_BYTES))
+    monkeypatch.setattr(reader_mod, "_http_stream", _stub_server(_REMOTE_BYTES))
     passed: dict[str, int | None] = {}
     omitted: dict[str, int | None] = {}
 
@@ -214,8 +201,15 @@ def test_explicit_default_factory_matches_the_default(
 
 
 def _reader_recorder(seen: list[str]) -> Validator:
+    """Record whether the reader the validator gets would read a remote asset.
+
+    The pass hands the validator its reader behind a wrapper, so the
+    reader's answer, not its class, shows which factory built it.
+    """
+
     def check(node: Node, reader: AssetReader) -> list[DataDefect]:
-        seen.append(type(reader).__name__)
+        located = reader.locate(node, _REMOTE_HREF)
+        seen.append("remote" if located is not None else "local only")
         return []
 
     return check
@@ -233,7 +227,7 @@ def test_runner_threads_the_factory_through(catalog: CatalogBuilder) -> None:
         data_reader_factory=LocalOnlyReader,
     )
 
-    assert set(seen) == {"LocalOnlyReader"}
+    assert set(seen) == {"local only"}
 
 
 def test_runner_defaults_to_the_filesystem_http_reader(catalog: CatalogBuilder) -> None:
@@ -243,7 +237,7 @@ def test_runner_defaults_to_the_filesystem_http_reader(catalog: CatalogBuilder) 
 
     validate(root, structural=False, data_validator=_reader_recorder(seen))
 
-    assert set(seen) == {"FilesystemHttpReader"}
+    assert set(seen) == {"remote"}
 
 
 # --- the CLI option ---------------------------------------------------------

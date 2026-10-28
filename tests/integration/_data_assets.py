@@ -181,6 +181,60 @@ def write_geoparquet(
     pq.write_table(table, path, row_group_size=row_group_size)
 
 
+class _WkbGeometryType(pa.ExtensionType):
+    """A minimal ``geoarrow.wkb`` extension type.
+
+    pyarrow's Parquet writer maps a ``geoarrow.wkb`` column to the native
+    ``GEOMETRY`` logical type and writes per-row-group GeospatialStatistics —
+    the same file shape DuckDB's Iceberg writer produces. pyarrow 25 drops the
+    extension's crs on write, so files written here carry an absent crs
+    (OGC:CRS84 by definition); CRS variants are driven over fakes instead.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(pa.binary(), "geoarrow.wkb")
+
+    def __arrow_ext_serialize__(self) -> bytes:
+        return b"{}"
+
+    @classmethod
+    def __arrow_ext_deserialize__(
+        cls, storage_type: pa.DataType, serialized: bytes
+    ) -> _WkbGeometryType:  # noqa: ARG003, E501
+        del storage_type, serialized  # pyarrow's hook signature; nothing varies
+        return cls()
+
+
+def _wkb_geometry_type() -> _WkbGeometryType:
+    try:
+        pa.register_extension_type(_WkbGeometryType())
+    except pa.ArrowKeyError:
+        pass  # one process runs many tests; the name registers once
+    return _WkbGeometryType()
+
+
+def write_native_geoparquet(
+    path: Path,
+    *,
+    points: list[tuple[float, float]] | None = None,
+    row_group_size: int = 2,
+    columns: dict[str, list[object]] | None = None,
+) -> None:
+    """A Parquet file whose geometry is the native ``GEOMETRY`` logical type.
+
+    No ``geo`` key — the file DuckDB writes with ``GEOPARQUET_VERSION 'NONE'``
+    and the file Iceberg engines publish. The writer computes native
+    GeospatialStatistics per row group on its own.
+    """
+    pts = points if points is not None else ordered_points()
+    wkb = [struct.pack("<BIdd", 1, 1, x, y) for x, y in pts]
+    geometry = pa.ExtensionArray.from_storage(_wkb_geometry_type(), pa.array(wkb, type=pa.binary()))
+    cols: dict[str, object] = {"geometry": geometry, "value": list(range(len(pts)))}
+    if columns:
+        cols.update(columns)
+    pq.write_table(pa.table(cols), path, row_group_size=row_group_size)
+
+
 def write_item_mirror(
     path: Path,
     ids: list[str] | None,

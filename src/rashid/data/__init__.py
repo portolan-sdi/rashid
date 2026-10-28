@@ -21,6 +21,10 @@ Which bytes it may read is the caller's choice. ``reader_factory`` supplies the
 the checks that read the catalog's own files and skips the ones that would have
 to stream someone else's host.
 
+The pass checks objects on a thread pool and reports in catalog order. On a
+published catalog each asset read waits on the network, and a serial loop
+over thousands of assets took hours (#219).
+
 The heavy geospatial dependencies (``pyarrow``, ``rasterio``, ``rio-cogeo``,
 ``pyproj``) are core dependencies but are imported
 lazily by :func:`default_validator`, so the core package stays stdlib-only and a
@@ -29,13 +33,16 @@ catalog with no data pass installs nothing new.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
+from rashid import _trace
 from rashid.catalog import CatalogGraph, Kind, Node
-from rashid.data.reader import AssetReader, FilesystemHttpReader
+from rashid.data.reader import AssetReader, FilesystemHttpReader, Locator
 from rashid.model import Finding, Severity
 
 DAT_UNAVAILABLE = "PTL-DAT-000"
@@ -56,6 +63,7 @@ DAT_PARTITION_SCHEMA = "PTL-DAT-014"
 DAT_TABULAR = "PTL-DAT-015"
 DAT_MIRROR = "PTL-DAT-016"
 DAT_VECTOR_COLUMNS = "PTL-DAT-017"
+DAT_NATIVE_CRS = "PTL-DAT-018"
 
 # Requirement IDs from the spec's requirements manifest
 # (specs/portolan/requirements.yaml) enforced by each check;
@@ -78,15 +86,19 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     # FMT-043 binds an item mirror to the same three GeoParquet MUSTs as
     # vector data, so the checks that enforce them carry it too.
     # FMT-050 is the footer check: at eight or more row groups the row-group
-    # boxes decide. FMT-044 is its floor: below that the layout is reported and
-    # not judged, and the rows are measured in file-order chunks (FMT-006's
-    # abstract test) instead, rather than faulted on a threshold their row-group
-    # count cannot express. FMT-051 puts the area sum beside every verdict,
-    # FMT-052 makes a file under the row floor an INFO rather than silence,
-    # FMT-053 pins the reference to the near-square grid, FMT-054 makes the
-    # spec's abstract test vectors binding (tests/fixtures/spatial-metric-
-    # vectors.json, vendored verbatim), and FMT-049 keeps consecutive-pair
-    # overlap out of the verdict.
+    # boxes decide. FMT-058 is the 5 MB size floor under which nothing is
+    # judged, FMT-059 fails the clear case (efficiency under 0.25) from two
+    # row groups, and FMT-044 withholds only the pass below eight; the rows
+    # are measured in file-order chunks (FMT-006's abstract test) where the
+    # footer gives no verdict. FMT-051 and FMT-060 define the statistics and
+    # the absolute read share beside every verdict, FMT-061 the worst boxes
+    # and the window profile, FMT-052 makes a file under the row floor an
+    # INFO rather than silence, FMT-053 pins the reference to the near-square
+    # grid, FMT-054 makes the spec's abstract test vectors binding
+    # (tests/fixtures/spatial-metric-vectors.json, vendored verbatim), and
+    # FMT-049 keeps consecutive-pair overlap out of the verdict.
+    # FMT-055 makes a file with a native geospatial column vector data even
+    # without a `geo` key; the checks that now run on such a file carry it.
     DAT_ORDERING: (
         "PORTO-FMT-006",
         "PORTO-FMT-043",
@@ -98,11 +110,22 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
         "PORTO-FMT-052",
         "PORTO-FMT-053",
         "PORTO-FMT-054",
+        "PORTO-FMT-055",
+        "PORTO-FMT-058",
+        "PORTO-FMT-059",
+        "PORTO-FMT-060",
+        "PORTO-FMT-061",
     ),
     # ERROR when neither statistics source exists; WARNING when a 2.x file
     # relies on native statistics without the RECOMMENDED covering column.
-    DAT_ROWGROUP_STATS: ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043", "PORTO-FMT-045"),
-    DAT_ROWGROUP_SIZE: ("PORTO-FMT-009", "PORTO-FMT-043", "PORTO-FMT-045"),
+    DAT_ROWGROUP_STATS: (
+        "PORTO-FMT-007",
+        "PORTO-FMT-008",
+        "PORTO-FMT-043",
+        "PORTO-FMT-045",
+        "PORTO-FMT-055",
+    ),
+    DAT_ROWGROUP_SIZE: ("PORTO-FMT-009", "PORTO-FMT-043", "PORTO-FMT-045", "PORTO-FMT-055"),
     DAT_COG_STATS: (
         "PORTO-FMT-026",
         "PORTO-FMT-027",
@@ -127,10 +150,28 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     ),
     # A mirror must reproduce the collection's items (PORTO-FMT-042).
     DAT_MIRROR: ("PORTO-FMT-042",),
+    # The native crs resolves from the file alone: a defined-or-absent value
+    # is the MUST (FMT-056), self-contained PROJJSON the SHOULD (FMT-057).
+    DAT_NATIVE_CRS: ("PORTO-FMT-056", "PORTO-FMT-057", "PORTO-FMT-045"),
 }
 
 # Assets are declared on collections and items; catalogs carry none.
 _DATA_KINDS: tuple[Kind, ...] = ("collection", "item")
+
+#: Objects with a remote asset checked at once. A remote asset costs several
+#: requests that each wait hundreds of milliseconds for a first byte (#219).
+#: obstore releases the GIL while it waits, and so does GDAL when it opens or
+#: reads a dataset. GDAL's sidecar probes run inside rasterio calls that keep
+#: the GIL, which is one reason checks.py turns them off for a remote asset.
+#: The threads then overlap those waits rather than queue on them.
+_REMOTE_WORKERS = 32
+
+#: Objects whose assets are all local checked at once. Parsing a footer and
+#: judging row order is Python work that holds the GIL, so threads past a few
+#: only contend for it: on the large ``data`` scenario the pass took 36 ms on
+#: 4 threads, 43 ms on 8, and 60 ms on 32. A few still overlap file reads and
+#: the hashing of large files, which release it.
+_LOCAL_WORKERS = 4
 
 
 @dataclass(frozen=True)
@@ -198,6 +239,16 @@ def validate_data(
     systemically, returns a single ``PTL-DAT-000`` warning instead of failing the
     run — a systemic failure is reported once, not once per object.
 
+    An object with a remote asset is checked on a pool of ``_REMOTE_WORKERS``
+    threads, and any other on a pool of ``_LOCAL_WORKERS``; the two run at
+    once. Findings are emitted in catalog order, so the report does not depend on
+    which thread finishes first. The first object whose validator raises ends
+    the pass as the serial loop did: the findings of the objects before it are
+    kept, the objects not yet started are cancelled, and nothing after it is
+    reported. The objects still running then fail at their next call to the
+    reader, so a whole-object stream stops within one chunk. A ``validator`` and the reader ``reader_factory`` builds are
+    therefore called from several threads at once, and must be thread-safe.
+
     ``reader_factory`` chooses which assets are readable at all;
     :class:`~rashid.data.reader.LocalOnlyReader` narrows the pass to the
     catalog's own files. An asset its reader declines is skipped silently, so a
@@ -221,38 +272,125 @@ def validate_data(
             ]
 
     reader = (reader_factory or FilesystemHttpReader)(graph)
+    nodes = [node for node in graph.iter(*_DATA_KINDS) if node.parse_error is None]
     findings: list[Finding] = []
-    for node in graph.iter(*_DATA_KINDS):
-        if node.parse_error is not None:
-            continue
+    ended = threading.Event()
+    shared = _EndableReader(reader, ended)
+    remote = ThreadPoolExecutor(_REMOTE_WORKERS, thread_name_prefix="data-remote")
+    local = ThreadPoolExecutor(_LOCAL_WORKERS, thread_name_prefix="data-local")
+    try:
+        futures = [
+            _trace.submit(remote if _reads_remote(node, reader) else local, validator, node, shared)
+            for node in nodes
+        ]
+        for node, future in zip(nodes, futures, strict=True):
+            try:
+                defects = future.result()
+            except Exception as exc:  # noqa: BLE001 - any validator failure is systemic
+                findings.append(
+                    Finding(
+                        rule_id=DAT_UNAVAILABLE,
+                        severity=Severity.WARNING,
+                        message=f"data validation could not run: {exc}",
+                        path=".",
+                    )
+                )
+                return findings
+            findings.extend(_to_findings(node, defects))
+    finally:
+        # Every future is done on the normal path. On a systemic failure or an
+        # interrupt, drop the objects not yet started and return without
+        # waiting. An object already reading may be streaming gigabytes for a
+        # checksum, and its result would be thrown away. The pool threads are
+        # not daemons, so the interpreter joins them at exit: ending the reader
+        # makes each one stop at its next chunk or reader call.
+        ended.set()
+        for pool in (remote, local):
+            pool.shutdown(wait=False, cancel_futures=True)
+    return findings
+
+
+class _PassEnded(Exception):
+    """A worker read after :func:`validate_data` stopped waiting for it."""
+
+
+class _EndableReader:
+    """``reader``, until ``ended`` is set; then every call and chunk raises.
+
+    GDAL's own reads of a ``/vsicurl`` raster bypass this reader. They fetch
+    a header and a few tiles, not the whole object, so they end soon anyway.
+    """
+
+    def __init__(self, reader: AssetReader, ended: threading.Event) -> None:
+        self._reader = reader
+        self._ended = ended
+
+    def _check(self) -> None:
+        if self._ended.is_set():
+            raise _PassEnded("the data pass ended before this object finished")
+
+    def locate(self, node: Node, href: str) -> Locator | None:
+        self._check()
+        return self._reader.locate(node, href)
+
+    def stream(self, node: Node, href: str) -> Iterator[bytes] | None:
+        self._check()
+        stream = self._reader.stream(node, href)
+        return None if stream is None else self._chunks(stream)
+
+    def _chunks(self, stream: Iterator[bytes]) -> Iterator[bytes]:
         try:
-            defects = validator(node, reader)
-        except Exception as exc:  # noqa: BLE001 - any validator failure is systemic
-            findings.append(
-                Finding(
-                    rule_id=DAT_UNAVAILABLE,
-                    severity=Severity.WARNING,
-                    message=f"data validation could not run: {exc}",
-                    path=".",
-                )
+            for chunk in stream:
+                self._check()
+                yield chunk
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+
+
+def _reads_remote(node: Node, reader: AssetReader) -> bool:
+    """Whether any asset on ``node`` resolves to a remote URL under ``reader``.
+
+    Locating is the reader's own answer, so a narrowed reader such as
+    :class:`~rashid.data.reader.LocalOnlyReader` sends every object to the
+    local pool. A reader that fails here sends the object to the local pool
+    too, where the validator meets the same failure and the pass reports it
+    as a systemic one.
+    """
+    assets = node.data.get("assets")
+    if not isinstance(assets, dict):
+        return False
+    for asset in assets.values():
+        href = asset.get("href") if isinstance(asset, dict) else None
+        if isinstance(href, str) and href:
+            try:
+                located = reader.locate(node, href)
+            except Exception:  # noqa: BLE001 - the validator reports it
+                return False
+            if located is not None and located.is_remote:
+                return True
+    return False
+
+
+def _to_findings(node: Node, defects: list[DataDefect]) -> list[Finding]:
+    findings: list[Finding] = []
+    for defect in defects:
+        pointer = defect.json_pointer
+        if pointer is None:
+            pointer = f"/assets/{defect.asset_key}"
+            if defect.field is not None:
+                pointer = f"{pointer}/{defect.field}"
+        findings.append(
+            Finding(
+                rule_id=defect.rule_id,
+                severity=defect.severity,
+                message=defect.message,
+                path=str(node.path),
+                object_id=node.id,
+                json_pointer=pointer,
+                expected=defect.expected,
+                actual=defect.actual,
             )
-            return findings
-        for defect in defects:
-            pointer = defect.json_pointer
-            if pointer is None:
-                pointer = f"/assets/{defect.asset_key}"
-                if defect.field is not None:
-                    pointer = f"{pointer}/{defect.field}"
-            findings.append(
-                Finding(
-                    rule_id=defect.rule_id,
-                    severity=defect.severity,
-                    message=defect.message,
-                    path=str(node.path),
-                    object_id=node.id,
-                    json_pointer=pointer,
-                    expected=defect.expected,
-                    actual=defect.actual,
-                )
-            )
+        )
     return findings

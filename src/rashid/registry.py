@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 import rashid.data as _data_pass
+import rashid.extensions as _extension_pass
 import rashid.live as _live_pass
 import rashid.runner as _runner
 import rashid.schema as _schema_pass
@@ -61,9 +62,9 @@ class CheckInfo:
 
 # Title and strongest severity for every check that does not subclass Rule.
 # Keys are the rule ids themselves rather than the modules' constants so this
-# table reads as the id-space it documents. The four ``-000`` entries report
-# that a pass could not run: they cite no requirement and always warn, because
-# an unavailable pass is not a failed one.
+# table reads as the id-space it documents. The four ``-000`` entries and
+# ``PTL-GEN-002`` report that a check could not run: they cite no requirement
+# and always warn, because an unavailable pass is not a failed one.
 _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
     "PTL-GEN-000": (
         Severity.ERROR,
@@ -73,6 +74,10 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
         Severity.ERROR,
         "every object file parses as JSON",
     ),
+    "PTL-GEN-002": (
+        Severity.WARNING,
+        "the whole tree was read, so every check could see every file",
+    ),
     "PTL-STR-000": (
         Severity.WARNING,
         "the STAC structural pass could run",
@@ -80,6 +85,18 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
     "PTL-STR-001": (
         Severity.ERROR,
         "every object is valid STAC 1.1.0",
+    ),
+    "PTL-EXT-000": (
+        Severity.WARNING,
+        "the extension schema pass and each declared schema could load",
+    ),
+    "PTL-EXT-001": (
+        Severity.ERROR,
+        "every object satisfies the schemas of the extensions it declares",
+    ),
+    "PTL-EXT-002": (
+        Severity.INFO,
+        "every declared extension was validated against its schema",
     ),
     "PTL-SCH-000": (
         Severity.WARNING,
@@ -161,6 +178,10 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
         Severity.WARNING,
         "a GeoParquet data asset's columns are documented with table:columns",
     ),
+    "PTL-DAT-018": (
+        Severity.ERROR,
+        "a native geometry column's CRS resolves from the file alone",
+    ),
     "PTL-LIV-000": (
         Severity.WARNING,
         "the live pass could reach a host to probe",
@@ -185,10 +206,29 @@ _PASS_CHECKS: dict[str, tuple[Severity, str]] = {
         Severity.ERROR,
         "CORS preflight accepts GET and HEAD with Range",
     ),
+    "PTL-LIV-006": (
+        Severity.ERROR,
+        "every link target under the publish base answers HEAD with 2xx",
+    ),
+    "PTL-LIV-007": (
+        Severity.WARNING,
+        "the root self link names the base the catalog is published under",
+    ),
+    "PTL-LIV-008": (
+        Severity.ERROR,
+        "no asset or link target on the probed hosts redirects off https",
+    ),
 }
 
 # The pass modules that declare a SPEC_IDS registry.
-_PASS_MODULES = (_runner, _structural_pass, _schema_pass, _data_pass, _live_pass)
+_PASS_MODULES = (
+    _runner,
+    _structural_pass,
+    _extension_pass,
+    _schema_pass,
+    _data_pass,
+    _live_pass,
+)
 
 
 class RegistryError(RuntimeError):

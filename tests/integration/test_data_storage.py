@@ -8,6 +8,7 @@ each non-compliant variant raises exactly the rule it violates (formats.md:30/64
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterator
 from datetime import datetime, timedelta
@@ -37,6 +38,7 @@ from rashid.data import (  # noqa: E402
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
 )
+from pyproj import CRS  # noqa: E402
 from rashid.data.reader import Locator  # noqa: E402
 from rashid.model import Severity  # noqa: E402
 from tests.integration import _data_assets as assets  # noqa: E402
@@ -46,6 +48,10 @@ pytestmark = pytest.mark.integration
 
 def _loc(path: Path) -> Locator:
     return Locator(is_remote=False, source=str(path))
+
+
+def _files(path: Path) -> checks._AssetFiles:
+    return checks._AssetFiles(_loc(path))
 
 
 class _FileReader:
@@ -73,11 +79,11 @@ def _node_with_asset(asset: dict) -> Node:
 
 
 def _gpq(path: Path) -> list:
-    return checks._check_geoparquet("data", _loc(path))
+    return checks._check_geoparquet("data", _files(path))
 
 
 def _raster(path: Path) -> list:
-    return checks._check_raster("data", _loc(path))
+    return checks._check_raster("data", _loc(path), _files(path))
 
 
 # --- GeoParquet ------------------------------------------------------------
@@ -717,6 +723,228 @@ def test_plain_parquet_is_skipped(tmp_path: Path) -> None:
     assert _gpq(path) == []
 
 
+# --- native-geo Parquet: GEOMETRY logical type, no geo key (PORTO-FMT-055) ---
+#
+# The file DuckDB's Iceberg writer produces (portolan-sdi/rashid#200). The spec
+# accepts it as its third form, so the storage rules run on it; the missing
+# geo key is not a defect, and the native crs gets its own rules.
+
+
+def test_native_geo_columns_are_detected(tmp_path: Path) -> None:
+    native = tmp_path / "native.parquet"
+    assets.write_native_geoparquet(native)
+    parquet = pq.ParquetFile(native)
+    assert checks._native_geo_columns(parquet) == ["geometry"]
+    plain = tmp_path / "plain.parquet"
+    assets.write_geoparquet(plain, geo=False)
+    assert checks._native_geo_columns(pq.ParquetFile(plain)) == []
+
+
+def test_native_geo_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
+    # The issue's shuffled-Iceberg-file case: with no geo key the file was
+    # skipped and no ordering rule ran. The native GeospatialStatistics supply
+    # the row-group boxes, so the footer check judges it now.
+    path = tmp_path / "native.parquet"
+    assets.write_native_geoparquet(path, points=assets.interleaved_points())
+    defects = _gpq(path)
+    assert [d.rule_id for d in defects if d.severity is Severity.ERROR] == [DAT_ORDERING]
+
+
+def test_native_geo_ordered_rows_keep_only_the_covering_warning(tmp_path: Path) -> None:
+    path = tmp_path / "native.parquet"
+    assets.write_native_geoparquet(path, points=assets.ordered_points(10))
+    defects = _gpq(path)
+    assert [d.rule_id for d in defects] == [DAT_ROWGROUP_STATS]
+    assert defects[0].severity is Severity.WARNING
+    assert "covering column" in defects[0].message
+
+
+def test_native_geo_missing_geo_key_is_not_a_version_error(tmp_path: Path) -> None:
+    path = tmp_path / "native.parquet"
+    assets.write_native_geoparquet(path)
+    assert DAT_GEOPARQUET_VERSION not in [d.rule_id for d in _gpq(path)]
+
+
+def test_native_geo_single_row_group_reports_unevaluated_ordering(tmp_path: Path) -> None:
+    # Parity with a geo-key file that has native statistics and no covering
+    # column: the row check has no covering column to read, and it says so
+    # instead of staying silent.
+    path = tmp_path / "native.parquet"
+    assets.write_native_geoparquet(path, points=assets.ordered_points(200), row_group_size=200)
+    defects = _gpq(path)
+    ordering = [d for d in defects if d.rule_id == DAT_ORDERING]
+    assert [d.severity for d in ordering] == [Severity.INFO]
+    assert "could not be evaluated" in ordering[0].message
+
+
+def test_native_geo_footprint_reaches_the_consistency_check(tmp_path: Path) -> None:
+    path = tmp_path / "native.parquet"
+    assets.write_native_geoparquet(path)
+    geo = checks._geo_from_parquet(_files(path))
+    assert geo is not None
+    assert geo.bbox == [4.0, 50.0, 6.0, 52.0]
+    assert geo.epsg == 4326  # absent crs is OGC:CRS84 by definition
+
+
+def test_native_geo_file_is_not_tabular(tmp_path: Path) -> None:
+    path = tmp_path / "native.parquet"
+    assets.write_native_geoparquet(path)
+    assert _tabular(_tabular_collection(), path) == []
+
+
+def test_native_vector_collection_without_table_columns_flags_dat_017(tmp_path: Path) -> None:
+    path = tmp_path / "native.parquet"
+    assets.write_native_geoparquet(path)
+    defects = _vector(_tabular_collection(), path)
+    assert [d.rule_id for d in defects] == [DAT_VECTOR_COLUMNS]
+
+
+# --- the native crs (PTL-DAT-018) --------------------------------------------
+#
+# pyarrow 25 reads a crs off the GEOMETRY logical type but cannot write one,
+# so these drive the check over duck-typed schema metadata shaped exactly like
+# pyarrow's (`logical_type.to_json()`).
+
+
+class _FakeLogicalType:
+    def __init__(self, payload: str) -> None:
+        self._payload = payload
+
+    def to_json(self) -> str:
+        return self._payload
+
+
+class _FakeSchemaColumn:
+    def __init__(self, name: str, payload: str | None) -> None:
+        self.name = name
+        self.logical_type = _FakeLogicalType(payload) if payload is not None else None
+
+
+class _FakeSchema:
+    def __init__(self, columns: list[_FakeSchemaColumn]) -> None:
+        self._columns = columns
+
+    def __len__(self) -> int:
+        return len(self._columns)
+
+    def column(self, i: int) -> _FakeSchemaColumn:
+        return self._columns[i]
+
+
+class _FakeFileMeta:
+    def __init__(self, schema: _FakeSchema, kv: dict[bytes, bytes] | None) -> None:
+        self.schema = schema
+        self.metadata = kv
+        self.num_row_groups = 0
+
+
+class _NativeCrsParquet:
+    """Duck-types what the native-CRS check touches."""
+
+    def __init__(self, crs: str | None, kv: dict[bytes, bytes] | None = None) -> None:
+        body: dict[str, str] = {"Type": "Geometry"}
+        if crs is not None:
+            body["crs"] = crs
+        payload = json.dumps(body)
+        self.metadata = _FakeFileMeta(_FakeSchema([_FakeSchemaColumn("geometry", payload)]), kv)
+
+
+def _crs_defects(crs: str | None, kv: dict[bytes, bytes] | None = None) -> list:
+    return checks._check_native_crs("data", _NativeCrsParquet(crs, kv), ["geometry"])
+
+
+@pytest.mark.parametrize("crs", [None, "", "OGC:CRS84"])
+def test_absent_or_default_native_crs_is_clean(crs: str | None) -> None:
+    assert _crs_defects(crs) == []
+
+
+def test_inline_projjson_native_crs_is_clean() -> None:
+    assert _crs_defects('{"type": "GeographicCRS", "name": "WGS 84"}') == []
+
+
+@pytest.mark.parametrize("crs", ["EPSG:4326", "srid:3857"])
+def test_registry_code_native_crs_warns(crs: str) -> None:
+    defects = _crs_defects(crs)
+    assert [d.rule_id for d in defects] == ["PTL-DAT-018"]
+    assert [d.severity for d in defects] == [Severity.WARNING]
+    assert crs in defects[0].message
+
+
+def test_projjson_reference_resolves_against_file_metadata() -> None:
+    assert _crs_defects("projjson:my_crs", {b"my_crs": b'{"type": "GeographicCRS"}'}) == []
+
+
+def test_projjson_reference_to_a_missing_key_errors() -> None:
+    defects = _crs_defects("projjson:my_crs", {})
+    assert [d.severity for d in defects] == [Severity.ERROR]
+    assert "my_crs" in defects[0].message
+
+
+def test_projjson_reference_to_a_non_json_key_errors() -> None:
+    defects = _crs_defects("projjson:my_crs", {b"my_crs": b"not json"})
+    assert [d.severity for d in defects] == [Severity.ERROR]
+
+
+def test_undefined_native_crs_form_errors() -> None:
+    defects = _crs_defects("a free-text datum description")
+    assert [d.severity for d in defects] == [Severity.ERROR]
+
+
+def test_broken_inline_projjson_errors() -> None:
+    defects = _crs_defects("{not projjson")
+    assert [d.severity for d in defects] == [Severity.ERROR]
+
+
+def test_native_detection_shrugs_off_unhelpful_schemas() -> None:
+    # pyarrow < 21 (no logical_type), a logical type whose JSON does not
+    # parse, a crs that is not a string, and a fake with no schema at all:
+    # each falls back rather than crashes.
+    no_schema = _FakeParquet([])
+    assert checks._native_geo_columns(no_schema) == []
+    assert checks._native_crs(no_schema, "geometry") is None
+
+    class _Quirks:
+        def __init__(self) -> None:
+            columns = [
+                _FakeSchemaColumn("old_pyarrow", None),
+                _FakeSchemaColumn("broken", "not json"),
+                _FakeSchemaColumn("other", json.dumps({"Type": "None"})),
+                _FakeSchemaColumn("geom", json.dumps({"Type": "Geometry", "crs": 5})),
+            ]
+            self.metadata = _FakeFileMeta(_FakeSchema(columns), None)
+
+    quirky = _Quirks()
+    assert checks._native_geo_columns(quirky) == ["geom"]
+    # The primary falls back to the first native column when none is named
+    # 'geometry'; its non-string crs reads as absent.
+    assert checks._primary_geometry_column(quirky, {}) == "geom"
+    assert checks._native_crs(quirky, "geom") is None
+    assert checks._native_crs(quirky, "old_pyarrow") is None
+    assert checks._native_crs(quirky, "broken") is None
+    assert checks._native_crs(quirky, "nowhere") is None
+
+
+def test_resolve_native_crs_covers_each_form() -> None:
+    crs84 = checks._resolve_native_crs(_NativeCrsParquet(None), "geometry")
+    assert crs84 is not None and crs84.to_epsg() == 4326
+    authority = checks._resolve_native_crs(_NativeCrsParquet("EPSG:3857"), "geometry")
+    assert authority is not None and authority.to_epsg() == 3857
+    projjson = CRS.from_epsg(4326).to_json().encode()
+    reference = checks._resolve_native_crs(
+        _NativeCrsParquet("projjson:my_crs", {b"my_crs": projjson}), "geometry"
+    )
+    assert reference is not None and reference.to_epsg() == 4326
+    assert checks._resolve_native_crs(_NativeCrsParquet("projjson:gone", {}), "geometry") is None
+    assert checks._resolve_native_crs(_NativeCrsParquet("no such datum"), "geometry") is None
+    assert checks._resolve_native_crs(_NativeCrsParquet(None), None) is None
+
+
+def test_native_file_without_statistics_yields_no_footprint() -> None:
+    # No row groups, so no GeospatialStatistics to union: the consistency
+    # check stands down instead of inventing a bbox.
+    assert checks._geo_from_native_parquet(_NativeCrsParquet(None)) is None
+
+
 # --- COG -------------------------------------------------------------------
 
 
@@ -845,7 +1073,7 @@ def test_missing_geo_version_flags_dat_012(tmp_path: Path) -> None:
 
 
 def _tiles(path: Path) -> list:
-    return checks._check_tile_size("data", _loc(path))
+    return checks._check_tile_size("data", _files(path))
 
 
 def test_default_512_tiles_are_clean(tmp_path: Path) -> None:
@@ -1140,7 +1368,7 @@ def _tabular_collection(**overrides: object) -> Node:
 
 def _tabular(node: Node, path: Path) -> list:
     asset = {"href": "./data.parquet", "roles": ["data"]}
-    return checks._check_tabular(node, "data", asset, _loc(path))
+    return checks._check_tabular(node, "data", asset, _files(path))
 
 
 def _timestamp_column() -> dict[str, list[object]]:
@@ -1175,7 +1403,7 @@ def test_tabular_with_asset_level_table_columns_is_clean(tmp_path: Path) -> None
         "roles": ["data"],
         "table:columns": [{"name": "value", "type": "int64", "description": "a value"}],
     }
-    assert checks._check_tabular(_tabular_collection(), "data", asset, _loc(path)) == []
+    assert checks._check_tabular(_tabular_collection(), "data", asset, _files(path)) == []
 
 
 def test_tabular_temporal_column_without_extent_flags_dat_015(tmp_path: Path) -> None:
@@ -1214,14 +1442,14 @@ def test_non_data_roles_are_not_tabular(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False)
     asset = {"href": "./data.parquet", "roles": ["metadata"]}
-    assert checks._check_tabular(_tabular_collection(), "data", asset, _loc(path)) == []
+    assert checks._check_tabular(_tabular_collection(), "data", asset, _files(path)) == []
 
 
 def test_item_level_parquet_is_not_tabular(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False)
     node = _node_with_asset({"href": "./data.parquet", "roles": ["data"]})
-    assert checks._check_tabular(node, "data", node.data["assets"]["a"], _loc(path)) == []
+    assert checks._check_tabular(node, "data", node.data["assets"]["a"], _files(path)) == []
 
 
 # --- vector column documentation (PTL-DAT-017) ------------------------------
@@ -1248,7 +1476,7 @@ def _vector_item(**overrides: object) -> Node:
 
 def _vector(node: Node, path: Path, **asset_fields: object) -> list:
     asset = {"href": "./data.parquet", "roles": ["data"], **asset_fields}
-    return checks._check_vector_columns(node, "data", asset, _loc(path))
+    return checks._check_vector_columns(node, "data", asset, _files(path))
 
 
 def test_vector_collection_without_table_columns_flags_dat_017(tmp_path: Path) -> None:
@@ -1303,4 +1531,4 @@ def test_non_data_roles_are_not_vector(tmp_path: Path) -> None:
     path = tmp_path / "geo.parquet"
     assets.write_geoparquet(path)
     asset = {"href": "./data.parquet", "roles": ["metadata"]}
-    assert checks._check_vector_columns(_tabular_collection(), "data", asset, _loc(path)) == []
+    assert checks._check_vector_columns(_tabular_collection(), "data", asset, _files(path)) == []

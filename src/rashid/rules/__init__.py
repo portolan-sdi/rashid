@@ -10,6 +10,8 @@ from rashid.rules.assets import (
     CatalogAssetsRule,
     ChecksumMultihashRule,
     CogMediaTypeRule,
+    CollectionDataRule,
+    ItemDataRule,
 )
 from rashid.rules.bbox import BboxValidRule
 from rashid.rules.catalogs import SubcatalogFanoutRule
@@ -100,6 +102,8 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     AssetFileFieldsRule(),
     ChecksumMultihashRule(),
     CatalogAssetsRule(),
+    CollectionDataRule(),
+    ItemDataRule(),
     SchemaUriDeclaredRule(),
     SchemaUriConsistencyRule(),
     VersionExtensionRule(),

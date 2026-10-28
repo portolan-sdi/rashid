@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rashid"
-version = "0.1.8"
+version = "0.3.0"
 description = "Validator and linter for Portolan catalogs"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "Portolan contributors" }]
 # The data pass reads asset bytes to verify checksum, size, format, and extent —
 # the core of what a catalog validator is for — so its geospatial stack is a
@@ -16,26 +16,33 @@ authors = [{ name = "Portolan contributors" }]
 # keep `import rashid` cheap: the heavy imports stay confined to
 # rashid.data.checks and load only when the pass runs.
 #
-# Floors sit at the newest release that still resolves on Python 3.10; rasterio,
-# rio-cogeo, and pyproj all dropped 3.10 in their latest majors, and 3.11+ picks
-# those up through the lock. pyarrow is the exception: 21 is the oldest release
-# whose reader exposes native GeospatialStatistics (checks._native_bboxes
+# Floors stay at releases that resolved on Python 3.10, the previous minimum.
+# Raising them is a separate change. pyarrow is the exception: 21 is the
+# oldest release whose reader exposes native GeospatialStatistics (checks._native_bboxes
 # feature-detects it either way), and consumers cap pyarrow below 25 over an
 # abseil ABI break, so a >=25 floor would make rashid uninstallable next to them
 # (#36; also fixed on main by #49 — the floors agree whichever merges first).
 # shapely joins the stack for the item-mirror comparison in
 # checks._geometry_agrees, which decodes the mirror's WKB and the item's GeoJSON
 # and compares them structurally. Its floor follows the same rule: 2.1 is the
-# newest series shapely ships, and it still resolves on Python 3.10.
+# newest series shapely ships.
+# jsonschema-rs screens each object before jsonschema sees it
+# (rashid._jsonschema.screened), and its registry needs the meta-schemas that
+# jsonschema-specifications carries; jsonschema already depends on it, so
+# naming it adds no install, only the direct import.
 dependencies = [
     "click>=8.4",
     "jsonschema>=4.26",
+    "jsonschema-rs>=0.58",
+    "jsonschema-specifications>=2023.3.6",
     "referencing>=0.30",
     "pyarrow>=21",
     "rasterio>=1.4.4",
     "rio-cogeo>=6",
     "pyproj>=3.7.1",
     "shapely>=2.1",
+    "orjson>=3.11",
+    "obstore>=0.9",
 ]
 
 [project.optional-dependencies]
@@ -69,6 +76,7 @@ dev = [
     "pip>=26.1",
     "pip-audit>=2.10",
     "mutmut>=3.6",
+    "trustme>=1.2.1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -76,7 +84,7 @@ packages = ["src/rashid"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "C4", "UP"]
@@ -87,12 +95,12 @@ known-first-party = ["rashid"]
 
 [tool.mypy]
 strict = true
-python_version = "3.10"
+python_version = "3.11"
 files = ["src/rashid"]
 
-# jsonschema ships no py.typed marker; stubs live in the separate types-jsonschema.
+# jsonschema and jsonschema-specifications ship no py.typed marker.
 [[tool.mypy.overrides]]
-module = "jsonschema.*"
+module = ["jsonschema.*", "jsonschema_specifications.*"]
 ignore_missing_imports = true
 
 # The data-pass geospatial stack (rashid[data]) ships no usable type information.
@@ -141,6 +149,7 @@ source_modules = [
     "rashid.rules",
     "rashid.live",
     "rashid.api",
+    "rashid._trace",
 ]
 forbidden_modules = ["click"]
 
@@ -167,13 +176,14 @@ source_modules = [
     "rashid.live",
     "rashid.data.reader",
     "rashid.api",
+    "rashid._trace",
 ]
 forbidden_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"]
 ignore_imports = ["rashid.data -> rashid.data.checks"]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.1.8"
+version = "0.3.0"
 version_files = ["pyproject.toml:^version"]
 tag_format = "v$version"
 annotated_tag = true
@@ -187,14 +197,14 @@ changelog_file = "CHANGELOG.md"
 major_version_zero = true
 
 [tool.codespell]
-skip = ".git,uv.lock,.venv,.mypy_cache,.ruff_cache,.pytest_cache,mutants"
+skip = ".git,uv.lock,.venv,.mypy_cache,.ruff_cache,.pytest_cache,mutants,.cache"
 # "unparseable" is a valid English variant used in rule messages
 ignore-words-list = "unparseable"
 check-filenames = true
 
 [tool.vulture]
 min_confidence = 80
-paths = ["src/rashid", "tests"]
+paths = ["src/rashid", "tests", "scripts"]
 sort_by_size = true
 
 [tool.bandit]
@@ -204,7 +214,7 @@ exclude_dirs = ["tests", ".venv"]
 known_first_party = ["rashid"]
 # .claude holds Claude Code worktrees, each with its own .venv. Like mutants,
 # it is generated, not this project's dependency surface.
-exclude = [".venv", "tests", "mutants", ".claude"]
+exclude = [".venv", "tests", "mutants", ".claude", ".cache"]
 
 [tool.deptry.package_module_name_map]
 # rio-cogeo installs as the `rio_cogeo` import package.
@@ -212,6 +222,10 @@ rio-cogeo = ["rio_cogeo"]
 
 [tool.mutmut]
 source_paths = ["src/rashid/"]
+# mutmut runs the suite from its mutants/ copy, which holds tests/ but not
+# scripts/. tests/unit/test_profile_script.py loads scripts/profile.py by a
+# path relative to the tests directory, so scripts/ must be copied too.
+also_copy = ["scripts/"]
 # --no-cov drops the coverage overhead and the global --cov-fail-under gate
 # from addopts; mutmut 3 runs pytest in-process, so extra args must go here
 # rather than in a `runner` setting (which mutmut 3 ignores).

@@ -8,9 +8,6 @@ reachable.
 
 from __future__ import annotations
 
-from typing import Any
-from urllib.request import Request
-
 import pytest
 
 from rashid import RulesConfig, validate, validate_schema
@@ -18,6 +15,7 @@ from rashid._jsonschema import SchemaError
 from rashid.catalog import CatalogGraph
 from rashid.model import Severity
 from rashid.schema import DEFAULT_SCHEMA_URI, _schema_uri_for, default_validator
+from tests._https import HttpsServer, Route
 from tests.conftest import (
     PORTOLAN_URI,
     CatalogBuilder,
@@ -236,40 +234,24 @@ def test_non_https_schema_uri_is_rejected() -> None:
         _fetch_schema("file:///etc/passwd")
 
 
-def test_remote_schema_fetch_sends_a_named_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_remote_schema_fetch_sends_a_named_user_agent(https_server: HttpsServer) -> None:
     """The schema URI can come from the catalog, so it can sit behind a CDN.
 
     Cloudflare answers the default ``Python-urllib`` agent with a 403, which
     would fail the schema pass on a healthy catalog exactly as it failed the
     live pass (#64).
     """
-    import json as json_mod
     from importlib.metadata import version
 
     from rashid import schema as schema_mod
 
-    seen: list[Any] = []
+    https_server.routes["/portolan/v0.1.0/schema.json"] = Route(body=b'{"$id": "x"}')
 
-    class _Response:
-        def read(self) -> bytes:
-            return json_mod.dumps({"$id": "x"}).encode()
+    fetched = schema_mod._fetch_schema(https_server.url("portolan/v0.1.0/schema.json"))
 
-        def __enter__(self) -> _Response:
-            return self
-
-        def __exit__(self, *_exc: object) -> None:
-            return None
-
-    def fake_urlopen(request: Any, **_kwargs: Any) -> _Response:
-        seen.append(request)
-        return _Response()
-
-    monkeypatch.setattr(schema_mod.urllib.request, "urlopen", fake_urlopen)
-    schema_mod._fetch_schema("https://schemas.portolan-sdi.org/portolan/v0.1.0/schema.json")
-
-    (request,) = seen
-    assert isinstance(request, Request), "the fetch must build a Request to carry headers"
-    assert request.get_header("User-agent") == (
+    assert fetched == {"$id": "x"}
+    (seen,) = https_server.seen
+    assert seen.headers["user-agent"] == (
         f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
     )
 

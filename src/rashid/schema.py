@@ -25,15 +25,13 @@ substitute their own.
 
 from __future__ import annotations
 
-import json
-import urllib.request
 from collections.abc import Callable
 from functools import lru_cache
 from importlib import resources
 from typing import Any
 
-from rashid._http import user_agent
-from rashid._jsonschema import SchemaError
+from rashid import _json
+from rashid._jsonschema import SchemaError, fetch_schema
 from rashid.catalog import CatalogGraph, Kind
 from rashid.model import Finding, Severity
 from rashid.rules.conformance import declared_schema_uris
@@ -77,20 +75,8 @@ def _schema_uri_for(graph: CatalogGraph) -> str:
 
 
 def _fetch_schema(schema_uri: str) -> dict[str, Any]:
-    # Only fetch over https: the URI can originate from a catalog's declared
-    # stac_extensions, so a file:// or custom scheme would let a hostile catalog
-    # read local files or reach internal hosts (CWE-22 / SSRF).
-    if not schema_uri.startswith("https://"):
-        raise ValueError(f"schema URI must be an https URL, got: {schema_uri!r}")
-    # Named agent for the same reason the live pass sends one: the URI can come
-    # from the catalog's own stac_extensions, so the schema may sit behind a CDN
-    # that answers the default Python-urllib agent with a 403.
-    request = urllib.request.Request(  # noqa: S310  # nosec B310 - scheme checked above
-        schema_uri, headers={"User-Agent": user_agent()}
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310  # nosec B310 - scheme checked above
-        schema: dict[str, Any] = json.loads(response.read().decode("utf-8"))
-    return schema
+    """Fetch the profile schema over https. See :func:`_jsonschema.fetch_schema`."""
+    return fetch_schema(schema_uri)
 
 
 @lru_cache(maxsize=1)
@@ -108,7 +94,7 @@ def _bundled_schemas() -> dict[str, dict[str, Any]]:
         schema_file = version_dir.joinpath("schema.json")
         if not schema_file.is_file():
             continue
-        schema: dict[str, Any] = json.loads(schema_file.read_text(encoding="utf-8"))
+        schema: dict[str, Any] = _json.loads(schema_file.read_bytes())
         schemas[str(schema["$id"]).rstrip("#")] = schema
     return schemas
 
@@ -132,18 +118,17 @@ def validator_from_schema(schema: dict[str, Any]) -> Validator:
     ``jsonschema`` is imported lazily because the metadata pass never needs it.
     Draft-07 is pinned because the published Portolan schema declares
     ``$schema`` draft-07. Error narrowing (the oneOf discriminator dance) lives
-    in :func:`rashid._jsonschema.describe`, shared with the structural pass.
+    in :func:`rashid._jsonschema.describe`, shared with the structural pass,
+    and :func:`rashid._jsonschema.screened` skips it for a valid object.
     """
     from jsonschema import Draft7Validator
 
-    from rashid._jsonschema import describe
+    from rashid._jsonschema import compile_rust, screened, specifications_rust_registry
 
-    validator = Draft7Validator(schema)
-
-    def _validate(data: dict[str, Any]) -> list[SchemaError]:
-        return [describe(error) for error in sorted(validator.iter_errors(data), key=str)]
-
-    return _validate
+    return screened(
+        Draft7Validator(schema),
+        compile_rust(schema, specifications_rust_registry(), draft7=True),
+    )
 
 
 def default_validator(

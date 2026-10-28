@@ -9,6 +9,8 @@ from tests.conftest import (
     CatalogBuilder,
     default_asset,
     findings_for,
+    nest_items_under_organizing_catalog,
+    thumbnail_asset,
 )
 
 pytestmark = pytest.mark.unit
@@ -233,3 +235,78 @@ def test_item_asset_template_needs_cog_media_type(catalog: CatalogBuilder) -> No
     findings = findings_for(validate(catalog.write()), "PTL-AST-006")
     assert len(findings) == 1
     assert findings[0].json_pointer == "/item_assets/data/type"
+
+
+def test_collection_with_only_a_thumbnail_is_flagged(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"thumbnail": thumbnail_asset()})
+    findings = findings_for(validate(catalog.write()), "PTL-AST-007")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+    assert findings[0].path == "roads/collection.json"
+    assert findings[0].json_pointer == "/assets"
+
+
+def test_collection_without_assets_is_flagged(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={})
+    assert len(findings_for(validate(catalog.write()), "PTL-AST-007")) == 1
+
+
+def test_collection_data_on_its_items_is_clean(catalog: CatalogBuilder) -> None:
+    catalog.collection("scenes", assets={"thumbnail": thumbnail_asset()}).item("a")
+    assert findings_for(validate(catalog.write()), "PTL-AST-007") == []
+
+
+def test_collection_data_on_items_under_an_organizing_catalog_is_clean(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.collection("scenes", assets={"thumbnail": thumbnail_asset()}).item("a")
+    root = catalog.write()
+    nest_items_under_organizing_catalog(root, root / "scenes")
+    assert findings_for(validate(root), "PTL-AST-007") == []
+
+
+def test_partition_glob_refers_to_the_data(catalog: CatalogBuilder) -> None:
+    catalog.collection(
+        "parts",
+        assets={"thumbnail": thumbnail_asset()},
+        **{"partition:glob": "./**/*.parquet"},
+    )
+    assert findings_for(validate(catalog.write()), "PTL-AST-007") == []
+
+
+def test_blank_partition_glob_does_not_refer_to_the_data(catalog: CatalogBuilder) -> None:
+    catalog.collection("parts", assets={"thumbnail": thumbnail_asset()}, **{"partition:glob": " "})
+    assert len(findings_for(validate(catalog.write()), "PTL-AST-007")) == 1
+
+
+def test_data_role_beside_other_roles_counts(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"data": _asset(roles=["data", "source"])}).item(
+        "a", assets={"data": _asset(roles=["visual", "data"])}
+    )
+    report = validate(catalog.write())
+    assert findings_for(report, "PTL-AST-007") == []
+    assert findings_for(report, "PTL-AST-008") == []
+
+
+def test_item_without_data_asset_is_flagged(catalog: CatalogBuilder) -> None:
+    catalog.collection("scenes").item("a", assets={"thumbnail": thumbnail_asset()})
+    report = validate(catalog.write())
+    findings = findings_for(report, "PTL-AST-008")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+    assert findings[0].path == "scenes/a/a.json"
+    assert findings[0].json_pointer == "/assets"
+    # The collection's own data asset still refers to its data.
+    assert findings_for(report, "PTL-AST-007") == []
+
+
+def test_dataless_items_leave_the_collection_without_data(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection("scenes", assets={"thumbnail": thumbnail_asset()})
+    collection.item("a", assets={"thumbnail": thumbnail_asset()})
+    collection.item("b", assets={})
+    report = validate(catalog.write())
+    assert len(findings_for(report, "PTL-AST-007")) == 1
+    assert {f.path for f in findings_for(report, "PTL-AST-008")} == {
+        "scenes/a/a.json",
+        "scenes/b/b.json",
+    }

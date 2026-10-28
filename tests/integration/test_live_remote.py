@@ -1,6 +1,6 @@
 """Live pass prober against a real server — networked, self-skipping.
 
-Exercises the default urllib prober's three request shapes end to end against
+Exercises the default prober's three request shapes end to end against
 a small immutable blob (a pinned commit of this repo's README on GitHub, which
 serves ranges). It asserts the transport facts the prober must extract —
 status, lowercased headers — NOT GitHub's CORS policy: that is the hosting
@@ -15,7 +15,7 @@ from urllib.request import urlopen
 
 import pytest
 
-from rashid.live import ProbeResponse, _UrllibProber
+from rashid.live import ProbeResponse, _DefaultProber
 
 pytestmark = [pytest.mark.integration, pytest.mark.network]
 
@@ -42,7 +42,7 @@ def _probe(call: Callable[[str], ProbeResponse], url: str) -> ProbeResponse:
 
 def test_prober_reads_range_and_head() -> None:
     _require_reachable(_URL)
-    prober = _UrllibProber()
+    prober = _DefaultProber()
 
     ranged = _probe(prober.get_range, _URL)
     assert ranged.status == 206
@@ -58,10 +58,10 @@ def test_prober_survives_a_preflight() -> None:
     # The preflight must come back as a ProbeResponse whatever the server's
     # CORS verdict is — HTTPError (405, 403) folds into status, never raises.
     _require_reachable(_URL)
-    response = _probe(_UrllibProber().preflight, _URL)
+    response = _probe(_DefaultProber().preflight, _URL)
     assert isinstance(response.status, int)
 
 
 def test_prober_refuses_non_https() -> None:
     with pytest.raises(ValueError, match="non-https"):
-        _UrllibProber().get_range("http://example.com/data.parquet")
+        _DefaultProber().get_range("http://example.com/data.parquet")

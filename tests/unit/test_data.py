@@ -9,6 +9,9 @@ geospatial stack (now a core dependency, still lazily imported).
 
 from __future__ import annotations
 
+import threading
+import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -24,6 +27,7 @@ from rashid.data import (
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
     DAT_MIRROR,
+    DAT_NATIVE_CRS,
     DAT_ORDERING,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
@@ -38,7 +42,7 @@ from rashid.data import (
     DataDefect,
     validate_data,
 )
-from rashid.data.reader import AssetReader
+from rashid.data.reader import AssetReader, Locator
 from rashid.model import Severity
 from rashid.runner import validate
 from tests.conftest import CatalogBuilder
@@ -99,6 +103,186 @@ def test_systemic_failure_reported_once(catalog: CatalogBuilder) -> None:
     assert findings[0].rule_id == DAT_UNAVAILABLE
     assert findings[0].severity is Severity.WARNING
     assert "reader exploded" in findings[0].message
+
+
+def _items_graph(catalog: CatalogBuilder, count: int) -> CatalogGraph:
+    collection = catalog.collection("roads")
+    for i in range(count):
+        collection.item(f"seg{i}")
+    return CatalogGraph.load(catalog.write())
+
+
+def _flag(node: Node) -> list[DataDefect]:
+    return [DataDefect(DAT_CHECKSUM, Severity.ERROR, f"{node.id} diverges", "data")]
+
+
+def test_findings_keep_catalog_order_when_objects_finish_out_of_order(
+    catalog: CatalogBuilder,
+) -> None:
+    """The first object waits for the last one, so the pool must run them at once.
+
+    A serial loop would block on the first object until the wait times out,
+    which this test reports as a failure rather than a hang.
+    """
+    graph = _items_graph(catalog, 6)
+    last_done = threading.Event()
+
+    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+        if node.id == "seg0" and not last_done.wait(timeout=10):
+            raise AssertionError("seg5 never ran while seg0 waited")
+        if node.id == "seg5":
+            last_done.set()
+        return _flag(node) if node.kind == "item" else []
+
+    findings = validate_data(graph, check)
+
+    assert [f.object_id for f in findings] == [f"seg{i}" for i in range(6)]
+
+
+class _HrefReader:
+    """Locates ``remote.tif`` as an https URL and ``local.tif`` as a file."""
+
+    def locate(self, node: Node, href: str) -> Locator | None:
+        if href == "remote.tif":
+            return Locator(is_remote=True, source="https://example.org/remote.tif")
+        if href == "local.tif":
+            return Locator(is_remote=False, source="/nowhere/local.tif")
+        return None
+
+    def stream(self, node: Node, href: str) -> Iterator[bytes] | None:
+        return None
+
+
+def test_objects_with_a_remote_asset_run_on_the_remote_pool(catalog: CatalogBuilder) -> None:
+    roads = catalog.collection("roads")
+    roads.item("far", assets={"data": {"href": "remote.tif"}})
+    roads.item("near", assets={"data": {"href": "local.tif"}})
+    roads.item("both", assets={"a": {"href": "local.tif"}, "b": {"href": "remote.tif"}})
+    roads.item("bare")
+    graph = CatalogGraph.load(catalog.write())
+    pools: dict[str | None, str] = {}
+
+    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+        pools[node.id] = threading.current_thread().name.rsplit("_", 1)[0]
+        return []
+
+    validate_data(graph, check, reader_factory=lambda graph: _HrefReader())
+
+    assert pools == {
+        "roads": "data-local",
+        "far": "data-remote",
+        "near": "data-local",
+        "both": "data-remote",
+        "bare": "data-local",
+    }
+
+
+def test_a_reader_that_fails_to_locate_is_reported_once(catalog: CatalogBuilder) -> None:
+    """Choosing a pool must not raise what the validator would report."""
+    catalog.collection("roads").item("seg1", assets={"data": {"href": "x.tif"}})
+    graph = CatalogGraph.load(catalog.write())
+
+    class Broken(_HrefReader):
+        def locate(self, node: Node, href: str) -> Locator | None:
+            raise OSError("cannot resolve")
+
+    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+        for asset in node.data.get("assets", {}).values():
+            reader.locate(node, asset["href"])
+        return []
+
+    findings = validate_data(graph, check, reader_factory=lambda graph: Broken())
+
+    assert [f.rule_id for f in findings] == [DAT_UNAVAILABLE]
+    assert "cannot resolve" in findings[0].message
+
+
+def test_systemic_failure_returns_without_waiting_on_running_objects(
+    catalog: CatalogBuilder,
+) -> None:
+    """A failure is reported at once, not after every object in flight finishes."""
+    graph = _items_graph(catalog, 2)
+    release = threading.Event()
+
+    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+        if node.id == "seg0":
+            raise RuntimeError("reader exploded")
+        if node.id == "seg1":
+            release.wait(timeout=30)
+        return []
+
+    started = time.monotonic()
+    try:
+        findings = validate_data(graph, check)
+    finally:
+        release.set()
+
+    assert time.monotonic() - started < 10
+    assert [f.rule_id for f in findings] == [DAT_UNAVAILABLE]
+
+
+class _EndlessReader(_HrefReader):
+    """Streams chunks forever, as a multi-gigabyte asset seems to a checksum."""
+
+    def stream(self, node: Node, href: str) -> Iterator[bytes] | None:
+        def chunks() -> Iterator[bytes]:
+            while True:
+                yield b"x" * 1024
+
+        return chunks()
+
+
+def test_systemic_failure_stops_a_running_stream(catalog: CatalogBuilder) -> None:
+    """An object still streaming stops at its next chunk once the pass returns.
+
+    The pool threads are not daemons, so the interpreter joins them at exit.
+    A stream that ran on would hold the process open after the report.
+    """
+    graph = _items_graph(catalog, 2)
+    streaming = threading.Event()
+    stopped: list[BaseException] = []
+    done = threading.Event()
+
+    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+        if node.id == "seg0":
+            streaming.wait(timeout=10)
+            raise RuntimeError("reader exploded")
+        if node.id == "seg1":
+            stream = reader.stream(node, "remote.tif")
+            assert stream is not None
+            try:
+                for _chunk in stream:
+                    streaming.set()
+            except BaseException as exc:
+                stopped.append(exc)
+                raise
+            finally:
+                done.set()
+        return []
+
+    findings = validate_data(graph, check, reader_factory=lambda graph: _EndlessReader())
+
+    assert [f.rule_id for f in findings] == [DAT_UNAVAILABLE]
+    assert done.wait(timeout=10), "the stream ran on after the pass returned"
+    assert "ended" in str(stopped[0])
+
+
+def test_systemic_failure_keeps_earlier_findings_and_drops_later_ones(
+    catalog: CatalogBuilder,
+) -> None:
+    graph = _items_graph(catalog, 3)
+
+    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+        if node.id == "seg1":
+            raise RuntimeError("reader exploded")
+        return _flag(node) if node.kind == "item" else []
+
+    findings = validate_data(graph, check)
+
+    assert [(f.rule_id, f.object_id) for f in findings] == [
+        (DAT_CHECKSUM, "seg0"),
+        (DAT_UNAVAILABLE, None),
+    ]
 
 
 def test_missing_geospatial_stack_downgrades_to_warning(
@@ -174,6 +358,7 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
             DAT_TABULAR,
             DAT_MIRROR,
             DAT_VECTOR_COLUMNS,
+            DAT_NATIVE_CRS,
         }
     )
     validate(graph_root, config=RulesConfig(disabled=all_ids), data=True, data_validator=spy)
