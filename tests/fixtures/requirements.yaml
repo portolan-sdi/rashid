@@ -859,6 +859,44 @@ requirements:
       `srid:<n>` value needs a CRS registry, so a validator reports it as a
       warning.
 
+  - id: PORTO-FMT-058
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      A validator MUST NOT judge the order of a file whose row groups hold
+      fewer than 5,000,000 compressed bytes, and MUST report that the file is
+      too small for order to matter rather than stay silent.
+
+  - id: PORTO-FMT-059
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      Below eight row groups the footer check MUST still fail a file whose
+      efficiency is under 0.25 at two or more row groups: boxes that each
+      cover most of the extent are plain at any count.
+
+  - id: PORTO-FMT-060
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      A validator MUST lead its verdict with the absolute cost: the share of
+      the file's bytes the query window is expected to read, as in "a
+      typical query reads 23% of the file".
+
+  - id: PORTO-FMT-061
+    severity: SHOULD
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      On a failure, a validator SHOULD name the row groups whose boxes are
+      largest against the extent, so a publisher can see whether one outlier
+      or the whole file is at fault. A validator SHOULD also report the read
+      share for windows at 1% and at 25% of each dimension beside the 10%
+      figure.
+
   - id: PORTO-FMT-006
     severity: MUST
     enforcement: validator

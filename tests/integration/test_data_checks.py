@@ -555,9 +555,9 @@ def test_overlapping_strips_prune_and_are_ordered() -> None:
     # reference the strips sit close to the bar: skip 0.544 of 0.741 achievable.
     wide = [(1.625 * i, 0.0, 1.625 * i + 3.5, 10.0) for i in range(5)]
     score = checks._pruning_score(wide)
-    assert score.achieved == pytest.approx(0.544, abs=0.001)
-    assert score.achievable == pytest.approx(0.741, abs=0.001)
-    assert score.efficiency == pytest.approx(0.735, abs=0.001)
+    assert score.achieved == pytest.approx(0.583, abs=0.001)
+    assert score.achievable == pytest.approx(0.777, abs=0.001)
+    assert score.efficiency == pytest.approx(0.750, abs=0.001)
     assert not score.below_bar
 
 
@@ -615,49 +615,72 @@ def test_every_box_spanning_the_extent_scores_zero() -> None:
 
 
 def test_closed_form_matches_the_sampled_mean() -> None:
-    """Cross-check 3: the expectation is the quantity the 20-window sample estimated.
+    """Cross-check 3: the expectation is the quantity a window sample estimates.
 
-    The retired estimator drew 20 windows from ``random.Random(seed)`` with a
-    fixed seed, so its verdict depended on the seed. The closed form is that
-    estimator's expectation, and the mean over 2000 seeds shows it, to two
-    decimals, on both the actual boxes and the reference.
+    Draw a box by its rows, a centre uniform in it, a window at 10% of that
+    box, and count the bytes of the boxes it misses: the mean over many draws
+    converges to the closed form, on both the actual boxes and the reference.
+    A sampled rule moved its verdict with the seed on real files, which is why
+    the spec states the limit instead.
     """
     import random
 
     boxes = [(0.0, 0.0, 0.3, 0.3), (0.2, 0.1, 0.6, 0.5), (0.5, 0.5, 1.0, 1.0), (0.0, 0.6, 0.5, 1.0)]
-    extent = checks._bbox_union(boxes)
-    reference = checks._ideal_grid_boxes(extent, len(boxes))
+    rows = [3.0, 1.0, 2.0, 2.0]
+    sizes = [2.0, 1.0, 4.0, 1.0]
+    reference = checks._ideal_grid_boxes(checks._bbox_union(boxes), len(boxes))
+    uniform = [1.0] * len(reference)
 
-    def sampled(layout: list[tuple[float, float, float, float]]) -> float:
-        width = (extent[2] - extent[0]) * checks._QUERY_FRACTION
-        height = (extent[3] - extent[1]) * checks._QUERY_FRACTION
-        total = 0.0
-        for seed in range(2000):
-            rng = random.Random(seed)
-            for _ in range(20):
-                x = rng.uniform(extent[0], extent[2] - width)
-                y = rng.uniform(extent[1], extent[3] - height)
-                window = (x, y, x + width, y + height)
-                total += sum(1 for b in layout if not checks._bbox_overlaps(window, b))
-        return total / (2000 * 20 * len(layout))
+    def sampled(
+        layout: list[tuple[float, float, float, float]],
+        weights: list[float],
+        byte_shares: list[float],
+    ) -> float:
+        rng = random.Random(0)
+        total_bytes = sum(byte_shares)
+        read = 0.0
+        draws = 40_000
+        for _ in range(draws):
+            (source,) = rng.choices(range(len(layout)), weights=weights)
+            b = layout[source]
+            cx = rng.uniform(b[0], b[2])
+            cy = rng.uniform(b[1], b[3])
+            half_w = checks._QUERY_FRACTION * (b[2] - b[0]) / 2.0
+            half_h = checks._QUERY_FRACTION * (b[3] - b[1]) / 2.0
+            window = (cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+            read += sum(
+                byte_shares[j] / total_bytes
+                for j, t in enumerate(layout)
+                if t[0] <= window[2]
+                and window[0] <= t[2]
+                and t[1] <= window[3]
+                and window[1] <= t[3]
+            )
+        return 1.0 - read / draws
 
-    assert checks._mean_skip_rate(boxes, extent) == pytest.approx(sampled(boxes), abs=0.005)
-    assert checks._mean_skip_rate(reference, extent) == pytest.approx(sampled(reference), abs=0.005)
+    assert checks._weighted_skip_rate(boxes, rows, sizes) == pytest.approx(
+        sampled(boxes, rows, sizes), abs=0.01
+    )
+    assert checks._weighted_skip_rate(reference, uniform, uniform) == pytest.approx(
+        sampled(reference, uniform, uniform), abs=0.01
+    )
 
 
 def test_reference_tiling_covers_the_extent() -> None:
-    """Cross-check 4: at n=3 the old 2x2 grid left a cell empty.
+    """Cross-check 4: the reference is the full tiling, every cell filled.
 
-    A window landing on the empty quarter skipped every reference box, which
-    inflated the achievable rate from 0.609 to 0.691 and every efficiency by
-    13%. The last row of the tiling now stretches to the full width.
+    PORTO-FMT-053 pins one construction so every validator divides by the same
+    number. The grid with an empty cell is a different number (0.644 against
+    0.638 at n = 3 under the box-scaled window), and the last row of the
+    pinned tiling stretches to the full width.
     """
     tiling = checks._ideal_grid_boxes(_UNIT, 3)
     assert tiling == [(0.0, 0.0, 0.5, 0.5), (0.5, 0.0, 1.0, 0.5), (0.0, 0.5, 1.0, 1.0)]
     assert sum(checks._bbox_area(b) for b in tiling) == pytest.approx(1.0)
-    assert checks._mean_skip_rate(tiling, _UNIT) == pytest.approx(0.609, abs=0.001)
+    uniform = [1.0, 1.0, 1.0]
+    assert checks._weighted_skip_rate(tiling, uniform, uniform) == pytest.approx(0.638, abs=0.001)
     old_grid = [(0.0, 0.0, 0.5, 0.5), (0.5, 0.0, 1.0, 0.5), (0.0, 0.5, 0.5, 1.0)]
-    assert checks._mean_skip_rate(old_grid, _UNIT) == pytest.approx(0.691, abs=0.001)
+    assert checks._weighted_skip_rate(old_grid, uniform, uniform) == pytest.approx(0.644, abs=0.001)
 
 
 @pytest.mark.parametrize("count", [1, 2, 5, 7, 8, 12, 100])
@@ -680,15 +703,15 @@ def test_degenerate_layouts_have_a_defined_score() -> None:
     assert single.efficiency is None
     assert single.below_bar is None
 
-    whole_extent_window = checks._pruning_score(checks._ideal_grid_boxes(_UNIT, 8), fraction=1.0)
-    assert whole_extent_window.achieved == 0.0
-    assert whole_extent_window.efficiency is None
-    assert whole_extent_window.below_bar is None
+    point_extent = checks._pruning_score([(1.0, 1.0, 1.0, 1.0)] * 3)
+    assert point_extent.achieved == 0.0
+    assert point_extent.efficiency is None
+    assert point_extent.below_bar is None
 
 
 def test_empty_layouts_have_nothing_to_skip() -> None:
     assert checks._ideal_grid_boxes(_UNIT, 0) == []
-    assert checks._mean_skip_rate([], _UNIT) == 0.0
+    assert checks._weighted_skip_rate([], [], []) == 0.0
 
 
 def test_efficiency_is_clipped_at_one() -> None:
@@ -1087,15 +1110,21 @@ def test_shared_layout_vectors(name: str) -> None:
     """PORTO-FMT-054: the spec's abstract test vectors, vendored verbatim from
     specs/portolan/abstract-tests/spatial-metric-vectors.json."""
     vector = _VECTORS["layouts"][name]
-    _assert_expected(checks._pruning_score([tuple(b) for b in vector["boxes"]]), vector["expected"])
+    rows = [float(r) for r in vector["rows"]] if "rows" in vector else None
+    sizes = [float(x) for x in vector["sizes"]] if "sizes" in vector else None
+    score = checks._pruning_score([tuple(b) for b in vector["boxes"]], rows, sizes)
+    _assert_expected(score, vector["expected"])
 
 
 @pytest.mark.parametrize("name", sorted(_VECTORS["rows"]))
 def test_shared_row_vectors(name: str) -> None:
     vector = _VECTORS["rows"][name]
-    chunks = checks._chunked_bboxes([tuple(b) if b is not None else None for b in vector["boxes"]])
+    chunks, weights = checks._chunked_bboxes(
+        [tuple(b) if b is not None else None for b in vector["boxes"]]
+    )
     assert [list(c) for c in chunks] == vector["expected_chunks"]
-    _assert_expected(checks._pruning_score(chunks), vector["expected"])
+    assert weights == [float(w) for w in vector["chunk_rows"]]
+    _assert_expected(checks._pruning_score(chunks, weights, weights), vector["expected"])
 
 
 def test_an_unboxed_chunk_shrinks_the_reference() -> None:
@@ -1107,9 +1136,11 @@ def test_an_unboxed_chunk_shrinks_the_reference() -> None:
     rows: list = [(float(i), 0.0, float(i) + 1.0, 1.0) for i in range(23)]
     for i in (4, 5, 11, 12):
         rows[i] = None
-    chunks = checks._chunked_bboxes(rows)
+    chunks, weights = checks._chunked_bboxes(rows)
     assert len(chunks) == 8
-    score = checks._pruning_score(chunks)
+    score = checks._pruning_score(chunks, weights, weights)
     extent = checks._bbox_union(chunks)
-    assert score.achievable == checks._mean_skip_rate(checks._ideal_grid_boxes(extent, 8), extent)
-    assert score.achievable != checks._mean_skip_rate(checks._ideal_grid_boxes(extent, 10), extent)
+    eight = checks._ideal_grid_boxes(extent, 8)
+    ten = checks._ideal_grid_boxes(extent, 10)
+    assert score.achievable == checks._weighted_skip_rate(eight, [1.0] * 8, [1.0] * 8)
+    assert score.achievable != checks._weighted_skip_rate(ten, [1.0] * 10, [1.0] * 10)
