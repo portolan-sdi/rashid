@@ -20,6 +20,7 @@ pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
 import pyarrow.parquet as pq  # noqa: E402
+from pyproj import CRS  # noqa: E402
 
 import rashid.data.checks as checks  # noqa: E402
 from rashid.catalog import Node  # noqa: E402
@@ -37,7 +38,6 @@ from rashid.data import (  # noqa: E402
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
 )
-from pyproj import CRS  # noqa: E402
 from rashid.data.reader import Locator  # noqa: E402
 from rashid.model import Severity  # noqa: E402
 from tests.integration import _data_assets as assets  # noqa: E402
