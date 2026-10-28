@@ -85,10 +85,18 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     DAT_CONSISTENCY: ("PORTO-FMT-036",),
     # FMT-043 binds an item mirror to the same three GeoParquet MUSTs as
     # vector data, so the checks that enforce them carry it too.
-    # FMT-044 is the applicability guard on FMT-006: the two row-group criteria
-    # run at five or more groups, a single group is measured over its rows, and
-    # two to four are left alone rather than faulted on a threshold they cannot
-    # express.
+    # FMT-050 is the footer check: at eight or more row groups the row-group
+    # boxes decide. FMT-058 is the 5 MB size floor under which nothing is
+    # judged, FMT-059 fails the clear case (efficiency under 0.25) from two
+    # row groups, and FMT-044 withholds only the pass below eight; the rows
+    # are measured in file-order chunks (FMT-006's abstract test) where the
+    # footer gives no verdict. FMT-051 and FMT-060 define the statistics and
+    # the absolute read share beside every verdict, FMT-061 the worst boxes
+    # and the window profile, FMT-052 makes a file under the row floor an
+    # INFO rather than silence, FMT-053 pins the reference to the near-square
+    # grid, FMT-054 makes the spec's abstract test vectors binding
+    # (tests/fixtures/spatial-metric-vectors.json, vendored verbatim), and
+    # FMT-049 keeps consecutive-pair overlap out of the verdict.
     # FMT-055 makes a file with a native geospatial column vector data even
     # without a `geo` key; the checks that now run on such a file carry it.
     DAT_ORDERING: (
@@ -96,7 +104,17 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
         "PORTO-FMT-043",
         "PORTO-FMT-044",
         "PORTO-FMT-045",
+        "PORTO-FMT-049",
+        "PORTO-FMT-050",
+        "PORTO-FMT-051",
+        "PORTO-FMT-052",
+        "PORTO-FMT-053",
+        "PORTO-FMT-054",
         "PORTO-FMT-055",
+        "PORTO-FMT-058",
+        "PORTO-FMT-059",
+        "PORTO-FMT-060",
+        "PORTO-FMT-061",
     ),
     # ERROR when neither statistics source exists; WARNING when a 2.x file
     # relies on native statistics without the RECOMMENDED covering column.
