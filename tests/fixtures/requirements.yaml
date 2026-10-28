@@ -823,6 +823,38 @@ requirements:
     quote: >-
       Files SHOULD be compressed to stay small, with `zstd` RECOMMENDED.
 
+  # The next three entries are vendored ahead of the nightly sync, from
+  # portolan-spec PR #226 (accept native-geo Parquet): the sync replaces this
+  # file wholesale once that PR merges.
+  - id: PORTO-FMT-055
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      A file with a native geospatial column is vector data even when it
+      carries no `geo` metadata key. A validator MUST apply every requirement
+      in this section to such a file rather than treat it as tabular Parquet.
+
+  - id: PORTO-FMT-056
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      When the native logical type's `crs` field is the only CRS a geometry
+      column declares, the value MUST be one the [Parquet geospatial
+      specification](https://github.com/apache/parquet-format/blob/master/Geospatial.md)
+      defines.
+
+  - id: PORTO-FMT-057
+    severity: SHOULD
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      The value SHOULD be inline PROJJSON or a `projjson:<key>` reference,
+      which a reader resolves from the file alone. An `<authority>:<code>` or
+      `srid:<n>` value needs a CRS registry, so a validator reports it as a
+      warning.
+
   - id: PORTO-FMT-006
     severity: MUST
     enforcement: validator

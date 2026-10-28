@@ -37,6 +37,15 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   count, ids, geometry, datetime, or bbox (MUST, formats.md, Raster § Item
   mirror). A mirror runs the GeoParquet checks above as well: the spec binds
   it to them like any other spatial table.
+- ``PTL-DAT-018`` a native geometry column's CRS does not resolve from the
+  file alone (formats.md, Geospatial Parquet). Inline PROJJSON and
+  ``projjson:<key>`` pass, ``<authority>:<code>``/``srid:<n>`` warn, anything
+  else errors (MUST + SHOULD).
+
+A file is geospatial when it carries a ``geo`` key or a native Parquet
+``GEOMETRY``/``GEOGRAPHY`` column; the spec accepts GeoParquet 1.1, 2.0, and
+native-geo Parquet with no ``geo`` key, and every vector rule applies to all
+three forms.
 
 The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
 run over an asset and over every file a local relative ``partition:glob``
@@ -98,6 +107,7 @@ from rashid.data import (
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
     DAT_MIRROR,
+    DAT_NATIVE_CRS,
     DAT_ORDERING,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
@@ -927,13 +937,16 @@ def _bbox_mismatch_message(
 def _check_geoparquet(
     key: str, files: _AssetFiles, *, subject: str | None = None
 ) -> list[DataDefect]:
-    """A GeoParquet asset MUST have bounded row groups, per-row-group spatial
-    statistics, and spatial ordering (formats.md:30,64,75).
+    """A geospatial Parquet asset MUST have bounded row groups, per-row-group
+    spatial statistics, and spatial ordering (formats.md:30,64,75).
 
     Parquet and GeoParquet share the ``application/vnd.apache.parquet`` media
-    type. A file with no ``geo`` metadata key is plain Parquet — legitimate
-    tabular data — so it is skipped rather than faulted; these rules apply only
-    to actual GeoParquet.
+    type. A file is geospatial when it carries a ``geo`` metadata key or a
+    column of the native Parquet ``GEOMETRY``/``GEOGRAPHY`` logical type
+    (PORTO-FMT-055); only a file with neither is plain tabular Parquet and
+    skipped. A native-geo file with no ``geo`` key is the spec's third accepted
+    form, so the missing key is not faulted — its CRS rules are
+    (PORTO-FMT-056/057) — and Iceberg writers produce exactly that file (#200).
 
     ``subject`` names the file in the message. It defaults to the asset the key
     belongs to; the partition pass passes the matched path instead, since a
@@ -946,11 +959,16 @@ def _check_geoparquet(
         return []
 
     geo = _geo_metadata(parquet)
-    if geo is None:
-        return []  # plain Parquet, not GeoParquet — nothing to enforce here
+    native = _native_geo_columns(parquet)
+    if geo is None and not native:
+        return []  # plain Parquet, not geospatial — nothing to enforce here
 
     defects: list[DataDefect] = []
-    defects.extend(_check_geoparquet_version(key, geo, subject=subject))
+    if geo is not None:
+        defects.extend(_check_geoparquet_version(key, geo, subject=subject))
+    else:
+        geo = {}
+        defects.extend(_check_native_crs(key, parquet, native, subject=subject))
     meta = parquet.metadata
     row_counts = [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
     if any(n > _MAX_ROW_GROUP_ROWS for n in row_counts):
@@ -1005,11 +1023,12 @@ def _check_geoparquet(
 def _check_geoparquet_version(
     key: str, geo: dict[str, Any], *, subject: str | None = None
 ) -> list[DataDefect]:
-    """The ``geo`` metadata MUST declare GeoParquet 1.1 or 2.x.
+    """The ``geo`` metadata, when present, MUST declare GeoParquet 1.1 or 2.x.
 
-    formats.md:25: "Data MUST be provided in GeoParquet 1.1 or 2.0". A file
-    with ``geo`` metadata but an older version (1.0, the common legacy case)
-    lacks the covering-column machinery the rest of the format MUSTs assume.
+    formats.md accepts GeoParquet 1.1, 2.0, or native-geo Parquet with no
+    ``geo`` key. A file with ``geo`` metadata but an older version (1.0, the
+    common legacy case) lacks the covering-column machinery the rest of the
+    format MUSTs assume. A file with no ``geo`` key never reaches this check.
     """
     subject = subject or f"asset '{key}'"
     version = geo.get("version")
@@ -1037,6 +1056,171 @@ def _geo_metadata(parquet: Any) -> dict[str, Any] | None:
     except (ValueError, TypeError):
         return None
     return geo if isinstance(geo, dict) else None
+
+
+def _native_geo_columns(parquet: Any) -> list[str]:
+    """Columns whose Parquet logical type is ``GEOMETRY`` or ``GEOGRAPHY``.
+
+    Read from the Parquet schema, not the Arrow one, so detection needs no
+    registered geoarrow extension. pyarrow >= 21 names the type through
+    ``logical_type``; an older pyarrow reports it as unknown and the file
+    falls back to the ``geo``-key path.
+    """
+    schema = getattr(parquet.metadata, "schema", None)
+    if schema is None:
+        return []
+    names: list[str] = []
+    for i in range(len(schema)):
+        column = schema.column(i)
+        logical = getattr(column, "logical_type", None)
+        if logical is None:
+            continue
+        try:
+            kind = _json.loads(logical.to_json()).get("Type")
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if kind in ("Geometry", "Geography"):
+            names.append(column.name)
+    return names
+
+
+def _primary_geometry_column(parquet: Any, geo: dict[str, Any]) -> str | None:
+    """The column the per-row-group statistics are read from.
+
+    The ``geo`` key names it; a native-geo file without one defaults to the
+    column named ``geometry``, else the first native geospatial column.
+    """
+    primary = geo.get("primary_column")
+    if isinstance(primary, str):
+        return primary
+    native = _native_geo_columns(parquet)
+    if not native:
+        return None
+    return "geometry" if "geometry" in native else native[0]
+
+
+def _native_crs(parquet: Any, name: str) -> str | None:
+    """The ``crs`` string of a native geospatial column, None when absent."""
+    schema = getattr(parquet.metadata, "schema", None)
+    if schema is None:
+        return None
+    for i in range(len(schema)):
+        column = schema.column(i)
+        if column.name != name:
+            continue
+        logical = getattr(column, "logical_type", None)
+        if logical is None:
+            return None
+        try:
+            crs = _json.loads(logical.to_json()).get("crs")
+        except (ValueError, TypeError, AttributeError):
+            return None
+        return crs if isinstance(crs, str) else None
+    return None
+
+
+# A CRS registry identifier: `<authority>:<code>`, which also matches
+# `srid:<n>`. Resolving one needs a registry, which is why PORTO-FMT-057
+# prefers inline PROJJSON and keeps this form a warning rather than an error.
+_AUTHORITY_CODE = re.compile(r"[A-Za-z][A-Za-z0-9_]*:[A-Za-z0-9_.]+\Z")
+
+
+def _check_native_crs(
+    key: str, parquet: Any, columns: list[str], *, subject: str | None = None
+) -> list[DataDefect]:
+    """The CRS of each native geospatial column resolves from the file alone.
+
+    formats.md: the native ``crs`` value MUST be one the Parquet geospatial
+    specification defines, and an absent value is OGC:CRS84 (PORTO-FMT-056).
+    Inline PROJJSON and a ``projjson:<key>`` reference into the file metadata
+    resolve from the file alone; an ``<authority>:<code>`` or ``srid:<n>``
+    value needs a CRS registry, so it is a warning (PORTO-FMT-057). Anything
+    else is an error. These rules only reach a file with no ``geo`` key —
+    with one, the key's own ``crs`` field governs and the consistency check
+    reads that.
+    """
+    subject = subject or f"asset '{key}'"
+    defects: list[DataDefect] = []
+    for name in columns:
+        crs = _native_crs(parquet, name)
+        if crs is None:
+            continue  # absent: OGC:CRS84 by definition
+        value = crs.strip()
+        if not value or value == "OGC:CRS84":
+            continue
+        if value.startswith("{"):
+            try:
+                _json.loads(value)
+                continue  # inline PROJJSON
+            except ValueError:
+                defects.append(
+                    DataDefect(
+                        DAT_NATIVE_CRS,
+                        Severity.ERROR,
+                        f"{subject} geometry column '{name}' carries a crs that opens "
+                        "like JSON but does not parse; it must be a form the Parquet "
+                        "geospatial specification defines",
+                        key,
+                    )
+                )
+                continue
+        if value.startswith("projjson:"):
+            defects.extend(_projjson_reference_defects(key, parquet, name, value, subject=subject))
+            continue
+        if _AUTHORITY_CODE.match(value):
+            defects.append(
+                DataDefect(
+                    DAT_NATIVE_CRS,
+                    Severity.WARNING,
+                    f"{subject} geometry column '{name}' declares its CRS as '{value}', "
+                    "which needs a CRS registry to resolve; inline PROJJSON lets a "
+                    "reader resolve it from the file alone",
+                    key,
+                )
+            )
+            continue
+        defects.append(
+            DataDefect(
+                DAT_NATIVE_CRS,
+                Severity.ERROR,
+                f"{subject} geometry column '{name}' crs '{value}' is not a form the "
+                "Parquet geospatial specification defines",
+                key,
+            )
+        )
+    return defects
+
+
+def _projjson_reference_defects(
+    key: str, parquet: Any, name: str, value: str, *, subject: str
+) -> list[DataDefect]:
+    """A ``projjson:<key>`` crs resolves against the file's key-value metadata."""
+    meta_key = value[len("projjson:") :]
+    kv = getattr(parquet.metadata, "metadata", None) or {}
+    raw = kv.get(meta_key.encode())
+    if raw is None:
+        return [
+            DataDefect(
+                DAT_NATIVE_CRS,
+                Severity.ERROR,
+                f"{subject} geometry column '{name}' crs names file metadata key "
+                f"'{meta_key}', which the file does not carry",
+                key,
+            )
+        ]
+    try:
+        _json.loads(raw)
+    except (ValueError, TypeError):
+        return [
+            DataDefect(
+                DAT_NATIVE_CRS,
+                Severity.ERROR,
+                f"{subject} geometry column '{name}' crs names file metadata key "
+                f"'{meta_key}', which does not hold PROJJSON",
+                key,
+            )
+        ]
+    return []
 
 
 # --- item mirrors -----------------------------------------------------------
@@ -1417,8 +1601,8 @@ def _check_tabular(
         parquet = files.parquet()
     except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
         return []
-    if _geo_metadata(parquet) is not None:
-        return []  # GeoParquet: the geospatial storage rules own it
+    if _geo_metadata(parquet) is not None or _native_geo_columns(parquet):
+        return []  # geospatial Parquet: the vector storage rules own it
     defects: list[DataDefect] = []
     if not _has_table_columns(node, asset):
         defects.append(
@@ -1462,7 +1646,7 @@ def _check_vector_columns(
         parquet = files.parquet()
     except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
         return []
-    if _geo_metadata(parquet) is None:
+    if _geo_metadata(parquet) is None and not _native_geo_columns(parquet):
         return []  # plain Parquet: the Tabular Data SHOULDs own it
     if _has_table_columns(node, asset):
         return []
@@ -1542,7 +1726,7 @@ def _rowgroup_stat_defects(
     boxes = _covering_bboxes(parquet, geo)
     if boxes is not None:
         return boxes, []
-    boxes = _native_bboxes(parquet, geo)
+    boxes = _native_bboxes(parquet, _primary_geometry_column(parquet, geo))
     if boxes is None:
         return None, [
             DataDefect(
@@ -1566,7 +1750,7 @@ def _rowgroup_stat_defects(
 
 
 def _native_bboxes(
-    parquet: Any, geo: dict[str, Any]
+    parquet: Any, primary: str | None
 ) -> list[tuple[float, float, float, float]] | None:
     """Per-row-group boxes from Parquet native ``GeospatialStatistics``.
 
@@ -1574,7 +1758,6 @@ def _native_bboxes(
     exposes ``geo_statistics``; older versions have no attribute and fall
     through to None, keeping the covering column as the only satisfier).
     """
-    primary = geo.get("primary_column")
     if not isinstance(primary, str):
         return None
     meta = parquet.metadata
@@ -2095,7 +2278,7 @@ def _geo_from_parquet(files: _AssetFiles) -> _Geo | None:
     parquet = files.parquet()
     raw = (parquet.schema_arrow.metadata or {}).get(b"geo")
     if raw is None:
-        return None
+        return _geo_from_native_parquet(parquet)
     geo = _json.loads(raw)
     primary = geo.get("primary_column")
     column = geo.get("columns", {}).get(primary, {})
@@ -2103,6 +2286,54 @@ def _geo_from_parquet(files: _AssetFiles) -> _Geo | None:
     crs_obj = column.get("crs")
     crs = CRS.from_user_input(crs_obj) if crs_obj is not None else CRS.from_epsg(4326)
     return _Geo(bbox=_as_bbox(bbox), epsg=crs.to_epsg(), crs=crs)
+
+
+def _geo_from_native_parquet(parquet: Any) -> _Geo | None:
+    """Footprint and CRS of a native-geo file without a ``geo`` key.
+
+    The bbox is the union of the per-row-group ``GeospatialStatistics`` and the
+    CRS comes off the logical type, so the consistency check covers the spec's
+    third accepted form too. A CRS this cannot resolve is the native-CRS
+    check's business, and the footprint comparison stands down rather than
+    assume a datum.
+    """
+    native = _native_geo_columns(parquet)
+    if not native:
+        return None
+    primary = _primary_geometry_column(parquet, {})
+    boxes = _native_bboxes(parquet, primary)
+    if not boxes:
+        return None
+    bbox = [
+        min(box[0] for box in boxes),
+        min(box[1] for box in boxes),
+        max(box[2] for box in boxes),
+        max(box[3] for box in boxes),
+    ]
+    crs = _resolve_native_crs(parquet, primary)
+    if crs is None:
+        return None
+    return _Geo(bbox=bbox, epsg=crs.to_epsg(), crs=crs)
+
+
+def _resolve_native_crs(parquet: Any, primary: str | None) -> CRS | None:
+    """The column's CRS as pyproj understands it, None when unresolvable."""
+    if primary is None:
+        return None
+    value = _native_crs(parquet, primary)
+    if value is None or not value.strip():
+        return CRS.from_epsg(4326)  # absent is OGC:CRS84 by definition
+    value = value.strip()
+    if value.startswith("projjson:"):
+        kv = getattr(parquet.metadata, "metadata", None) or {}
+        raw = kv.get(value[len("projjson:") :].encode())
+        if raw is None:
+            return None
+        value = raw.decode() if isinstance(raw, bytes) else str(raw)
+    try:
+        return CRS.from_user_input(value)
+    except Exception:  # noqa: BLE001 - the native-CRS check reports the bad value
+        return None
 
 
 def _geo_from_raster(files: _AssetFiles) -> _Geo | None:
