@@ -27,6 +27,7 @@ from rashid.data import (
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
     DAT_MIRROR,
+    DAT_NATIVE_CRS,
     DAT_ORDERING,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
@@ -357,6 +358,7 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
             DAT_TABULAR,
             DAT_MIRROR,
             DAT_VECTOR_COLUMNS,
+            DAT_NATIVE_CRS,
         }
     )
     validate(graph_root, config=RulesConfig(disabled=all_ids), data=True, data_validator=spy)
