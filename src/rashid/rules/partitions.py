@@ -15,6 +15,7 @@ extension writes.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from urllib.parse import urlsplit
 
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
@@ -93,3 +94,24 @@ def _declares_extension(node: Node) -> bool:
     return any(
         isinstance(uri, str) and uri.startswith(_PARTITION_EXTENSION_PREFIX) for uri in extensions
     )
+
+
+class PartitionGlobSchemeRule(Rule):
+    """HTTP cannot list objects for partition glob expansion."""
+
+    id = "PTL-PRT-002"
+    spec_ids = ("PORTO-FMT-064",)
+    default_severity = Severity.ERROR
+    description = "partition:glob must not use HTTP or HTTPS"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        glob = node.data.get("partition:glob")
+        if isinstance(glob, str) and urlsplit(glob).scheme.lower() in {"http", "https"}:
+            yield self.finding(
+                node,
+                "partition:glob uses HTTP or HTTPS, which cannot list partition objects",
+                json_pointer="/partition:glob",
+                fix_hint="use a relative glob or a bucket-native scheme such as s3:// or gs://",
+                actual=glob,
+            )
