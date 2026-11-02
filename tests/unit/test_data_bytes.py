@@ -283,7 +283,9 @@ def test_stream_without_close_is_tolerated() -> None:
 
 
 @pytest.mark.parametrize("location", ["relative", "absolute", "remote", "other"])
-def test_self_references_skip_byte_checks(location: str, tmp_path: Path) -> None:
+def test_self_references_skip_byte_checks(
+    location: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     node = _item(_asset(**{"file:size": 1, "file:checksum": _multihash(b"wrong")}))
     node.abs_path = tmp_path / "roads/seg1/seg1.json"
     graph = CatalogGraph(root_path=tmp_path, nodes={node.path: node})
@@ -296,6 +298,7 @@ def test_self_references_skip_byte_checks(location: str, tmp_path: Path) -> None
     }[location]
     node.data["assets"]["data"]["href"] = href
     reader = _CountingReader(payload=b"{}")
+    monkeypatch.setattr(reader, "stream", lambda node, href: reader.stream_handed)
     defects = checks.check_node(node, reader, graph)
     if location == "other":
         assert {defect.rule_id for defect in defects} == {DAT_CHECKSUM, DAT_SIZE}
