@@ -54,34 +54,25 @@ class MirrorViaLinkRule(Rule):
     """A mirror links back to its original source."""
 
     id = "PTL-PRO-001"
-    spec_ids = ("PORTO-CORE-053",)
+    spec_ids = ("PORTO-CORE-053", "PORTO-CORE-084")
     default_severity = Severity.ERROR
-    description = "a mirror must include a rel:'via' link (type text/html) to the original source"
+    description = "a mirror must include at least one HTML via link to the original source"
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         if provenance_of(node) != "mirror":
             return
-        via = [link for link in links_of(node) if link.get("rel") == "via"]
-        if not via:
-            yield self.finding(
-                node,
-                "mirror collection has no rel:'via' link to its original source",
-                json_pointer="/links",
-                fix_hint='add {"rel": "via", "href": <the upstream download or landing page>,'
-                ' "type": "text/html"} to links',
-            )
+        if any(
+            link.get("rel") == "via" and link.get("type") == "text/html" for link in links_of(node)
+        ):
             return
-        for link in via:
-            if link.get("type") != "text/html":
-                yield self.finding(
-                    node,
-                    f"rel:'via' link has type {link.get('type')!r}, expected 'text/html'",
-                    json_pointer="/links",
-                    fix_hint="set the rel:'via' link type to 'text/html'",
-                    expected="text/html",
-                    actual=link.get("type"),
-                )
+        yield self.finding(
+            node,
+            "mirror collection has no rel:'via' link of type 'text/html' to its original source",
+            json_pointer="/links",
+            fix_hint='add a via link to the upstream landing page with type "text/html";'
+            " keep service links with the media types their services return",
+        )
 
 
 class MirrorCanonicalLinkRule(Rule):
