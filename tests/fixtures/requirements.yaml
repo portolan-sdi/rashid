@@ -297,12 +297,20 @@ requirements:
       `thumbnail` for the preview image; `metadata` for sidecar metadata,
       with `iso-19115` used specifically for an ISO 19115 file.
 
+  - id: PORTO-CORE-085
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/core.md
+    quote: >-
+      An asset whose `href` resolves to the STAC object that contains it MUST omit
+      `file:size` and `file:checksum`.
+
   - id: PORTO-CORE-028
     severity: SHOULD
     enforcement: validator
     file: specs/portolan/core.md
     quote: >-
-      Assets SHOULD carry `file:size` and `file:checksum` from the [file
+      Other assets SHOULD carry `file:size` and `file:checksum` from the [file
       extension](https://github.com/stac-extensions/file).
 
   - id: PORTO-CORE-029
@@ -570,8 +578,16 @@ requirements:
     enforcement: validator
     file: specs/portolan/core.md
     quote: >-
-      A mirror MUST include a `via` link (type `text/html`) pointing to the
-      original source.
+      A mirror MUST include at least one `via` link of type `text/html` pointing to
+      the original source.
+
+  - id: PORTO-CORE-084
+    severity: MAY
+    enforcement: validator
+    file: specs/portolan/core.md
+    quote: >-
+      Further `via` links MAY point to the upstream services the
+      data comes from, each carrying the media type that service returns.
 
   - id: PORTO-CORE-054
     severity: MUST
@@ -605,9 +621,9 @@ requirements:
     enforcement: validator
     file: specs/portolan/core.md
     quote: >-
-      A mirror MUST record when it was last synced from its source by setting
-      the top-level `updated` field (RFC 3339) at each synced catalog and
-      collection to the time of the sync.
+      The sync tool MUST set the top-level `updated` field (RFC 3339) to the sync
+      time on every mirror catalog and collection it checks. This applies even when
+      the source is unchanged. Objects outside that sync keep their previous value.
 
   - id: PORTO-CORE-058
     severity: MUST
@@ -664,7 +680,8 @@ requirements:
     enforcement: process
     file: specs/portolan/core.md
     quote: >-
-      The root catalog MAY publish a logo as a link with `rel: "icon"`.
+      A catalog, collection, or item MAY publish a logo as a link
+      with `rel: "icon"`.
 
   - id: PORTO-CORE-075
     severity: MUST
@@ -916,6 +933,15 @@ requirements:
       format of the data, it MAY additionally be registered as a
       collection-level asset, and the link and the asset then coexist.
 
+  - id: PORTO-FMT-062
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      A PMTiles asset MUST carry the `visual` role and belong to a collection that
+      references the GeoParquet data it renders through a `data` asset or
+      `partition:glob`.
+
   - id: PORTO-FMT-014
     severity: MUST
     enforcement: validator
@@ -959,8 +985,9 @@ requirements:
     enforcement: process
     file: specs/portolan/formats.md
     quote: >-
-      The scheme's path structure MUST reflect spatial extent so readers can
-      prune files without reading metadata.
+      A spatial scheme (`kdtree`, `h3`, `s2`, `quadkey`, `a5`) MUST have a path
+      structure that reflects spatial extent so readers can prune files without
+      reading metadata.
 
   - id: PORTO-FMT-019
     severity: SHOULD
@@ -981,6 +1008,13 @@ requirements:
       browsers, and bucket-native schemes (`s3://`, `gs://`) MAY be used
       where those readers need them (glob expansion requires listing, which
       plain https does not provide).
+
+  - id: PORTO-FMT-064
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      `partition:glob` MUST NOT use `http://` or `https://`.
 
   - id: PORTO-FMT-021
     severity: MUST
@@ -1062,6 +1096,14 @@ requirements:
       and MUST be written at creation time (e.g. `gdal_translate -of COG
       -stats`), residing in the file's leading header block so they arrive in
       a reader's first range request.
+
+  - id: PORTO-FMT-063
+    severity: MUST
+    enforcement: process
+    file: specs/portolan/formats.md
+    quote: >-
+      Embedded statistics MUST describe the stored, full-resolution pixels of each
+      band.
 
   - id: PORTO-FMT-030
     severity: MUST
