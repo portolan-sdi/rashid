@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import posixpath
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urljoin, urlparse, urlsplit
 
-from rashid.catalog import Node
+from rashid.catalog import CatalogGraph, Node, is_absolute_href
 
 # Rels that make the tree navigable; every one carries type requirements and
 # must be relative and resolvable.
@@ -97,3 +98,40 @@ def parse_rfc3339(value: object) -> datetime | None:
     if parsed.tzinfo is None:
         return None
     return parsed
+
+
+def asset_refers_to_self(node: Node, href: str, graph: CatalogGraph | None = None) -> bool:
+    """Compare an asset href with the containing object's known locations."""
+    if not href:
+        return False
+    local = node.abs_path.as_uri()
+    if not is_absolute_href(href):
+        return _object_location(urljoin(local, href)) == _object_location(local)
+    locations = [local]
+    locations.extend(
+        link["href"]
+        for link in links_of(node)
+        if link.get("rel") == "self"
+        and isinstance(link.get("href"), str)
+        and is_absolute_href(link["href"])
+    )
+    if graph is not None:
+        locations.extend(
+            urljoin(base, str(node.path))
+            for base in (graph.base_url, graph.published_base())
+            if base is not None
+        )
+    return any(
+        _object_location(urljoin(location, href)) == _object_location(location)
+        for location in locations
+    )
+
+
+def _object_location(url: str) -> tuple[str, str, str, str]:
+    parsed = urlsplit(url)
+    return (
+        parsed.scheme.lower(),
+        parsed.netloc.lower(),
+        posixpath.normpath(unquote(parsed.path)),
+        parsed.query,
+    )

@@ -16,6 +16,7 @@ from rashid.model import Finding, Severity
 from rashid.rule import Rule
 from rashid.rules._common import (
     COG_MEDIA_TYPE,
+    asset_refers_to_self,
     is_cog_media_type,
     is_pmtiles_asset,
     is_raster_data_asset,
@@ -172,9 +173,10 @@ class CogMediaTypeRule(Rule):
 
 
 class AssetFileFieldsRule(Rule):
-    """Every asset should carry file:size and file:checksum.
+    """Assets should carry file metadata unless they refer to their STAC object.
 
-    core.md, Assets: "Assets SHOULD carry ``file:size`` and ``file:checksum``".
+    Self-references must omit both fields (PORTO-CORE-085). Other assets
+    should carry ``file:size`` and ``file:checksum`` (PORTO-CORE-028).
     A catalog that describes data it does not host cannot checksum bytes it
     never touches, so the absence is a warning rather than an error. A
     ``file:size`` that is present but not a positive integer is reported here
@@ -182,18 +184,30 @@ class AssetFileFieldsRule(Rule):
     """
 
     id = "PTL-AST-003"
-    spec_ids = ("PORTO-CORE-028",)
-    default_severity = Severity.WARNING
-    description = "every asset should carry file:size and file:checksum"
+    spec_ids = ("PORTO-CORE-028", "PORTO-CORE-085")
+    default_severity = Severity.ERROR
+    description = "assets should carry file metadata; self-references must omit it"
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         for pointer, key, asset in _assets_of(node):
+            href = asset.get("href")
+            if isinstance(href, str) and asset_refers_to_self(node, href, graph):
+                for field in ("file:size", "file:checksum"):
+                    if field in asset:
+                        yield self.finding(
+                            node,
+                            f"self-referencing asset '{key}' must omit {field}",
+                            json_pointer=f"{pointer}/{field}",
+                            fix_hint=f"remove {field} from the asset that refers to this STAC object",
+                        )
+                continue
             size = asset.get("file:size")
             if size is None:
                 yield self.finding(
                     node,
                     f"asset '{key}' has no file:size",
+                    severity=Severity.WARNING,
                     json_pointer=f"{pointer}/file:size",
                     fix_hint="add file:size, the asset's size in bytes as an integer",
                 )
@@ -201,6 +215,7 @@ class AssetFileFieldsRule(Rule):
                 yield self.finding(
                     node,
                     f"asset '{key}' file:size must be a positive integer, got {size!r}",
+                    severity=Severity.WARNING,
                     json_pointer=f"{pointer}/file:size",
                     fix_hint="set file:size to the asset's byte count, unquoted and greater than 0",
                     actual=size,
@@ -209,6 +224,7 @@ class AssetFileFieldsRule(Rule):
                 yield self.finding(
                     node,
                     f"asset '{key}' has no file:checksum",
+                    severity=Severity.WARNING,
                     json_pointer=f"{pointer}/file:checksum",
                     fix_hint="add file:checksum, the multihash of the asset bytes:"
                     " '1220' followed by the sha256 hex digest",

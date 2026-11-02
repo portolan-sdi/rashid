@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 
 import rashid.data.checks as checks
-from rashid.catalog import Node
+from rashid.catalog import CatalogGraph, Node
 from rashid.data import DAT_CHECKSUM, DAT_FORMAT, DAT_SIZE, DataDefect
 from rashid.data.reader import Locator
 from rashid.model import Severity
@@ -280,3 +280,27 @@ def test_stream_without_close_is_tolerated() -> None:
             return iter([b"PAR1"])
 
     assert checks.check_node(_item(_asset()), _Bare()) == []
+
+
+@pytest.mark.parametrize("location", ["relative", "absolute", "remote", "other"])
+def test_self_references_skip_byte_checks(location: str, tmp_path: Path) -> None:
+    node = _item(_asset(**{"file:size": 1, "file:checksum": _multihash(b"wrong")}))
+    node.abs_path = tmp_path / "roads/seg1/seg1.json"
+    graph = CatalogGraph(root_path=tmp_path, nodes={node.path: node})
+    graph.base_url = "https://example.org/catalog/"
+    href = {
+        "relative": "../seg1/./seg1.json",
+        "absolute": str(node.abs_path),
+        "remote": "https://example.org/catalog/roads/seg1/seg1.json",
+        "other": _HREF,
+    }[location]
+    node.data["assets"]["data"]["href"] = href
+    reader = _CountingReader(payload=b"{}")
+    defects = checks.check_node(node, reader, graph)
+    if location == "other":
+        assert {defect.rule_id for defect in defects} == {DAT_CHECKSUM, DAT_SIZE}
+        assert reader.consumed == 2
+    else:
+        assert defects == []
+        assert reader.consumed == 0
+        assert not reader.closed

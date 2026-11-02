@@ -9,6 +9,7 @@ from tests.conftest import (
     CatalogBuilder,
     default_asset,
     findings_for,
+    mutate_json,
     nest_items_under_organizing_catalog,
     thumbnail_asset,
 )
@@ -376,3 +377,54 @@ def test_pmtiles_alone_is_not_primary_data(
     assert len(findings_for(report, "PTL-AST-009")) == 1
     if scope == "item":
         assert len(findings_for(report, "PTL-AST-008")) == 1
+
+
+@pytest.mark.parametrize("scope", ["collection", "item"])
+@pytest.mark.parametrize("location", ["relative", "absolute", "root-self", "object-self", "other"])
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {},
+        {"file:size": 1},
+        {"file:checksum": VALID_MULTIHASH},
+        {"file:size": None, "file:checksum": None},
+    ],
+)
+def test_asset_file_fields_for_self_reference(
+    catalog: CatalogBuilder, scope: str, location: str, fields: dict
+) -> None:
+    collection = catalog.collection("roads", assets={})
+    path = "roads/collection.json"
+    relative = "./sub/../collection.json"
+    if scope == "item":
+        collection.item("seg1", assets={})
+        path = "roads/seg1/seg1.json"
+        relative = "../seg1/./seg1.json"
+    root = catalog.write()
+    href = relative
+    if location == "absolute":
+        href = str(root / path)
+    elif location in {"root-self", "object-self"}:
+        href = f"https://example.org/catalog/{path}"
+        self_path = root / ("catalog.json" if location == "root-self" else path)
+        self_href = "https://example.org/catalog/catalog.json" if location == "root-self" else href
+        mutate_json(self_path, lambda d: d["links"].append({"rel": "self", "href": self_href}))
+    elif location == "other":
+        href = "../other/collection.json"
+    mutate_json(
+        root / path,
+        lambda d: d["assets"].update(
+            {"object": {"href": href, "type": "application/json", "roles": ["metadata"], **fields}}
+        ),
+    )
+    findings = [f for f in findings_for(validate(root), "PTL-AST-003") if f.path == path]
+    if location == "other":
+        assert all(f.severity is Severity.WARNING for f in findings)
+        assert len(findings) == sum(
+            fields.get(field) is None for field in ("file:size", "file:checksum")
+        )
+    else:
+        assert len(findings) == len(fields)
+        assert all(f.severity is Severity.ERROR for f in findings)
+        assert {f.json_pointer for f in findings} == {f"/assets/object/{field}" for field in fields}
+        assert all(f.fix_hint for f in findings)
