@@ -32,7 +32,7 @@ At vendor time, `scripts/vendor_spec_fixtures.py` parses that table. The rule ig
 
 The same file drives `PTL-EXT-001` and the schema vendoring. `scripts/vendor_stac_schemas.py` reads the registry and fetches the `$ref` closure of every pinned extension into `src/rashid/_schemas/extensions/`. A version pinned in the specification arrives with its schema on the next spec sync. rashid needs no code change to validate against it.
 
-A registered extension declared at a version the registry does not pin is validated against the schema of the version it declares. rashid does not package that schema, so it fetches it over https. A newer schema would report fields that the declared version never defined. A skip would let a catalog turn its schema errors into a `PTL-CNF-004` warning when it declares an older version.
+A registered extension declared at a version the registry does not pin is validated against the schema of the version it declares. rashid fetches that schema over https unless the package retains a compatibility version. Contacts v0.1.1 remains packaged beside v1.0.0. A newer schema would report fields that the declared version never defined. A skip would let a catalog turn its schema errors into a `PTL-CNF-004` warning when it declares an older version.
 
 ## Understand Special Cases
 
