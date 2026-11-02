@@ -310,3 +310,69 @@ def test_dataless_items_leave_the_collection_without_data(catalog: CatalogBuilde
         "scenes/a/a.json",
         "scenes/b/b.json",
     }
+
+
+@pytest.mark.parametrize("scope", ["collection", "item"])
+@pytest.mark.parametrize(
+    "reference", ["collection", "item", "glob", "none", "other", "raster", "source"]
+)
+def test_pmtiles_requires_own_collection_data(
+    catalog: CatalogBuilder, scope: str, reference: str
+) -> None:
+    pmtiles = {"href": "./map.pmtiles", "type": "application/vnd.pmtiles", "roles": ["visual"]}
+    collection = catalog.collection("roads", assets={})
+    if scope == "collection":
+        collection.overrides["assets"] = {"map": pmtiles}
+    else:
+        collection.item("tiles", assets={"map": pmtiles})
+    if reference == "collection":
+        collection.overrides["assets"]["data"] = default_asset()
+    elif reference == "item":
+        collection.item("source-data", assets={"data": default_asset()})
+    elif reference == "glob":
+        collection.overrides["partition:glob"] = "./parts/*.parquet"
+    elif reference == "other":
+        catalog.collection("other", assets={"data": default_asset()})
+    elif reference == "raster":
+        collection.overrides["assets"]["data"] = _asset(type="image/tiff", href="./data.tif")
+    elif reference == "source":
+        collection.overrides["assets"]["data"] = _asset(roles=["source"])
+    findings = findings_for(validate(catalog.write()), "PTL-AST-009")
+    assert len(findings) == (0 if reference in {"collection", "item", "glob"} else 1)
+    for finding in findings:
+        assert finding.severity is Severity.ERROR
+        assert finding.json_pointer
+        assert finding.fix_hint
+
+
+@pytest.mark.parametrize("roles", [["visual"], ["data"], [], None])
+def test_pmtiles_visual_role(catalog: CatalogBuilder, roles: object) -> None:
+    catalog.collection(
+        "roads",
+        assets={
+            "data": default_asset(),
+            "map": {"href": "./map.pmtiles", "type": "application/vnd.pmtiles", "roles": roles},
+        },
+    )
+    findings = findings_for(validate(catalog.write()), "PTL-AST-009")
+    assert len(findings) == (0 if roles == ["visual"] else 1)
+    if findings:
+        assert findings[0].json_pointer == "/assets/map/roles"
+
+
+@pytest.mark.parametrize("scope", ["collection", "item"])
+@pytest.mark.parametrize("media_type", ["application/vnd.pmtiles", "application/octet-stream"])
+def test_pmtiles_alone_is_not_primary_data(
+    catalog: CatalogBuilder, scope: str, media_type: str
+) -> None:
+    assets = {
+        "map": {"href": "./map.pmtiles?download=1", "type": media_type, "roles": ["data", "visual"]}
+    }
+    collection = catalog.collection("roads", assets=assets if scope == "collection" else {})
+    if scope == "item":
+        collection.item("tiles", assets=assets)
+    report = validate(catalog.write())
+    assert len(findings_for(report, "PTL-AST-007")) == 1
+    assert len(findings_for(report, "PTL-AST-009")) == 1
+    if scope == "item":
+        assert len(findings_for(report, "PTL-AST-008")) == 1

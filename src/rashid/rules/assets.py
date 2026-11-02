@@ -17,13 +17,17 @@ from rashid.rule import Rule
 from rashid.rules._common import (
     COG_MEDIA_TYPE,
     is_cog_media_type,
+    is_pmtiles_asset,
     is_raster_data_asset,
     roles_of,
 )
 
 
 def _has_data_asset(node: Node) -> bool:
-    return any("data" in roles_of(asset) for _, _, asset in _assets_of(node))
+    return any(
+        "data" in roles_of(asset) and not is_pmtiles_asset(asset)
+        for _, _, asset in _assets_of(node)
+    )
 
 
 def _assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
@@ -320,3 +324,47 @@ class ChecksumMultihashRule(Rule):
                     "e.g. '1220' + sha256 hex",
                     actual=checksum,
                 )
+
+
+class PMTilesDataRule(Rule):
+    """PMTiles renders GeoParquet data owned by the same collection."""
+
+    id = "PTL-AST-009"
+    spec_ids = ("PORTO-FMT-062",)
+    default_severity = Severity.ERROR
+    description = "PMTiles assets must carry visual and reference their collection's GeoParquet"
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in _assets_of(node):
+            if not is_pmtiles_asset(asset):
+                continue
+            if "visual" not in roles_of(asset):
+                yield self.finding(
+                    node,
+                    f"PMTiles asset '{key}' has no visual role",
+                    json_pointer=f"{pointer}/roles",
+                    fix_hint="add visual to the PMTiles asset's roles",
+                )
+            collection = node if node.kind == "collection" else graph.enclosing_collection_of(node)
+            if collection is None or not _has_geoparquet_reference(collection, graph):
+                yield self.finding(
+                    node,
+                    f"PMTiles asset '{key}' has no GeoParquet reference in its collection",
+                    json_pointer=pointer,
+                    fix_hint="register the rendered GeoParquet as a data asset on the same"
+                    " collection or its items, or set the collection's partition:glob",
+                )
+
+
+def _has_geoparquet_reference(collection: Node, graph: CatalogGraph) -> bool:
+    glob = collection.data.get("partition:glob")
+    if isinstance(glob, str) and glob.strip():
+        return True
+    return any(
+        "data" in roles_of(asset)
+        and asset.get("type") == "application/vnd.apache.parquet"
+        and not is_pmtiles_asset(asset)
+        for owner in [collection, *graph.items_of(collection)]
+        for _, _, asset in _assets_of(owner)
+    )

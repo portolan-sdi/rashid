@@ -77,6 +77,14 @@ def is_raster_data_asset(asset: dict[str, Any]) -> bool:
     return urlparse(href).path.lower().endswith(TIFF_SUFFIXES)
 
 
+def is_pmtiles_asset(asset: dict[str, Any]) -> bool:
+    """Identify PMTiles by media type or href, including URL query strings."""
+    href = asset.get("href")
+    return asset.get("type") == "application/vnd.pmtiles" or (
+        isinstance(href, str) and urlparse(href).path.lower().endswith(".pmtiles")
+    )
+
+
 def parse_rfc3339(value: object) -> datetime | None:
     """Parse an RFC 3339 date-time; None when invalid or offset-less."""
     if not isinstance(value, str):

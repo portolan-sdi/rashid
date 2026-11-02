@@ -12,6 +12,7 @@ from rashid.rules.assets import (
     CogMediaTypeRule,
     CollectionDataRule,
     ItemDataRule,
+    PMTilesDataRule,
 )
 from rashid.rules.bbox import BboxValidRule
 from rashid.rules.catalogs import SubcatalogFanoutRule
@@ -104,6 +105,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     CatalogAssetsRule(),
     CollectionDataRule(),
     ItemDataRule(),
+    PMTilesDataRule(),
     SchemaUriDeclaredRule(),
     SchemaUriConsistencyRule(),
     VersionExtensionRule(),
