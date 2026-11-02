@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import os.path
 import posixpath
 from datetime import datetime
 from typing import Any
-from urllib.parse import unquote, urljoin, urlparse, urlsplit
+from urllib.parse import quote, unquote, urljoin, urlparse, urlsplit
 
 from rashid.catalog import CatalogGraph, Node, is_absolute_href
 
@@ -104,7 +105,11 @@ def asset_refers_to_self(node: Node, href: str, graph: CatalogGraph | None = Non
     """Compare an asset href with the containing object's known locations."""
     if not href:
         return False
-    local = node.abs_path.as_uri()
+    if os.path.normcase(os.path.normpath(href)) == os.path.normcase(str(node.abs_path)):
+        return True
+    # Path.as_uri() imports the network stack on Python 3.14.
+    path = node.abs_path.as_posix()
+    local = "file://" + ("" if path.startswith("/") else "/") + quote(path, safe="/:")
     if not is_absolute_href(href):
         return _object_location(urljoin(local, href)) == _object_location(local)
     locations = [local]

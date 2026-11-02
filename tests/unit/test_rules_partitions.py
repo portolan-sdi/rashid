@@ -111,12 +111,20 @@ def test_empty_field_values_are_flagged(catalog: CatalogBuilder) -> None:
     assert {f.json_pointer for f in findings} == {"/partition:scheme", "/partition:keys"}
 
 
-@pytest.mark.parametrize("scheme", ["http", "https", "HTTPS"])
-def test_http_glob_is_rejected(catalog: CatalogBuilder, scheme: str) -> None:
+@pytest.mark.parametrize(
+    "glob",
+    [
+        "http://example.org/*.parquet",
+        "https://example.org/*.parquet",
+        "HTTPS://example.org/*.parquet",
+        "https://[invalid",
+    ],
+)
+def test_http_glob_is_rejected(catalog: CatalogBuilder, glob: str) -> None:
     root = _built(catalog)
     mutate_json(
         _collection(root),
-        lambda d: d.__setitem__("partition:glob", f"{scheme}://example.org/*.parquet"),
+        lambda d: d.__setitem__("partition:glob", glob),
     )
     findings = findings_for(validate(root), "PTL-PRT-002")
     assert len(findings) == 1

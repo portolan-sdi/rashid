@@ -15,7 +15,6 @@ extension writes.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from urllib.parse import urlsplit
 
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
@@ -107,7 +106,7 @@ class PartitionGlobSchemeRule(Rule):
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         glob = node.data.get("partition:glob")
-        if isinstance(glob, str) and urlsplit(glob).scheme.lower() in {"http", "https"}:
+        if isinstance(glob, str) and glob.lstrip().lower().startswith(("http://", "https://")):
             yield self.finding(
                 node,
                 "partition:glob uses HTTP or HTTPS, which cannot list partition objects",
