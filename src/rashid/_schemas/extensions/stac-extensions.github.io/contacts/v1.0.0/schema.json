@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://stac-extensions.github.io/contacts/v0.1.1/schema.json#",
+  "$id": "https://stac-extensions.github.io/contacts/v1.0.0/schema.json#",
   "title": "Contacts Extension",
   "description": "STAC Contacts Extension for STAC Catalogs, Collections and Items.",
   "type": "object",
@@ -11,7 +11,7 @@
     "stac_extensions": {
       "type": "array",
       "contains": {
-        "const": "https://stac-extensions.github.io/contacts/v0.1.1/schema.json"
+        "const": "https://stac-extensions.github.io/contacts/v1.0.0/schema.json"
       }
     }
   },
@@ -92,8 +92,17 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": [
-              "name"
+            "anyOf": [
+              {
+                "required": [
+                  "name"
+                ]
+              },
+              {
+                "required": [
+                  "organization"
+                ]
+              }
             ],
             "properties": {
               "identifier": {
@@ -102,11 +111,15 @@
               "name": {
                 "type": "string"
               },
-              "positionName": {
+              "position": {
                 "type": "string"
               },
               "organization": {
                 "type": "string"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
               },
               "logo": {
                 "allOf": [
