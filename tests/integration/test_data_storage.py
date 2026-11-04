@@ -27,7 +27,7 @@ import rashid.data._files as file_owner
 import rashid.data.checks as checks
 from rashid.catalog import Node
 from rashid.cli import main
-from rashid.data import DataDefect, _DataResults, geoparquet
+from rashid.data import DataDefect, _DataResults, geoparquet, raster
 from rashid.data._files import _AssetFiles
 from rashid.data.reader import Locator
 from rashid.model import Severity
@@ -89,7 +89,7 @@ def _gpq(path: Path) -> list:
 
 
 def _raster(path: Path) -> list:
-    return checks._check_raster("data", _loc(path), _files(path))
+    return raster._check_raster("data", _loc(path), _files(path))
 
 
 # --- GeoParquet ------------------------------------------------------------
@@ -743,7 +743,7 @@ def test_missing_geo_version_flags_dat_012(tmp_path: Path) -> None:
 
 
 def _tiles(path: Path) -> list:
-    return checks._check_tile_size("data", _files(path))
+    return raster._check_tile_size("data", _files(path))
 
 
 def test_default_512_tiles_are_clean(tmp_path: Path) -> None:
