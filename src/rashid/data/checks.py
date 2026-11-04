@@ -844,9 +844,9 @@ def _check_geoparquet(
     statistics, and spatial ordering (formats.md:30,64,75).
 
     Parquet and GeoParquet share the ``application/vnd.apache.parquet`` media
-    type. A file with no ``geo`` metadata key is plain Parquet — legitimate
-    tabular data — so it is skipped rather than faulted; these rules apply only
-    to actual GeoParquet.
+    type. Native GEOMETRY/GEOGRAPHY columns are spatial even without the
+    required ``geo`` key. Such files fail the GeoParquet declaration check and
+    still run the row-group checks; other files without the key are tabular.
 
     ``subject`` names the file in the message. It defaults to the asset the key
     belongs to; the partition pass passes the matched path instead, since a
@@ -859,10 +859,19 @@ def _check_geoparquet(
         return []
 
     geo = _geo_metadata(parquet)
-    if not isinstance(geo, dict):
-        return []  # plain Parquet or malformed metadata, not parsed GeoParquet — nothing to enforce here
-
     defects: list[DataDefect] = []
+    if geo is None and (primary := _native_geometry(parquet)) is not None:
+        defects.append(
+            DataDefect(
+                DAT_GEOPARQUET_VERSION,
+                Severity.ERROR,
+                f"{subject} is not conformant GeoParquet 2.0: native geometry needs a 'geo' metadata key",
+                key,
+            )
+        )
+        geo = {"version": "2.0", "primary_column": primary}
+    if not isinstance(geo, dict):
+        return []  # plain Parquet or malformed metadata
     defects.extend(_check_geoparquet_version(key, geo, subject=subject))
     meta = parquet.metadata
     row_counts = [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
@@ -910,6 +919,18 @@ def _check_geoparquet_version(
             key,
         )
     ]
+
+
+def _native_geometry(parquet: Any) -> str | None:
+    """The first native GEOMETRY or GEOGRAPHY leaf, without guessing by name."""
+    return next(
+        (
+            parquet.schema.column(i).path
+            for i in range(len(parquet.schema))
+            if parquet.schema.column(i).logical_type.type in {"GEOMETRY", "GEOGRAPHY"}
+        ),
+        None,
+    )
 
 
 @dataclass(frozen=True)
@@ -1315,7 +1336,7 @@ def _check_tabular(
         parquet = files.parquet()
     except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
-    if isinstance(_geo_metadata(parquet), dict):
+    if isinstance(_geo_metadata(parquet), dict) or _native_geometry(parquet) is not None:
         return []  # GeoParquet: the geospatial storage rules own it
     defects: list[DataDefect] = []
     if not _has_table_columns(node, asset):
@@ -1360,7 +1381,7 @@ def _check_vector_columns(
         parquet = files.parquet()
     except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
-    if not isinstance(_geo_metadata(parquet), dict):
+    if not isinstance(_geo_metadata(parquet), dict) and _native_geometry(parquet) is None:
         return []  # plain Parquet: the Tabular Data SHOULDs own it
     if _has_table_columns(node, asset):
         return []
