@@ -44,16 +44,6 @@ Tests use the `unit`, `integration`, and `network` markers. Network tests check 
 
 Set `ENABLE_PRE_PUSH_TESTS=1` to include fast tests in the pre-push hook.
 
-## Mutation testing
-
-Mutation testing checks whether tests catch changes to the code, beyond measuring which lines they run.
-
-```bash
-uv run mutmut run
-```
-
-CI runs mutation tests nightly and checks the score against `.mutation-baseline`, currently 72%. Raise the minimum as tests improve. If you lower it, explain why in the pull request.
-
 ## Measuring performance
 
 Use `scripts/profile.py` for repeatable performance measurements. The seeded scenarios in `tests/scenarios.py` generate the same catalogs on every run. Compare small and large scenarios to see how costs grow with catalog size.

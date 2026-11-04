@@ -655,6 +655,4 @@ def test_the_module_imports_only_the_standard_library() -> None:
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             imported.add(node.module.split(".")[0])
-    # A mutmut sweep runs this test against its mutated copy of the file,
-    # which imports mutmut's trampoline. The real file never imports it.
-    assert imported - {"__future__", "mutmut"} <= sys.stdlib_module_names
+    assert imported - {"__future__"} <= sys.stdlib_module_names

@@ -75,7 +75,6 @@ dev = [
     "bandit>=1.9",
     "pip>=26.1",
     "pip-audit>=2.10",
-    "mutmut>=3.6",
     "trustme>=1.2.1",
 ]
 
@@ -197,7 +196,7 @@ changelog_file = "CHANGELOG.md"
 major_version_zero = true
 
 [tool.codespell]
-skip = ".git,uv.lock,.venv,.mypy_cache,.ruff_cache,.pytest_cache,mutants,.cache"
+skip = ".git,uv.lock,.venv,.mypy_cache,.ruff_cache,.pytest_cache,.cache"
 # "unparseable" is a valid English variant used in rule messages
 ignore-words-list = "unparseable"
 check-filenames = true
@@ -212,22 +211,9 @@ exclude_dirs = ["tests", ".venv"]
 
 [tool.deptry]
 known_first_party = ["rashid"]
-# .claude holds Claude Code worktrees, each with its own .venv. Like mutants,
-# it is generated, not this project's dependency surface.
-exclude = [".venv", "tests", "mutants", ".claude", ".cache"]
+# .claude holds generated Claude Code worktrees, each with its own .venv.
+exclude = [".venv", "tests", ".claude", ".cache"]
 
 [tool.deptry.package_module_name_map]
 # rio-cogeo installs as the `rio_cogeo` import package.
 rio-cogeo = ["rio_cogeo"]
-
-[tool.mutmut]
-source_paths = ["src/rashid/"]
-# mutmut runs the suite from its mutants/ copy, which holds tests/ but not
-# scripts/. tests/unit/test_profile_script.py loads scripts/profile.py by a
-# path relative to the tests directory, so scripts/ must be copied too.
-also_copy = ["scripts/"]
-# --no-cov drops the coverage overhead and the global --cov-fail-under gate
-# from addopts; mutmut 3 runs pytest in-process, so extra args must go here
-# rather than in a `runner` setting (which mutmut 3 ignores).
-pytest_add_cli_args = ["--no-cov", "--tb=short"]
-pytest_add_cli_args_test_selection = ["tests/"]
