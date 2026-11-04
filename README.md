@@ -99,7 +99,7 @@ for finding in report.errors:
     print(finding.message)
 ```
 
-`validate()` uses the same default passes as the command-line interface. Pass settings through the frozen, keyword-only `ValidationOptions` dataclass, for example `validate(path, options=ValidationOptions(schema=True))`. For a URL, `live` is on unless the options set `live=False`. Set `extensions=False` to skip the extension pass.
+`validate()` uses the same default passes as the command-line interface. Pass settings through the frozen, keyword-only `ValidationOptions` dataclass. Use `validate(path, options=ValidationOptions(schema=True))` to enable the profile schema pass. For a URL, `live` is on unless the options set `live=False`. Set `extensions=False` to skip the extension pass.
 
 Use `RulesConfig` to disable rules or change their severity.
 

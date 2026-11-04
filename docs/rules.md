@@ -208,22 +208,22 @@ The [Portolan versioning requirement](https://github.com/portolan-sdi/portolan-s
 
 The rule produces warnings for:
 
-- A predecessor, successor, or latest link that resolves inside the catalog but does not name a readable STAC object.
-- A predecessor without its reciprocal successor, or a successor without its reciprocal predecessor. An unresolved partner link gets its own warning instead.
+- A predecessor, successor, or latest link within the catalog whose target is not a readable STAC object.
+- A missing reciprocal link between a predecessor and successor, unless the partner link has a target that cannot be resolved.
 - A cycle, including a self predecessor or successor.
 - A latest link whose target has a successor in the known version graph.
 - More than one latest link on the same resource, even when the targets are not loaded.
-- A relative history link in a local catalog that does not name an existing file.
+- A relative history link in a local catalog whose target file does not exist.
 
-A version history may be a changelog, catalog, or collection. Branches and merges are allowed. A single version may name itself as latest.
+A version history may be a changelog, catalog, or collection. Branches and merges are allowed. A version may link to itself as latest.
 
-The rule does not require version labels to match IDs or dates, require labels to be unique across a collection, or require unrelated histories to share one head. Deprecation does not change the version graph.
+Version labels need not match IDs or dates and may repeat within a collection. Unrelated histories may have different heads. Deprecation does not change the version graph.
 
-Resolution uses the graph's existing href policy, including absolute STAC links under the language root's published self base. Absolute history documents and targets outside that base need network probes. This metadata rule does not fetch them. If an inverse link cannot be judged, the rule leaves that pair unchecked.
+Resolution uses the graph's existing href policy, including absolute STAC links under the language root's published self base. The metadata rule cannot check absolute history documents or targets outside that base because it does not fetch them. If an inverse link cannot be judged, the rule leaves that pair unchecked.
 
 History-file existence is checked only for local catalogs. A remote crawl mirror omits arbitrary history documents, so their absence from the mirror does not show a broken link.
 
-For remote catalogs, version targets absent from the loaded graph are also left unchecked. Only loaded targets are used to check reciprocity, cycles, and whether latest names a head. The limit of one latest link applies regardless of loaded targets. The rule does not fetch missing targets.
+For remote catalogs, the rule checks reciprocity, cycles, and whether latest points to a head using only targets already loaded in the graph. It enforces the limit of one latest link without fetching missing targets.
 
 `is-version-of` and `has-version` describe an overarching resource rather than predecessor and successor edges. They do not join the version graph.
 

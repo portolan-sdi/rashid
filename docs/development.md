@@ -49,13 +49,13 @@ These gates keep each consolidated concept at its owner ([#266](https://github.c
 | Gate | Enforced boundary |
 |---|---|
 | Ruff `TID251` | URL interpretation belongs to `_href.py`; urllib requests and HTTPStore construction to `_store.py`; JSON loading to `_json.py`; raw readers and glob enumeration to `data/_files.py`. |
-| import-linter | Metadata rules cannot import live checks, the crawler, transport, or the data pass. Only the named data check modules can import `data/_files.py`. |
+| import-linter | Metadata rules cannot import live checks, the crawler, transport, or the data pass. The `data-files-owner` contract lists the modules allowed to import `data/_files.py`. |
 | jscpd 5.2.1 | New Python clones in `src/rashid` and `tests` fail the commit hook. Fixtures and virtual environments are excluded. An empty scan fails. |
-| API snapshot | `test_api.py` pins `rashid.api` and `rashid.__all__`, their defining objects, and callable signatures. Python owns the enum constructor signature. |
+| API snapshot | `test_api.py` pins `rashid.api` and `rashid.__all__`, their defining objects, and callable signatures. Python defines the enum constructor signature. |
 | Registry checks | Duplicate IDs fail registry construction. An AST scan compares emitted IDs with `CHECKS` and checks that pass declarations reuse the ID constants. |
 | Pointer construction | An AST scan rejects hand-built pointers outside `model.py`: f-strings, addition, percent formatting, `.format`, and slash joins. Generic slash prefixes are checked in values assigned or passed as `pointer` or `json_pointer`. |
 | Exemption ledger | `guardrail_exemptions.json` lists every Ruff per-file ignore code (including the #264 signature exemptions), import ignore, allowed file-owner importer, baseline, and strict xfail issue, with reasons. Tests pin their counts and reject stale entries. |
-| Strict xfails | Unresolved defects name an open issue that the PR does not close and use `strict=True`; a fix becomes a failing XPASS until its exemption is removed. Ruff bans imperative `pytest.xfail`, including imported aliases, in tests too. |
+| Strict xfails | Tests for unresolved defects must reference an open issue that the PR does not close and use `strict=True`. After a fix, the test fails with XPASS until its xfail marker is removed. Ruff bans imperative `pytest.xfail`, including imported aliases, in tests too. |
 
 T9 split `data/checks.py` into concern modules. The file-owner contract allows those exact modules, without a package wildcard.
 `_href.py` also owns wire encoding. The rules-to-network contract has no import exemptions.
@@ -82,7 +82,7 @@ uv run python scripts/gate_selftest.py --fault duplicate-block
 
 The script extracts `HEAD` with `git archive`, runs each gate on a clean copy, then injects its fault.
 It checks banned APIs, all three layer contracts, duplication, API exports and signatures, duplicate and missing IDs, pointer variants, baseline growth, loose and bare xfails, CI wiring, and exemption growth.
-The self-test pins its fault count so dropping a case fails. Each fault must produce its specific diagnostic; syntax errors and clean-copy failures fail the self-test. The working tree stays untouched.
+The self-test pins its fault count so dropping a case fails. Each fault must produce its specific diagnostic; syntax errors and clean-copy failures fail the self-test, which runs without modifying the working tree.
 
 ## Measuring performance
 
