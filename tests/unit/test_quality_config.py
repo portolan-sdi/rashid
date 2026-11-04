@@ -95,3 +95,28 @@ def test_jscpd_hook_runs_in_the_ci_commit_stage() -> None:
         "portolan-sdi/portolan-ops/.github/workflows/reusable-python-ci.yml@v1.14.0"
     )
     assert "pytest -n 8" in ci["jobs"]["ci"]["with"]["test-command"]
+
+
+def test_ci_runs_the_gate_selftest_on_linux() -> None:
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    job = ci["jobs"]["guardrail-selftest"]
+    assert job["runs-on"] == "ubuntu-latest"
+    assert not job.get("if")
+    assert not job.get("continue-on-error", False)
+    steps = job["steps"]
+    setup = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("uses", "").startswith("astral-sh/setup-uv@")
+    )
+    install = next(
+        index for index, step in enumerate(steps) if "uv sync --locked" in step.get("run", "")
+    )
+    run = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("run") == "uv run python scripts/gate_selftest.py"
+    )
+    assert setup < install < run
+    assert not steps[run].get("if")
+    assert not steps[run].get("continue-on-error", False)
