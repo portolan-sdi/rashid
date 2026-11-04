@@ -34,9 +34,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 from rashid import _json, _store, _trace
+from rashid._href import crawl_prefix
 from rashid.catalog import ROOT_CATALOG
 
 log = logging.getLogger(__name__)
@@ -99,32 +100,6 @@ class _StoreFetcher:
         return Fetched(status=200, body=body)
 
 
-def is_catalog_url(location: str) -> bool:
-    """True when ``location`` is an https URL rather than a filesystem path."""
-    parsed = urlparse(location)
-    return parsed.scheme.lower() == "https" and bool(parsed.netloc)
-
-
-def split_catalog_url(url: str) -> tuple[str, str]:
-    """``(base, root_url)`` for a catalog URL given either way.
-
-    The URL may name the root ``catalog.json`` or the directory it sits in,
-    with or without a trailing slash; both name the same catalog, as the
-    directory and its ``catalog.json`` do on disk. The base always ends in one
-    slash and the root URL is the base plus ``catalog.json``.
-    """
-    if not is_catalog_url(url):
-        raise ValueError(f"catalog URL must be https, got: {url!r}")
-    parsed = urlparse(url)._replace(query="", fragment="")
-    parsed = parsed._replace(scheme=parsed.scheme.lower(), netloc=parsed.netloc.lower())
-    path = parsed.path
-    if path.endswith(f"/{ROOT_CATALOG.name}") or path == ROOT_CATALOG.name:
-        path = path[: -len(ROOT_CATALOG.name)]
-    path = path.rstrip("/") + "/"
-    base = parsed._replace(path=path).geturl()
-    return base, f"{base}{ROOT_CATALOG.name}"
-
-
 @dataclass
 class Crawl:
     """What a crawl found: every URL asked, and how the tree was assembled.
@@ -157,7 +132,7 @@ def crawl(
     """Fetch the tree under ``base`` into ``dest``, following links from the root.
 
     ``base`` is the directory URL the root ``catalog.json`` sits under, with a
-    trailing slash (see :func:`split_catalog_url`). Every document is written
+    trailing slash (see :func:`rashid._href.split_catalog_url`). Every document is written
     at ``dest / <path under base>``, the path spelled as the hrefs spell it, so
     the graph resolves the same hrefs to the same files. The URL requested,
     and recorded in ``statuses``, is that path percent-encoded, which is the
@@ -247,7 +222,7 @@ def _fetch_one(fetcher: Fetcher, url: str) -> Fetched | str:
 def _write(dest: Path, rel: str, body: bytes) -> str | None:
     """Write ``body`` at ``dest / rel``; the reason when it could not be written.
 
-    ``rel`` was normalized under the base by :func:`_safe_relative`, so the
+    ``rel`` was normalized under the base by :func:`rashid._href.safe_crawl_path`, so the
     containment check should never fail; it exists because the alternative to
     a redundant check is a fetched document written outside the temporary
     tree. The filesystem can still refuse: a directory URL that answered 200
@@ -304,50 +279,12 @@ def _follow_paths(base: str, rel: str, body: bytes) -> list[str]:
         href = link.get("href")
         if not isinstance(href, str) or not href:
             continue
-        path = _under_base(base, directory, href)
+        path = crawl_prefix(base, directory, href)
         # Only a JSON document is followed and written. A child or item link
         # to anything else is not a STAC object; the live pass still HEADs it.
         if path is not None and path.endswith(".json"):
             paths.append(path)
     return paths
-
-
-def _under_base(base: str, directory: str, href: str) -> str | None:
-    """The path under ``base`` that ``href`` names; None when it is not the tree's.
-
-    A relative href joins onto the document's directory. An absolute https
-    href is followed only when it starts with the base — a link to another
-    host is another catalog's business, and the live pass's PORTO-CORE-073
-    scoping says the same. Either way the result is normalized and must stay
-    below the root: a catalog is a hostile input here, and a path that climbs
-    out of the tree would otherwise name where its bytes get written.
-    """
-    parsed = urlparse(href)
-    if parsed.scheme or href.startswith("/"):
-        if parsed.scheme.lower() != "https" or not href.startswith(base):
-            return None
-        candidate = href[len(base) :].split("#", 1)[0].split("?", 1)[0]
-    else:
-        candidate = posixpath.join(directory, href.split("#", 1)[0].split("?", 1)[0])
-    return _safe_relative(candidate)
-
-
-def _safe_relative(candidate: str) -> str | None:
-    """``candidate`` normalized as a path strictly below the root, or None.
-
-    Rejects the root itself, anything that climbs above it, an absolute path,
-    a backslash (a separator on the filesystem the tree is written to, and
-    never legitimate in an href), and any segment that is empty or dots-only
-    after normalization.
-    """
-    if not candidate or "\\" in candidate or "\x00" in candidate:
-        return None
-    rel = posixpath.normpath(candidate)
-    if rel in (".", "..") or rel.startswith(("../", "/")):
-        return None
-    if any(part in ("", ".", "..") for part in rel.split("/")):
-        return None  # pragma: no cover - normpath leaves none; belt and braces
-    return rel
 
 
 __all__ = [
@@ -358,7 +295,5 @@ __all__ = [
     "Fetched",
     "Fetcher",
     "crawl",
-    "is_catalog_url",
-    "split_catalog_url",
     "wire_url",
 ]

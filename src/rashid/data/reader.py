@@ -25,10 +25,10 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import urlparse
 
 from rashid import _store
-from rashid.catalog import CatalogGraph, Node, is_absolute_href
+from rashid._href import is_absolute_href, is_https_href
+from rashid.catalog import CatalogGraph, Node
 from rashid.remote import wire_url
 
 _CHUNK = 1 << 16  # 64 KiB
@@ -77,7 +77,7 @@ class FilesystemHttpReader:
         if not href:
             return None
         if is_absolute_href(href):
-            if urlparse(href).scheme.lower() == "https":
+            if is_https_href(href):
                 return Locator(is_remote=True, source=href)
             return None  # s3/http/file: not browser-fetchable; PTL-AST-002 covers it
         rel = self._graph.resolve_path(node, href)

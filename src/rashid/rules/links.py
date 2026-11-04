@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from rashid.catalog import CatalogGraph, Node, is_absolute_href, self_link_base
+from rashid._href import is_absolute_href
+from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
 from rashid.rules._common import STRUCTURAL_RELS, links_of
@@ -44,38 +45,6 @@ def _icon_links(node: Node) -> Iterable[tuple[int, dict[str, Any]]]:
     for index, link in enumerate(links_of(node)):
         if link.get("rel") == "icon":
             yield index, link
-
-
-def _published_base(node: Node, graph: CatalogGraph) -> str | None:
-    """The URL prefix the tree ``node`` sits in is published under.
-
-    Read from the root ``self`` link of ``node``'s own language tree (see
-    :func:`rashid.catalog.self_link_base`), so a translated tree with its own
-    absolute ``self`` link resolves its own absolute hrefs.
-    """
-    return self_link_base(graph.language_root_of(node))
-
-
-def _resolve_structural_href(
-    node: Node, graph: CatalogGraph, href: str
-) -> tuple[bool, Node | None]:
-    """Resolve a structural href to ``(judgeable, target)``.
-
-    A relative href resolves against the file tree (core.md, Links). An
-    absolute href is judgeable only when the root self link names the
-    published base and the href sits under it; the remainder then resolves
-    from the root. Without that base the pass cannot say what the URL points
-    at, and the caller reports nothing rather than guess.
-    """
-    if not is_absolute_href(href):
-        return True, graph.resolve_link(node, href)
-    base = _published_base(node, graph)
-    if base is None or not href.startswith(base):
-        return False, None
-    root = graph.language_root_of(node)
-    if root is None:  # unreachable: _published_base read a self link off it
-        return False, None
-    return True, graph.resolve_link(root, href[len(base) :])
 
 
 class RequiredLinksRule(Rule):
@@ -134,7 +103,7 @@ class ChildLinkCompletenessRule(Rule):
                 continue
             href = link.get("href")
             if isinstance(href, str) and href:
-                judgeable, target = _resolve_structural_href(node, graph, href)
+                judgeable, target = graph.resolve_structural_link(node, href)
                 if not judgeable:
                     unjudged = True
                 elif target is not None:
@@ -271,7 +240,7 @@ class LinkResolutionRule(Rule):
                     fix_hint="set the link's href to the target's path, e.g. '../catalog.json'",
                 )
                 continue
-            judgeable, target = _resolve_structural_href(node, graph, href)
+            judgeable, target = graph.resolve_structural_link(node, href)
             if not judgeable:
                 # The spec permits absolute structural links, and without a
                 # published base from a root self link this pass cannot say

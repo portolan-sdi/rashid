@@ -13,9 +13,9 @@ from pathlib import Path
 import click
 
 from rashid import ValidationOptions, _trace
+from rashid._href import is_catalog_url
 from rashid.data.reader import LocalOnlyReader
 from rashid.model import Report, Severity
-from rashid.remote import is_catalog_url
 from rashid.runner import validate
 
 _SEVERITY_TAGS = {

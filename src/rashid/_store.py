@@ -66,8 +66,8 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
 from rashid import _trace
+from rashid._href import store_path, url_authority
 from rashid._http import user_agent
-from rashid._url import store_path, url_authority
 
 if TYPE_CHECKING:
     from urllib.request import OpenerDirector

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from rashid import _trace
+from rashid._href import is_catalog_url, split_catalog_url
 from rashid._jsonschema import SchemaError
 from rashid.catalog import ROOT_CATALOG, CatalogGraph
 from rashid.config import RulesConfig
@@ -55,8 +56,6 @@ from rashid.remote import (
     Fetcher,
     FetchError,
     crawl,
-    is_catalog_url,
-    split_catalog_url,
 )
 from rashid.rule import Rule
 from rashid.schema import SCH_INVALID, validate_schema

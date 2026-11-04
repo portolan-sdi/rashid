@@ -73,8 +73,9 @@ from urllib.error import HTTPError
 from urllib.parse import urlparse
 
 from rashid import _store, _trace
+from rashid._href import is_absolute_href
 from rashid._http import user_agent
-from rashid.catalog import CatalogGraph, Kind, Node, is_absolute_href
+from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.model import Finding, Severity
 from rashid.remote import wire_url
 from rashid.rules._common import links_of

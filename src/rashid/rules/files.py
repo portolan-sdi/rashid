@@ -13,7 +13,8 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from rashid.catalog import CatalogGraph, Node, is_absolute_href
+from rashid._href import is_absolute_href
+from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
 from rashid.rules._common import links_of

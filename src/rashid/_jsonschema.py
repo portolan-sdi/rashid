@@ -31,6 +31,7 @@ from importlib import resources
 from typing import TYPE_CHECKING, Any, cast
 
 from rashid import _json, _trace
+from rashid._href import is_schema_url
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 
@@ -70,7 +71,7 @@ def fetch_schema(schema_uri: str) -> dict[str, Any]:
     """
     from rashid import _store
 
-    if not schema_uri.startswith("https://"):
+    if not is_schema_url(schema_uri):
         raise ValueError(f"schema URI must be an https URL, got: {schema_uri!r}")
     _trace.count("schema.fetches")
     log.debug("fetching schema %s", schema_uri)

@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from rashid import _store, _trace
-from rashid._url import object_location
+from rashid._href import object_location
 from rashid.catalog import Node
 from rashid.rules._common import asset_refers_to_self
 from tests._https import HttpsServer, Route

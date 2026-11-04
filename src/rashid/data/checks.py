@@ -74,7 +74,6 @@ from datetime import UTC, datetime, timedelta
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlparse
 
 import pyarrow as pa
 import rasterio
@@ -87,6 +86,7 @@ from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
 from rashid import _json, _trace
+from rashid._href import is_absolute_href
 from rashid._multihash import decode_multihash
 from rashid.catalog import CatalogGraph, Node
 from rashid.data import (
@@ -1855,7 +1855,7 @@ def _partition_files(node: Node) -> list[tuple[str, Path]]:
     pattern = node.data.get("partition:glob")
     if not isinstance(pattern, str) or not pattern.strip():
         return []
-    if urlparse(pattern).scheme or pattern.startswith("/"):
+    if is_absolute_href(pattern):
         return []  # remote or absolute: not listable from here
     normalized = posixpath.normpath(pattern)
     if normalized.startswith(".."):

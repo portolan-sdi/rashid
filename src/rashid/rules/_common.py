@@ -7,8 +7,8 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import quote, urljoin, urlparse, urlsplit
 
-from rashid._url import object_location
-from rashid.catalog import CatalogGraph, Node, is_absolute_href
+from rashid._href import is_absolute_href, object_location
+from rashid.catalog import CatalogGraph, Node
 from rashid.remote import wire_url
 
 # Rels that make the tree navigable; every one carries type requirements and
