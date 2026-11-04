@@ -241,7 +241,7 @@ def _check_tabular(
         parquet = files.parquet()
     except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
-    if isinstance(_geo_metadata(parquet), dict) or _native_geometry(parquet) is not None:
+    if _geo_metadata(parquet) is not None or _native_geometry(parquet) is not None:
         return []  # GeoParquet: the geospatial storage rules own it
     defects: list[DataDefect] = []
     if not has_table_columns(node, asset):
@@ -286,7 +286,8 @@ def _check_vector_columns(
         parquet = files.parquet()
     except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
-    if not isinstance(_geo_metadata(parquet), dict) and _native_geometry(parquet) is None:
+    geo = _geo_metadata(parquet)
+    if isinstance(geo, _MalformedGeo) or (geo is None and _native_geometry(parquet) is None):
         return []  # plain Parquet: the Tabular Data SHOULDs own it
     if has_table_columns(node, asset):
         return []
