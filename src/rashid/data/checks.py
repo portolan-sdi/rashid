@@ -77,7 +77,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 import rasterio
 import shapely
 from pyproj import CRS, Transformer
@@ -110,6 +109,7 @@ from rashid.data import (
     DAT_VECTOR_COLUMNS,
     DataDefect,
 )
+from rashid.data._files import _AssetFiles, _parquet_file
 from rashid.data.reader import AssetReader, Locator
 from rashid.model import Severity
 from rashid.rules._common import asset_refers_to_self
@@ -250,84 +250,6 @@ class _Wgs84Bounds:
 
 
 log = logging.getLogger(__name__)
-
-
-def _parquet_file(source: Any) -> Any:
-    """``pq.ParquetFile(source)``, counted. Each open reads and parses the footer."""
-    _trace.count("parquet.opens")
-    return pq.ParquetFile(source)
-
-
-def _raster_open(path: str) -> Any:
-    """``rasterio.open(path)``, counted. Each open reads the TIFF header."""
-    _trace.count("raster.opens")
-    return rasterio.open(path)
-
-
-class _AssetFiles:
-    """One asset's open Parquet file and raster dataset, shared by its checks.
-
-    Each check used to open the asset itself, so a GeoParquet footer was read
-    three times and a COG header four (#224). On a remote asset each open is
-    its own round of range requests. Here the first check to ask opens the
-    file and the rest reuse it.
-
-    An open that fails is remembered too, and every later call raises the same
-    exception object. Each check keeps its own ``except`` branch, so a check
-    reports what it reported when it opened the file itself, down to the
-    exception text in the message. The traceback is dropped before each raise,
-    so it does not grow by one check's frames per raise.
-
-    The raster dataset is opened by whoever asks first, under the GDAL
-    environment active at that moment. Callers read it under
-    ``rasterio.Env(GDAL_PAM_ENABLED="NO")``, since GTiff loads PAM lazily.
-    """
-
-    def __init__(self, located: Locator) -> None:
-        self.located = located
-        self._parquet: Any = None
-        self._parquet_error: Exception | None = None
-        self._handle: Any = None
-        self._raster: Any = None
-        self._raster_error: Exception | None = None
-
-    def parquet(self) -> Any:
-        if self._parquet_error is not None:
-            raise self._parquet_error.with_traceback(None)
-        if self._parquet is None:
-            try:
-                source: Any = self.located.source
-                if self.located.is_remote:
-                    source = self._handle = self.located.open_binary()
-                self._parquet = _parquet_file(source)
-            except Exception as exc:
-                self._parquet_error = exc
-                raise
-        return self._parquet
-
-    def raster(self) -> Any:
-        if self._raster_error is not None:
-            raise self._raster_error.with_traceback(None)
-        if self._raster is None:
-            try:
-                self._raster = _raster_open(self.located.gdal_path())
-            except Exception as exc:
-                self._raster_error = exc
-                raise
-        return self._raster
-
-    def close(self) -> None:
-        # One close that raises must not leave the other handles open.
-        with contextlib.ExitStack() as stack:
-            for opened in (self._handle, self._parquet, self._raster):
-                if opened is not None:
-                    stack.callback(opened.close)
-
-    def __enter__(self) -> _AssetFiles:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
 
 
 def check_node(

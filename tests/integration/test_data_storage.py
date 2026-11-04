@@ -23,6 +23,7 @@ pytest.importorskip("rio_cogeo")
 import pyarrow.parquet as pq
 from click.testing import CliRunner
 
+import rashid.data._files as file_owner
 import rashid.data.checks as checks
 from rashid.catalog import Node
 from rashid.cli import main
@@ -174,7 +175,7 @@ def test_many_row_groups_use_only_footer_for_ordering(
         def read(self, *_args: object, **_kwargs: object) -> None:
             raise AssertionError("PTL-DAT-006 read row data")
 
-    monkeypatch.setattr(checks.pq, "ParquetFile", lambda source: _FooterOnlyParquet())
+    monkeypatch.setattr(file_owner.pq, "ParquetFile", lambda source: _FooterOnlyParquet())
 
     assert _gpq(path) == []
 
@@ -203,7 +204,7 @@ def test_footer_shortcut_reads_rows_when_covering_values_are_null(
             reads += 1
             return parquet.read(*args, **kwargs)
 
-    monkeypatch.setattr(checks.pq, "ParquetFile", lambda source: _TrackedParquet())
+    monkeypatch.setattr(file_owner.pq, "ParquetFile", lambda source: _TrackedParquet())
     assert _gpq(path) == []
     assert reads == 1
 
