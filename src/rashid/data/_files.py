@@ -117,7 +117,5 @@ def _partition_files(base: Path, pattern: str) -> list[tuple[str, Path]]:
     The caller owns href applicability and containment; this owner performs
     filesystem enumeration only.
     """
-    matches = sorted(
-        match.replace("\\", "/") for match in globmodule.glob(pattern, root_dir=str(base))
-    )
-    return [(match, base / match) for match in matches]
+    matches = sorted(globmodule.glob(pattern, root_dir=str(base)))
+    return [(Path(match).as_posix(), base / match) for match in matches]

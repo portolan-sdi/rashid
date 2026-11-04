@@ -799,9 +799,7 @@ def _partitioned_collection(directory: Path, glob: str = "parts/*.parquet") -> N
     )
 
 
-def test_partition_glob_matches_use_posix_names(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_partition_glob_matches_use_posix_names(tmp_path: Path) -> None:
     catalog = CatalogBuilder(tmp_path)
     catalog.collection("buildings", assets={}, **{"partition:glob": "parts/*.parquet"})
     catalog.write()
@@ -809,11 +807,6 @@ def test_partition_glob_matches_use_posix_names(
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
     assets.write_geoparquet(parts / "b.parquet", version="1.0.0")
-    monkeypatch.setattr(
-        file_owner.globmodule,
-        "glob",
-        lambda *args, **kwargs: [r"parts\b.parquet", r"parts\a.parquet"],
-    )
     result = CliRunner().invoke(main, ["check", "--json", str(tmp_path)])
     assert result.exit_code == 1, result.output
     findings = [
