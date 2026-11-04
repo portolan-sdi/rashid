@@ -106,7 +106,8 @@ def _noisy(catalog: CatalogBuilder, count: int) -> Path:
     the subcatalog fan-out warning, for one finding more.
     """
     for index in range(count):
-        catalog.collection(f"roads_{index}", title=f"road_centerlines_{index}")
+        collection = catalog.collection(f"roads_{index}", title=f"Road centerlines {index}")
+        collection.overrides["title"] = f"road_centerlines_{index}"
     return catalog.write()
 
 
