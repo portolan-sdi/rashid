@@ -316,7 +316,7 @@ def test_consistency_skips_the_bbox_it_cannot_reproject(monkeypatch: pytest.Monk
     located = Locator(is_remote=False, source="unused")
     files = _AssetFiles(located)
 
-    defects, _bounds = checks._check_consistency(
+    defects, _bounds, _complete = checks._check_consistency(
         _item(_asset()),
         key="data",
         asset=_asset(),
@@ -472,7 +472,7 @@ def test_consistency_unreadable_is_info() -> None:
     node = _item(_asset())
     located = Locator(is_remote=False, source="/no/such/file.parquet")
     files = _AssetFiles(located)
-    defects, _bounds = checks._check_consistency(
+    defects, _bounds, _complete = checks._check_consistency(
         node, key="data", asset=_asset(), expected="parquet", files=files
     )
     assert [d.rule_id for d in defects] == [DAT_CONSISTENCY]

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._https import HttpsServer
 from tests.conftest import CatalogBuilder
 from tests.integration import _data_assets as assets
 from tests.integration._owner_catalog import _catalog, _declare, _findings
@@ -87,3 +88,92 @@ def test_collection_extent_matches_the_asset_union(
     document["extent"]["spatial"]["bbox"] = [[4.005, 50, boxes[-1][2], boxes[-1][3]]]
     metadata.write_text(json.dumps(document))
     assert not _findings(tmp_path, "PTL-DAT-005")
+
+
+def test_collection_extent_with_skipped_remote_asset(
+    tmp_path: Path, https_server: HttpsServer
+) -> None:
+    """Local scope cannot conclude that an incomplete union is too small."""
+    import json
+
+    from click.testing import CliRunner
+
+    from rashid.cli import main
+    from tests._https import Route
+
+    directory = _catalog(tmp_path, extent={"spatial": {"bbox": [[0, 0, 2, 1]]}})
+    assets.write_geoparquet(directory / "west.parquet", points=[(0, 0), (1, 1)])
+    assets.write_geoparquet(directory / "east.parquet", points=[(1, 0), (2, 1)])
+    _declare(directory, ["west.parquet", "east.parquet"])
+    path = directory / "collection.json"
+    document = json.loads(path.read_text())
+    document["assets"]["east.parquet"]["href"] = https_server.url("east.parquet")
+    path.write_text(json.dumps(document))
+    https_server.routes["/east.parquet"] = Route(body=(directory / "east.parquet").read_bytes())
+
+    for extent in ([0, 0, 2, 1], [0, 0, 0.5, 1], [0, 0, 3, 1]):
+        document["extent"]["spatial"]["bbox"] = [extent]
+        path.write_text(json.dumps(document))
+        for scope in ("local", "all"):
+            result = CliRunner().invoke(
+                main, ["check", "--json", "--data-scope", scope, str(tmp_path)]
+            )
+            assert result.exit_code in (0, 1), result.output
+            findings = [
+                finding
+                for finding in json.loads(result.output)["findings"]
+                if finding["rule_id"] == "PTL-DAT-005"
+            ]
+            expected = extent[2] < 1 or (scope == "all" and extent[2] > 2)
+            assert len(findings) == int(expected), (scope, extent, findings)
+
+
+@pytest.mark.parametrize("scope", ["all", "local"])
+def test_collection_extent_ignores_readable_nonspatial_parquet(tmp_path: Path, scope: str) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from tests.integration.test_href_behavior import _check
+
+    directory = _catalog(tmp_path, extent={"spatial": {"bbox": [[0, 0, 3, 1]]}})
+    assets.write_geoparquet(directory / "spatial.parquet", points=[(0, 0), (1, 1)])
+    pq.write_table(pa.table({"value": [1, 2]}), directory / "table.parquet")
+    _declare(directory, ["spatial.parquet", "table.parquet"])
+    report = _check(tmp_path, "--data-scope", scope)
+    findings = [f for f in report["findings"] if f["rule_id"] == "PTL-DAT-005"]
+    assert len(findings) == 1
+    assert findings[0]["json_pointer"] == "/extent/spatial/bbox/0"
+    assert "asset union" in findings[0]["message"]
+
+
+@pytest.mark.parametrize("scope", ["all", "local"])
+def test_collection_extent_with_geoparquet_without_bbox(tmp_path: Path, scope: str) -> None:
+    import json
+
+    import pyarrow.parquet as pq
+
+    from tests.conftest import mutate_json
+    from tests.integration.test_href_behavior import _check
+
+    directory = _catalog(tmp_path, extent={"spatial": {"bbox": [[0, 0, 2, 1]]}})
+    assets.write_geoparquet(directory / "west.parquet", points=[(0, 0), (1, 1)])
+    east = directory / "east.parquet"
+    assets.write_geoparquet(east, points=[(1, 0), (2, 1)])
+    table = pq.read_table(east)
+    metadata = dict(table.schema.metadata)
+    geo = json.loads(metadata[b"geo"])
+    del geo["columns"][geo["primary_column"]]["bbox"]
+    metadata[b"geo"] = json.dumps(geo).encode()
+    pq.write_table(table.replace_schema_metadata(metadata), east)
+    _declare(directory, ["west.parquet", "east.parquet"])
+
+    for extent, expected in (([0, 0, 2, 1], 0), ([0, 0, 0.5, 1], 1)):
+        mutate_json(
+            directory / "collection.json",
+            lambda d, extent=extent: d["extent"]["spatial"].update(bbox=[extent]),
+        )
+        report = _check(tmp_path, "--data-scope", scope)
+        findings = [f for f in report["findings"] if f["rule_id"] == "PTL-DAT-005"]
+        assert len(findings) == expected, (scope, extent, findings)
+        if findings:
+            assert findings[0]["json_pointer"] == "/extent/spatial/bbox/0"

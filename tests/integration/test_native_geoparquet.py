@@ -72,3 +72,25 @@ def test_native_geometry_requires_geo_and_still_checks_groups(
     plain = pa.table({"value": [1, 2]})
     pq.write_table(plain, path)
     assert not _findings(tmp_path, "PTL-DAT-012")
+
+
+@pytest.mark.parametrize("scope", ["all", "local"])
+@pytest.mark.parametrize("spherical", [False, True])
+def test_collection_extent_with_native_geometry_without_geo(
+    tmp_path: Path, scope: str, spherical: bool
+) -> None:
+    from tests.integration.test_href_behavior import _check
+
+    directory = _catalog(tmp_path, extent={"spatial": {"bbox": [[0, 0, 2, 1]]}})
+    for start, name in ((0, "west"), (1, "east")):
+        assets.write_geoparquet(directory / f"{name}.parquet", points=[(start, 0), (start + 1, 1)])
+    east = directory / "east.parquet"
+    table = pq.read_table(east)
+    geometry = pa.ExtensionArray.from_storage(
+        _WKB(spherical), table.column("geometry").combine_chunks()
+    )
+    pq.write_table(table.set_column(0, "geometry", geometry).replace_schema_metadata(None), east)
+    _declare(directory, ["west.parquet", "east.parquet"])
+
+    report = _check(tmp_path, "--data-scope", scope)
+    assert not [f for f in report["findings"] if f["rule_id"] == "PTL-DAT-005"]

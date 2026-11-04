@@ -656,8 +656,11 @@ def _bbox_overlaps(a: tuple[float, ...], b: tuple[float, ...]) -> bool:
 def _geo_from_parquet(files: _AssetFiles) -> _Geo | None:
     parquet = files.parquet()
     geo = _geo_metadata(parquet)
+    if geo is None and _native_geometry(parquet) is None:
+        return None
     if geo is None or isinstance(geo, _MalformedGeo):
-        return None  # _check_geoparquet owns the malformed-metadata INFO
+        # The GeoParquet checks report missing or malformed spatial metadata.
+        return _Geo(bbox=None, epsg=None, crs=None)
     primary = geo.get("primary_column")
     column = geo.get("columns", {}).get(primary, {})
     bbox = column.get("bbox")

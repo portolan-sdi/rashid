@@ -144,22 +144,33 @@ def check_node(
     """
     results = _DataResults()
     bounds: list[_Wgs84Bounds] = []
+    extent_complete = True
     schemas, partitions, total = _check_partitions(node, reader)
     results.extend(schemas)
     results.extend(partitions, partition_total=total)
     for _pointer, key, asset in assets_of(node):
         href = asset.get("href")
         if not isinstance(href, str) or not href:
+            media_type = asset.get("type")
+            spatial = (
+                not is_source_asset(asset)
+                and isinstance(media_type, str)
+                and _expected_format(media_type) in {"parquet", "tiff", "pmtiles"}
+            )
+            extent_complete = extent_complete and not spatial
             continue  # PTL-AST-001 reports a missing href
         if asset_refers_to_self(node, href, graph):
             continue  # PTL-AST-003 requires both file metadata fields to be absent
         log.debug("data: %s asset %r: %s", node.path, key, href)
         with _trace.span("data.asset"):
-            defects, actual = _check_asset(node, key=key, asset=asset, reader=reader, graph=graph)
+            defects, actual, complete = _check_asset(
+                node, key=key, asset=asset, reader=reader, graph=graph
+            )
             results.extend(defects)
+            extent_complete = extent_complete and complete
             if actual is not None:
                 bounds.append(actual)
-    results.extend(_check_collection_extent(node, bounds))
+    results.extend(_check_collection_extent(node, bounds, complete=extent_complete))
     return results.build()
 
 
@@ -170,7 +181,7 @@ def _check_asset(
     asset: dict[str, Any],
     reader: AssetReader,
     graph: CatalogGraph | None = None,
-) -> tuple[list[DataDefect], _Wgs84Bounds | None]:
+) -> tuple[list[DataDefect], _Wgs84Bounds | None, bool]:
     href = asset["href"]
     _trace.count("data.assets")
     defects: list[DataDefect] = []
@@ -187,8 +198,13 @@ def _check_asset(
         # Shapefile or a GeoPackage as often as not, so judging it as a COG or
         # a GeoParquet would fail it for being what it says it is. Its bytes
         # are still checksum/size/format-verified above.
-        return defects, None
+        return (
+            defects,
+            None,
+            is_source_asset(asset) or expected not in {"parquet", "tiff", "pmtiles"},
+        )
     bounds = None
+    complete = True
     gdal_env = rasterio.Env(**_REMOTE_GDAL) if located.is_remote else contextlib.nullcontext()
     with gdal_env, _AssetFiles(located) as files:
         if is_mirror_asset(asset):
@@ -206,11 +222,11 @@ def _check_asset(
             defects.extend(_check_tabular(node, key, asset, files))
             defects.extend(_check_vector_columns(node, key, asset, files))
         if expected in {"parquet", "tiff", "pmtiles"}:
-            consistency, bounds = _check_consistency(
+            consistency, bounds, complete = _check_consistency(
                 node, key=key, asset=asset, expected=expected, files=files
             )
             defects.extend(consistency)
-    return defects, bounds
+    return defects, bounds, complete
 
 
 def _check_consistency(
@@ -220,13 +236,13 @@ def _check_consistency(
     asset: dict[str, Any],
     expected: str,
     files: _AssetFiles,
-) -> tuple[list[DataDefect], _Wgs84Bounds | None]:
+) -> tuple[list[DataDefect], _Wgs84Bounds | None, bool]:
     try:
         geo = _extract_geo(expected, files)
     except Exception as exc:  # unreadable header is advisory, not fatal
-        return [_unreadable_spatial_metadata(key, exc)], None
+        return [_unreadable_spatial_metadata(key, exc)], None, False
     if geo is None:
-        return [], None
+        return [], None, expected == "parquet"
 
     defects: list[DataDefect] = []
     declared_epsg = _declared_epsg(node, asset)
@@ -243,7 +259,7 @@ def _check_consistency(
     ):
         message = _bbox_mismatch_message(key, declared_bbox, bounds, geo.epsg)
         defects.append(DataDefect(DAT_CONSISTENCY, Severity.WARNING, message, key))
-    return defects, bounds
+    return defects, bounds, bounds is not None
 
 
 # --- spatial extraction ----------------------------------------------------

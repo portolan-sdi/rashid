@@ -88,13 +88,19 @@ def _unreadable_spatial_metadata(
     )
 
 
-def _check_collection_extent(node: Node, bounds: list[_Wgs84Bounds]) -> list[DataDefect]:
+def _check_collection_extent(
+    node: Node, bounds: list[_Wgs84Bounds], *, complete: bool = True
+) -> list[DataDefect]:
     declared = _declared_bbox(node)
     if node.kind != "collection" or not bounds or declared is None:
         return []
     inners = [box.inner for box in bounds if box.inner is not None]
+    outers = [box.outer for box in bounds]
+    if not complete:
+        # Unread assets can extend the union; only its known inner bound can contradict the extent.
+        outers.append(declared)
     union = _Wgs84Bounds(
-        outer=list(_bbox_union([box.outer for box in bounds])),
+        outer=list(_bbox_union(outers)),
         inner=list(_bbox_union(inners)) if inners else None,
         reprojected=any(box.reprojected for box in bounds),
     )
