@@ -18,7 +18,7 @@ authors = [{ name = "Portolan contributors" }]
 #
 # Floors stay at releases that resolved on Python 3.10, the previous minimum.
 # Raising them is a separate change. pyarrow is the exception: 21 is the
-# oldest release whose reader exposes native GeospatialStatistics (checks._native_bboxes
+# oldest release whose reader exposes native GeospatialStatistics (geoparquet._native_bboxes
 # feature-detects it either way), and consumers cap pyarrow below 25 over an
 # abseil ABI break, so a >=25 floor would make rashid uninstallable next to them
 # (#36; also fixed on main by #49 — the floors agree whichever merges first).

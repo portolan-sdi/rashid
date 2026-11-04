@@ -27,7 +27,7 @@ from pyproj import CRS, Transformer
 import rashid.data.checks as checks
 from rashid import _trace
 from rashid.catalog import Node
-from rashid.data import DataDefect, _DataResults, spatial, storage
+from rashid.data import DataDefect, _DataResults, geoparquet, spatial, storage
 from rashid.data._files import _AssetFiles
 from rashid.data.reader import Locator
 from rashid.model import Severity
@@ -465,7 +465,7 @@ def test_geo_from_parquet_without_geo_metadata(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     pq.write_table(pa.table({"value": [1, 2, 3]}), path)
     files = _AssetFiles(Locator(is_remote=False, source=str(path)))
-    assert checks._geo_from_parquet(files) is None
+    assert geoparquet._geo_from_parquet(files) is None
 
 
 def test_consistency_unreadable_is_info() -> None:
@@ -525,12 +525,12 @@ def test_unreadable_parquet_opens_once_and_reports_as_before(tmp_path: Path) -> 
 
 def test_spatial_ordering_low_overlap() -> None:
     disjoint = [(0.0, 0.0, 1.0, 1.0), (2.0, 2.0, 3.0, 3.0), (4.0, 4.0, 5.0, 5.0)]
-    assert checks._is_spatially_ordered(disjoint)
+    assert geoparquet._is_spatially_ordered(disjoint)
 
 
 def test_spatial_ordering_high_overlap_fails() -> None:
     piled = [(0.0, 0.0, 5.0, 5.0)] * 4
-    assert not checks._is_spatially_ordered(piled)
+    assert not geoparquet._is_spatially_ordered(piled)
 
 
 def test_spatial_ordering_high_locality_despite_overlap() -> None:
@@ -538,9 +538,9 @@ def test_spatial_ordering_high_locality_despite_overlap() -> None:
     # fraction of the extent, so the locality criterion carries the ordering.
     boxes = [(float(i), 0.0, float(i) + 2.0, 1.0) for i in range(10)]
     assert not all(  # sanity: neighbours really do overlap
-        not checks._bbox_overlaps(boxes[i], boxes[i + 1]) for i in range(len(boxes) - 1)
+        not geoparquet._bbox_overlaps(boxes[i], boxes[i + 1]) for i in range(len(boxes) - 1)
     )
-    assert checks._is_spatially_ordered(boxes)
+    assert geoparquet._is_spatially_ordered(boxes)
 
 
 def test_spatial_ordering_needs_a_skippable_layout() -> None:
@@ -548,7 +548,7 @@ def test_spatial_ordering_needs_a_skippable_layout() -> None:
     # and each box covers nearly the whole extent, so a reader skips none of
     # them and neither criterion carries the file.
     spanning = [(0.0, 0.0, 10.0, 10.0)] + [(0.05 * i, 0.05 * i, 10.0, 10.0) for i in range(1, 5)]
-    assert not checks._is_spatially_ordered(spanning)
+    assert not geoparquet._is_spatially_ordered(spanning)
 
 
 def test_spatial_ordering_holds_the_flat_locality_limit() -> None:
@@ -558,13 +558,13 @@ def test_spatial_ordering_holds_the_flat_locality_limit() -> None:
     # thin file outright rather than judging it against a softened threshold.
     wide = [(1.625 * i, 0.0, 1.625 * i + 3.5, 10.0) for i in range(5)]
     extent = spatial._bbox_union(wide)
-    ratio = sum(checks._bbox_area(b) for b in wide) / len(wide) / checks._bbox_area(extent)
+    ratio = sum(geoparquet._bbox_area(b) for b in wide) / len(wide) / geoparquet._bbox_area(extent)
     assert ratio == pytest.approx(0.35)
-    assert not checks._is_spatially_ordered(wide)
+    assert not geoparquet._is_spatially_ordered(wide)
 
 
 def test_spatial_ordering_zero_extent_is_ordered() -> None:
-    assert checks._is_spatially_ordered([(1.0, 1.0, 1.0, 1.0), (1.0, 1.0, 1.0, 1.0)])
+    assert geoparquet._is_spatially_ordered([(1.0, 1.0, 1.0, 1.0), (1.0, 1.0, 1.0, 1.0)])
 
 
 @pytest.mark.parametrize(
@@ -586,9 +586,9 @@ def test_is_source(roles: object, expected: bool) -> None:
 
 
 def test_bbox_helpers() -> None:
-    assert checks._bbox_area((0.0, 0.0, 2.0, 3.0)) == 6.0
-    assert checks._bbox_overlaps((0.0, 0.0, 2.0, 2.0), (1.0, 1.0, 3.0, 3.0))
-    assert not checks._bbox_overlaps((0.0, 0.0, 1.0, 1.0), (2.0, 2.0, 3.0, 3.0))
+    assert geoparquet._bbox_area((0.0, 0.0, 2.0, 3.0)) == 6.0
+    assert geoparquet._bbox_overlaps((0.0, 0.0, 2.0, 2.0), (1.0, 1.0, 3.0, 3.0))
+    assert not geoparquet._bbox_overlaps((0.0, 0.0, 1.0, 1.0), (2.0, 2.0, 3.0, 3.0))
     assert spatial._bbox_union([(0.0, 1.0, 2.0, 3.0), (-1.0, 0.0, 1.0, 5.0)]) == (
         -1.0,
         0.0,
@@ -663,7 +663,7 @@ def _covering(bbox: object) -> dict[str, object]:
 
 def test_bbox_struct_reads_the_covering_declaration() -> None:
     geo = _covering({corner: ["bbox", corner] for corner in ("xmin", "ymin", "xmax", "ymax")})
-    assert checks._bbox_struct(_FakeParquet("bbox"), geo) == (
+    assert geoparquet._bbox_struct(_FakeParquet("bbox"), geo) == (
         "bbox",
         ["xmin", "ymin", "xmax", "ymax"],
     )
@@ -688,7 +688,7 @@ def test_bbox_struct_reads_the_covering_declaration() -> None:
     ],
 )
 def test_unusable_covering_declaration_yields_no_bbox_column(geo: dict[str, object]) -> None:
-    assert checks._bbox_struct(_FakeParquet("bbox"), geo) is None
+    assert geoparquet._bbox_struct(_FakeParquet("bbox"), geo) is None
 
 
 @pytest.mark.parametrize(
@@ -701,7 +701,7 @@ def test_unusable_covering_declaration_yields_no_bbox_column(geo: dict[str, obje
 )
 def test_bbox_column_values(row: object, expected: object) -> None:
     table = _FakeTable([row])
-    assert checks._bbox_column_values(table, ("bbox", ["xmin", "ymin", "xmax", "ymax"])) == [
+    assert geoparquet._bbox_column_values(table, ("bbox", ["xmin", "ymin", "xmax", "ymax"])) == [
         expected
     ]
 
