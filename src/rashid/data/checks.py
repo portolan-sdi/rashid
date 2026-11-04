@@ -69,7 +69,7 @@ import math
 import posixpath
 import re
 import struct
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -263,6 +263,7 @@ def check_node(
     is skipped.
     """
     results = _DataResults()
+    bounds: list[_Wgs84Bounds] = []
     with _FileCache() as cache:
         results.extend(_check_partition_schemas(node, cache))
         partitions, total = _check_partition_geoparquet(node, reader, cache)
@@ -275,9 +276,11 @@ def check_node(
                 continue  # PTL-AST-003 requires both file metadata fields to be absent
             log.debug("data: %s asset %r: %s", node.path, key, href)
             with _trace.span("data.asset"):
-                results.extend(
-                    _check_asset(node, entry=(key, asset), reader=reader, graph=graph, cache=cache)
-                )
+                defects, actual = _check_asset(node, entry=(key, asset), reader=reader, graph=graph, cache=cache)
+                results.extend(defects)
+                if actual is not None:
+                    bounds.append(actual)
+    results.extend(_check_collection_extent(node, bounds))
     return results.build()
 
 
@@ -295,7 +298,7 @@ def _check_asset(
     reader: AssetReader,
     graph: CatalogGraph | None = None,
     cache: _FileCache,
-) -> list[DataDefect]:
+) -> tuple[list[DataDefect], _Wgs84Bounds | None]:
     key, asset = entry
     href = asset["href"]
     _trace.count("data.assets")
@@ -313,7 +316,8 @@ def _check_asset(
         # Shapefile or a GeoPackage as often as not, so judging it as a COG or
         # a GeoParquet would fail it for being what it says it is. Its bytes
         # are still checksum/size/format-verified above.
-        return defects
+        return defects, None
+    bounds = None
     gdal_env = rasterio.Env(**_REMOTE_GDAL) if located.is_remote else contextlib.nullcontext()
     with gdal_env:
         files = cache.get(located)
@@ -332,10 +336,11 @@ def _check_asset(
             defects.extend(_check_tabular(node, key, asset, files))
             defects.extend(_check_vector_columns(node, key, asset, files))
         if expected in {"parquet", "tiff", "pmtiles"}:
-            defects.extend(
-                _check_consistency(node, key=key, asset=asset, expected=expected, files=files)
+            consistency, bounds = _check_consistency(
+                node, key=key, asset=asset, expected=expected, files=files
             )
-    return defects
+            defects.extend(consistency)
+    return defects, bounds
 
 
 def _is_source(asset: dict[str, Any]) -> bool:
@@ -751,7 +756,7 @@ def _check_consistency(
     asset: dict[str, Any],
     expected: str,
     files: _AssetFiles,
-) -> list[DataDefect]:
+) -> tuple[list[DataDefect], _Wgs84Bounds | None]:
     try:
         geo = _extract_geo(expected, files)
     except Exception as exc:  # unreadable header is advisory, not fatal
@@ -762,9 +767,9 @@ def _check_consistency(
                 f"asset '{key}' spatial metadata could not be read ({exc})",
                 key,
             )
-        ]
+        ], None
     if geo is None:
-        return []
+        return [], None
 
     defects: list[DataDefect] = []
     declared_epsg = _declared_epsg(node, asset)
@@ -773,10 +778,39 @@ def _check_consistency(
 
     declared_bbox = _declared_bbox(node)
     bounds = _wgs84_bounds(geo)
-    if declared_bbox is not None and bounds is not None and not _bbox_within(declared_bbox, bounds):
+    if (
+        node.kind != "collection"
+        and declared_bbox is not None
+        and bounds is not None
+        and not _bbox_within(declared_bbox, bounds)
+    ):
         message = _bbox_mismatch_message(key, declared_bbox, bounds, geo.epsg)
         defects.append(DataDefect(DAT_CONSISTENCY, Severity.WARNING, message, key))
-    return defects
+    return defects, bounds
+
+
+def _check_collection_extent(node: Node, bounds: list[_Wgs84Bounds]) -> list[DataDefect]:
+    declared = _declared_bbox(node)
+    if node.kind != "collection" or not bounds or declared is None:
+        return []
+    inners = [box.inner for box in bounds if box.inner is not None]
+    union = _Wgs84Bounds(
+        outer=list(_bbox_union([box.outer for box in bounds])),
+        inner=list(_bbox_union(inners)) if inners else None,
+        reprojected=any(box.reprojected for box in bounds),
+    )
+    if _bbox_within(declared, union):
+        return []
+    return [
+        DataDefect(
+            DAT_CONSISTENCY,
+            Severity.WARNING,
+            f"collection '{node.id}' declared bbox {_fmt_bbox(declared)} is inconsistent with "
+            f"its asset union {_fmt_bbox(union.outer)}",
+            "",
+            json_pointer="/extent/spatial/bbox/0",
+        )
+    ]
 
 
 def _epsg_defect(node: Node, key: str, declared: _EpsgDeclaration, actual: int) -> DataDefect:
@@ -1775,7 +1809,7 @@ def _bbox_overlaps(a: tuple[float, ...], b: tuple[float, ...]) -> bool:
 
 
 def _bbox_union(
-    bboxes: list[tuple[float, float, float, float]],
+    bboxes: Sequence[Sequence[float]],
 ) -> tuple[float, float, float, float]:
     return (
         min(b[0] for b in bboxes),
