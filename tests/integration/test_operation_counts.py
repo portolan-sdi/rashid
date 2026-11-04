@@ -12,6 +12,7 @@ and that one-time cost would make the counts depend on test order.
 
 from __future__ import annotations
 
+import sys
 import tracemalloc
 from collections import Counter
 from collections.abc import Callable
@@ -108,6 +109,10 @@ def _remote_data_run(
         return target.server.seen(), target.server.peak_in_flight(), report.findings
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="GDAL's Schannel backend cannot check revocation for the local trustme CA certificates",
+)
 def test_remote_data_requests_per_asset(cache_dir: Path) -> None:
     """Each remote asset costs a fixed number of requests, whatever GDAL defaults to.
 
@@ -161,6 +166,10 @@ def _data_findings(findings: list[Finding]) -> list[tuple[object, ...]]:
     ]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="GDAL's Schannel backend cannot check revocation for the local trustme CA certificates",
+)
 def test_remote_data_raster_open_retries_a_throttled_request(cache_dir: Path) -> None:
     """GDAL retries a 503, so a throttling host does not make a valid COG broken.
 
@@ -178,6 +187,10 @@ def test_remote_data_raster_open_retries_a_throttled_request(cache_dir: Path) ->
     assert len(gdal) >= 3  # two refused, then the one that succeeded
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="GDAL's Schannel backend cannot check revocation for the local trustme CA certificates",
+)
 def test_remote_data_findings_match_local(cache_dir: Path) -> None:
     """Serving the assets over HTTPS changes no data-pass finding."""
     pytest.importorskip("pyarrow")

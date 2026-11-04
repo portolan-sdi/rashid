@@ -20,7 +20,7 @@ import time
 import tracemalloc
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 import pytest
 
@@ -346,9 +346,10 @@ def test_meta_holds_version_run_id_timings_counters_and_rss() -> None:
     json.dumps(meta)
 
 
-def test_chrome_trace_has_complete_events_and_thread_names(tmp_path: Path) -> None:
+@pytest.mark.parametrize("path", [Path("a/b"), PurePosixPath("a/b"), PureWindowsPath("a/b")])
+def test_chrome_trace_has_complete_events_and_thread_names(tmp_path: Path, path: PurePath) -> None:
     _trace.enable("on")
-    with _trace.span("outer", path=Path("a/b")):
+    with _trace.span("outer", path=path):
 
         def work() -> None:
             with _trace.span("worker"):
@@ -367,7 +368,7 @@ def test_chrome_trace_has_complete_events_and_thread_names(tmp_path: Path) -> No
     assert named == {"pool-1", threading.current_thread().name}
     outer = next(e for e in complete if e["name"] == "outer")
     assert outer["cat"] == "rashid"
-    assert outer["args"] == {"path": "a/b"}
+    assert outer["args"] == {"path": str(path)}
     assert outer["dur"] > 0
     assert outer["ts"] >= 0
 
