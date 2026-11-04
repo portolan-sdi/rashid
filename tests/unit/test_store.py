@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import ssl
 from datetime import timedelta
 from importlib.metadata import version
 from pathlib import Path, PurePosixPath
@@ -89,6 +90,29 @@ def test_a_body_without_content_length_is_read_over_urllib(https_server: HttpsSe
     assert b"".join(_store.stream(https_server.url("chunked.json"), 1 << 16)) == b"{}"
     assert [s.method for s in https_server.seen] == ["GET"] * 4
     assert {s.headers["user-agent"] for s in https_server.seen} == {_AGENT}
+
+
+@pytest.mark.parametrize("chunk_size", [1, 4, 1 << 16])
+def test_urllib_stream_does_not_read_tls_after_eof(
+    https_server: HttpsServer, monkeypatch: pytest.MonkeyPatch, chunk_size: int
+) -> None:
+    """Windows 3.13 can raise ENOENT on a second TLS read after ragged EOF."""
+    https_server.routes["/stream.bin"] = Route(body=b"body", length=False)
+    exhausted: set[ssl.SSLSocket] = set()
+    original = ssl.SSLSocket.read
+
+    def read(sock: ssl.SSLSocket, *args: Any, **kwargs: Any) -> Any:
+        if sock in exhausted:
+            raise FileNotFoundError(2, "No such file or directory")
+        result = original(sock, *args, **kwargs)
+        if not result and not sock.server_side:
+            exhausted.add(sock)
+        return result
+
+    monkeypatch.setattr(ssl.SSLSocket, "read", read)
+
+    assert b"".join(_store.stream(https_server.url("stream.bin"), chunk_size)) == b"body"
+    assert len(exhausted) == 1
 
 
 def test_urllib_keeps_the_body_cap(https_server: HttpsServer) -> None:
