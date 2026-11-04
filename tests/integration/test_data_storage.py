@@ -993,11 +993,13 @@ def test_plain_parquet_partitions_are_left_alone(tmp_path: Path) -> None:
     assert _partition_bytes(_partitioned_collection(tmp_path)) == []
 
 
-def test_unreadable_partition_is_silent(tmp_path: Path) -> None:
+def test_unreadable_partition_reports_unavailable_data(tmp_path: Path) -> None:
     parts = tmp_path / "parts"
     parts.mkdir()
     (parts / "a.parquet").write_bytes(b"not parquet")
-    assert _partition_bytes(_partitioned_collection(tmp_path)) == []
+    defects = _partition_bytes(_partitioned_collection(tmp_path))
+    assert len(defects) == 1 and defects[0].rule_id == checks.DAT_UNAVAILABLE
+    assert defects[0].severity is Severity.WARNING
 
 
 @pytest.mark.parametrize(

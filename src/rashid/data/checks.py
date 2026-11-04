@@ -105,6 +105,7 @@ from rashid.data import (
     DAT_SIZE,
     DAT_TABULAR,
     DAT_TILE_SIZE,
+    DAT_UNAVAILABLE,
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
     DataDefect,
@@ -1879,7 +1880,15 @@ def _check_partitions(
         with _AssetFiles(Locator(is_remote=False, source=str(path))) as opened:
             try:
                 parquet = opened.parquet()
-            except Exception:  # unreadable partition: byte checks own reporting it
+            except Exception as exc:
+                found.append(
+                    DataDefect(
+                        DAT_UNAVAILABLE,
+                        Severity.WARNING,
+                        f"partition file '{match}' data validation could not run: {exc}",
+                        match,
+                    )
+                )
                 continue
             schemas.append((match, {field.name: str(field.type) for field in parquet.schema_arrow}))
             if not declared:
