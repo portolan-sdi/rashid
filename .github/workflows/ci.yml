@@ -43,6 +43,9 @@ jobs:
     with:
       # The shared default still includes 3.10. rashid requires 3.11 or later.
       python-versions: '["3.11", "3.12", "3.13"]'
+      test-command: >-
+        uv run pytest -n 8 --cov=$COVERAGE_TARGET
+        --cov-report=xml --cov-report=term-missing
       # rashid reads and writes files, and path handling is where Windows
       # breaks. The shared default is ubuntu alone.
       os: '["ubuntu", "macos", "windows"]'

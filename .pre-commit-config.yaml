@@ -1,6 +1,6 @@
 # Two-stage strategy:
 #   commit stage  — fast, file-scoped checks (formatting, hygiene, spelling,
-#                   workflow lint). Must stay sub-second-ish.
+#                   workflow lint, duplicate code).
 #   pre-push stage — whole-project gates (types, dead code,
 #                   dependency hygiene, import contracts). CI runs both
 #                   stages via `pre-commit run --all-files [--hook-stage
@@ -68,6 +68,15 @@ repos:
 
   - repo: local
     hooks:
+      - id: jscpd
+        name: duplicate code (jscpd, baseline-gated)
+        # renovate: datasource=npm depName=jscpd
+        entry: uvx jscpd@5.2.1 src/rashid tests --baseline .jscpd-baseline.json --fail-on-new-clones 0
+        language: system
+        files: '^(src/rashid/.*\.py|tests/.*\.py|\.jscpd(-baseline)?\.json)$'
+        pass_filenames: false
+        stages: [pre-commit]
+
       - id: deptry
         name: deptry (dependency hygiene)
         entry: uv run deptry .
@@ -98,7 +107,7 @@ repos:
 
       - id: fast-tests
         name: fast tests (opt-in via ENABLE_PRE_PUSH_TESTS=1)
-        entry: bash -c 'if [ "${ENABLE_PRE_PUSH_TESTS:-0}" = "1" ]; then uv run pytest -n auto --tb=short; fi'
+        entry: bash -c 'if [ "${ENABLE_PRE_PUSH_TESTS:-0}" = "1" ]; then uv run pytest -n 8 --tb=short; fi'
         language: system
         pass_filenames: false
         stages: [pre-push]
