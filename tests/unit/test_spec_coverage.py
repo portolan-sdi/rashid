@@ -103,6 +103,22 @@ def test_manifest_ids_are_unique() -> None:
     assert len(ids) == len(set(ids))
 
 
+def test_documented_rule_groups_match_the_registry() -> None:
+    rules_doc = _TESTS_DIR.parent / "docs" / "rules.md"
+    groups = re.findall(
+        r"\| `(PTL-[A-Z]{3})` \| ([\d–, ]+) \|",
+        rules_doc.read_text(encoding="utf-8"),
+    )
+    documented = {
+        f"{prefix}-{number:03d}"
+        for prefix, ranges in groups
+        for segment in ranges.split(", ")
+        for bounds in [segment.split("–")]
+        for number in range(int(bounds[0]), int(bounds[-1]) + 1)
+    }
+    assert documented == set(CHECKS)
+
+
 def test_every_validator_must_and_should_is_cited() -> None:
     cited = _citations()
     missing = [
