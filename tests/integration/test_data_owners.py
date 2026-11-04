@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import random
+import subprocess
+import sys
 from pathlib import Path
 
 import pyarrow as pa
@@ -40,7 +42,7 @@ def test_partition_handles_and_covering_policies(tmp_path: Path, nested: bool) -
     _declare(directory, ["a.parquet"])
     with _trace.counting() as counts:
         ordering = _findings(tmp_path, "PTL-DAT-006")
-    assert counts["parquet.opens"] == 2
+    assert counts["parquet.opens"] == 3
     assert {f["severity"] for f in ordering} == ({"info"} if nested else {"error"})
     assert not _findings(tmp_path, "PTL-DAT-007")
 
@@ -87,3 +89,36 @@ def test_result_build_is_a_function_of_sources(seed: int) -> None:
     fresh.extend(partitions, partition_total=20)
     fresh.extend([*assets_source, extra])
     assert source.build() == fresh.build() == [*first, extra]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix descriptor limit")
+def test_many_partitions_open_once_without_exhausting_handles(tmp_path: Path) -> None:
+    """A real CLI process with fewer descriptors than partition files checks all of them."""
+    directory = _catalog(tmp_path, **{"partition:glob": "./*.parquet"})
+    for i in range(100):
+        assets.write_geoparquet(directory / f"{i:03}.parquet", version="1.0.0")
+    code = (
+        "import resource; resource.setrlimit(resource.RLIMIT_NOFILE, (80, 80)); "
+        "from rashid.cli import main; main()"
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            code,
+            "--timings",
+            "check",
+            "--json",
+            "--data-scope",
+            "local",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1, result.stderr
+    report = json.loads(result.stdout)
+    findings = [f for f in report["findings"] if f["rule_id"] == "PTL-DAT-012"]
+    assert len(findings) == 1 and findings[0]["message"].startswith("100 of 100 partition files")
+    assert report["meta"]["counters"]["parquet.opens"] == 100

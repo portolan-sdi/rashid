@@ -111,7 +111,7 @@ from rashid.data import (
     _DataResults,
     _files,
 )
-from rashid.data._files import _AssetFiles, _FileCache
+from rashid.data._files import _AssetFiles
 from rashid.data.reader import AssetReader, Locator
 from rashid.model import Severity
 from rashid.rules._common import asset_refers_to_self
@@ -265,22 +265,21 @@ def check_node(
     """
     results = _DataResults()
     bounds: list[_Wgs84Bounds] = []
-    with _FileCache() as cache:
-        results.extend(_check_partition_schemas(node, cache))
-        partitions, total = _check_partition_geoparquet(node, reader, cache)
-        results.extend(partitions, partition_total=total)
-        for key, asset in _assets_of(node):
-            href = asset.get("href")
-            if not isinstance(href, str) or not href:
-                continue  # PTL-AST-001 reports a missing href
-            if asset_refers_to_self(node, href, graph):
-                continue  # PTL-AST-003 requires both file metadata fields to be absent
-            log.debug("data: %s asset %r: %s", node.path, key, href)
-            with _trace.span("data.asset"):
-                defects, actual = _check_asset(node, entry=(key, asset), reader=reader, graph=graph, cache=cache)
-                results.extend(defects)
-                if actual is not None:
-                    bounds.append(actual)
+    schemas, partitions, total = _check_partitions(node, reader)
+    results.extend(schemas)
+    results.extend(partitions, partition_total=total)
+    for key, asset in _assets_of(node):
+        href = asset.get("href")
+        if not isinstance(href, str) or not href:
+            continue  # PTL-AST-001 reports a missing href
+        if asset_refers_to_self(node, href, graph):
+            continue  # PTL-AST-003 requires both file metadata fields to be absent
+        log.debug("data: %s asset %r: %s", node.path, key, href)
+        with _trace.span("data.asset"):
+            defects, actual = _check_asset(node, key=key, asset=asset, reader=reader, graph=graph)
+            results.extend(defects)
+            if actual is not None:
+                bounds.append(actual)
     results.extend(_check_collection_extent(node, bounds))
     return results.build()
 
@@ -295,12 +294,11 @@ def _assets_of(node: Node) -> list[tuple[str, dict[str, Any]]]:
 def _check_asset(
     node: Node,
     *,
-    entry: tuple[str, dict[str, Any]],
+    key: str,
+    asset: dict[str, Any],
     reader: AssetReader,
     graph: CatalogGraph | None = None,
-    cache: _FileCache,
 ) -> tuple[list[DataDefect], _Wgs84Bounds | None]:
-    key, asset = entry
     href = asset["href"]
     _trace.count("data.assets")
     defects: list[DataDefect] = []
@@ -320,8 +318,7 @@ def _check_asset(
         return defects, None
     bounds = None
     gdal_env = rasterio.Env(**_REMOTE_GDAL) if located.is_remote else contextlib.nullcontext()
-    with gdal_env:
-        files = cache.get(located)
+    with gdal_env, _AssetFiles(located) as files:
         if is_mirror_asset(asset):
             # formats.md, Raster § Item mirror: a mirror must reproduce the
             # items it mirrors (PORTO-FMT-042). It then falls through to the
@@ -1801,7 +1798,7 @@ def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bo
     Callers must hold the applicability guard themselves. Below
     ``_MIN_ORDERING_ROW_GROUPS`` the two criteria say nothing, so a file that
     thin is either left alone or measured over its rows instead; see
-    :func:`_check_geoparquet` and :func:`_row_ordering_defects`.
+    :func:`_check_geoparquet` and :func:`_ordering_defect`.
     """
     pairs = len(bboxes) - 1
     overlaps = sum(_bbox_overlaps(bboxes[i], bboxes[i + 1]) for i in range(pairs))
@@ -1859,26 +1856,39 @@ def _partition_files(node: Node) -> list[tuple[str, Path]]:
     return _files._partition_files(base, normalized)
 
 
-def _check_partition_schemas(node: Node, cache: _FileCache) -> list[DataDefect]:
-    """Every partition file MUST share a single Parquet schema.
+def _check_partitions(
+    node: Node, reader: AssetReader
+) -> tuple[list[DataDefect], list[DataDefect], int]:
+    """Read each partition's schema and GeoParquet checks through one handle.
 
-    formats.md:91: "Every partition file MUST share a single Parquet schema —
-    the same columns, names, and types — so the glob can be queried as one
-    table. This is validated by tooling reading file footers, not by JSON
-    schema." A local relative ``partition:glob`` is expanded against the
-    collection's own directory and every matched footer is compared to the
-    first; a remote or absolute glob (``s3://``, ``https://``) cannot be
-    listed from the local tree, so it is skipped. Unreadable files degrade to
-    silence — the byte checks own reporting broken assets.
+    Only the column maps survive each file, so an arbitrarily large glob does
+    not retain an open descriptor per partition. Declared assets are compared
+    for schema here; their format findings come from the asset pass alone.
     """
+    files = _partition_files(node)
+    if not files:
+        return [], [], 0
     schemas: list[tuple[str, dict[str, str]]] = []
-    for match, path in _partition_files(node):
-        try:
-            parquet = cache.get(Locator(is_remote=False, source=str(path))).parquet()
-        except Exception:  # nosec B112 - unreadable partition: the byte checks own it
-            continue
-        arrow = parquet.schema_arrow
-        schemas.append((match, {field.name: str(field.type) for field in arrow}))
+    already_read = _asset_paths(node, reader)
+    found: list[DataDefect] = []
+    checked = 0
+    for match, path in files:
+        declared = str(path) in already_read
+        if not declared:
+            checked += 1
+        with _AssetFiles(Locator(is_remote=False, source=str(path))) as opened:
+            try:
+                parquet = opened.parquet()
+            except Exception:  # unreadable partition: byte checks own reporting it
+                continue
+            schemas.append((match, {field.name: str(field.type) for field in parquet.schema_arrow}))
+            if not declared:
+                found.extend(_check_geoparquet(match, opened, subject=f"partition file '{match}'"))
+    return _partition_schema_defects(schemas), found, checked
+
+
+def _partition_schema_defects(schemas: list[tuple[str, dict[str, str]]]) -> list[DataDefect]:
+    """Every listed partition MUST share the first readable file's schema."""
     if len(schemas) < 2:
         return []  # nothing to compare
     reference_name, reference = schemas[0]
@@ -1898,37 +1908,6 @@ def _check_partition_schemas(node: Node, cache: _FileCache) -> list[DataDefect]:
             )
         )
     return defects
-
-
-def _check_partition_geoparquet(
-    node: Node, reader: AssetReader, cache: _FileCache
-) -> tuple[list[DataDefect], int]:
-    """The GeoParquet MUSTs apply to partition files, not only to assets.
-
-    A partitioned collection addresses its data by ``partition:glob`` and
-    carries no ``data`` asset, which is the layout formats.md:113 prescribes.
-    The per-asset loop therefore never reaches those files, leaving
-    ``PTL-DAT-006``, ``007``, ``008``, and ``012`` unenforced on the only
-    bytes the collection publishes. This runs the same checks over every
-    matched file.
-
-    A collection can hold hundreds of partitions written by one job, so a
-    single bad setting would report hundreds of near-identical errors. Each
-    rule reports once, naming how many files failed and quoting one of them.
-    """
-    files = _partition_files(node)
-    if not files:
-        return [], 0
-    already_read = _asset_paths(node, reader)
-    found: list[DataDefect] = []
-    checked = 0
-    for match, path in files:
-        if str(path) in already_read:
-            continue  # a declared asset: the per-asset loop reports it
-        checked += 1
-        opened = cache.get(Locator(is_remote=False, source=str(path)))
-        found.extend(_check_geoparquet(match, opened, subject=f"partition file '{match}'"))
-    return found, checked
 
 
 def _asset_paths(node: Node, reader: AssetReader) -> set[str]:

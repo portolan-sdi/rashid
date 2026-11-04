@@ -111,25 +111,6 @@ class _AssetFiles:
         self.close()
 
 
-class _FileCache:
-    """Node-scoped handles, including partitions also declared as assets."""
-
-    def __init__(self) -> None:
-        self._opened: dict[Locator, _AssetFiles] = {}
-        self._stack = contextlib.ExitStack()
-
-    def get(self, located: Locator) -> _AssetFiles:
-        if located not in self._opened:
-            self._opened[located] = self._stack.enter_context(_AssetFiles(located))
-        return self._opened[located]
-
-    def __enter__(self) -> _FileCache:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self._stack.close()
-
-
 def _partition_files(base: Path, pattern: str) -> list[tuple[str, Path]]:
     """List a locally scoped glob in stable order with POSIX message paths.
 

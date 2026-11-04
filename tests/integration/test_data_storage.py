@@ -883,13 +883,12 @@ class _NoAssets:
 
 
 def _partition_schemas(node: Node) -> list:
-    with file_owner._FileCache() as cache:
-        return checks._check_partition_schemas(node, cache)
+    schemas, _, _ = checks._check_partitions(node, _NoAssets())
+    return schemas
 
 
 def _partition_bytes(node: Node, reader: object | None = None) -> list:
-    with file_owner._FileCache() as cache:
-        defects, total = checks._check_partition_geoparquet(node, reader or _NoAssets(), cache)
+    _, defects, total = checks._check_partitions(node, reader or _NoAssets())
     source = checks._DataResults()
     source.extend(defects, partition_total=total)
     return source.build()
