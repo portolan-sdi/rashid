@@ -37,9 +37,9 @@ def is_absolute_href(href: str) -> bool:
 
 
 def href_host(href: str) -> str:
-    """Live authority key, retaining the declared port and ignoring host case."""
+    """Live authority key, using the shared authority normalization."""
     parsed = split_href(href)
-    return parsed.netloc.lower() if parsed is not None else ""
+    return url_authority(parsed) if parsed is not None else ""
 
 
 def off_https_reference(href: str) -> bool:
@@ -230,12 +230,12 @@ def live_host_href(directory: str, href: str, base: str | None) -> str | None:
 
     wire_url encodes the resulting candidate's path for probing.
     """
-    parsed = parse_href(href)
-    publish = parse_href(base) if base is not None else None
+    parsed = split_href(href)
+    publish = split_href(base) if base is not None else None
     if parsed is None or (base is not None and publish is None):
         return None
     if parsed.scheme.lower() == "https" and parsed.netloc:
-        if publish is not None and parsed.netloc.lower() != publish.netloc.lower():
+        if publish is not None and url_authority(parsed) != url_authority(publish):
             return None
         return href
     if base is None:
@@ -261,17 +261,15 @@ def resolve_live_base(
 
 
 def location_key(url: str) -> tuple[str, str, str] | None:
-    parsed = parse_href(url)
+    parsed = split_href(url)
     if parsed is None:
         return None
     scheme = parsed.scheme.lower()
-    host = parsed.hostname or ""
     try:
-        port = parsed.port
+        _ = parsed.port
     except ValueError:
         return None
-    default = {"https": 443, "http": 80}.get(scheme)
-    netloc = host if port is None or port == default else f"{host}:{port}"
+    netloc = url_authority(parsed)
     path = posixpath.normpath(parsed.path or "/")
     return scheme, netloc, path.rstrip("/") + "/"
 
@@ -363,4 +361,5 @@ def wire_url(base: str, rel: str) -> str:
     if parsed is not None and parsed.scheme and parsed.netloc:
         origin = path[: len(path) - len(parsed.path)] if parsed.path else path
         path = parsed.path
-    return f"{base}{origin}{quote(path, safe='/%')}{href_suffix(str(rel))}"
+    encoded = quote(path, safe="/%:@!$&'()*+,;=")
+    return f"{base}{origin}{encoded}{href_suffix(str(rel))}"

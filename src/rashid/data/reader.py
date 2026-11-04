@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Protocol
 
 from rashid import _store
-from rashid._href import is_absolute_href, is_https_href, request_target, wire_url
+from rashid._href import href_suffix, is_absolute_href, is_https_href, request_target, wire_url
 from rashid.catalog import CatalogGraph, Node
 
 _CHUNK = 1 << 16  # 64 KiB
@@ -86,7 +86,9 @@ class FilesystemHttpReader:
         path = self._graph.root_path / Path(*rel.parts)
         if not path.is_relative_to(self._graph.root_path):
             return None
-        if path.is_file():
+        if path.is_file() and (
+            self._graph.base_url is None or not href_suffix(href).startswith("?")
+        ):
             return Locator(is_remote=False, source=str(path))
         target = request_target(str(self._graph.href_path(node).parent), href)
         if self._graph.base_url is not None and target is not None:
