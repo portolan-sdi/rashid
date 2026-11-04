@@ -20,21 +20,21 @@ import pytest
 pytest.importorskip("pyarrow")
 pytest.importorskip("pyproj")
 
-import pyarrow as pa  # noqa: E402
-import pyarrow.parquet as pq  # noqa: E402
-from pyproj import CRS, Transformer  # noqa: E402
+import pyarrow as pa
+import pyarrow.parquet as pq
+from pyproj import CRS, Transformer
 
-import rashid.data.checks as checks  # noqa: E402
-from rashid import _trace  # noqa: E402
-from rashid.catalog import Node  # noqa: E402
-from rashid.data import (  # noqa: E402
+import rashid.data.checks as checks
+from rashid import _trace
+from rashid.catalog import Node
+from rashid.data import (
     DAT_CHECKSUM,
     DAT_CONSISTENCY,
     DAT_FORMAT,
     DAT_SIZE,
 )
-from rashid.data.reader import Locator  # noqa: E402
-from rashid.model import Severity  # noqa: E402
+from rashid.data.reader import Locator
+from rashid.model import Severity
 
 pytestmark = pytest.mark.integration
 

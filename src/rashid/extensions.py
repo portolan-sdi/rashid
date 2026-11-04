@@ -210,7 +210,7 @@ def validate_extensions(
                 _, _, count = unavailable.get(uri, (label, "", 0))
                 unavailable[uri] = (label, str(exc), count + 1)
                 continue
-            except Exception as exc:  # noqa: BLE001 - any validator failure is systemic
+            except Exception as exc:  # any validator failure is systemic
                 findings.append(
                     Finding(
                         rule_id=EXT_UNAVAILABLE,

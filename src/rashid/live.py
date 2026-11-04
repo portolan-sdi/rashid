@@ -618,7 +618,7 @@ class _HeadCache:
         _trace.count("live.heads")
         try:
             return self._prober.head(url)
-        except Exception as exc:  # noqa: BLE001 - kept for head() to report in order
+        except Exception as exc:  # kept for head() to report in order
             return exc
 
     def head(self, url: str) -> ProbeResponse | None:
@@ -710,7 +710,7 @@ def _probe_host(
         ranged = prober.get_range(rep.url)
         _trace.count("live.preflights")
         preflighted = prober.preflight(rep.url)
-    except Exception as exc:  # noqa: BLE001 - an unreachable host is reported once
+    except Exception as exc:  # an unreachable host is reported once
         log.debug("host %s failed: %s", host, exc)
         heads.failed.setdefault(host, exc)
         return _unavailable(f"live probes against host '{host}' failed: {exc}", str(rep.node.path))

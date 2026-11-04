@@ -245,7 +245,7 @@ def _send(url: str, method: str, headers: dict[str, str] | None) -> Any:
             retry, cause = exc.code >= 500, exc
         except StoreError:
             raise
-        except Exception as exc:  # noqa: BLE001 - urllib raises many types; the message is what matters
+        except Exception as exc:  # urllib raises many types; the message is what matters
             error = StoreError(f"{method} {url}: {exc}")
             retry, cause = True, exc
         delay = _BACKOFF * 2**attempt
@@ -266,7 +266,7 @@ def _urlopen(url: str, method: str, headers: dict[str, str] | None = None) -> It
             yield response
     except StoreError:
         raise
-    except Exception as exc:  # noqa: BLE001 - urllib raises many types; the message is what matters
+    except Exception as exc:  # urllib raises many types; the message is what matters
         raise StoreError(f"{method} {url}: {exc}") from exc
 
 
@@ -300,7 +300,7 @@ def get(url: str, *, max_bytes: int | None = None) -> bytes:
             return body
         except StoreError:
             raise
-        except Exception as exc:  # noqa: BLE001 - obstore raises several types; the text has the status
+        except Exception as exc:  # obstore raises several types; the text has the status
             if not _urllib_can_read(exc):
                 error = _error("GET", url, exc)
                 log.debug("%s", error)
@@ -332,7 +332,7 @@ def head_size(url: str) -> int:
                 size = int(obstore.head(*located)["size"])
                 log.debug("HEAD %s: %d bytes", url, size)
                 return size
-            except Exception as exc:  # noqa: BLE001 - obstore raises several types; the text has the status
+            except Exception as exc:  # obstore raises several types; the text has the status
                 if not isinstance(exc, InvalidPathError):
                     error = _error("HEAD", url, exc)
                     log.debug("%s", error)
@@ -364,7 +364,7 @@ def get_range(url: str, start: int, end: int) -> bytes:
             except NotSupportedError:
                 log.debug("GET %s: range ignored; reading the whole object", url)
                 return get(url)[start:end]
-            except Exception as exc:  # noqa: BLE001 - obstore raises several types; the text has the status
+            except Exception as exc:  # obstore raises several types; the text has the status
                 if not _urllib_can_read(exc):
                     raise _error("GET", url, exc) from exc
                 _fallback("GET", url, exc)
@@ -386,7 +386,7 @@ def stream(url: str, chunk_size: int) -> Iterator[bytes]:
 
         try:
             result = obstore.get(*located)
-        except Exception as exc:  # noqa: BLE001 - obstore raises several types; the text has the status
+        except Exception as exc:  # obstore raises several types; the text has the status
             if not _urllib_can_read(exc):
                 raise _error("GET", url, exc) from exc
             _fallback("GET", url, exc)
@@ -394,7 +394,7 @@ def stream(url: str, chunk_size: int) -> Iterator[bytes]:
             try:
                 for chunk in result.stream(min_chunk_size=chunk_size):
                     yield bytes(chunk)
-            except Exception as exc:  # noqa: BLE001 - obstore raises several types; the text has the status
+            except Exception as exc:  # obstore raises several types; the text has the status
                 raise _error("GET", url, exc) from exc
             return
     else:

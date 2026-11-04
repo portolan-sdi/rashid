@@ -184,7 +184,7 @@ def validate_schema(
                     path=".",
                 )
             ]
-        except Exception as exc:  # noqa: BLE001 - schema fetch/compile failure is systemic
+        except Exception as exc:  # schema fetch/compile failure is systemic
             return [
                 Finding(
                     rule_id=SCH_UNAVAILABLE,
@@ -200,7 +200,7 @@ def validate_schema(
             continue
         try:
             errors = validator(node.data)
-        except Exception as exc:  # noqa: BLE001 - any validator failure is systemic
+        except Exception as exc:  # any validator failure is systemic
             findings.append(
                 Finding(
                     rule_id=SCH_UNAVAILABLE,
@@ -210,15 +210,15 @@ def validate_schema(
                 )
             )
             return findings
-        for error in errors:
-            findings.append(
-                Finding(
-                    rule_id=SCH_INVALID,
-                    severity=Severity.ERROR,
-                    message=f"Portolan profile schema validation failed: {error.message}",
-                    path=str(node.path),
-                    object_id=node.id,
-                    json_pointer=error.json_pointer,
-                )
+        findings.extend(
+            Finding(
+                rule_id=SCH_INVALID,
+                severity=Severity.ERROR,
+                message=f"Portolan profile schema validation failed: {error.message}",
+                path=str(node.path),
+                object_id=node.id,
+                json_pointer=error.json_pointer,
             )
+            for error in errors
+        )
     return findings

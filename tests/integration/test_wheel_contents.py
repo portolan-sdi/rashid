@@ -24,7 +24,7 @@ def test_wheel_ships_marker_and_schemas(tmp_path: Path) -> None:
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("uv not on PATH")
-    build = subprocess.run(  # noqa: S603
+    build = subprocess.run(
         [uv, "build", "--wheel", "--out-dir", str(tmp_path)],
         cwd=REPO_ROOT,
         check=False,

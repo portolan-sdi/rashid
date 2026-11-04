@@ -123,7 +123,7 @@ def validate_structural(graph: CatalogGraph, validator: Validator | None = None)
             continue
         try:
             errors = validator(node.data)
-        except Exception as exc:  # noqa: BLE001 - any validator failure is systemic
+        except Exception as exc:  # any validator failure is systemic
             findings.append(
                 Finding(
                     rule_id=STR_UNAVAILABLE,
@@ -133,15 +133,15 @@ def validate_structural(graph: CatalogGraph, validator: Validator | None = None)
                 )
             )
             return findings
-        for error in errors:
-            findings.append(
-                Finding(
-                    rule_id=STR_INVALID,
-                    severity=Severity.ERROR,
-                    message=f"STAC 1.1.0 structural validation failed: {error.message}",
-                    path=str(node.path),
-                    object_id=node.id,
-                    json_pointer=error.json_pointer,
-                )
+        findings.extend(
+            Finding(
+                rule_id=STR_INVALID,
+                severity=Severity.ERROR,
+                message=f"STAC 1.1.0 structural validation failed: {error.message}",
+                path=str(node.path),
+                object_id=node.id,
+                json_pointer=error.json_pointer,
             )
+            for error in errors
+        )
     return findings

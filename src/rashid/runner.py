@@ -175,7 +175,7 @@ def _optional_passes(
                 ),
             )
         )
-    if options.data and not _DATA_RULE_IDS <= config.disabled:
+    if options.data and not config.disabled >= _DATA_RULE_IDS:
         findings.extend(
             f
             for f in _stage(
@@ -186,7 +186,7 @@ def _optional_passes(
             )
             if f.rule_id not in config.disabled
         )
-    if options.live and not _LIVE_RULE_IDS <= config.disabled:
+    if options.live and not config.disabled >= _LIVE_RULE_IDS:
         findings.extend(
             f
             for f in _stage(
@@ -529,16 +529,16 @@ def _validate_graph(
             files_checked=len(graph.nodes),
         )
 
-    for node in graph.iter():
-        if node.parse_error is not None:
-            findings.append(
-                Finding(
-                    rule_id=GEN_UNPARSEABLE,
-                    severity=Severity.ERROR,
-                    message=f"file is not valid JSON: {node.parse_error}",
-                    path=str(node.path),
-                )
-            )
+    findings.extend(
+        Finding(
+            rule_id=GEN_UNPARSEABLE,
+            severity=Severity.ERROR,
+            message=f"file is not valid JSON: {node.parse_error}",
+            path=str(node.path),
+        )
+        for node in graph.iter()
+        if node.parse_error is not None
+    )
 
     findings.extend(_stage("rules", lambda: _run_rules(graph, rules, config)))
 

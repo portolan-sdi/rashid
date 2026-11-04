@@ -24,22 +24,22 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
-from rashid import validate  # noqa: E402
-from rashid.catalog import CatalogGraph  # noqa: E402
-from rashid.data import (  # noqa: E402
+from rashid import validate
+from rashid.catalog import CatalogGraph
+from rashid.data import (
     DAT_MIRROR,
     DAT_ORDERING,
     DAT_ROWGROUP_STATS,
     DAT_TABULAR,
     validate_data,
 )
-from rashid.model import Severity  # noqa: E402
-from tests.conftest import (  # noqa: E402
+from rashid.model import Severity
+from tests.conftest import (
     CatalogBuilder,
     mutate_json,
     write_organizing_catalog_layout,
 )
-from tests.integration import _data_assets as assets  # noqa: E402
+from tests.integration import _data_assets as assets
 
 pytestmark = pytest.mark.integration
 

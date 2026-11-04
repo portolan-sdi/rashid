@@ -250,7 +250,7 @@ def validate_data(
         for node, future in zip(nodes, futures, strict=True):
             try:
                 defects = future.result()
-            except Exception as exc:  # noqa: BLE001 - any validator failure is systemic
+            except Exception as exc:  # any validator failure is systemic
                 findings.append(
                     Finding(
                         rule_id=DAT_UNAVAILABLE,
@@ -330,7 +330,7 @@ def _reads_remote(node: Node, reader: AssetReader) -> bool:
         if isinstance(href, str) and href:
             try:
                 located = reader.locate(node, href)
-            except Exception:  # noqa: BLE001 - the validator reports it
+            except Exception:  # the validator reports it
                 return False
             if located is not None and located.is_remote:
                 return True

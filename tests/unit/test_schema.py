@@ -296,8 +296,8 @@ def test_real_schema_accepts_the_builder(catalog: CatalogBuilder) -> None:
     import urllib.request
 
     try:
-        urllib.request.urlopen(DEFAULT_SCHEMA_URI, timeout=5)  # noqa: S310
-    except Exception:  # noqa: BLE001
+        urllib.request.urlopen(DEFAULT_SCHEMA_URI, timeout=5)
+    except Exception:
         pytest.skip(f"{DEFAULT_SCHEMA_URI} unreachable")
 
     collection = catalog.collection("roads")

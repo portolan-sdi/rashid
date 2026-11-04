@@ -651,7 +651,7 @@ def _check_raster(key: str, located: Locator, files: _AssetFiles) -> list[DataDe
     try:
         _trace.count("raster.cog_validates")
         is_valid, errors, _warnings = cog_validate(located.gdal_path(), quiet=True)
-    except Exception as exc:  # noqa: BLE001 - a reader failure is not a conformance fault
+    except Exception as exc:  # a reader failure is not a conformance fault
         return [
             DataDefect(
                 DAT_COG,
@@ -718,7 +718,7 @@ def _check_overviews(key: str, files: _AssetFiles) -> list[DataDefect]:
         tile = max(shape) if shape is not None else _MAX_TILE
         oversized = max(src.width, src.height) > tile
         has_overviews = bool(src.overviews(1))
-    except Exception:  # noqa: BLE001 - unreadable raster: the COG check owns reporting it
+    except Exception:  # unreadable raster: the COG check owns reporting it
         return []
     if oversized and not has_overviews:
         return [
@@ -748,7 +748,7 @@ def _check_tile_size(key: str, files: _AssetFiles) -> list[DataDefect]:
         if shape is None:
             return []
         tile_height, tile_width = shape
-    except Exception:  # noqa: BLE001 - unreadable raster: the COG check owns reporting it
+    except Exception:  # unreadable raster: the COG check owns reporting it
         return []
     if tile_height != tile_width:
         return [
@@ -793,7 +793,7 @@ def _check_cog_stats(key: str, files: _AssetFiles) -> list[DataDefect]:
             if _VALID_PERCENT_KEY not in tags:
                 has_nodata = src.nodatavals[bidx - 1] is not None
                 (vp_must if has_nodata else vp_should).append(bidx)
-    except Exception as exc:  # noqa: BLE001 - unreadable raster is advisory here
+    except Exception as exc:  # unreadable raster is advisory here
         return [
             DataDefect(
                 DAT_COG_STATS,
@@ -844,7 +844,7 @@ def _check_consistency(
 ) -> list[DataDefect]:
     try:
         geo = _extract_geo(expected, located, files)
-    except Exception as exc:  # noqa: BLE001 - unreadable header is advisory, not fatal
+    except Exception as exc:  # unreadable header is advisory, not fatal
         return [
             DataDefect(
                 DAT_CONSISTENCY,
@@ -945,7 +945,7 @@ def _check_geoparquet(
     subject = subject or f"asset '{key}'"
     try:
         parquet = files.parquet()
-    except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
+    except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
 
     geo = _geo_metadata(parquet)
@@ -1016,9 +1016,7 @@ def _check_geoparquet_version(
     """
     subject = subject or f"asset '{key}'"
     version = geo.get("version")
-    if isinstance(version, str) and (
-        version == "1.1" or version.startswith("1.1.") or version.startswith("2.")
-    ):
+    if isinstance(version, str) and (version == "1.1" or version.startswith(("1.1.", "2."))):
         return []
     described = repr(version) if version is not None else "no version"
     return [
@@ -1118,7 +1116,7 @@ def _check_mirror(
 
     try:
         parquet = files.parquet()
-    except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
+    except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
 
     if "id" not in parquet.schema_arrow.names:
@@ -1238,7 +1236,7 @@ def _read_mirror_rows(parquet: Any) -> _MirrorRows | None:
     wanted = [geometry_name, datetime_name, bbox[0] if bbox is not None else None]
     try:
         table = parquet.read(columns=["id", *(name for name in wanted if name is not None)])
-    except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
+    except Exception:  # unreadable Parquet: format/checksum checks own it
         return None
     return _MirrorRows(
         ids=table.column("id").to_pylist(),
@@ -1418,7 +1416,7 @@ def _check_tabular(
         return []
     try:
         parquet = files.parquet()
-    except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
+    except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
     if _geo_metadata(parquet) is not None:
         return []  # GeoParquet: the geospatial storage rules own it
@@ -1463,7 +1461,7 @@ def _check_vector_columns(
         return []
     try:
         parquet = files.parquet()
-    except Exception:  # noqa: BLE001 - unreadable Parquet: format/checksum checks own it
+    except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
     if _geo_metadata(parquet) is None:
         return []  # plain Parquet: the Tabular Data SHOULDs own it
@@ -1832,7 +1830,7 @@ def _row_bboxes(
     try:
         flat = parquet.read(columns=[paths[0][0]]).flatten()  # type: ignore[index]
         corners = [flat.column(f"{p[0]}.{p[1]}").to_pylist() for p in paths]  # type: ignore[index]
-    except Exception:  # noqa: BLE001 - unreadable column: the checksum check owns bad bytes
+    except Exception:  # unreadable column: the checksum check owns bad bytes
         return None
     boxes: list[tuple[float, float, float, float]] = []
     for corner_values in zip(*corners, strict=True):
@@ -1932,7 +1930,7 @@ def _check_partition_schemas(node: Node) -> list[DataDefect]:
     for match, path in _partition_files(node):
         try:
             parquet = _parquet_file(str(path))
-        except Exception:  # noqa: BLE001 # nosec B112 - unreadable partition: the byte checks own it
+        except Exception:  # nosec B112 - unreadable partition: the byte checks own it
             continue
         arrow = parquet.schema_arrow
         schemas.append((match, {field.name: str(field.type) for field in arrow}))
@@ -2063,7 +2061,7 @@ def _expected_format(media_type: str) -> str | None:
         return "pmtiles"
     if lowered.startswith("image/png"):
         return "png"
-    if lowered.startswith("image/jpeg") or lowered.startswith("image/jpg"):
+    if lowered.startswith(("image/jpeg", "image/jpg")):
         return "jpeg"
     return None
 

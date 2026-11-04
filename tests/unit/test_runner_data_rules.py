@@ -44,11 +44,11 @@ def _rules_of(prefix: str) -> frozenset[str]:
 
 
 def test_data_gate_lists_every_data_rule() -> None:
-    assert runner._DATA_RULE_IDS == _rules_of("PTL-DAT-")
+    assert _rules_of("PTL-DAT-") == runner._DATA_RULE_IDS
 
 
 def test_live_gate_lists_every_live_rule() -> None:
-    assert runner._LIVE_RULE_IDS == _rules_of("PTL-LIV-")
+    assert _rules_of("PTL-LIV-") == runner._LIVE_RULE_IDS
 
 
 def test_gates_agree_with_the_pass_modules() -> None:
@@ -58,8 +58,8 @@ def test_gates_agree_with_the_pass_modules() -> None:
     files, so a rule added to one and forgotten in the other fails here rather
     than agreeing with a gate that is wrong twice.
     """
-    assert runner._DATA_RULE_IDS == frozenset(data_pass.SPEC_IDS)
-    assert runner._LIVE_RULE_IDS == frozenset(live_pass.SPEC_IDS)
+    assert frozenset(data_pass.SPEC_IDS) == runner._DATA_RULE_IDS
+    assert frozenset(live_pass.SPEC_IDS) == runner._LIVE_RULE_IDS
 
 
 def test_degradation_reports_are_not_gate_members() -> None:

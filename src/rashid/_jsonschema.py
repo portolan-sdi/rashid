@@ -148,14 +148,18 @@ def _stac_trees() -> tuple[tuple[Traversable, str], ...]:
 def _extension_trees() -> tuple[tuple[Traversable, str], ...]:
     schemas = resources.files("rashid").joinpath("_schemas")
     trees: list[tuple[Traversable, str]] = [(schemas.joinpath("geojson"), _GEOJSON_BASE)]
-    for version_dir in schemas.joinpath("stac").iterdir():
-        if version_dir.is_dir():
-            trees.append((version_dir, f"{_STAC_HOST}v{version_dir.name}/"))
+    trees.extend(
+        (version_dir, f"{_STAC_HOST}v{version_dir.name}/")
+        for version_dir in schemas.joinpath("stac").iterdir()
+        if version_dir.is_dir()
+    )
     extensions = schemas.joinpath("extensions")
     if extensions.is_dir():
-        for host_dir in extensions.iterdir():
-            if host_dir.is_dir():
-                trees.append((host_dir, f"https://{host_dir.name}/"))
+        trees.extend(
+            (host_dir, f"https://{host_dir.name}/")
+            for host_dir in extensions.iterdir()
+            if host_dir.is_dir()
+        )
     return tuple(trees)
 
 
@@ -197,7 +201,7 @@ def compile_rust(schema: dict[str, Any], registry: Any, *, draft7: bool = False)
     _trace.count("schema.rust_compiles")
     try:
         return build(schema, registry=registry, validate_formats=False, offline=True)
-    except Exception as exc:  # noqa: BLE001 - any compile failure falls back to jsonschema
+    except Exception as exc:  # any compile failure falls back to jsonschema
         log.debug("jsonschema-rs cannot compile %s: %s", schema.get("$id", "<no $id>"), exc)
         return None
 

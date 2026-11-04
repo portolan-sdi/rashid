@@ -29,7 +29,7 @@ _URL = "https://raw.githubusercontent.com/portolan-sdi/rashid/312ff6e/README.md"
 
 def _fetch(url: str) -> bytes:
     try:
-        with urlopen(url, timeout=30) as response:  # noqa: S310 - literal https URL
+        with urlopen(url, timeout=30) as response:  # literal https URL
             if response.status != 200:
                 pytest.skip(f"{url} returned {response.status}")
             return bytes(response.read())

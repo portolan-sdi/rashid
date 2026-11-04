@@ -46,9 +46,9 @@ MEMRAY = "memray==1.20.0"
 MODES = ("counts", "time", "mem", "import", "instr", "run")
 _PROFILES = REPO / ".cache" / "profiles"
 
-# "import time:       437 |      34470 |       rashid._store"
+# Example import record: "import time:       437 |      34470 |       rashid._store"
 _IMPORT_LINE = re.compile(r"^import time:\s+(\d+) \|\s+(\d+) \|( *)(\S+)")
-# "==12345== I   refs:      1,234,567"
+# Example instruction record: "==12345== I   refs:      1,234,567"
 _CACHEGRIND_REFS = re.compile(r"I\s+refs:\s+([\d,]+)")
 
 

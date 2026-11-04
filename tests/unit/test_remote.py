@@ -451,7 +451,7 @@ def test_directory_url_answering_200_does_not_break_the_crawl(
 
     class Index(DirFetcher):
         def get(self, url: str) -> Fetched:
-            if url.endswith("sector-1.json") or url.endswith("inner.json"):
+            if url.endswith(("sector-1.json", "inner.json")):
                 self.calls.append(url)
                 return Fetched(
                     status=200,
@@ -525,7 +525,7 @@ def test_url_mode_runs_the_metadata_pass_over_the_crawled_tree(catalog: CatalogB
     assert report.files_checked == 5
     ids = {f.rule_id for f in report.findings}
     assert GEN_PARTIAL_TREE in ids
-    assert not {i for i in ids if i.startswith("PTL-LNK") or i.startswith("PTL-FIL")}
+    assert not {i for i in ids if i.startswith(("PTL-LNK", "PTL-FIL"))}
 
 
 def test_url_mode_reports_the_same_metadata_findings_as_the_directory(
