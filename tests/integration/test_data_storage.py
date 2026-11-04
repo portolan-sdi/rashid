@@ -8,6 +8,7 @@ each non-compliant variant raises exactly the rule it violates (formats.md:30/64
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -19,9 +20,11 @@ pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
 import pyarrow.parquet as pq  # noqa: E402
+from click.testing import CliRunner  # noqa: E402
 
 import rashid.data.checks as checks  # noqa: E402
 from rashid.catalog import Node  # noqa: E402
+from rashid.cli import main  # noqa: E402
 from rashid.data import (  # noqa: E402
     DAT_COG,
     DAT_COG_STATS,
@@ -38,6 +41,7 @@ from rashid.data import (  # noqa: E402
 )
 from rashid.data.reader import Locator  # noqa: E402
 from rashid.model import Severity  # noqa: E402
+from tests.conftest import CatalogBuilder  # noqa: E402
 from tests.integration import _data_assets as assets  # noqa: E402
 
 pytestmark = pytest.mark.integration
@@ -779,6 +783,34 @@ def _partitioned_collection(directory: Path, glob: str = "parts/*.parquet") -> N
         id="buildings",
         data={"type": "Collection", "partition:glob": glob},
     )
+
+
+def test_partition_glob_matches_use_posix_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = CatalogBuilder(tmp_path)
+    catalog.collection("buildings", assets={}, **{"partition:glob": "parts/*.parquet"})
+    catalog.write()
+    parts = tmp_path / "buildings" / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assets.write_geoparquet(parts / "b.parquet", version="1.0.0")
+    monkeypatch.setattr(
+        checks.globmodule, "glob", lambda *args, **kwargs: [r"parts\b.parquet", r"parts\a.parquet"]
+    )
+    result = CliRunner().invoke(main, ["check", "--json", str(tmp_path)])
+    assert result.exit_code == 1, result.output
+    findings = [
+        finding
+        for finding in json.loads(result.output)["findings"]
+        if finding["rule_id"] == DAT_GEOPARQUET_VERSION
+    ]
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["message"].startswith("partition file 'parts/b.parquet' geo metadata")
+    assert "\\" not in finding["message"]
+    assert finding["path"] == "buildings/collection.json"
+    assert finding["json_pointer"] == "/partition:glob"
 
 
 def test_consistent_partition_schemas_are_clean(tmp_path: Path) -> None:

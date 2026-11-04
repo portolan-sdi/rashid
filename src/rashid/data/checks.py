@@ -1910,9 +1910,10 @@ def _partition_files(node: Node) -> list[tuple[str, Path]]:
     if normalized.startswith(".."):
         return []  # escapes the catalog tree
     base = node.abs_path.parent
-    return [
-        (match, base / match) for match in sorted(globmodule.glob(normalized, root_dir=str(base)))
-    ]
+    matches = sorted(
+        match.replace("\\", "/") for match in globmodule.glob(normalized, root_dir=str(base))
+    )
+    return [(match, base / match) for match in matches]
 
 
 def _check_partition_schemas(node: Node) -> list[DataDefect]:
