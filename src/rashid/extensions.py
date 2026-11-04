@@ -179,7 +179,8 @@ def validate_extensions(
 
     def recover(target: SchemaTarget, exc: Exception) -> bool:
         uri = target.schema_uri
-        assert uri is not None
+        if uri is None:
+            raise AssertionError
         if isinstance(exc, LookupError):
             unvalidated[uri] = unvalidated.get(uri, 0) + 1
             return True
