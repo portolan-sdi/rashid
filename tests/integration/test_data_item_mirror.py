@@ -11,7 +11,10 @@ Needs the ``rashid[data]`` extra; skips without it. Fully local — no network.
 
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -153,6 +156,33 @@ def _rewrite_mirror(root: Path, ids: list[str] | None, **kwargs: Any) -> None:
 def test_matching_mirror_is_clean(catalog_root: Path) -> None:
     findings = validate_data(CatalogGraph.load(catalog_root))
     assert findings == [], [f"{f.rule_id} {f.message}" for f in findings]
+
+
+def test_matching_mirror_in_fresh_interpreter(catalog_root: Path, tmp_path: Path) -> None:
+    """Windows needs the runtime tzdata dependency to decode mirror timestamps.
+
+    Disable the system database on Windows even if the host has one installed.
+    On Linux, PYTHONTZPATH=/nonexistent reproduces the same missing database.
+    """
+    env = os.environ.copy()
+    if sys.platform == "win32":
+        env["PYTHONTZPATH"] = str(tmp_path / "no-timezone-database")
+    code = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from rashid.catalog import CatalogGraph\n"
+        "from rashid.data import validate_data\n"
+        "findings = validate_data(CatalogGraph.load(Path(sys.argv[1])))\n"
+        "assert findings == [], [(f.rule_id, f.message) for f in findings]\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(catalog_root)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_unordered_mirror_is_flagged(catalog_root: Path) -> None:
