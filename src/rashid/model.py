@@ -26,8 +26,10 @@ class Severity(Enum):
 
 
 def json_pointer(*tokens: str | int, prefix: str = "") -> str:
-    """Build a JSON pointer, optionally extending an already-built prefix."""
-    return prefix + "".join("/" + str(token) for token in tokens)
+    """Build an RFC 6901 pointer, optionally extending an already-encoded prefix."""
+    return prefix + "".join(
+        "/" + str(token).replace("~", "~0").replace("/", "~1") for token in tokens
+    )
 
 
 @dataclass(frozen=True)
