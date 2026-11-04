@@ -89,7 +89,11 @@ from rashid import _json, _trace
 from rashid._href import is_absolute_href
 from rashid._multihash import decode_multihash
 from rashid.catalog import CatalogGraph, Node
-from rashid.data import (
+from rashid.data import DataDefect, _DataResults, _files
+from rashid.data._files import _AssetFiles
+from rashid.data.reader import AssetReader, Locator
+from rashid.model import Severity
+from rashid.registry import (
     DAT_CHECKSUM,
     DAT_COG,
     DAT_COG_STATS,
@@ -108,13 +112,7 @@ from rashid.data import (
     DAT_UNAVAILABLE,
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
-    DataDefect,
-    _DataResults,
-    _files,
 )
-from rashid.data._files import _AssetFiles
-from rashid.data.reader import AssetReader, Locator
-from rashid.model import Severity
 from rashid.rules._common import (
     asset_refers_to_self,
     assets_of,

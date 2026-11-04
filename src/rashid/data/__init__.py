@@ -44,81 +44,8 @@ from rashid import _trace
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.data.reader import AssetReader, FilesystemHttpReader, Locator
 from rashid.model import Finding, Severity
+from rashid.registry import DAT_UNAVAILABLE
 from rashid.rules._common import assets_of
-
-DAT_UNAVAILABLE = "PTL-DAT-000"
-DAT_CHECKSUM = "PTL-DAT-001"
-DAT_SIZE = "PTL-DAT-002"
-DAT_FORMAT = "PTL-DAT-003"
-DAT_COG = "PTL-DAT-004"
-DAT_CONSISTENCY = "PTL-DAT-005"
-DAT_ORDERING = "PTL-DAT-006"
-DAT_ROWGROUP_STATS = "PTL-DAT-007"
-DAT_ROWGROUP_SIZE = "PTL-DAT-008"
-DAT_COG_STATS = "PTL-DAT-009"
-DAT_VALID_PERCENT = "PTL-DAT-010"
-DAT_OVERVIEWS = "PTL-DAT-011"
-DAT_GEOPARQUET_VERSION = "PTL-DAT-012"
-DAT_TILE_SIZE = "PTL-DAT-013"
-DAT_PARTITION_SCHEMA = "PTL-DAT-014"
-DAT_TABULAR = "PTL-DAT-015"
-DAT_MIRROR = "PTL-DAT-016"
-DAT_VECTOR_COLUMNS = "PTL-DAT-017"
-
-# Requirement IDs from the spec's requirements manifest
-# (specs/portolan/requirements.yaml) enforced by each check;
-# gated by tests/unit/test_spec_coverage.py.
-SPEC_IDS: dict[str, tuple[str, ...]] = {
-    # PORTO-CORE-030 requires any file:size and file:checksum an asset carries
-    # to match the bytes its href resolves to. These two checks are how that is
-    # observed, which is why the requirement is enforcement: validator.
-    DAT_CHECKSUM: ("PORTO-CORE-030",),
-    DAT_SIZE: ("PORTO-CORE-030",),
-    DAT_FORMAT: ("PORTO-CORE-026", "PORTO-FMT-001"),
-    # FMT-045 scopes every format check below to the catalog's own cloud-native
-    # assets. It is enforced once, at the dispatch in checks.py that returns
-    # early for a source asset, so each check the early return suppresses
-    # carries the ID.
-    DAT_COG: ("PORTO-FMT-001", "PORTO-FMT-023", "PORTO-FMT-024", "PORTO-FMT-045"),
-    # The footprint comparison is scoped to geospatial data only, which is
-    # how a tabular bbox stays informational (PORTO-FMT-036).
-    DAT_CONSISTENCY: ("PORTO-FMT-036",),
-    # FMT-043 binds an item mirror to the same three GeoParquet MUSTs as
-    # vector data, so the checks that enforce them carry it too.
-    # FMT-044 is the applicability guard on FMT-006: the two row-group criteria
-    # run at five or more groups, a single group is measured over its rows, and
-    # two to four are left alone rather than faulted on a threshold they cannot
-    # express.
-    DAT_ORDERING: ("PORTO-FMT-006", "PORTO-FMT-043", "PORTO-FMT-044", "PORTO-FMT-045"),
-    # ERROR when neither statistics source exists; WARNING when a 2.x file
-    # relies on native statistics without the RECOMMENDED covering column.
-    DAT_ROWGROUP_STATS: ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043", "PORTO-FMT-045"),
-    DAT_ROWGROUP_SIZE: ("PORTO-FMT-009", "PORTO-FMT-043", "PORTO-FMT-045"),
-    DAT_COG_STATS: (
-        "PORTO-FMT-026",
-        "PORTO-FMT-027",
-        "PORTO-FMT-028",
-        "PORTO-FMT-030",
-        "PORTO-FMT-045",
-    ),
-    DAT_VALID_PERCENT: ("PORTO-FMT-031", "PORTO-FMT-045"),
-    DAT_OVERVIEWS: ("PORTO-FMT-024", "PORTO-FMT-025", "PORTO-FMT-045"),
-    DAT_GEOPARQUET_VERSION: ("PORTO-FMT-004", "PORTO-FMT-045"),
-    DAT_TILE_SIZE: ("PORTO-FMT-024", "PORTO-FMT-045"),
-    DAT_PARTITION_SCHEMA: ("PORTO-FMT-021", "PORTO-FMT-045"),
-    DAT_TABULAR: ("PORTO-FMT-037", "PORTO-FMT-045"),
-    # The collection SHOULD carries the field, an item carries it in
-    # properties, and a collection whose assets differ MAY declare it per
-    # asset instead — which is why an asset-level declaration satisfies both.
-    DAT_VECTOR_COLUMNS: (
-        "PORTO-FMT-046",
-        "PORTO-FMT-047",
-        "PORTO-FMT-048",
-        "PORTO-FMT-045",
-    ),
-    # A mirror must reproduce the collection's items (PORTO-FMT-042).
-    DAT_MIRROR: ("PORTO-FMT-042",),
-}
 
 # Assets are declared on collections and items; catalogs carry none.
 _DATA_KINDS: tuple[Kind, ...] = ("collection", "item")

@@ -82,48 +82,22 @@ from rashid._href import (
 )
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.model import Finding, Severity
+from rashid.registry import (
+    LIV_CORS_EXPOSE,
+    LIV_CORS_ORIGIN,
+    LIV_CORS_PREFLIGHT,
+    LIV_HEAD_LENGTH,
+    LIV_LINK_TARGET,
+    LIV_OFF_HTTPS,
+    LIV_RANGE,
+    LIV_SELF_BASE,
+    LIV_UNAVAILABLE,
+)
 from rashid.remote import wire_url
 from rashid.rules._common import assets_of, links_of
 
 log = logging.getLogger(__name__)
 
-LIV_UNAVAILABLE = "PTL-LIV-000"
-LIV_RANGE = "PTL-LIV-001"
-LIV_HEAD_LENGTH = "PTL-LIV-002"
-LIV_CORS_ORIGIN = "PTL-LIV-003"
-LIV_CORS_EXPOSE = "PTL-LIV-004"
-LIV_CORS_PREFLIGHT = "PTL-LIV-005"
-LIV_LINK_TARGET = "PTL-LIV-006"
-LIV_SELF_BASE = "PTL-LIV-007"
-LIV_OFF_HTTPS = "PTL-LIV-008"
-
-# Requirement IDs from the spec's requirements manifest
-# (specs/portolan/requirements.yaml) enforced by each check;
-# gated by tests/unit/test_spec_coverage.py.
-SPEC_IDS: dict[str, tuple[str, ...]] = {
-    # Every live check probes the host set built below, and that set is where
-    # PORTO-CORE-073 lands: an absolute href on a host other than the one the
-    # catalog is published under is dropped before a host is ever collected,
-    # so no upstream server is asked to satisfy the Data Storage MUSTs.
-    LIV_RANGE: ("PORTO-CORE-043", "PORTO-CORE-073"),
-    LIV_HEAD_LENGTH: ("PORTO-CORE-043", "PORTO-CORE-073"),
-    LIV_CORS_ORIGIN: ("PORTO-CORE-045", "PORTO-CORE-073"),
-    LIV_CORS_EXPOSE: ("PORTO-CORE-045", "PORTO-CORE-073"),
-    LIV_CORS_PREFLIGHT: ("PORTO-CORE-045", "PORTO-CORE-073"),
-    # core.md, Links: every link MUST resolve (035), against the catalog's own
-    # tree on object storage as much as on disk (036). The publish host is
-    # that tree; the same PORTO-CORE-073 scoping keeps the HEADs off others.
-    LIV_LINK_TARGET: ("PORTO-CORE-035", "PORTO-CORE-036", "PORTO-CORE-073"),
-    # core.md, Links: a published root catalog SHOULD carry an absolute self
-    # link (081). When the caller names the publish base too, the two must
-    # agree, or the publish step wrote the catalog to the wrong location.
-    LIV_SELF_BASE: ("PORTO-CORE-081",),
-    # core.md, Assets: an absolute href MUST use https, because a browser
-    # cannot fetch the other schemes (023). A redirect off https moves the
-    # object to such a URL, so a link that redirects there does not resolve
-    # for an https client either (035). The 073 scoping applies as above.
-    LIV_OFF_HTTPS: ("PORTO-CORE-023", "PORTO-CORE-035", "PORTO-CORE-073"),
-}
 
 # Assets are declared on collections and items; catalogs carry none.
 _LIVE_KINDS: tuple[Kind, ...] = ("collection", "item")

@@ -14,42 +14,20 @@ from rashid._href import is_catalog_url, split_catalog_url
 from rashid._jsonschema import SchemaError
 from rashid.catalog import ROOT_CATALOG, CatalogGraph
 from rashid.config import RulesConfig
-from rashid.data import (
-    DAT_CHECKSUM,
-    DAT_COG,
-    DAT_COG_STATS,
-    DAT_CONSISTENCY,
-    DAT_FORMAT,
-    DAT_GEOPARQUET_VERSION,
-    DAT_MIRROR,
-    DAT_ORDERING,
-    DAT_OVERVIEWS,
-    DAT_PARTITION_SCHEMA,
-    DAT_ROWGROUP_SIZE,
-    DAT_ROWGROUP_STATS,
-    DAT_SIZE,
-    DAT_TABULAR,
-    DAT_TILE_SIZE,
-    DAT_VALID_PERCENT,
-    DAT_VECTOR_COLUMNS,
-    validate_data,
-)
 from rashid.data import ReaderFactory as DataReaderFactory
 from rashid.data import Validator as DataValidator
-from rashid.extensions import EXT_INVALID, validate_extensions
-from rashid.live import (
-    LIV_CORS_EXPOSE,
-    LIV_CORS_ORIGIN,
-    LIV_CORS_PREFLIGHT,
-    LIV_HEAD_LENGTH,
-    LIV_LINK_TARGET,
-    LIV_OFF_HTTPS,
-    LIV_RANGE,
-    LIV_SELF_BASE,
-    validate_live,
-)
+from rashid.data import validate_data
+from rashid.extensions import validate_extensions
 from rashid.live import Prober as LiveProber
+from rashid.live import validate_live
 from rashid.model import Finding, Report, Severity
+from rashid.registry import (
+    DEFAULT_RULES,
+    GEN_MISSING_ROOT,
+    GEN_PARTIAL_TREE,
+    GEN_UNPARSEABLE,
+    check_ids,
+)
 from rashid.remote import (
     DEFAULT_MAX_DOCUMENTS,
     Crawl,
@@ -58,66 +36,11 @@ from rashid.remote import (
     crawl,
 )
 from rashid.rule import Rule
-from rashid.schema import SCH_INVALID, validate_schema
-from rashid.structural import STR_INVALID, validate_structural
+from rashid.schema import validate_schema
+from rashid.structural import validate_structural
 
 log = logging.getLogger(__name__)
 
-GEN_MISSING_ROOT = "PTL-GEN-000"
-GEN_UNPARSEABLE = "PTL-GEN-001"
-GEN_PARTIAL_TREE = "PTL-GEN-002"
-
-# Requirement IDs from the spec's requirements manifest
-# (specs/portolan/requirements.yaml) enforced by each check;
-# gated by tests/unit/test_spec_coverage.py.
-SPEC_IDS: dict[str, tuple[str, ...]] = {
-    # A missing/invalid root catalog.json breaks the always-required
-    # entrypoint; an unparseable object cannot be a valid STAC catalog.
-    GEN_MISSING_ROOT: ("PORTO-CORE-001", "PORTO-CORE-013"),
-    GEN_UNPARSEABLE: ("PORTO-CORE-001",),
-}
-
-# Every rule the data pass can raise; disabling all of them skips the (networked)
-# pass entirely, while disabling any subset just silences those findings. An id
-# left out is a rule that vanishes when the listed ones are disabled, without
-# anyone having disabled it, so tests/unit/test_runner_data_rules.py derives the
-# membership from the registry rather than trusting this list.
-_DATA_RULE_IDS = frozenset(
-    {
-        DAT_CHECKSUM,
-        DAT_SIZE,
-        DAT_FORMAT,
-        DAT_COG,
-        DAT_CONSISTENCY,
-        DAT_ORDERING,
-        DAT_ROWGROUP_STATS,
-        DAT_ROWGROUP_SIZE,
-        DAT_COG_STATS,
-        DAT_VALID_PERCENT,
-        DAT_OVERVIEWS,
-        DAT_GEOPARQUET_VERSION,
-        DAT_TILE_SIZE,
-        DAT_PARTITION_SCHEMA,
-        DAT_TABULAR,
-        DAT_MIRROR,
-        DAT_VECTOR_COLUMNS,
-    }
-)
-
-# Every rule the live pass can raise; disabling all of them skips the (networked)
-# pass entirely, while disabling any subset just silences those findings.
-_LIVE_RULE_IDS = frozenset(
-    {
-        LIV_RANGE,
-        LIV_HEAD_LENGTH,
-        LIV_CORS_ORIGIN,
-        LIV_CORS_EXPOSE,
-        LIV_CORS_PREFLIGHT,
-        LIV_LINK_TARGET,
-        LIV_SELF_BASE,
-        LIV_OFF_HTTPS,
-    }
-)
 
 # Structural/schema validators map one object's raw JSON to schema errors.
 _Validator = Callable[[dict[str, Any]], list[SchemaError]]
@@ -160,11 +83,15 @@ def _optional_passes(
 ) -> list[Finding]:
     """Run the structural, extension, schema, data, and live passes, honouring disable ids."""
     findings: list[Finding] = []
-    if options.structural and STR_INVALID not in config.disabled:
+    if options.structural and not config.disabled >= check_ids(
+        "structural", enables_pass_only=True
+    ):
         findings.extend(
             _stage("structural", lambda: validate_structural(graph, options.structural_validator))
         )
-    if options.extensions and EXT_INVALID not in config.disabled:
+    if options.extensions and not config.disabled >= check_ids(
+        "extensions", enables_pass_only=True
+    ):
         findings.extend(
             f
             for f in _stage(
@@ -173,7 +100,7 @@ def _optional_passes(
             )
             if f.rule_id not in config.disabled
         )
-    if options.schema and SCH_INVALID not in config.disabled:
+    if options.schema and not config.disabled >= check_ids("schema", enables_pass_only=True):
         findings.extend(
             _stage(
                 "schema",
@@ -182,7 +109,7 @@ def _optional_passes(
                 ),
             )
         )
-    if options.data and not config.disabled >= _DATA_RULE_IDS:
+    if options.data and not config.disabled >= check_ids("data", enables_pass_only=True):
         findings.extend(
             f
             for f in _stage(
@@ -193,7 +120,7 @@ def _optional_passes(
             )
             if f.rule_id not in config.disabled
         )
-    if options.live and not config.disabled >= _LIVE_RULE_IDS:
+    if options.live and not config.disabled >= check_ids("live", enables_pass_only=True):
         findings.extend(
             f
             for f in _stage(
@@ -512,8 +439,6 @@ def _validate_graph(
 
     rules = options.rules
     if rules is None:
-        from rashid.rules import DEFAULT_RULES
-
         rules = DEFAULT_RULES
 
     findings.extend(_stage("rules", lambda: _run_rules(graph, rules, config)))

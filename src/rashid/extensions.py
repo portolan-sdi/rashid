@@ -48,24 +48,12 @@ from rashid._jsonschema import (
 )
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
+from rashid.registry import EXT_INVALID, EXT_UNAVAILABLE, EXT_UNVALIDATED
 from rashid.rules.conformance import (
     SCHEMA_URI_PATTERN,
     registered_at_other_version,
     registered_extension,
 )
-
-EXT_INVALID = "PTL-EXT-001"
-EXT_UNAVAILABLE = "PTL-EXT-000"
-EXT_UNVALIDATED = "PTL-EXT-002"
-
-# Requirement IDs from the spec's requirements manifest
-# (specs/portolan/requirements.yaml) enforced by each check;
-# gated by tests/unit/test_spec_coverage.py.
-#
-# Empty by design. The spec sentence this pass implements — the structural
-# validation bullet in specs/portolan/core.md — carries no RFC 2119 keyword,
-# so the manifest assigns it no ID. PTL-CNF-004 sets the same precedent.
-SPEC_IDS: dict[str, tuple[str, ...]] = {}
 
 _PASS = SchemaPass("extension", EXT_INVALID, EXT_UNAVAILABLE)
 

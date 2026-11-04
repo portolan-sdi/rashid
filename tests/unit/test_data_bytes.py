@@ -22,9 +22,10 @@ import pytest
 
 import rashid.data.checks as checks
 from rashid.catalog import CatalogGraph, Node
-from rashid.data import DAT_CHECKSUM, DAT_FORMAT, DAT_SIZE, DataDefect
+from rashid.data import DataDefect
 from rashid.data.reader import Locator
 from rashid.model import Severity
+from rashid.registry import DAT_CHECKSUM, DAT_FORMAT, DAT_SIZE
 
 pytestmark = pytest.mark.unit
 

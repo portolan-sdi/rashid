@@ -1,36 +1,16 @@
-"""The pass-skip gates must list every rule their pass can raise.
-
-``runner._DATA_RULE_IDS`` and ``runner._LIVE_RULE_IDS`` exist so that disabling
-every rule of a networked pass skips the pass itself. An id missing from either
-set is invisible in the worst way: the caller disables the ids it knows about,
-the gate sees a superset of them, and the pass is skipped taking a rule the
-caller never disabled with it. ``PTL-DAT-016`` was dropped that way (#86).
-
-The expected ids are derived, never listed. :mod:`rashid.registry` documents
-itself as the single enumeration of every check rashid can emit and raises at
-import when a pass declares a rule it does not describe, so ``CHECKS`` is the
-strongest source of truth available in-process. Within one pass's id prefix the
-degradation report (``-000``) is exactly the check that cites no spec
-requirement — it reports that the pass could not run rather than enforcing
-anything — so ``spec_ids`` separates rule from report without naming an id
-here. A gate against drift that has to be edited when a rule is added would be
-the same gate that just failed.
-"""
+"""Disabling a networked pass uses its registered gate members."""
 
 from __future__ import annotations
 
 import pytest
 
 import rashid.data as data_pass
-import rashid.live as live_pass
-import rashid.runner as runner
 from rashid import ValidationOptions
 from rashid.catalog import Node
 from rashid.config import RulesConfig
-from rashid.data import DAT_MIRROR, DAT_UNAVAILABLE, DataDefect
+from rashid.data import DataDefect
 from rashid.data.reader import AssetReader
-from rashid.live import LIV_UNAVAILABLE
-from rashid.registry import CHECKS
+from rashid.registry import CHECKS, DAT_MIRROR, DAT_UNAVAILABLE, LIV_UNAVAILABLE, check_ids
 from rashid.runner import validate
 from tests.conftest import CatalogBuilder
 
@@ -45,28 +25,17 @@ def _rules_of(prefix: str) -> frozenset[str]:
 
 
 def test_data_gate_lists_every_data_rule() -> None:
-    assert _rules_of("PTL-DAT-") == runner._DATA_RULE_IDS
+    assert _rules_of("PTL-DAT-") == check_ids("data", enables_pass_only=True)
 
 
 def test_live_gate_lists_every_live_rule() -> None:
-    assert _rules_of("PTL-LIV-") == runner._LIVE_RULE_IDS
-
-
-def test_gates_agree_with_the_pass_modules() -> None:
-    """A second derivation, from the passes' own spec registries.
-
-    The registry join and each pass's ``SPEC_IDS`` are written in different
-    files, so a rule added to one and forgotten in the other fails here rather
-    than agreeing with a gate that is wrong twice.
-    """
-    assert frozenset(data_pass.SPEC_IDS) == runner._DATA_RULE_IDS
-    assert frozenset(live_pass.SPEC_IDS) == runner._LIVE_RULE_IDS
+    assert _rules_of("PTL-LIV-") == check_ids("live", enables_pass_only=True)
 
 
 def test_degradation_reports_are_not_gate_members() -> None:
     """``-000`` is not a rule, so disabling every rule cannot require it."""
-    assert DAT_UNAVAILABLE not in runner._DATA_RULE_IDS
-    assert LIV_UNAVAILABLE not in runner._LIVE_RULE_IDS
+    assert DAT_UNAVAILABLE not in check_ids("data", enables_pass_only=True)
+    assert LIV_UNAVAILABLE not in check_ids("live", enables_pass_only=True)
 
 
 def _spy() -> tuple[list[str], data_pass.Validator]:
@@ -92,7 +61,7 @@ def test_mirror_rule_keeps_the_pass_alive(catalog: CatalogBuilder) -> None:
     validate(
         root,
         options=ValidationOptions(
-            config=RulesConfig(disabled=runner._DATA_RULE_IDS - {DAT_MIRROR}),
+            config=RulesConfig(disabled=check_ids("data", enables_pass_only=True) - {DAT_MIRROR}),
             structural=False,
             data_validator=spy,
         ),
@@ -109,7 +78,7 @@ def test_disabling_every_rule_still_skips_the_pass(catalog: CatalogBuilder) -> N
     validate(
         root,
         options=ValidationOptions(
-            config=RulesConfig(disabled=runner._DATA_RULE_IDS),
+            config=RulesConfig(disabled=check_ids("data", enables_pass_only=True)),
             structural=False,
             data_validator=spy,
         ),

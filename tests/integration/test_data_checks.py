@@ -27,14 +27,9 @@ from pyproj import CRS, Transformer
 import rashid.data.checks as checks
 from rashid import _trace
 from rashid.catalog import Node
-from rashid.data import (
-    DAT_CHECKSUM,
-    DAT_CONSISTENCY,
-    DAT_FORMAT,
-    DAT_SIZE,
-)
 from rashid.data.reader import Locator
 from rashid.model import Severity
+from rashid.registry import DAT_CHECKSUM, DAT_CONSISTENCY, DAT_FORMAT, DAT_SIZE
 from rashid.rules._common import is_source_asset
 
 pytestmark = pytest.mark.integration

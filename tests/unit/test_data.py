@@ -20,7 +20,10 @@ import rashid.data as data_pass
 from rashid import ValidationOptions
 from rashid.catalog import CatalogGraph, Node
 from rashid.config import RulesConfig
-from rashid.data import (
+from rashid.data import DataDefect, validate_data
+from rashid.data.reader import AssetReader, Locator
+from rashid.model import Severity
+from rashid.registry import (
     DAT_CHECKSUM,
     DAT_COG,
     DAT_COG_STATS,
@@ -39,11 +42,7 @@ from rashid.data import (
     DAT_UNAVAILABLE,
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
-    DataDefect,
-    validate_data,
 )
-from rashid.data.reader import AssetReader, Locator
-from rashid.model import Severity
 from rashid.runner import validate
 from tests.conftest import CatalogBuilder
 

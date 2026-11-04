@@ -23,8 +23,14 @@ from rashid._href import is_catalog_url, split_catalog_url
 from rashid.catalog import CatalogGraph
 from rashid.cli import main
 from rashid.data.reader import FilesystemHttpReader, LocalOnlyReader
-from rashid.live import LIV_LINK_TARGET, LIV_SELF_BASE, LIV_UNAVAILABLE
 from rashid.model import Severity
+from rashid.registry import (
+    GEN_MISSING_ROOT,
+    GEN_PARTIAL_TREE,
+    LIV_LINK_TARGET,
+    LIV_SELF_BASE,
+    LIV_UNAVAILABLE,
+)
 from rashid.remote import (
     Crawl,
     Fetched,
@@ -33,7 +39,6 @@ from rashid.remote import (
     crawl,
     wire_url,
 )
-from rashid.runner import GEN_MISSING_ROOT, GEN_PARTIAL_TREE
 from tests._https import HttpsServer, Route
 from tests.conftest import CatalogBuilder, mutate_json
 from tests.unit.test_live import FakeProber, StatusProber

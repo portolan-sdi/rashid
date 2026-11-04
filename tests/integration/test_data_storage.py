@@ -27,7 +27,9 @@ import rashid.data._files as file_owner
 import rashid.data.checks as checks
 from rashid.catalog import Node
 from rashid.cli import main
-from rashid.data import (
+from rashid.data.reader import Locator
+from rashid.model import Severity
+from rashid.registry import (
     DAT_COG,
     DAT_COG_STATS,
     DAT_GEOPARQUET_VERSION,
@@ -41,8 +43,6 @@ from rashid.data import (
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
 )
-from rashid.data.reader import Locator
-from rashid.model import Severity
 from tests.conftest import CatalogBuilder
 from tests.integration import _data_assets as assets
 

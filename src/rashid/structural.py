@@ -21,18 +21,7 @@ from typing import Any
 from rashid._jsonschema import SchemaError, SchemaPass, Validator, schema_targets, stac_registry
 from rashid.catalog import CatalogGraph
 from rashid.model import Finding
-
-STR_INVALID = "PTL-STR-001"
-STR_UNAVAILABLE = "PTL-STR-000"
-
-SPEC_IDS: dict[str, tuple[str, ...]] = {
-    STR_INVALID: (
-        "PORTO-CORE-001",
-        "PORTO-CORE-013",
-        "PORTO-CORE-019",
-        "PORTO-FMT-036",
-    ),
-}
+from rashid.registry import STR_INVALID, STR_UNAVAILABLE
 
 _PASS = SchemaPass("structural", STR_INVALID, STR_UNAVAILABLE)
 
