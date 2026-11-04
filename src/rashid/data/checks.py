@@ -774,14 +774,7 @@ def _check_consistency(
     try:
         geo = _extract_geo(expected, files)
     except Exception as exc:  # unreadable header is advisory, not fatal
-        return [
-            DataDefect(
-                DAT_CONSISTENCY,
-                Severity.INFO,
-                f"asset '{key}' spatial metadata could not be read ({exc})",
-                key,
-            )
-        ], None
+        return [_unreadable_spatial_metadata(key, exc)], None
     if geo is None:
         return [], None
 
@@ -801,6 +794,18 @@ def _check_consistency(
         message = _bbox_mismatch_message(key, declared_bbox, bounds, geo.epsg)
         defects.append(DataDefect(DAT_CONSISTENCY, Severity.WARNING, message, key))
     return defects, bounds
+
+
+def _unreadable_spatial_metadata(
+    key: str, error: Exception, *, subject: str | None = None
+) -> DataDefect:
+    subject = subject or f"asset '{key}'"
+    return DataDefect(
+        DAT_CONSISTENCY,
+        Severity.INFO,
+        f"{subject} spatial metadata could not be read ({error})",
+        key,
+    )
 
 
 def _check_collection_extent(node: Node, bounds: list[_Wgs84Bounds]) -> list[DataDefect]:
@@ -907,6 +912,8 @@ def _check_geoparquet(
         return []
 
     geo = _geo_metadata(parquet)
+    if isinstance(geo, _MalformedGeo):
+        return [_unreadable_spatial_metadata(key, geo.error, subject=subject)]
     defects: list[DataDefect] = []
     if geo is None and (primary := _native_geometry(parquet)) is not None:
         defects.append(
@@ -919,7 +926,7 @@ def _check_geoparquet(
         )
         geo = {"version": "2.0", "primary_column": primary}
     if not isinstance(geo, dict):
-        return []  # plain Parquet or malformed metadata
+        return []  # plain Parquet
     defects.extend(_check_geoparquet_version(key, geo, subject=subject))
     meta = parquet.metadata
     row_counts = [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
@@ -2001,10 +2008,8 @@ def _extract_geo(expected: str, files: _AssetFiles) -> _Geo | None:
 def _geo_from_parquet(files: _AssetFiles) -> _Geo | None:
     parquet = files.parquet()
     geo = _geo_metadata(parquet)
-    if geo is None:
-        return None
-    if isinstance(geo, _MalformedGeo):
-        raise geo.error
+    if geo is None or isinstance(geo, _MalformedGeo):
+        return None  # _check_geoparquet owns the malformed-metadata INFO
     primary = geo.get("primary_column")
     column = geo.get("columns", {}).get(primary, {})
     bbox = column.get("bbox")
