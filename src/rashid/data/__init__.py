@@ -89,7 +89,7 @@ class DataDefect:
     actual: Any | None = None
 
 
-class _DataResults:
+class DataResults:
     """Finding sources; each build derives shared-field and partition results anew."""
 
     def __init__(self) -> None:

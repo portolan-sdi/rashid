@@ -50,7 +50,7 @@ def test_partition_handles_and_covering_policies(tmp_path: Path, nested: bool) -
 @pytest.mark.parametrize("seed", range(20))
 def test_result_build_is_a_function_of_sources(seed: int) -> None:
     """Rebuilding and extending a built accumulator equals a fresh derivation."""
-    from rashid.data import _DataResults
+    from rashid.data import DataResults
 
     rng = random.Random(seed)
     assets_source = [
@@ -67,7 +67,7 @@ def test_result_build_is_a_function_of_sources(seed: int) -> None:
         DataDefect("PTL-DAT-007", rng.choice(list(Severity)), f"file {i}", str(i))
         for i in range(rng.randrange(1, 15))
     ]
-    source = _DataResults()
+    source = DataResults()
     source.extend(partitions, partition_total=20)
     source.extend(assets_source)
     first = source.build()
@@ -85,7 +85,7 @@ def test_result_build_is_a_function_of_sources(seed: int) -> None:
         )
     extra = DataDefect("PTL-DAT-005", Severity.WARNING, "asset", "extra")
     source.extend([extra])
-    fresh = _DataResults()
+    fresh = DataResults()
     fresh.extend(partitions, partition_total=20)
     fresh.extend([*assets_source, extra])
     assert source.build() == fresh.build() == [*first, extra]

@@ -28,7 +28,7 @@ def _raster_open(path: str, *, overview_level: int | None = None) -> Any:
     return rasterio.open(path, **options)
 
 
-class _AssetFiles:
+class AssetFiles:
     """One asset's open Parquet file and raster dataset, shared by its checks.
 
     Each check used to open the asset itself, so a GeoParquet footer was read
@@ -104,14 +104,14 @@ class _AssetFiles:
                 if opened is not None:
                     stack.callback(opened.close)
 
-    def __enter__(self) -> _AssetFiles:
+    def __enter__(self) -> AssetFiles:
         return self
 
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
 
-def _partition_files(base: Path, pattern: str) -> list[tuple[str, Path]]:
+def partition_files(base: Path, pattern: str) -> list[tuple[str, Path]]:
     """List a locally scoped glob in stable order with POSIX message paths.
 
     The caller owns href applicability and containment; this owner performs

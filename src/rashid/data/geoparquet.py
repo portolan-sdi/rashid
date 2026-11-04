@@ -11,8 +11,8 @@ from pyproj import CRS
 from rashid import _json
 from rashid.catalog import Node
 from rashid.data import DataDefect
-from rashid.data._files import _AssetFiles
-from rashid.data.spatial import _as_bbox, _bbox_union, _Geo, _unreadable_spatial_metadata
+from rashid.data._files import AssetFiles
+from rashid.data.spatial import Geo, as_bbox, bbox_union, unreadable_spatial_metadata
 from rashid.model import Severity
 from rashid.registry import (
     DAT_GEOPARQUET_VERSION,
@@ -58,8 +58,8 @@ _MIN_CHUNK_ROWS = 20
 # --- GeoParquet cloud-native structure -------------------------------------
 
 
-def _check_geoparquet(
-    key: str, files: _AssetFiles, *, subject: str | None = None
+def check_geoparquet(
+    key: str, files: AssetFiles, *, subject: str | None = None
 ) -> list[DataDefect]:
     """A GeoParquet asset MUST have bounded row groups, per-row-group spatial
     statistics, and spatial ordering (formats.md:30,64,75).
@@ -79,9 +79,9 @@ def _check_geoparquet(
     except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
 
-    geo = _geo_metadata(parquet)
+    geo = geo_metadata(parquet)
     if isinstance(geo, _MalformedGeo):
-        return [_unreadable_spatial_metadata(key, geo.message, subject=subject)]
+        return [unreadable_spatial_metadata(key, geo.message, subject=subject)]
     defects: list[DataDefect] = []
     if geo is None and (primary := _native_geometry(parquet)) is not None:
         defects.append(
@@ -161,7 +161,7 @@ class _MalformedGeo:
     message: str
 
 
-def _geo_metadata(parquet: Any) -> dict[str, Any] | _MalformedGeo | None:
+def geo_metadata(parquet: Any) -> dict[str, Any] | _MalformedGeo | None:
     """Distinguish an absent key, malformed JSON, and a parsed metadata object."""
     raw = (parquet.schema_arrow.metadata or {}).get(b"geo")
     if raw is None:
@@ -175,7 +175,7 @@ def _geo_metadata(parquet: Any) -> dict[str, Any] | _MalformedGeo | None:
     return geo
 
 
-def _bbox_struct(
+def bbox_struct(
     parquet: Any, geo: dict[str, Any], *, policy: Literal["rows", "statistics"] = "rows"
 ) -> tuple[str, list[str]] | None:
     """Resolve covering paths for either row structs or footer statistics.
@@ -204,7 +204,7 @@ def _bbox_struct(
     return None
 
 
-def _bbox_column_values(table: Any, bbox: tuple[str, list[str]]) -> list[Any]:
+def bbox_column_values(table: Any, bbox: tuple[str, list[str]]) -> list[Any]:
     """Per-row [xmin, ymin, xmax, ymax], or None for a row that carries none."""
     root, fields = bbox
     values: list[Any] = []
@@ -218,8 +218,8 @@ def _bbox_column_values(table: Any, bbox: tuple[str, list[str]]) -> list[Any]:
 # --- tabular collections ----------------------------------------------------
 
 
-def _check_tabular(
-    node: Node, key: str, asset: dict[str, Any], files: _AssetFiles
+def check_tabular(
+    node: Node, key: str, asset: dict[str, Any], files: AssetFiles
 ) -> list[DataDefect]:
     """The Tabular Data SHOULDs for a plain-Parquet collection-level data asset.
 
@@ -239,7 +239,7 @@ def _check_tabular(
         parquet = files.parquet()
     except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
-    if _geo_metadata(parquet) is not None or _native_geometry(parquet) is not None:
+    if geo_metadata(parquet) is not None or _native_geometry(parquet) is not None:
         return []  # GeoParquet: the geospatial storage rules own it
     defects: list[DataDefect] = []
     if not has_table_columns(node, asset):
@@ -265,8 +265,8 @@ def _check_tabular(
     return defects
 
 
-def _check_vector_columns(
-    node: Node, key: str, asset: dict[str, Any], files: _AssetFiles
+def check_vector_columns(
+    node: Node, key: str, asset: dict[str, Any], files: AssetFiles
 ) -> list[DataDefect]:
     """The table-extension SHOULDs for a GeoParquet data asset.
 
@@ -284,7 +284,7 @@ def _check_vector_columns(
         parquet = files.parquet()
     except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
-    geo = _geo_metadata(parquet)
+    geo = geo_metadata(parquet)
     if isinstance(geo, _MalformedGeo) or (geo is None and _native_geometry(parquet) is None):
         return []  # plain Parquet: the Tabular Data SHOULDs own it
     if has_table_columns(node, asset):
@@ -392,7 +392,7 @@ def _native_bboxes(
 
 def _covering_leaf_indices(parquet: Any, geo: dict[str, Any]) -> dict[str, int] | None:
     """Resolve all four covering leaves only when they exist in the Parquet schema."""
-    covering = _bbox_struct(parquet, geo, policy="statistics")
+    covering = bbox_struct(parquet, geo, policy="statistics")
     if covering is None:
         return None
     index = _column_index(parquet.metadata)
@@ -561,7 +561,7 @@ def _conservative_chunk_bboxes(
         end = min(start + size, rows)
         intersecting = [bbox for left, right, bbox in group_ranges if left < end and right > start]
         if intersecting:
-            chunks.append(_bbox_union(intersecting))
+            chunks.append(bbox_union(intersecting))
     return chunks
 
 
@@ -580,7 +580,7 @@ def _chunked_bboxes(
     a file with one group has no stated evaluation.
     """
     size = -(-len(row_boxes) // _ORDERING_CHUNKS)
-    return [_bbox_union(row_boxes[i : i + size]) for i in range(0, len(row_boxes), size)]
+    return [bbox_union(row_boxes[i : i + size]) for i in range(0, len(row_boxes), size)]
 
 
 def _row_bboxes(
@@ -598,7 +598,7 @@ def _row_bboxes(
     out of spatial order, and one of them must not cost the whole file its
     ordering check. Returns None only when no row has a box at all.
     """
-    covering = _bbox_struct(parquet, geo)
+    covering = bbox_struct(parquet, geo)
     if covering is None:
         return None
     root, fields = covering
@@ -628,14 +628,14 @@ def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bo
     Callers must hold the applicability guard themselves. Below
     ``_MIN_ORDERING_ROW_GROUPS`` the two criteria say nothing, so a file that
     thin is either left alone or measured over its rows instead; see
-    :func:`_check_geoparquet` and :func:`_ordering_defect`.
+    :func:`check_geoparquet` and :func:`_ordering_defect`.
     """
     pairs = len(bboxes) - 1
     overlaps = sum(_bbox_overlaps(bboxes[i], bboxes[i + 1]) for i in range(pairs))
     if overlaps / pairs < _MAX_OVERLAP_FRACTION:
         return True  # low overlap
 
-    extent = _bbox_union(bboxes)
+    extent = bbox_union(bboxes)
     extent_area = _bbox_area(extent)
     if extent_area == 0:
         return True  # a single location — nothing to order
@@ -651,17 +651,17 @@ def _bbox_overlaps(a: tuple[float, ...], b: tuple[float, ...]) -> bool:
     return min(a[2], b[2]) > max(a[0], b[0]) and min(a[3], b[3]) > max(a[1], b[1])
 
 
-def _geo_from_parquet(files: _AssetFiles) -> _Geo | None:
+def geo_from_parquet(files: AssetFiles) -> Geo | None:
     parquet = files.parquet()
-    geo = _geo_metadata(parquet)
+    geo = geo_metadata(parquet)
     if geo is None and _native_geometry(parquet) is None:
         return None
     if geo is None or isinstance(geo, _MalformedGeo):
         # The GeoParquet checks report missing or malformed spatial metadata.
-        return _Geo(bbox=None, epsg=None, crs=None)
+        return Geo(bbox=None, epsg=None, crs=None)
     primary = geo.get("primary_column")
     column = geo.get("columns", {}).get(primary, {})
     bbox = column.get("bbox")
     crs_obj = column.get("crs")
     crs = CRS.from_user_input(crs_obj) if crs_obj is not None else CRS.from_epsg(4326)
-    return _Geo(bbox=_as_bbox(bbox), epsg=crs.to_epsg(), crs=crs)
+    return Geo(bbox=as_bbox(bbox), epsg=crs.to_epsg(), crs=crs)

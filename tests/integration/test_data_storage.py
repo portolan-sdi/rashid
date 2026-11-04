@@ -27,8 +27,8 @@ import rashid.data._files as file_owner
 import rashid.data.checks as checks
 from rashid.catalog import Node
 from rashid.cli import main
-from rashid.data import DataDefect, _DataResults, geoparquet, partitions, raster
-from rashid.data._files import _AssetFiles
+from rashid.data import DataDefect, DataResults, geoparquet, partitions, raster
+from rashid.data._files import AssetFiles
 from rashid.data.reader import Locator
 from rashid.model import Severity
 from rashid.registry import (
@@ -56,8 +56,8 @@ def _loc(path: Path) -> Locator:
     return Locator(is_remote=False, source=str(path))
 
 
-def _files(path: Path) -> _AssetFiles:
-    return _AssetFiles(_loc(path))
+def _files(path: Path) -> AssetFiles:
+    return AssetFiles(_loc(path))
 
 
 class _FileReader:
@@ -85,11 +85,11 @@ def _node_with_asset(asset: dict) -> Node:
 
 
 def _gpq(path: Path) -> list:
-    return geoparquet._check_geoparquet("data", _files(path))
+    return geoparquet.check_geoparquet("data", _files(path))
 
 
 def _raster(path: Path) -> list:
-    return raster._check_raster("data", _loc(path), _files(path))
+    return raster.check_raster("data", _loc(path), _files(path))
 
 
 # --- GeoParquet ------------------------------------------------------------
@@ -226,7 +226,7 @@ def test_footer_pass_does_not_mask_unordered_rows(tmp_path: Path) -> None:
     path = tmp_path / "footer_false_positive.parquet"
     assets.write_geoparquet(path, points=points, row_group_size=rows_per_group)
     parquet = pq.ParquetFile(path)
-    geo = geoparquet._geo_metadata(parquet) or {}
+    geo = geoparquet.geo_metadata(parquet) or {}
     bboxes, _ = geoparquet._rowgroup_stat_defects("data", parquet, geo)
     assert bboxes is not None and geoparquet._is_spatially_ordered(bboxes)
 
@@ -409,7 +409,7 @@ def test_all_null_geometry_is_never_faulted_as_disorder(tmp_path: Path) -> None:
         null_rows=set(range(len(points))),
     )
     parquet = pq.ParquetFile(path)
-    assert geoparquet._row_bboxes(parquet, geoparquet._geo_metadata(parquet) or {}) is None
+    assert geoparquet._row_bboxes(parquet, geoparquet.geo_metadata(parquet) or {}) is None
     ordering = [d for d in _gpq(path) if d.rule_id == DAT_ORDERING]
     assert [d for d in ordering if d.severity is Severity.ERROR] == []
 
@@ -879,13 +879,13 @@ class _NoAssets:
 
 
 def _partition_schemas(node: Node) -> list:
-    schemas, _, _ = partitions._check_partitions(node, _NoAssets())
+    schemas, _, _ = partitions.check_partitions(node, _NoAssets())
     return schemas
 
 
 def _partition_bytes(node: Node, reader: object | None = None) -> list:
-    _, defects, total = partitions._check_partitions(node, reader or _NoAssets())
-    source = _DataResults()
+    _, defects, total = partitions.check_partitions(node, reader or _NoAssets())
+    source = DataResults()
     source.extend(defects, partition_total=total)
     return source.build()
 
@@ -975,7 +975,7 @@ def test_partition_severities_fold_separately() -> None:
         DataDefect(DAT_ROWGROUP_STATS, Severity.ERROR, "e", "x"),
         DataDefect(DAT_ROWGROUP_STATS, Severity.WARNING, "w", "x"),
     ]
-    source = _DataResults()
+    source = DataResults()
     source.extend(defects, partition_total=2)
     folded = source.build()
     assert [d.severity for d in folded] == [Severity.ERROR, Severity.WARNING]
@@ -1070,7 +1070,7 @@ def _tabular_collection(**overrides: object) -> Node:
 
 def _tabular(node: Node, path: Path) -> list:
     asset = {"href": "./data.parquet", "roles": ["data"]}
-    return geoparquet._check_tabular(node, "data", asset, _files(path))
+    return geoparquet.check_tabular(node, "data", asset, _files(path))
 
 
 def _timestamp_column() -> dict[str, list[object]]:
@@ -1105,7 +1105,7 @@ def test_tabular_with_asset_level_table_columns_is_clean(tmp_path: Path) -> None
         "roles": ["data"],
         "table:columns": [{"name": "value", "type": "int64", "description": "a value"}],
     }
-    assert geoparquet._check_tabular(_tabular_collection(), "data", asset, _files(path)) == []
+    assert geoparquet.check_tabular(_tabular_collection(), "data", asset, _files(path)) == []
 
 
 def test_tabular_temporal_column_without_extent_flags_dat_015(tmp_path: Path) -> None:
@@ -1144,14 +1144,14 @@ def test_non_data_roles_are_not_tabular(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False)
     asset = {"href": "./data.parquet", "roles": ["metadata"]}
-    assert geoparquet._check_tabular(_tabular_collection(), "data", asset, _files(path)) == []
+    assert geoparquet.check_tabular(_tabular_collection(), "data", asset, _files(path)) == []
 
 
 def test_item_level_parquet_is_not_tabular(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False)
     node = _node_with_asset({"href": "./data.parquet", "roles": ["data"]})
-    assert geoparquet._check_tabular(node, "data", node.data["assets"]["a"], _files(path)) == []
+    assert geoparquet.check_tabular(node, "data", node.data["assets"]["a"], _files(path)) == []
 
 
 # --- vector column documentation (PTL-DAT-017) ------------------------------
@@ -1178,7 +1178,7 @@ def _vector_item(**overrides: object) -> Node:
 
 def _vector(node: Node, path: Path, **asset_fields: object) -> list:
     asset = {"href": "./data.parquet", "roles": ["data"], **asset_fields}
-    return geoparquet._check_vector_columns(node, "data", asset, _files(path))
+    return geoparquet.check_vector_columns(node, "data", asset, _files(path))
 
 
 def test_vector_collection_without_table_columns_flags_dat_017(tmp_path: Path) -> None:
@@ -1233,6 +1233,4 @@ def test_non_data_roles_are_not_vector(tmp_path: Path) -> None:
     path = tmp_path / "geo.parquet"
     assets.write_geoparquet(path)
     asset = {"href": "./data.parquet", "roles": ["metadata"]}
-    assert (
-        geoparquet._check_vector_columns(_tabular_collection(), "data", asset, _files(path)) == []
-    )
+    assert geoparquet.check_vector_columns(_tabular_collection(), "data", asset, _files(path)) == []

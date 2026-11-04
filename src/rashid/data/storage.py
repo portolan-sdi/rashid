@@ -33,11 +33,11 @@ _HASH_ALGOS = {
 }
 
 # Recognized formats: (magic-byte probe, media-type marker).
-_PMTILES_MAGIC = b"PMTiles"
+PMTILES_MAGIC = b"PMTiles"
 _HEAD_BYTES = 16  # enough for every magic-number probe below
 
 
-def _check_bytes(
+def check_bytes(
     key: str,
     *,
     asset: dict[str, Any],
@@ -238,7 +238,7 @@ def _verify_format(key: str, expected: str | None, head: bytes) -> list[DataDefe
 # --- format probing --------------------------------------------------------
 
 
-def _expected_format(media_type: str) -> str | None:
+def expected_format(media_type: str) -> str | None:
     lowered = media_type.lower()
     if "parquet" in lowered:
         return "parquet"
@@ -258,7 +258,7 @@ def _detect_format(head: bytes) -> str | None:
         return "parquet"
     if head[:4] in (b"II*\x00", b"MM\x00*"):
         return "tiff"
-    if head[: len(_PMTILES_MAGIC)] == _PMTILES_MAGIC:
+    if head[: len(PMTILES_MAGIC)] == PMTILES_MAGIC:
         return "pmtiles"
     if head[:8] == b"\x89PNG\r\n\x1a\n":
         return "png"

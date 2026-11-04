@@ -15,9 +15,9 @@ from shapely.geometry.base import BaseGeometry
 
 from rashid.catalog import CatalogGraph, Node
 from rashid.data import DataDefect
-from rashid.data._files import _AssetFiles
-from rashid.data.geoparquet import _bbox_column_values, _bbox_struct, _geo_metadata
-from rashid.data.spatial import _as_bbox
+from rashid.data._files import AssetFiles
+from rashid.data.geoparquet import bbox_column_values, bbox_struct, geo_metadata
+from rashid.data.spatial import as_bbox
 from rashid.model import Severity
 from rashid.registry import (
     DAT_MIRROR,
@@ -62,8 +62,8 @@ class _MirrorRows:
     bboxes: list[Any] | None
 
 
-def _check_mirror(  # noqa: PLR0911 - guard clauses follow the documented skip conditions
-    node: Node, key: str, files: _AssetFiles, graph: CatalogGraph | None
+def check_mirror(  # noqa: PLR0911 - guard clauses follow the documented skip conditions
+    node: Node, key: str, files: AssetFiles, graph: CatalogGraph | None
 ) -> list[DataDefect]:
     """A mirror MUST reproduce the collection's items (PORTO-FMT-042).
 
@@ -209,14 +209,14 @@ def _mirror_field_defects(
 def _read_mirror_rows(parquet: Any) -> _MirrorRows | None:
     """Read id, geometry, datetime, and bbox in one pass over the file."""
     names = parquet.schema_arrow.names
-    metadata = _geo_metadata(parquet)
+    metadata = geo_metadata(parquet)
     geo = metadata if isinstance(metadata, dict) else {}
     primary = geo.get("primary_column")
     geometry_name = primary if isinstance(primary, str) and primary in names else None
     if geometry_name is None and "geometry" in names:
         geometry_name = "geometry"
     datetime_name = "datetime" if "datetime" in names else None
-    bbox = _bbox_struct(parquet, geo)
+    bbox = bbox_struct(parquet, geo)
     wanted = [geometry_name, datetime_name, bbox[0] if bbox is not None else None]
     try:
         table = parquet.read(columns=["id", *(name for name in wanted if name is not None)])
@@ -226,7 +226,7 @@ def _read_mirror_rows(parquet: Any) -> _MirrorRows | None:
         ids=table.column("id").to_pylist(),
         geometry=table.column(geometry_name).to_pylist() if geometry_name else None,
         datetimes=table.column(datetime_name).to_pylist() if datetime_name else None,
-        bboxes=_bbox_column_values(table, bbox) if bbox is not None else None,
+        bboxes=bbox_column_values(table, bbox) if bbox is not None else None,
     )
 
 
@@ -300,7 +300,7 @@ def _datetime_agrees(item: Node, value: Any) -> bool:
 
 def _bbox_agrees(item: Node, value: Any) -> bool:
     """Does one mirror row's covering box reproduce the item's ``bbox``?"""
-    declared = _as_bbox(item.data.get("bbox"))
+    declared = as_bbox(item.data.get("bbox"))
     if declared is None:
         return True  # no declared bbox is nothing to compare against
     if not isinstance(value, list) or len(value) != len(declared):

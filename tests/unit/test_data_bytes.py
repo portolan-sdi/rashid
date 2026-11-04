@@ -1,6 +1,6 @@
 """How much of an asset the byte checks actually read.
 
-``_check_bytes`` derives three findings from one pass over the object: the
+``check_bytes`` derives three findings from one pass over the object: the
 checksum needs every byte, ``file:size`` needs every byte, and the format magic
 needs the first ``_HEAD_BYTES``. When none of the three can be produced, the
 object must not be touched at all — a remote COG on someone else's host is a

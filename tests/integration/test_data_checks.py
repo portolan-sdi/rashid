@@ -27,8 +27,8 @@ from pyproj import CRS, Transformer
 import rashid.data.checks as checks
 from rashid import _trace
 from rashid.catalog import Node
-from rashid.data import DataDefect, _DataResults, geoparquet, mirror, raster, spatial, storage
-from rashid.data._files import _AssetFiles
+from rashid.data import DataDefect, DataResults, geoparquet, mirror, raster, spatial, storage
+from rashid.data._files import AssetFiles
 from rashid.data.reader import Locator
 from rashid.model import Severity
 from rashid.registry import DAT_CHECKSUM, DAT_COG, DAT_CONSISTENCY, DAT_FORMAT, DAT_SIZE
@@ -157,7 +157,7 @@ def test_pmtiles_header_bbox(tmp_path: Path) -> None:
     path = tmp_path / "tiles.pmtiles"
     path.write_bytes(bytes(header))
 
-    geo = spatial._geo_from_pmtiles(Locator(is_remote=False, source=str(path)))
+    geo = spatial.geo_from_pmtiles(Locator(is_remote=False, source=str(path)))
 
     assert geo is not None
     assert geo.epsg == 4326
@@ -173,15 +173,15 @@ _RD_NEW_BBOX = [10425.156, 306846.198, 278026.09, 621876.3]
 _RD_NEW_ENVELOPE = [3.307938, 50.750367, 7.227498, 53.576423]
 
 
-def _rd_new_geo() -> spatial._Geo:
-    return spatial._Geo(bbox=list(_RD_NEW_BBOX), epsg=28992, crs=CRS.from_epsg(28992))
+def _rd_new_geo() -> spatial.Geo:
+    return spatial.Geo(bbox=list(_RD_NEW_BBOX), epsg=28992, crs=CRS.from_epsg(28992))
 
 
 def test_wgs84_bounds_of_unprojected_bbox_are_exact() -> None:
     bbox = [4.0, 50.0, 6.0, 52.0]
-    geo = spatial._Geo(bbox=bbox, epsg=4326, crs=CRS.from_epsg(4326))
+    geo = spatial.Geo(bbox=bbox, epsg=4326, crs=CRS.from_epsg(4326))
 
-    bounds = spatial._wgs84_bounds(geo)
+    bounds = spatial.wgs84_bounds(geo)
 
     assert bounds is not None
     assert not bounds.reprojected
@@ -193,9 +193,9 @@ def test_wgs84_bounds_reproject_a_projected_bbox() -> None:
     to_mercator = Transformer.from_crs(CRS.from_epsg(4326), CRS.from_epsg(3857), always_xy=True)
     minx, miny = to_mercator.transform(4.0, 50.0)
     maxx, maxy = to_mercator.transform(6.0, 52.0)
-    geo = spatial._Geo(bbox=[minx, miny, maxx, maxy], epsg=3857, crs=CRS.from_epsg(3857))
+    geo = spatial.Geo(bbox=[minx, miny, maxx, maxy], epsg=3857, crs=CRS.from_epsg(3857))
 
-    bounds = spatial._wgs84_bounds(geo)
+    bounds = spatial.wgs84_bounds(geo)
 
     assert bounds is not None
     assert bounds.reprojected
@@ -206,7 +206,7 @@ def test_wgs84_bounds_reproject_a_projected_bbox() -> None:
 
 
 def test_wgs84_bounds_bracket_the_true_envelope() -> None:
-    bounds = spatial._wgs84_bounds(_rd_new_geo())
+    bounds = spatial.wgs84_bounds(_rd_new_geo())
 
     assert bounds is not None
     assert bounds.inner is not None
@@ -221,10 +221,10 @@ def test_wgs84_bounds_bracket_the_true_envelope() -> None:
 
 def test_projected_bbox_accepts_its_true_envelope() -> None:
     """Reprojecting only the corners under-claims the north edge here (#26)."""
-    bounds = spatial._wgs84_bounds(_rd_new_geo())
+    bounds = spatial.wgs84_bounds(_rd_new_geo())
 
     assert bounds is not None
-    assert spatial._bbox_within(_RD_NEW_ENVELOPE, bounds)
+    assert spatial.bbox_within(_RD_NEW_ENVELOPE, bounds)
 
 
 @pytest.mark.parametrize(
@@ -235,18 +235,18 @@ def test_projected_bbox_accepts_its_true_envelope() -> None:
     ],
 )
 def test_projected_bbox_rejects_an_over_claimed_declaration(over: list[float]) -> None:
-    bounds = spatial._wgs84_bounds(_rd_new_geo())
+    bounds = spatial.wgs84_bounds(_rd_new_geo())
 
     assert bounds is not None
-    assert not spatial._bbox_within(over, bounds)
+    assert not spatial.bbox_within(over, bounds)
 
 
 def test_projected_mismatch_names_both_bounds() -> None:
-    bounds = spatial._wgs84_bounds(_rd_new_geo())
+    bounds = spatial.wgs84_bounds(_rd_new_geo())
 
     assert bounds is not None
     assert bounds.inner is not None
-    message = spatial._bbox_mismatch_message("data", [4.0, 51.0, 6.0, 53.0], bounds, 28992)
+    message = spatial.bbox_mismatch_message("data", [4.0, 51.0, 6.0, 53.0], bounds, 28992)
 
     assert "EPSG:28992" in message
     assert spatial._fmt_bbox(bounds.inner) in message
@@ -255,20 +255,20 @@ def test_projected_mismatch_names_both_bounds() -> None:
 
 def test_projected_bbox_rejects_an_under_claimed_declaration() -> None:
     """A stale bbox covering part of the data must still warn."""
-    bounds = spatial._wgs84_bounds(_rd_new_geo())
+    bounds = spatial.wgs84_bounds(_rd_new_geo())
 
     assert bounds is not None
     under = [4.0, 51.0, 6.0, 53.0]
-    assert not spatial._bbox_within(under, bounds)
+    assert not spatial.bbox_within(under, bounds)
 
 
 @pytest.mark.parametrize("epsg", [4326, 28992])
 def test_wgs84_bounds_of_an_untight_bbox_have_no_inner_side(epsg: int) -> None:
     """A raster grid only contains its data, so no side is pinned from inside."""
     bbox = [4.0, 50.0, 6.0, 52.0] if epsg == 4326 else list(_RD_NEW_BBOX)
-    geo = spatial._Geo(bbox=bbox, epsg=epsg, crs=CRS.from_epsg(epsg), tight=False)
+    geo = spatial.Geo(bbox=bbox, epsg=epsg, crs=CRS.from_epsg(epsg), tight=False)
 
-    bounds = spatial._wgs84_bounds(geo)
+    bounds = spatial.wgs84_bounds(geo)
 
     assert bounds is not None
     assert bounds.inner is None
@@ -276,20 +276,18 @@ def test_wgs84_bounds_of_an_untight_bbox_have_no_inner_side(epsg: int) -> None:
 
 def test_untight_bbox_accepts_a_declaration_inside_the_collar() -> None:
     """A nodata collar puts the real footprint well inside the grid extent."""
-    grid = spatial._Geo(
-        bbox=[4.0, 50.0, 6.0, 52.0], epsg=4326, crs=CRS.from_epsg(4326), tight=False
-    )
-    bounds = spatial._wgs84_bounds(grid)
+    grid = spatial.Geo(bbox=[4.0, 50.0, 6.0, 52.0], epsg=4326, crs=CRS.from_epsg(4326), tight=False)
+    bounds = spatial.wgs84_bounds(grid)
 
     assert bounds is not None
-    assert spatial._bbox_within([4.8, 50.9, 5.1, 51.2], bounds)
-    assert not spatial._bbox_within([3.5, 50.9, 5.1, 51.2], bounds)
+    assert spatial.bbox_within([4.8, 50.9, 5.1, 51.2], bounds)
+    assert not spatial.bbox_within([3.5, 50.9, 5.1, 51.2], bounds)
 
 
 def test_untight_mismatch_names_the_containing_extent() -> None:
-    bounds = spatial._Wgs84Bounds(outer=[4.0, 50.0, 6.0, 52.0], inner=None)
+    bounds = spatial.Wgs84Bounds(outer=[4.0, 50.0, 6.0, 52.0], inner=None)
 
-    message = spatial._bbox_mismatch_message("data", [3.5, 50.9, 5.1, 51.2], bounds, 4326)
+    message = spatial.bbox_mismatch_message("data", [3.5, 50.9, 5.1, 51.2], bounds, 4326)
 
     assert "is not contained by the asset's extent" in message
 
@@ -297,24 +295,24 @@ def test_untight_mismatch_names_the_containing_extent() -> None:
 def test_wgs84_bounds_skip_an_antimeridian_crossing() -> None:
     """Straddling the seam, min/max in degrees describes no box at all."""
     # PDC Mercator, central meridian 150E; the seam sits near x=3.34e6.
-    geo = spatial._Geo(bbox=[3.0e6, -1.0e6, 5.0e6, 1.0e6], epsg=3832, crs=CRS.from_epsg(3832))
+    geo = spatial.Geo(bbox=[3.0e6, -1.0e6, 5.0e6, 1.0e6], epsg=3832, crs=CRS.from_epsg(3832))
 
-    assert spatial._wgs84_bounds(geo) is None
+    assert spatial.wgs84_bounds(geo) is None
 
 
 @pytest.mark.parametrize("epsg", [3035, 32631])
 def test_wgs84_bounds_skip_an_unprojectable_bbox(epsg: int) -> None:
     """Coordinates outside the projection's domain reproject to infinity."""
-    geo = spatial._Geo(bbox=[-1e9, -1e9, 1e9, 1e9], epsg=epsg, crs=CRS.from_epsg(epsg))
+    geo = spatial.Geo(bbox=[-1e9, -1e9, 1e9, 1e9], epsg=epsg, crs=CRS.from_epsg(epsg))
 
-    assert spatial._wgs84_bounds(geo) is None
+    assert spatial.wgs84_bounds(geo) is None
 
 
 def test_consistency_skips_the_bbox_it_cannot_reproject(monkeypatch: pytest.MonkeyPatch) -> None:
-    geo = spatial._Geo(bbox=[3.0e6, -1.0e6, 5.0e6, 1.0e6], epsg=3832, crs=CRS.from_epsg(3832))
+    geo = spatial.Geo(bbox=[3.0e6, -1.0e6, 5.0e6, 1.0e6], epsg=3832, crs=CRS.from_epsg(3832))
     monkeypatch.setattr(checks, "_extract_geo", lambda expected, files: geo)
     located = Locator(is_remote=False, source="unused")
-    files = _AssetFiles(located)
+    files = AssetFiles(located)
 
     defects, _bounds, _complete = checks._check_consistency(
         _item(_asset()),
@@ -328,9 +326,9 @@ def test_consistency_skips_the_bbox_it_cannot_reproject(monkeypatch: pytest.Monk
 
 
 def test_bbox_within_tolerance() -> None:
-    exact = spatial._Wgs84Bounds(outer=[4.0, 50.0, 6.0, 52.0], inner=[4.0, 50.0, 6.0, 52.0])
-    assert spatial._bbox_within([4.005, 50.0, 6.0, 52.0], exact)
-    assert not spatial._bbox_within([4.5, 50.0, 6.0, 52.0], exact)
+    exact = spatial.Wgs84Bounds(outer=[4.0, 50.0, 6.0, 52.0], inner=[4.0, 50.0, 6.0, 52.0])
+    assert spatial.bbox_within([4.005, 50.0, 6.0, 52.0], exact)
+    assert not spatial.bbox_within([4.5, 50.0, 6.0, 52.0], exact)
 
 
 @pytest.mark.parametrize(
@@ -357,7 +355,7 @@ def test_detect_format_variants(head: bytes, expected: str | None) -> None:
     ],
 )
 def test_expected_format_variants(media: str, expected: str | None) -> None:
-    assert storage._expected_format(media) == expected
+    assert storage.expected_format(media) == expected
 
 
 @pytest.mark.parametrize(
@@ -371,7 +369,7 @@ def test_expected_format_variants(media: str, expected: str | None) -> None:
     ],
 )
 def test_as_bbox(raw: object, out: list[float] | None) -> None:
-    assert spatial._as_bbox(raw) == out
+    assert spatial.as_bbox(raw) == out
 
 
 def test_declared_bbox_collection_extent() -> None:
@@ -382,7 +380,7 @@ def test_declared_bbox_collection_extent() -> None:
         id="c",
         data={"extent": {"spatial": {"bbox": [[4.0, 50.0, 6.0, 52.0]]}}},
     )
-    assert spatial._declared_bbox(node) == [4.0, 50.0, 6.0, 52.0]
+    assert spatial.declared_bbox(node) == [4.0, 50.0, 6.0, 52.0]
 
 
 def test_declared_epsg_from_properties() -> None:
@@ -393,9 +391,9 @@ def test_declared_epsg_from_properties() -> None:
         id="i",
         data={"properties": {"proj:epsg": 3857}},
     )
-    inherited = spatial._declared_epsg(node, {})
+    inherited = spatial.declared_epsg(node, {})
     assert inherited == spatial._EpsgDeclaration(3857, "/properties/proj:epsg")
-    own = spatial._declared_epsg(node, {"proj:epsg": 32631})  # asset wins
+    own = spatial.declared_epsg(node, {"proj:epsg": 32631})  # asset wins
     assert own == spatial._EpsgDeclaration(32631, None)
 
 
@@ -407,12 +405,12 @@ def test_declared_epsg_from_document_root() -> None:
         id="c",
         data={"proj:epsg": 3857},
     )
-    assert spatial._declared_epsg(node, {}) == spatial._EpsgDeclaration(3857, "/proj:epsg")
+    assert spatial.declared_epsg(node, {}) == spatial._EpsgDeclaration(3857, "/proj:epsg")
 
 
 def test_declared_epsg_absent() -> None:
     node = Node(path=PurePosixPath("c/i/i.json"), abs_path=Path("/x"), kind="item", id="i", data={})
-    assert spatial._declared_epsg(node, {}) is None
+    assert spatial.declared_epsg(node, {}) is None
 
 
 def test_inherited_epsg_defect_points_at_the_declaration() -> None:
@@ -423,7 +421,7 @@ def test_inherited_epsg_defect_points_at_the_declaration() -> None:
         id="c",
         data={"proj:epsg": 3857},
     )
-    defect = spatial._epsg_defect(node, "data", spatial._EpsgDeclaration(3857, "/proj:epsg"), 4326)
+    defect = spatial.epsg_defect(node, "data", spatial._EpsgDeclaration(3857, "/proj:epsg"), 4326)
     assert defect.json_pointer == "/proj:epsg"
     assert defect.expected == 4326
     assert defect.actual == 3857
@@ -433,7 +431,7 @@ def test_inherited_epsg_defect_points_at_the_declaration() -> None:
 
 def test_asset_epsg_defect_points_at_the_asset() -> None:
     node = _item(_asset())
-    defect = spatial._epsg_defect(node, "data", spatial._EpsgDeclaration(3857, None), 4326)
+    defect = spatial.epsg_defect(node, "data", spatial._EpsgDeclaration(3857, None), 4326)
     assert defect.json_pointer is None  # validate_data points it at /assets/data
     assert defect.asset_key == "data"
     assert defect.message.startswith("asset 'data' declares proj:epsg 3857")
@@ -448,7 +446,7 @@ def test_collapse_keeps_one_defect_per_shared_field() -> None:
         DataDefect(DAT_CONSISTENCY, Severity.WARNING, f"asset {key}", key)
         for key in ("data", "extra")
     ]
-    source = _DataResults()
+    source = DataResults()
     source.extend(inherited + per_asset)
     collapsed = source.build()
     assert [d.asset_key for d in collapsed] == ["data", "data", "extra"]
@@ -456,7 +454,7 @@ def test_collapse_keeps_one_defect_per_shared_field() -> None:
 
 def test_check_raster_reader_error_is_info() -> None:
     located = Locator(is_remote=False, source="/no/such/file.tif")
-    defects = raster._check_raster("data", located, _AssetFiles(located))
+    defects = raster.check_raster("data", located, AssetFiles(located))
     assert [d.rule_id for d in defects] == [DAT_COG]
     assert defects[0].severity is Severity.INFO
 
@@ -464,14 +462,14 @@ def test_check_raster_reader_error_is_info() -> None:
 def test_geo_from_parquet_without_geo_metadata(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     pq.write_table(pa.table({"value": [1, 2, 3]}), path)
-    files = _AssetFiles(Locator(is_remote=False, source=str(path)))
-    assert geoparquet._geo_from_parquet(files) is None
+    files = AssetFiles(Locator(is_remote=False, source=str(path)))
+    assert geoparquet.geo_from_parquet(files) is None
 
 
 def test_consistency_unreadable_is_info() -> None:
     node = _item(_asset())
     located = Locator(is_remote=False, source="/no/such/file.parquet")
-    files = _AssetFiles(located)
+    files = AssetFiles(located)
     defects, _bounds, _complete = checks._check_consistency(
         node, key="data", asset=_asset(), expected="parquet", files=files
     )
@@ -482,7 +480,7 @@ def test_consistency_unreadable_is_info() -> None:
 @pytest.mark.parametrize("opener", ["parquet", "raster"])
 def test_asset_files_open_once_and_repeat_a_failure(opener: str) -> None:
     """Every check sees the one exception the one open raised."""
-    files = _AssetFiles(Locator(is_remote=False, source="/no/such/file"))
+    files = AssetFiles(Locator(is_remote=False, source="/no/such/file"))
     raised = []
     with _trace.counting() as delta:
         for _ in range(3):
@@ -557,7 +555,7 @@ def test_spatial_ordering_holds_the_flat_locality_limit() -> None:
     # 30% with no relaxation for low group counts, since PORTO-FMT-044 exempts a
     # thin file outright rather than judging it against a softened threshold.
     wide = [(1.625 * i, 0.0, 1.625 * i + 3.5, 10.0) for i in range(5)]
-    extent = spatial._bbox_union(wide)
+    extent = spatial.bbox_union(wide)
     ratio = sum(geoparquet._bbox_area(b) for b in wide) / len(wide) / geoparquet._bbox_area(extent)
     assert ratio == pytest.approx(0.35)
     assert not geoparquet._is_spatially_ordered(wide)
@@ -589,7 +587,7 @@ def test_bbox_helpers() -> None:
     assert geoparquet._bbox_area((0.0, 0.0, 2.0, 3.0)) == 6.0
     assert geoparquet._bbox_overlaps((0.0, 0.0, 2.0, 2.0), (1.0, 1.0, 3.0, 3.0))
     assert not geoparquet._bbox_overlaps((0.0, 0.0, 1.0, 1.0), (2.0, 2.0, 3.0, 3.0))
-    assert spatial._bbox_union([(0.0, 1.0, 2.0, 3.0), (-1.0, 0.0, 1.0, 5.0)]) == (
+    assert spatial.bbox_union([(0.0, 1.0, 2.0, 3.0), (-1.0, 0.0, 1.0, 5.0)]) == (
         -1.0,
         0.0,
         2.0,
@@ -636,7 +634,7 @@ def _mirror_item(**data: object) -> Node:
 
 
 class _FakeParquet:
-    """Just the schema surface ``_bbox_struct`` reads."""
+    """Just the schema surface ``bbox_struct`` reads."""
 
     def __init__(self, *names: str) -> None:
         self.schema_arrow = type("_Schema", (), {"names": list(names), "metadata": None})()
@@ -648,7 +646,7 @@ class _UnreadableParquet(_FakeParquet):
 
 
 class _FakeTable:
-    """Just the column surface ``_bbox_column_values`` reads."""
+    """Just the column surface ``bbox_column_values`` reads."""
 
     def __init__(self, rows: list[object]) -> None:
         self._rows = rows
@@ -663,7 +661,7 @@ def _covering(bbox: object) -> dict[str, object]:
 
 def test_bbox_struct_reads_the_covering_declaration() -> None:
     geo = _covering({corner: ["bbox", corner] for corner in ("xmin", "ymin", "xmax", "ymax")})
-    assert geoparquet._bbox_struct(_FakeParquet("bbox"), geo) == (
+    assert geoparquet.bbox_struct(_FakeParquet("bbox"), geo) == (
         "bbox",
         ["xmin", "ymin", "xmax", "ymax"],
     )
@@ -688,7 +686,7 @@ def test_bbox_struct_reads_the_covering_declaration() -> None:
     ],
 )
 def test_unusable_covering_declaration_yields_no_bbox_column(geo: dict[str, object]) -> None:
-    assert geoparquet._bbox_struct(_FakeParquet("bbox"), geo) is None
+    assert geoparquet.bbox_struct(_FakeParquet("bbox"), geo) is None
 
 
 @pytest.mark.parametrize(
@@ -701,7 +699,7 @@ def test_unusable_covering_declaration_yields_no_bbox_column(geo: dict[str, obje
 )
 def test_bbox_column_values(row: object, expected: object) -> None:
     table = _FakeTable([row])
-    assert geoparquet._bbox_column_values(table, ("bbox", ["xmin", "ymin", "xmax", "ymax"])) == [
+    assert geoparquet.bbox_column_values(table, ("bbox", ["xmin", "ymin", "xmax", "ymax"])) == [
         expected
     ]
 

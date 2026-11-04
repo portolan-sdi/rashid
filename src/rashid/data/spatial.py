@@ -13,7 +13,7 @@ from pyproj import CRS, Transformer
 from rashid.catalog import Node
 from rashid.data import DataDefect
 from rashid.data.reader import Locator
-from rashid.data.storage import _PMTILES_MAGIC
+from rashid.data.storage import PMTILES_MAGIC
 from rashid.model import Severity, json_pointer
 from rashid.registry import (
     DAT_CONSISTENCY,
@@ -43,7 +43,7 @@ class _EpsgDeclaration:
 
 
 @dataclass(frozen=True)
-class _Geo:
+class Geo:
     """Actual spatial metadata read from an asset's bytes."""
 
     bbox: list[float] | None
@@ -56,7 +56,7 @@ class _Geo:
 
 
 @dataclass(frozen=True)
-class _Wgs84Bounds:
+class Wgs84Bounds:
     """Where the WGS84 envelope of an asset's data must lie.
 
     ``outer`` contains that envelope. ``inner``, when known, is contained by it,
@@ -76,7 +76,7 @@ class _Wgs84Bounds:
     reprojected: bool = False
 
 
-def _unreadable_spatial_metadata(
+def unreadable_spatial_metadata(
     key: str, error: Exception | str, *, subject: str | None = None
 ) -> DataDefect:
     subject = subject or f"asset '{key}'"
@@ -88,10 +88,10 @@ def _unreadable_spatial_metadata(
     )
 
 
-def _check_collection_extent(
-    node: Node, bounds: list[_Wgs84Bounds], *, complete: bool = True
+def check_collection_extent(
+    node: Node, bounds: list[Wgs84Bounds], *, complete: bool = True
 ) -> list[DataDefect]:
-    declared = _declared_bbox(node)
+    declared = declared_bbox(node)
     if node.kind != "collection" or not bounds or declared is None:
         return []
     inners = [box.inner for box in bounds if box.inner is not None]
@@ -99,12 +99,12 @@ def _check_collection_extent(
     if not complete:
         # Unread assets can extend the union; only its known inner bound can contradict the extent.
         outers.append(declared)
-    union = _Wgs84Bounds(
-        outer=list(_bbox_union(outers)),
-        inner=list(_bbox_union(inners)) if inners else None,
+    union = Wgs84Bounds(
+        outer=list(bbox_union(outers)),
+        inner=list(bbox_union(inners)) if inners else None,
         reprojected=any(box.reprojected for box in bounds),
     )
-    if _bbox_within(declared, union):
+    if bbox_within(declared, union):
         return []
     return [
         DataDefect(
@@ -118,7 +118,7 @@ def _check_collection_extent(
     ]
 
 
-def _epsg_defect(node: Node, key: str, declared: _EpsgDeclaration, actual: int) -> DataDefect:
+def epsg_defect(node: Node, key: str, declared: _EpsgDeclaration, actual: int) -> DataDefect:
     """Fault the document node that carries the declaration, not its inheritor.
 
     An asset that declares its own ``proj:epsg`` and contradicts its own bytes
@@ -156,8 +156,8 @@ def _epsg_defect(node: Node, key: str, declared: _EpsgDeclaration, actual: int) 
     )
 
 
-def _bbox_mismatch_message(
-    key: str, declared: list[float], bounds: _Wgs84Bounds, epsg: int | None
+def bbox_mismatch_message(
+    key: str, declared: list[float], bounds: Wgs84Bounds, epsg: int | None
 ) -> str:
     """Say what the declared bbox had to satisfy, not just that it failed."""
     if bounds.inner is None:
@@ -177,7 +177,7 @@ def _bbox_mismatch_message(
     )
 
 
-def _bbox_union(
+def bbox_union(
     bboxes: Sequence[Sequence[float]],
 ) -> tuple[float, float, float, float]:
     return (
@@ -188,18 +188,18 @@ def _bbox_union(
     )
 
 
-def _geo_from_pmtiles(located: Locator) -> _Geo | None:
+def geo_from_pmtiles(located: Locator) -> Geo | None:
     with located.open_binary() as handle:
         header = handle.read(127)
-    if len(header) < 127 or header[:7] != _PMTILES_MAGIC:
+    if len(header) < 127 or header[:7] != PMTILES_MAGIC:
         return None
     # v3 header: min/max lon/lat are int32 E7 at byte offsets 102, 106, 110, 114.
     min_lon, min_lat, max_lon, max_lat = struct.unpack_from("<iiii", header, 102)
     bbox = [min_lon / 1e7, min_lat / 1e7, max_lon / 1e7, max_lat / 1e7]
-    return _Geo(bbox=bbox, epsg=4326, crs=CRS.from_epsg(4326))
+    return Geo(bbox=bbox, epsg=4326, crs=CRS.from_epsg(4326))
 
 
-def _as_bbox(bbox: Any) -> list[float] | None:
+def as_bbox(bbox: Any) -> list[float] | None:
     if not isinstance(bbox, list) or len(bbox) < 4:
         return None
     try:
@@ -212,12 +212,12 @@ def _as_bbox(bbox: Any) -> list[float] | None:
     return values[:4]
 
 
-def _wgs84_bounds(geo: _Geo) -> _Wgs84Bounds | None:
+def wgs84_bounds(geo: Geo) -> Wgs84Bounds | None:
     """Bracket the WGS84 envelope of the data behind a native bbox."""
     if geo.bbox is None:
         return None
     if geo.crs is None or geo.epsg == 4326:
-        return _Wgs84Bounds(outer=geo.bbox, inner=geo.bbox if geo.tight else None)
+        return Wgs84Bounds(outer=geo.bbox, inner=geo.bbox if geo.tight else None)
     transformer = Transformer.from_crs(geo.crs, CRS.from_epsg(4326), always_xy=True)
     minx, miny, maxx, maxy = geo.bbox[:4]
     outer = list(transformer.transform_bounds(minx, miny, maxx, maxy, densify_pts=_DENSIFY_PTS))
@@ -230,7 +230,7 @@ def _wgs84_bounds(geo: _Geo) -> _Wgs84Bounds | None:
     inner = _inner_bounds(transformer, geo.bbox) if geo.tight else None
     if geo.tight and inner is None:
         return None
-    return _Wgs84Bounds(outer=outer, inner=inner, reprojected=True)
+    return Wgs84Bounds(outer=outer, inner=inner, reprojected=True)
 
 
 def _inner_bounds(transformer: Transformer, bbox: list[float]) -> list[float] | None:
@@ -265,7 +265,7 @@ def _inner_bounds(transformer: Transformer, bbox: list[float]) -> list[float] | 
     return [min_lon_at_most, min_lat_at_most, max_lon_at_least, max_lat_at_least]
 
 
-def _bbox_within(declared: list[float], bounds: _Wgs84Bounds) -> bool:
+def bbox_within(declared: list[float], bounds: Wgs84Bounds) -> bool:
     """Does a declared bbox sit inside the bracket, side by side?
 
     Every side must land inside ``outer``. When ``inner`` is known each side must
@@ -294,18 +294,18 @@ def _fmt_bbox(bbox: list[float]) -> str:
     return "[" + ", ".join(f"{v:.4f}" for v in bbox[:4]) + "]"
 
 
-def _declared_bbox(node: Node) -> list[float] | None:
+def declared_bbox(node: Node) -> list[float] | None:
     if node.kind == "item":
-        return _as_bbox(node.data.get("bbox"))
+        return as_bbox(node.data.get("bbox"))
     extent = node.data.get("extent", {})
     spatial = extent.get("spatial", {}) if isinstance(extent, dict) else {}
     boxes = spatial.get("bbox") if isinstance(spatial, dict) else None
     if isinstance(boxes, list) and boxes:
-        return _as_bbox(boxes[0])
+        return as_bbox(boxes[0])
     return None
 
 
-def _declared_epsg(node: Node, asset: dict[str, Any]) -> _EpsgDeclaration | None:
+def declared_epsg(node: Node, asset: dict[str, Any]) -> _EpsgDeclaration | None:
     """Find the ``proj:epsg`` an asset is governed by, and where it is written.
 
     The asset's own value wins, then the enclosing object's ``properties``, then

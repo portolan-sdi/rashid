@@ -11,9 +11,9 @@ from rio_cogeo.cogeo import cog_validate
 
 from rashid import _trace
 from rashid.data import DataDefect
-from rashid.data._files import _AssetFiles
+from rashid.data._files import AssetFiles
 from rashid.data.reader import Locator
-from rashid.data.spatial import _Geo
+from rashid.data.spatial import Geo
 from rashid.model import Severity
 from rashid.registry import (
     DAT_COG,
@@ -35,7 +35,7 @@ _COG_STAT_KEYS = (
 _VALID_PERCENT_KEY = "STATISTICS_VALID_PERCENT"
 
 
-def _check_raster(key: str, located: Locator, files: _AssetFiles) -> list[DataDefect]:
+def check_raster(key: str, located: Locator, files: AssetFiles) -> list[DataDefect]:
     """A raster asset MUST be a valid COG (formats.md:91) with embedded band stats.
 
     ``cog_validate`` takes a path, not a dataset, so it opens the file itself.
@@ -94,7 +94,7 @@ def _tile_shape(src: Any) -> tuple[int, int] | None:
     return height, width
 
 
-def _check_overviews(key: str, files: _AssetFiles) -> list[DataDefect]:
+def _check_overviews(key: str, files: AssetFiles) -> list[DataDefect]:
     """A raster larger than one internal tile MUST carry internal overviews.
 
     A SHALL of OGC 21-026's Optimized GeoTIFF conformance class (optional in
@@ -142,7 +142,7 @@ def _overview_reduction(previous: tuple[int, int], current: tuple[int, int]) -> 
     return scale <= 10 and all(before > (after - 1) * scale for before, after in dimensions)
 
 
-def _check_tile_size(key: str, files: _AssetFiles) -> list[DataDefect]:
+def _check_tile_size(key: str, files: AssetFiles) -> list[DataDefect]:
     """Internal tiles MUST be square and no larger than 512×512.
 
     OGC 21-026 /req/optimized_geotiff/small-sizes ("square internal tiles,
@@ -182,13 +182,13 @@ def _check_tile_size(key: str, files: _AssetFiles) -> list[DataDefect]:
     return []
 
 
-def _check_cog_stats(key: str, files: _AssetFiles) -> list[DataDefect]:
+def _check_cog_stats(key: str, files: AssetFiles) -> list[DataDefect]:
     """Every COG band MUST carry embedded min/max/mean/stddev (formats.md:95),
     and SHOULD carry a valid percent — a MUST when the band has a nodata value
     (formats.md:121).
 
     Only statistics embedded in the file's GDAL_METADATA tag count, which is
-    why :func:`_check_raster` reads the dataset with PAM off.
+    why :func:`check_raster` reads the dataset with PAM off.
     """
     try:
         src = files.raster()
@@ -243,13 +243,13 @@ def _check_cog_stats(key: str, files: _AssetFiles) -> list[DataDefect]:
     return defects
 
 
-def _geo_from_raster(files: _AssetFiles) -> _Geo | None:
+def geo_from_raster(files: AssetFiles) -> Geo | None:
     # The dataset the COG checks share, read with PAM off as they read it.
     with rasterio.Env(GDAL_PAM_ENABLED="NO"):
         src = files.raster()
         bounds = src.bounds
         crs = CRS.from_wkt(src.crs.to_wkt()) if src.crs else None
-        return _Geo(
+        return Geo(
             bbox=[bounds.left, bounds.bottom, bounds.right, bounds.top],
             epsg=crs.to_epsg() if crs else None,
             crs=crs,

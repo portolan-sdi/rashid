@@ -69,32 +69,32 @@ import rasterio
 
 from rashid import _trace
 from rashid.catalog import CatalogGraph, Node
-from rashid.data import DataDefect, _DataResults
-from rashid.data._files import _AssetFiles
+from rashid.data import DataDefect, DataResults
+from rashid.data._files import AssetFiles
 from rashid.data.geoparquet import (
-    _check_geoparquet,
-    _check_tabular,
-    _check_vector_columns,
-    _geo_from_parquet,
+    check_geoparquet,
+    check_tabular,
+    check_vector_columns,
+    geo_from_parquet,
 )
-from rashid.data.mirror import _check_mirror
-from rashid.data.partitions import _check_partitions
-from rashid.data.raster import _check_raster, _geo_from_raster
+from rashid.data.mirror import check_mirror
+from rashid.data.partitions import check_partitions
+from rashid.data.raster import check_raster, geo_from_raster
 from rashid.data.reader import AssetReader
 from rashid.data.spatial import (
-    _bbox_mismatch_message,
-    _bbox_within,
-    _check_collection_extent,
-    _declared_bbox,
-    _declared_epsg,
-    _epsg_defect,
-    _Geo,
-    _geo_from_pmtiles,
-    _unreadable_spatial_metadata,
-    _wgs84_bounds,
-    _Wgs84Bounds,
+    Geo,
+    Wgs84Bounds,
+    bbox_mismatch_message,
+    bbox_within,
+    check_collection_extent,
+    declared_bbox,
+    declared_epsg,
+    epsg_defect,
+    geo_from_pmtiles,
+    unreadable_spatial_metadata,
+    wgs84_bounds,
 )
-from rashid.data.storage import _check_bytes, _expected_format
+from rashid.data.storage import check_bytes, expected_format
 from rashid.model import Severity
 from rashid.registry import (
     DAT_CONSISTENCY,
@@ -142,10 +142,10 @@ def check_node(
     the collection's items, needs the object's children. Without it that check
     is skipped.
     """
-    results = _DataResults()
-    bounds: list[_Wgs84Bounds] = []
+    results = DataResults()
+    bounds: list[Wgs84Bounds] = []
     extent_complete = True
-    schemas, partitions, total = _check_partitions(node, reader)
+    schemas, partitions, total = check_partitions(node, reader)
     results.extend(schemas)
     results.extend(partitions, partition_total=total)
     for _pointer, key, asset in assets_of(node):
@@ -155,7 +155,7 @@ def check_node(
             spatial = (
                 not is_source_asset(asset)
                 and isinstance(media_type, str)
-                and _expected_format(media_type) in {"parquet", "tiff", "pmtiles"}
+                and expected_format(media_type) in {"parquet", "tiff", "pmtiles"}
             )
             extent_complete = extent_complete and not spatial
             continue  # PTL-AST-001 reports a missing href
@@ -170,7 +170,7 @@ def check_node(
             extent_complete = extent_complete and complete
             if actual is not None:
                 bounds.append(actual)
-    results.extend(_check_collection_extent(node, bounds, complete=extent_complete))
+    results.extend(check_collection_extent(node, bounds, complete=extent_complete))
     return results.build()
 
 
@@ -181,14 +181,14 @@ def _check_asset(
     asset: dict[str, Any],
     reader: AssetReader,
     graph: CatalogGraph | None = None,
-) -> tuple[list[DataDefect], _Wgs84Bounds | None, bool]:
+) -> tuple[list[DataDefect], Wgs84Bounds | None, bool]:
     href = asset["href"]
     _trace.count("data.assets")
     defects: list[DataDefect] = []
     media_type = asset.get("type")
-    expected = _expected_format(media_type) if isinstance(media_type, str) else None
+    expected = expected_format(media_type) if isinstance(media_type, str) else None
 
-    defects.extend(_check_bytes(key, asset=asset, expected=expected, node=node, reader=reader))
+    defects.extend(check_bytes(key, asset=asset, expected=expected, node=node, reader=reader))
 
     located = reader.locate(node, href)
     if located is None or is_source_asset(asset):
@@ -206,7 +206,7 @@ def _check_asset(
     bounds = None
     complete = True
     gdal_env = rasterio.Env(**_REMOTE_GDAL) if located.is_remote else contextlib.nullcontext()
-    with gdal_env, _AssetFiles(located) as files:
+    with gdal_env, AssetFiles(located) as files:
         if is_mirror_asset(asset):
             # formats.md, Raster § Item mirror: a mirror must reproduce the
             # items it mirrors (PORTO-FMT-042). It then falls through to the
@@ -214,13 +214,13 @@ def _check_asset(
             # (PORTO-FMT-043) — an item index is queried by extent like any
             # other spatial table. The tabular SHOULDs skip it on their own,
             # being scoped to assets with the 'data' role.
-            defects.extend(_check_mirror(node, key, files, graph))
+            defects.extend(check_mirror(node, key, files, graph))
         if expected == "tiff":
-            defects.extend(_check_raster(key, located, files))
+            defects.extend(check_raster(key, located, files))
         if expected == "parquet":
-            defects.extend(_check_geoparquet(key, files))
-            defects.extend(_check_tabular(node, key, asset, files))
-            defects.extend(_check_vector_columns(node, key, asset, files))
+            defects.extend(check_geoparquet(key, files))
+            defects.extend(check_tabular(node, key, asset, files))
+            defects.extend(check_vector_columns(node, key, asset, files))
         if expected in {"parquet", "tiff", "pmtiles"}:
             consistency, bounds, complete = _check_consistency(
                 node, key=key, asset=asset, expected=expected, files=files
@@ -235,29 +235,29 @@ def _check_consistency(
     key: str,
     asset: dict[str, Any],
     expected: str,
-    files: _AssetFiles,
-) -> tuple[list[DataDefect], _Wgs84Bounds | None, bool]:
+    files: AssetFiles,
+) -> tuple[list[DataDefect], Wgs84Bounds | None, bool]:
     try:
         geo = _extract_geo(expected, files)
     except Exception as exc:  # unreadable header is advisory, not fatal
-        return [_unreadable_spatial_metadata(key, exc)], None, False
+        return [unreadable_spatial_metadata(key, exc)], None, False
     if geo is None:
         return [], None, expected == "parquet"
 
     defects: list[DataDefect] = []
-    declared_epsg = _declared_epsg(node, asset)
-    if declared_epsg is not None and geo.epsg is not None and declared_epsg.value != geo.epsg:
-        defects.append(_epsg_defect(node, key, declared_epsg, geo.epsg))
+    epsg_claim = declared_epsg(node, asset)
+    if epsg_claim is not None and geo.epsg is not None and epsg_claim.value != geo.epsg:
+        defects.append(epsg_defect(node, key, epsg_claim, geo.epsg))
 
-    declared_bbox = _declared_bbox(node)
-    bounds = _wgs84_bounds(geo)
+    bbox_claim = declared_bbox(node)
+    bounds = wgs84_bounds(geo)
     if (
         node.kind != "collection"
-        and declared_bbox is not None
+        and bbox_claim is not None
         and bounds is not None
-        and not _bbox_within(declared_bbox, bounds)
+        and not bbox_within(bbox_claim, bounds)
     ):
-        message = _bbox_mismatch_message(key, declared_bbox, bounds, geo.epsg)
+        message = bbox_mismatch_message(key, bbox_claim, bounds, geo.epsg)
         defects.append(DataDefect(DAT_CONSISTENCY, Severity.WARNING, message, key))
     return defects, bounds, bounds is not None
 
@@ -265,11 +265,11 @@ def _check_consistency(
 # --- spatial extraction ----------------------------------------------------
 
 
-def _extract_geo(expected: str, files: _AssetFiles) -> _Geo | None:
+def _extract_geo(expected: str, files: AssetFiles) -> Geo | None:
     if expected == "parquet":
-        return _geo_from_parquet(files)
+        return geo_from_parquet(files)
     if expected == "tiff":
-        return _geo_from_raster(files)
+        return geo_from_raster(files)
     if expected == "pmtiles":
-        return _geo_from_pmtiles(files.located)
+        return geo_from_pmtiles(files.located)
     return None

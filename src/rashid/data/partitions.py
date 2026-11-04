@@ -8,8 +8,8 @@ from pathlib import Path
 from rashid._href import is_absolute_href
 from rashid.catalog import Node
 from rashid.data import DataDefect, _files
-from rashid.data._files import _AssetFiles
-from rashid.data.geoparquet import _check_geoparquet
+from rashid.data._files import AssetFiles
+from rashid.data.geoparquet import check_geoparquet
 from rashid.data.reader import AssetReader, Locator
 from rashid.model import Severity, json_pointer
 from rashid.registry import (
@@ -23,7 +23,7 @@ from rashid.rules._common import (
 # --- partition schema consistency ------------------------------------------
 
 
-def _partition_files(node: Node) -> list[tuple[str, Path]]:
+def partition_files(node: Node) -> list[tuple[str, Path]]:
     """Local files the collection's ``partition:glob`` matches, sorted.
 
     The glob is expanded against the collection's own directory. A remote or
@@ -41,10 +41,10 @@ def _partition_files(node: Node) -> list[tuple[str, Path]]:
     if normalized.startswith(".."):
         return []  # escapes the catalog tree
     base = node.abs_path.parent
-    return _files._partition_files(base, normalized)
+    return _files.partition_files(base, normalized)
 
 
-def _check_partitions(
+def check_partitions(
     node: Node, reader: AssetReader
 ) -> tuple[list[DataDefect], list[DataDefect], int]:
     """Read each partition's schema and GeoParquet checks through one handle.
@@ -53,7 +53,7 @@ def _check_partitions(
     not retain an open descriptor per partition. Declared assets are compared
     for schema here; their format findings come from the asset pass alone.
     """
-    files = _partition_files(node)
+    files = partition_files(node)
     if not files:
         return [], [], 0
     schemas: list[tuple[str, dict[str, str]]] = []
@@ -61,7 +61,7 @@ def _check_partitions(
     found: list[DataDefect] = []
     for match, path in files:
         declared = str(path) in already_read
-        with _AssetFiles(Locator(is_remote=False, source=str(path))) as opened:
+        with AssetFiles(Locator(is_remote=False, source=str(path))) as opened:
             try:
                 parquet = opened.parquet()
             except Exception as exc:
@@ -76,7 +76,7 @@ def _check_partitions(
                 continue
             schemas.append((match, {field.name: str(field.type) for field in parquet.schema_arrow}))
             if not declared:
-                found.extend(_check_geoparquet(match, opened, subject=f"partition file '{match}'"))
+                found.extend(check_geoparquet(match, opened, subject=f"partition file '{match}'"))
     return _partition_schema_defects(schemas), found, len(files)
 
 
