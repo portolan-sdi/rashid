@@ -172,6 +172,10 @@ class ProbeResponse:
     def header(self, name: str) -> str | None:
         return self.headers.get(name.lower())
 
+    def access_denied(self) -> bool:
+        """Only authentication denials make conformance probes inaccessible."""
+        return self.status in (401, 403)
+
     def off_https(self) -> str | None:
         """The non-https URL this response redirects to; None for any other answer.
 
@@ -278,8 +282,8 @@ class _DefaultProber:
 
     When the host answers but obstore does not return the answer, the HEAD is
     sent again over urllib, so the checks read the full response exactly as
-    before. That covers a non-2xx status, whose headers ``_check_head`` still
-    reads, a missing ``Content-Length``, and a redirect off https, which comes
+    before. That covers a non-2xx status, which obstore reports as an error,
+    a missing ``Content-Length``, and a redirect off https, which comes
     back as the 3xx itself and is never followed. A transport
     failure is not sent again: it marks the host dead, and asking twice only
     doubles the wait.
@@ -408,6 +412,13 @@ def _off_https_finding(
 
 
 def _check_range(rep: _Target, response: ProbeResponse) -> list[Finding]:
+    if response.access_denied():
+        return [
+            _unavailable(
+                f"range and CORS probes for {rep.url} returned {response.status}; asset inaccessible",
+                str(rep.node.path),
+            )
+        ]
     problems: list[str] = []
     if response.status != 206:
         problems.append(f"a ranged GET returned {response.status}, expected 206 Partial Content")
@@ -482,6 +493,14 @@ def _check_preflight(rep: _Target, response: ProbeResponse) -> list[Finding]:
 
 
 def _check_head(target: _Target, response: ProbeResponse) -> list[Finding]:
+    if response.access_denied():
+        return [
+            _unavailable(
+                f"asset '{target.key}': HEAD {target.url} returned {response.status}; "
+                "asset inaccessible",
+                str(target.node.path),
+            )
+        ]
     length = response.header("content-length")
     pointer = f"/assets/{target.key}"
     if length is None or not length.isdigit():
@@ -669,7 +688,8 @@ def _probe_host(
 def _check_server(rep: _Target, ranged: ProbeResponse, preflighted: ProbeResponse) -> list[Finding]:
     """The host-level range and CORS checks, read off ``rep``'s two probes."""
     findings = _check_range(rep, ranged)
-    findings.extend(_check_cors(rep, ranged))
+    if not ranged.access_denied():
+        findings.extend(_check_cors(rep, ranged))
     findings.extend(_check_preflight(rep, preflighted))
     return findings
 
