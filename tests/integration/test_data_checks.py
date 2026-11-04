@@ -27,9 +27,11 @@ from pyproj import CRS, Transformer
 import rashid.data.checks as checks
 from rashid import _trace
 from rashid.catalog import Node
+from rashid.data import DataDefect, _DataResults, storage
+from rashid.data._files import _AssetFiles
 from rashid.data.reader import Locator
 from rashid.model import Severity
-from rashid.registry import DAT_CHECKSUM, DAT_CONSISTENCY, DAT_FORMAT, DAT_SIZE
+from rashid.registry import DAT_CHECKSUM, DAT_COG, DAT_CONSISTENCY, DAT_FORMAT, DAT_SIZE
 from rashid.rules._common import is_source_asset
 
 pytestmark = pytest.mark.integration
@@ -310,7 +312,7 @@ def test_consistency_skips_the_bbox_it_cannot_reproject(monkeypatch: pytest.Monk
     geo = checks._Geo(bbox=[3.0e6, -1.0e6, 5.0e6, 1.0e6], epsg=3832, crs=CRS.from_epsg(3832))
     monkeypatch.setattr(checks, "_extract_geo", lambda expected, files: geo)
     located = Locator(is_remote=False, source="unused")
-    files = checks._AssetFiles(located)
+    files = _AssetFiles(located)
 
     defects, _bounds = checks._check_consistency(
         _item(_asset()),
@@ -339,7 +341,7 @@ def test_bbox_within_tolerance() -> None:
     ],
 )
 def test_detect_format_variants(head: bytes, expected: str | None) -> None:
-    assert checks._detect_format(head) == expected
+    assert storage._detect_format(head) == expected
 
 
 @pytest.mark.parametrize(
@@ -353,7 +355,7 @@ def test_detect_format_variants(head: bytes, expected: str | None) -> None:
     ],
 )
 def test_expected_format_variants(media: str, expected: str | None) -> None:
-    assert checks._expected_format(media) == expected
+    assert storage._expected_format(media) == expected
 
 
 @pytest.mark.parametrize(
@@ -437,16 +439,14 @@ def test_asset_epsg_defect_points_at_the_asset() -> None:
 
 def test_collapse_keeps_one_defect_per_shared_field() -> None:
     inherited = [
-        checks.DataDefect(
-            checks.DAT_CONSISTENCY, Severity.WARNING, "same field", key, json_pointer="/proj:epsg"
-        )
+        DataDefect(DAT_CONSISTENCY, Severity.WARNING, "same field", key, json_pointer="/proj:epsg")
         for key in ("data", "extra", "third")
     ]
     per_asset = [
-        checks.DataDefect(checks.DAT_CONSISTENCY, Severity.WARNING, f"asset {key}", key)
+        DataDefect(DAT_CONSISTENCY, Severity.WARNING, f"asset {key}", key)
         for key in ("data", "extra")
     ]
-    source = checks._DataResults()
+    source = _DataResults()
     source.extend(inherited + per_asset)
     collapsed = source.build()
     assert [d.asset_key for d in collapsed] == ["data", "data", "extra"]
@@ -454,33 +454,33 @@ def test_collapse_keeps_one_defect_per_shared_field() -> None:
 
 def test_check_raster_reader_error_is_info() -> None:
     located = Locator(is_remote=False, source="/no/such/file.tif")
-    defects = checks._check_raster("data", located, checks._AssetFiles(located))
-    assert [d.rule_id for d in defects] == [checks.DAT_COG]
+    defects = checks._check_raster("data", located, _AssetFiles(located))
+    assert [d.rule_id for d in defects] == [DAT_COG]
     assert defects[0].severity is Severity.INFO
 
 
 def test_geo_from_parquet_without_geo_metadata(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     pq.write_table(pa.table({"value": [1, 2, 3]}), path)
-    files = checks._AssetFiles(Locator(is_remote=False, source=str(path)))
+    files = _AssetFiles(Locator(is_remote=False, source=str(path)))
     assert checks._geo_from_parquet(files) is None
 
 
 def test_consistency_unreadable_is_info() -> None:
     node = _item(_asset())
     located = Locator(is_remote=False, source="/no/such/file.parquet")
-    files = checks._AssetFiles(located)
+    files = _AssetFiles(located)
     defects, _bounds = checks._check_consistency(
         node, key="data", asset=_asset(), expected="parquet", files=files
     )
-    assert [d.rule_id for d in defects] == [checks.DAT_CONSISTENCY]
+    assert [d.rule_id for d in defects] == [DAT_CONSISTENCY]
     assert defects[0].severity is Severity.INFO
 
 
 @pytest.mark.parametrize("opener", ["parquet", "raster"])
 def test_asset_files_open_once_and_repeat_a_failure(opener: str) -> None:
     """Every check sees the one exception the one open raised."""
-    files = checks._AssetFiles(Locator(is_remote=False, source="/no/such/file"))
+    files = _AssetFiles(Locator(is_remote=False, source="/no/such/file"))
     raised = []
     with _trace.counting() as delta:
         for _ in range(3):

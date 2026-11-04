@@ -27,6 +27,8 @@ import rashid.data._files as file_owner
 import rashid.data.checks as checks
 from rashid.catalog import Node
 from rashid.cli import main
+from rashid.data import DataDefect, _DataResults
+from rashid.data._files import _AssetFiles
 from rashid.data.reader import Locator
 from rashid.model import Severity
 from rashid.registry import (
@@ -40,6 +42,7 @@ from rashid.registry import (
     DAT_ROWGROUP_STATS,
     DAT_TABULAR,
     DAT_TILE_SIZE,
+    DAT_UNAVAILABLE,
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
 )
@@ -53,8 +56,8 @@ def _loc(path: Path) -> Locator:
     return Locator(is_remote=False, source=str(path))
 
 
-def _files(path: Path) -> checks._AssetFiles:
-    return checks._AssetFiles(_loc(path))
+def _files(path: Path) -> _AssetFiles:
+    return _AssetFiles(_loc(path))
 
 
 class _FileReader:
@@ -882,7 +885,7 @@ def _partition_schemas(node: Node) -> list:
 
 def _partition_bytes(node: Node, reader: object | None = None) -> list:
     _, defects, total = checks._check_partitions(node, reader or _NoAssets())
-    source = checks._DataResults()
+    source = _DataResults()
     source.extend(defects, partition_total=total)
     return source.build()
 
@@ -969,10 +972,10 @@ def test_many_failing_partitions_fold_into_one_defect(tmp_path: Path) -> None:
 def test_partition_severities_fold_separately() -> None:
     """An ERROR and a WARNING of one rule stay two findings, not one."""
     defects = [
-        checks.DataDefect(DAT_ROWGROUP_STATS, Severity.ERROR, "e", "x"),
-        checks.DataDefect(DAT_ROWGROUP_STATS, Severity.WARNING, "w", "x"),
+        DataDefect(DAT_ROWGROUP_STATS, Severity.ERROR, "e", "x"),
+        DataDefect(DAT_ROWGROUP_STATS, Severity.WARNING, "w", "x"),
     ]
-    source = checks._DataResults()
+    source = _DataResults()
     source.extend(defects, partition_total=2)
     folded = source.build()
     assert [d.severity for d in folded] == [Severity.ERROR, Severity.WARNING]
@@ -991,7 +994,7 @@ def test_unreadable_partition_reports_unavailable_data(tmp_path: Path) -> None:
     parts.mkdir()
     (parts / "a.parquet").write_bytes(b"not parquet")
     defects = _partition_bytes(_partitioned_collection(tmp_path))
-    assert len(defects) == 1 and defects[0].rule_id == checks.DAT_UNAVAILABLE
+    assert len(defects) == 1 and defects[0].rule_id == DAT_UNAVAILABLE
     assert defects[0].severity is Severity.WARNING
 
 

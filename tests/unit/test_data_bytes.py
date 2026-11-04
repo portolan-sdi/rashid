@@ -22,7 +22,7 @@ import pytest
 
 import rashid.data.checks as checks
 from rashid.catalog import CatalogGraph, Node
-from rashid.data import DataDefect
+from rashid.data import DataDefect, storage
 from rashid.data.reader import Locator
 from rashid.model import Severity
 from rashid.registry import DAT_CHECKSUM, DAT_FORMAT, DAT_SIZE
@@ -160,7 +160,7 @@ def test_format_only_reads_just_the_head() -> None:
     defects = _run(_asset(type=_PARQUET), reader)
 
     assert defects == []
-    assert reader.consumed == checks._HEAD_BYTES
+    assert reader.consumed == storage._HEAD_BYTES
     assert reader.closed is True
 
 
@@ -172,7 +172,7 @@ def test_format_mismatch_still_found_from_the_head() -> None:
 
     assert [d.rule_id for d in defects] == [DAT_FORMAT]
     assert "pmtiles" in defects[0].message and "parquet" in defects[0].message
-    assert reader.consumed == checks._HEAD_BYTES
+    assert reader.consumed == storage._HEAD_BYTES
 
 
 def test_checksum_still_reads_every_byte() -> None:
