@@ -161,6 +161,48 @@ class DataDefect:
     actual: Any | None = None
 
 
+class _DataResults:
+    """Finding sources; each build derives shared-field and partition results anew."""
+
+    def __init__(self) -> None:
+        self._sources: list[tuple[DataDefect, int | None]] = []
+
+    def extend(self, defects: list[DataDefect], *, partition_total: int | None = None) -> None:
+        self._sources.extend((defect, partition_total) for defect in defects)
+
+    def build(self) -> list[DataDefect]:
+        groups: dict[tuple[object, ...], list[DataDefect]] = {}
+        totals: dict[tuple[object, ...], int] = {}
+        signature: tuple[object, ...]
+        for index, (defect, total) in enumerate(self._sources):
+            if total is not None:
+                signature = ("partition", defect.rule_id, defect.severity)
+                totals[signature] = total
+            elif defect.json_pointer is not None:
+                signature = ("field", defect.rule_id, defect.json_pointer, defect.message)
+            else:
+                signature = ("asset", index)
+            groups.setdefault(signature, []).append(defect)
+        results: list[DataDefect] = []
+        for signature, members in groups.items():
+            first = members[0]
+            if signature[0] != "partition":
+                results.append(first)
+                continue
+            message = first.message
+            if len(members) > 1:
+                message = (
+                    f"{len(members)} of {totals[signature]} partition files fail this check; "
+                    f"e.g. {first.message}"
+                )
+            results.append(
+                DataDefect(
+                    first.rule_id, first.severity, message, "", json_pointer="/partition:glob"
+                )
+            )
+        return results
+
+
 # A validator inspects one object's assets, given a reader for their bytes, and
 # returns the mismatches it found; an empty list means every asset matched.
 Validator = Callable[[Node, AssetReader], list[DataDefect]]

@@ -450,7 +450,9 @@ def test_collapse_keeps_one_defect_per_shared_field() -> None:
         checks.DataDefect(checks.DAT_CONSISTENCY, Severity.WARNING, f"asset {key}", key)
         for key in ("data", "extra")
     ]
-    collapsed = checks._collapse_shared_fields(inherited + per_asset)
+    source = checks._DataResults()
+    source.extend(inherited + per_asset)
+    collapsed = source.build()
     assert [d.asset_key for d in collapsed] == ["data", "data", "extra"]
 
 

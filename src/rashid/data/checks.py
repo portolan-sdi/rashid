@@ -73,7 +73,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import pyarrow as pa
@@ -108,8 +108,9 @@ from rashid.data import (
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
     DataDefect,
+    _DataResults,
 )
-from rashid.data._files import _AssetFiles, _parquet_file
+from rashid.data._files import _AssetFiles, _FileCache
 from rashid.data.reader import AssetReader, Locator
 from rashid.model import Severity
 from rashid.rules._common import asset_refers_to_self
@@ -261,41 +262,23 @@ def check_node(
     the collection's items, needs the object's children. Without it that check
     is skipped.
     """
-    defects: list[DataDefect] = []
-    defects.extend(_check_partition_schemas(node))
-    defects.extend(_check_partition_geoparquet(node, reader))
-    for key, asset in _assets_of(node):
-        href = asset.get("href")
-        if not isinstance(href, str) or not href:
-            continue  # PTL-AST-001 reports a missing href
-        if asset_refers_to_self(node, href, graph):
-            continue  # PTL-AST-003 requires both file metadata fields to be absent
-        log.debug("data: %s asset %r: %s", node.path, key, href)
-        with _trace.span("data.asset"):
-            defects.extend(_check_asset(node, key=key, asset=asset, reader=reader, graph=graph))
-    return _collapse_shared_fields(defects)
-
-
-def _collapse_shared_fields(defects: list[DataDefect]) -> list[DataDefect]:
-    """Report a defect in one shared field once, not once per asset that reads it.
-
-    Every asset on a collection inherits the collection's ``proj:epsg``, so the
-    per-asset pass raises the same defect against the same field as many times
-    as the collection has assets. One declaration is one defect. Defects that
-    name an asset carry no pointer of their own and pass through untouched.
-    """
-    seen: set[tuple[str, str, str]] = set()
-    kept: list[DataDefect] = []
-    for defect in defects:
-        if defect.json_pointer is None:
-            kept.append(defect)
-            continue
-        signature = (defect.rule_id, defect.json_pointer, defect.message)
-        if signature in seen:
-            continue
-        seen.add(signature)
-        kept.append(defect)
-    return kept
+    results = _DataResults()
+    with _FileCache() as cache:
+        results.extend(_check_partition_schemas(node, cache))
+        partitions, total = _check_partition_geoparquet(node, reader, cache)
+        results.extend(partitions, partition_total=total)
+        for key, asset in _assets_of(node):
+            href = asset.get("href")
+            if not isinstance(href, str) or not href:
+                continue  # PTL-AST-001 reports a missing href
+            if asset_refers_to_self(node, href, graph):
+                continue  # PTL-AST-003 requires both file metadata fields to be absent
+            log.debug("data: %s asset %r: %s", node.path, key, href)
+            with _trace.span("data.asset"):
+                results.extend(
+                    _check_asset(node, entry=(key, asset), reader=reader, graph=graph, cache=cache)
+                )
+    return results.build()
 
 
 def _assets_of(node: Node) -> list[tuple[str, dict[str, Any]]]:
@@ -308,11 +291,12 @@ def _assets_of(node: Node) -> list[tuple[str, dict[str, Any]]]:
 def _check_asset(
     node: Node,
     *,
-    key: str,
-    asset: dict[str, Any],
+    entry: tuple[str, dict[str, Any]],
     reader: AssetReader,
     graph: CatalogGraph | None = None,
+    cache: _FileCache,
 ) -> list[DataDefect]:
+    key, asset = entry
     href = asset["href"]
     _trace.count("data.assets")
     defects: list[DataDefect] = []
@@ -331,7 +315,8 @@ def _check_asset(
         # are still checksum/size/format-verified above.
         return defects
     gdal_env = rasterio.Env(**_REMOTE_GDAL) if located.is_remote else contextlib.nullcontext()
-    with gdal_env, _AssetFiles(located) as files:
+    with gdal_env:
+        files = cache.get(located)
         if is_mirror_asset(asset):
             # formats.md, Raster § Item mirror: a mirror must reproduce the
             # items it mirrors (PORTO-FMT-042). It then falls through to the
@@ -874,8 +859,8 @@ def _check_geoparquet(
         return []
 
     geo = _geo_metadata(parquet)
-    if geo is None:
-        return []  # plain Parquet, not GeoParquet — nothing to enforce here
+    if not isinstance(geo, dict):
+        return []  # plain Parquet or malformed metadata, not parsed GeoParquet — nothing to enforce here
 
     defects: list[DataDefect] = []
     defects.extend(_check_geoparquet_version(key, geo, subject=subject))
@@ -897,34 +882,9 @@ def _check_geoparquet(
     if bboxes is None:
         return defects  # without per-row-group boxes, ordering cannot be judged
 
-    groups = len(bboxes)
-    metrics_apply = groups >= _MIN_ORDERING_ROW_GROUPS
-
-    # A failed footer check settles the rule. A passing footer check can also
-    # settle the row check when conservative footer bounds prove that the
-    # synthetic row chunks pass. Otherwise inspect the rows themselves.
-    if metrics_apply and not _is_spatially_ordered(bboxes):
-        defects.append(
-            DataDefect(
-                DAT_ORDERING,
-                Severity.ERROR,
-                f"{subject} rows are not spatially ordered: row groups overlap heavily "
-                "and lack locality, so a reader cannot skip them",
-                key,
-            )
-        )
-        return defects
-    if metrics_apply and _footer_proves_row_ordering(parquet, geo, bboxes, row_counts):
-        return defects
-
-    row_defects = _row_ordering_defects(
-        key,
-        parquet=parquet,
-        geo=geo,
-        report_unreadable=not metrics_apply,
-        subject=subject,
-    )
-    defects.extend(row_defects)
+    ordering = _ordering_defect(key, parquet, geo, bboxes, subject=subject)
+    if ordering is not None:
+        defects.append(ordering)
     return defects
 
 
@@ -952,15 +912,25 @@ def _check_geoparquet_version(
     ]
 
 
-def _geo_metadata(parquet: Any) -> dict[str, Any] | None:
+@dataclass(frozen=True)
+class _MalformedGeo:
+    error: Exception
+
+
+def _geo_metadata(parquet: Any) -> dict[str, Any] | _MalformedGeo | None:
+    """Distinguish an absent key, malformed JSON, and a parsed metadata object."""
     raw = (parquet.schema_arrow.metadata or {}).get(b"geo")
     if raw is None:
         return None
     try:
         geo = _json.loads(raw)
-    except (ValueError, TypeError):
-        return None
-    return geo if isinstance(geo, dict) else None
+    except (ValueError, TypeError) as exc:
+        return _MalformedGeo(exc)
+    if not isinstance(geo, dict):
+        return _MalformedGeo(
+            AttributeError(f"'{type(geo).__name__}' object has no attribute 'get'")
+        )
+    return geo
 
 
 # --- item mirrors -----------------------------------------------------------
@@ -1149,7 +1119,8 @@ def _mirror_field_defects(
 def _read_mirror_rows(parquet: Any) -> _MirrorRows | None:
     """Read id, geometry, datetime, and bbox in one pass over the file."""
     names = parquet.schema_arrow.names
-    geo = _geo_metadata(parquet) or {}
+    metadata = _geo_metadata(parquet)
+    geo = metadata if isinstance(metadata, dict) else {}
     primary = geo.get("primary_column")
     geometry_name = primary if isinstance(primary, str) and primary in names else None
     if geometry_name is None and "geometry" in names:
@@ -1169,13 +1140,13 @@ def _read_mirror_rows(parquet: Any) -> _MirrorRows | None:
     )
 
 
-def _bbox_struct(parquet: Any, geo: dict[str, Any]) -> tuple[str, list[str]] | None:
-    """The covering column as a struct name and its four leaf field names.
+def _bbox_struct(
+    parquet: Any, geo: dict[str, Any], *, policy: Literal["rows", "statistics"] = "rows"
+) -> tuple[str, list[str]] | None:
+    """Resolve covering paths for either row structs or footer statistics.
 
-    Read from the same ``covering`` declaration the row-group statistics use
-    (:func:`_covering_bboxes`) rather than from a guessed column name. A
-    covering nested deeper than one struct level yields None: statistics name
-    their leaves by path, while a per-row read needs the struct itself.
+    ``rows`` requires four leaves in one shallow struct. ``statistics`` accepts
+    arbitrary leaf paths, returned as dotted names with an empty root.
     """
     columns = geo.get("columns")
     entry = columns.get(geo.get("primary_column")) if isinstance(columns, dict) else None
@@ -1183,16 +1154,19 @@ def _bbox_struct(parquet: Any, geo: dict[str, Any]) -> tuple[str, list[str]] | N
     bbox = covering.get("bbox") if isinstance(covering, dict) else None
     if not isinstance(bbox, dict):
         return None
-    paths = [bbox.get(corner) for corner in ("xmin", "ymin", "xmax", "ymax")]
+    paths: list[Any] = [bbox.get(corner) for corner in ("xmin", "ymin", "xmax", "ymax")]
+    if policy == "statistics":
+        try:
+            names = [".".join(path) for path in paths]
+        except TypeError:
+            return None
+        return "", names
     if not all(isinstance(path, list) and len(path) == 2 for path in paths):
         return None
-    roots = {str(path[0]) for path in paths}  # type: ignore[index]
-    if len(roots) != 1:
-        return None
-    root = roots.pop()
-    if root not in parquet.schema_arrow.names:
-        return None
-    return root, [str(path[1]) for path in paths]  # type: ignore[index]
+    roots = {str(path[0]) for path in paths}
+    if len(roots) == 1 and (root := roots.pop()) in parquet.schema_arrow.names:
+        return root, [str(path[1]) for path in paths]
+    return None
 
 
 def _bbox_column_values(table: Any, bbox: tuple[str, list[str]]) -> list[Any]:
@@ -1341,7 +1315,7 @@ def _check_tabular(
         parquet = files.parquet()
     except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
-    if _geo_metadata(parquet) is not None:
+    if isinstance(_geo_metadata(parquet), dict):
         return []  # GeoParquet: the geospatial storage rules own it
     defects: list[DataDefect] = []
     if not _has_table_columns(node, asset):
@@ -1386,7 +1360,7 @@ def _check_vector_columns(
         parquet = files.parquet()
     except Exception:  # unreadable Parquet: format/checksum checks own it
         return []
-    if _geo_metadata(parquet) is None:
+    if not isinstance(_geo_metadata(parquet), dict):
         return []  # plain Parquet: the Tabular Data SHOULDs own it
     if _has_table_columns(node, asset):
         return []
@@ -1520,24 +1494,14 @@ def _native_bboxes(
 
 def _covering_leaf_indices(parquet: Any, geo: dict[str, Any]) -> dict[str, int] | None:
     """Resolve all four covering leaves only when they exist in the Parquet schema."""
-    primary = geo.get("primary_column")
-    columns = geo.get("columns")
-    if not isinstance(columns, dict):
+    covering = _bbox_struct(parquet, geo, policy="statistics")
+    if covering is None:
         return None
-    covering = columns.get(primary, {}).get("covering", {}).get("bbox")
-    if not isinstance(covering, dict):
+    index = _column_index(parquet.metadata)
+    paths = covering[1]
+    if not all(path in index for path in paths):
         return None
-    try:
-        paths = {corner: ".".join(covering[corner]) for corner in ("xmin", "ymin", "xmax", "ymax")}
-    except (KeyError, TypeError):
-        return None
-
-    meta = parquet.metadata
-    index = _column_index(meta)
-    if not all(path in index for path in paths.values()):
-        return None
-
-    return {corner: index[path] for corner, path in paths.items()}
+    return dict(zip(("xmin", "ymin", "xmax", "ymax"), (index[path] for path in paths), strict=True))
 
 
 def _covering_bboxes(
@@ -1576,35 +1540,31 @@ def _column_index(meta: Any) -> dict[str, int]:
     return {group.column(j).path_in_schema: j for j in range(group.num_columns)}
 
 
-def _row_ordering_defects(
+def _ordering_defect(
     key: str,
-    *,
     parquet: Any,
     geo: dict[str, Any],
-    report_unreadable: bool,
-    subject: str | None = None,
-) -> list[DataDefect]:
-    """Check row order, whatever the file's row-group layout.
-
-    formats.md:30 requires spatially ordered rows in every file, and a validator
-    checks that by splitting them into the groups a conforming writer would have
-    produced. How the file happens to be chunked does not change whether the rows
-    are ordered, only how cheaply a reader can tell, so this runs at any count.
-
-    Below ``_MIN_ORDERING_ROW_GROUPS`` it is the only check available. The
-    reference stac-geoparquet writer shows why that matters. With no schema
-    passed, ``parse_stac_items_to_arrow`` returns one contiguous record batch at
-    any item count and ``to_parquet`` writes one row group per batch, leaving the
-    row-group checks a single box to compare, which passes on any row order.
-
-    ``report_unreadable`` is off when the row-group checks also run, since an
-    unreadable covering column then leaves row order checked, not unchecked.
-    """
-    subject = subject or f"asset '{key}'"
+    bboxes: list[tuple[float, float, float, float]],
+    *,
+    subject: str,
+) -> DataDefect | None:
+    """One verdict from footer criteria, a footer proof, or row chunks."""
+    metrics_apply = len(bboxes) >= _MIN_ORDERING_ROW_GROUPS
+    if metrics_apply and not _is_spatially_ordered(bboxes):
+        return DataDefect(
+            DAT_ORDERING,
+            Severity.ERROR,
+            f"{subject} rows are not spatially ordered: row groups overlap heavily "
+            "and lack locality, so a reader cannot skip them",
+            key,
+        )
     rows = parquet.metadata.num_rows
     groups = parquet.metadata.num_row_groups
-    if rows < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
-        return []  # too few rows for a chunk's box to describe anything
+    row_counts = [parquet.metadata.row_group(i).num_rows for i in range(groups)]
+    if rows < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS or (
+        metrics_apply and _footer_proves_row_ordering(parquet, geo, bboxes, row_counts)
+    ):
+        return None
     row_boxes = _row_bboxes(parquet, geo)
     # Re-apply the floor to the boxes that survived, not to the row count. Rows
     # without geometry carry no covering box, so a file can hold enough rows and
@@ -1613,35 +1573,31 @@ def _row_ordering_defects(
     # leaves ``_is_spatially_ordered`` no consecutive pair to divide by, and a
     # handful yields a verdict drawn from a sample far under the floor.
     if row_boxes is None or len(row_boxes) < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
-        if not report_unreadable:
-            return []
+        if metrics_apply:
+            return None
         if row_boxes is None:
             why = "with no bbox covering column to read"
         else:
             measured = len(row_boxes)
             verb = "carries" if measured == 1 else "carry"
             why = f"of which {measured} {verb} a covering box"
-        return [
-            DataDefect(
-                DAT_ORDERING,
-                Severity.INFO,
-                f"{subject} holds {rows} rows in {_plural(groups, 'row group')} "
-                f"{why}, so spatial ordering could not be evaluated",
-                key,
-            )
-        ]
-    if _is_spatially_ordered(_chunked_bboxes(row_boxes)):
-        return []
-    return [
-        DataDefect(
+        return DataDefect(
             DAT_ORDERING,
-            Severity.ERROR,
-            f"{subject} rows are not spatially ordered: {rows} rows in "
-            f"{_plural(groups, 'row group')} do not cluster spatially, so a reader "
-            "cannot skip any part of the file",
+            Severity.INFO,
+            f"{subject} holds {rows} rows in {_plural(groups, 'row group')} "
+            f"{why}, so spatial ordering could not be evaluated",
             key,
         )
-    ]
+    if _is_spatially_ordered(_chunked_bboxes(row_boxes)):
+        return None
+    return DataDefect(
+        DAT_ORDERING,
+        Severity.ERROR,
+        f"{subject} rows are not spatially ordered: {rows} rows in "
+        f"{_plural(groups, 'row group')} do not cluster spatially, so a reader "
+        "cannot skip any part of the file",
+        key,
+    )
 
 
 def _footer_proves_row_ordering(
@@ -1738,20 +1694,13 @@ def _row_bboxes(
     out of spatial order, and one of them must not cost the whole file its
     ordering check. Returns None only when no row has a box at all.
     """
-    columns = geo.get("columns")
-    if not isinstance(columns, dict):
+    covering = _bbox_struct(parquet, geo)
+    if covering is None:
         return None
-    covering = columns.get(geo.get("primary_column"), {}).get("covering", {}).get("bbox")
-    if not isinstance(covering, dict):
-        return None
-    paths = [covering.get(corner) for corner in ("xmin", "ymin", "xmax", "ymax")]
-    if not all(isinstance(p, list) and len(p) == 2 for p in paths):
-        return None
-    if len({p[0] for p in paths}) != 1:  # type: ignore[index]
-        return None
+    root, fields = covering
     try:
-        flat = parquet.read(columns=[paths[0][0]]).flatten()  # type: ignore[index]
-        corners = [flat.column(f"{p[0]}.{p[1]}").to_pylist() for p in paths]  # type: ignore[index]
+        flat = parquet.read(columns=[root]).flatten()
+        corners = [flat.column(f"{root}.{field}").to_pylist() for field in fields]
     except Exception:  # unreadable column: the checksum check owns bad bytes
         return None
     boxes: list[tuple[float, float, float, float]] = []
@@ -1836,7 +1785,7 @@ def _partition_files(node: Node) -> list[tuple[str, Path]]:
     return [(match, base / match) for match in matches]
 
 
-def _check_partition_schemas(node: Node) -> list[DataDefect]:
+def _check_partition_schemas(node: Node, cache: _FileCache) -> list[DataDefect]:
     """Every partition file MUST share a single Parquet schema.
 
     formats.md:91: "Every partition file MUST share a single Parquet schema —
@@ -1851,7 +1800,7 @@ def _check_partition_schemas(node: Node) -> list[DataDefect]:
     schemas: list[tuple[str, dict[str, str]]] = []
     for match, path in _partition_files(node):
         try:
-            parquet = _parquet_file(str(path))
+            parquet = cache.get(Locator(is_remote=False, source=str(path))).parquet()
         except Exception:  # nosec B112 - unreadable partition: the byte checks own it
             continue
         arrow = parquet.schema_arrow
@@ -1877,7 +1826,9 @@ def _check_partition_schemas(node: Node) -> list[DataDefect]:
     return defects
 
 
-def _check_partition_geoparquet(node: Node, reader: AssetReader) -> list[DataDefect]:
+def _check_partition_geoparquet(
+    node: Node, reader: AssetReader, cache: _FileCache
+) -> tuple[list[DataDefect], int]:
     """The GeoParquet MUSTs apply to partition files, not only to assets.
 
     A partitioned collection addresses its data by ``partition:glob`` and
@@ -1893,7 +1844,7 @@ def _check_partition_geoparquet(node: Node, reader: AssetReader) -> list[DataDef
     """
     files = _partition_files(node)
     if not files:
-        return []
+        return [], 0
     already_read = _asset_paths(node, reader)
     found: list[DataDefect] = []
     checked = 0
@@ -1901,9 +1852,9 @@ def _check_partition_geoparquet(node: Node, reader: AssetReader) -> list[DataDef
         if str(path) in already_read:
             continue  # a declared asset: the per-asset loop reports it
         checked += 1
-        with _AssetFiles(Locator(is_remote=False, source=str(path))) as opened:
-            found.extend(_check_geoparquet(match, opened, subject=f"partition file '{match}'"))
-    return _fold_partition_defects(found, checked)
+        opened = cache.get(Locator(is_remote=False, source=str(path)))
+        found.extend(_check_geoparquet(match, opened, subject=f"partition file '{match}'"))
+    return found, checked
 
 
 def _asset_paths(node: Node, reader: AssetReader) -> set[str]:
@@ -1921,36 +1872,6 @@ def _asset_paths(node: Node, reader: AssetReader) -> set[str]:
         if located is not None and not located.is_remote:
             paths.add(located.source)
     return paths
-
-
-def _fold_partition_defects(defects: list[DataDefect], total: int) -> list[DataDefect]:
-    """One defect per rule and severity, bound to the glob rather than an asset.
-
-    Order follows first appearance, so the report reads in the order the files
-    were walked. A lone failure keeps its own message; several keep the first
-    as the example, since partitions of one dataset fail the same way.
-    """
-    groups: dict[tuple[str, Severity], list[DataDefect]] = {}
-    for defect in defects:
-        groups.setdefault((defect.rule_id, defect.severity), []).append(defect)
-    folded: list[DataDefect] = []
-    for (rule_id, severity), members in groups.items():
-        first = members[0]
-        message = first.message
-        if len(members) > 1:
-            message = (
-                f"{len(members)} of {total} partition files fail this check; e.g. {first.message}"
-            )
-        folded.append(
-            DataDefect(
-                rule_id,
-                severity,
-                message,
-                "",
-                json_pointer="/partition:glob",
-            )
-        )
-    return folded
 
 
 def _schema_difference(reference: dict[str, str], other: dict[str, str]) -> str | None:
@@ -2017,10 +1938,11 @@ def _extract_geo(expected: str, files: _AssetFiles) -> _Geo | None:
 
 def _geo_from_parquet(files: _AssetFiles) -> _Geo | None:
     parquet = files.parquet()
-    raw = (parquet.schema_arrow.metadata or {}).get(b"geo")
-    if raw is None:
+    geo = _geo_metadata(parquet)
+    if geo is None:
         return None
-    geo = _json.loads(raw)
+    if isinstance(geo, _MalformedGeo):
+        raise geo.error
     primary = geo.get("primary_column")
     column = geo.get("columns", {}).get(primary, {})
     bbox = column.get("bbox")

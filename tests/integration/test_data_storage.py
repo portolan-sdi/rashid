@@ -418,19 +418,29 @@ def test_single_row_group_without_readable_row_boxes_reports_unevaluated() -> No
     no covering column to read row by row, so ordering stays unmeasured and
     the check says so rather than reporting success.
     """
-    parquet = SimpleNamespace(metadata=SimpleNamespace(num_rows=5000, num_row_groups=1))
-    defects = checks._row_ordering_defects("data", parquet=parquet, geo={}, report_unreadable=True)
-    assert [d.rule_id for d in defects] == [DAT_ORDERING]
-    assert defects[0].severity is Severity.INFO
-    assert "could not be evaluated" in defects[0].message
+    parquet = SimpleNamespace(
+        metadata=SimpleNamespace(
+            num_rows=5000, num_row_groups=1, row_group=lambda i: SimpleNamespace(num_rows=5000)
+        )
+    )
+    defects = checks._ordering_defect("data", parquet, {}, [], subject="asset 'data'")
+    assert defects.rule_id == DAT_ORDERING
+    assert defects.severity is Severity.INFO
+    assert "could not be evaluated" in defects.message
 
 
 def test_unreadable_boxes_stay_quiet_when_the_criteria_apply() -> None:
     """At five or more row groups the footer metrics measure ordering anyway,
     so an unreadable covering column is not a gap worth reporting."""
-    parquet = SimpleNamespace(metadata=SimpleNamespace(num_rows=5000, num_row_groups=8))
-    defects = checks._row_ordering_defects("data", parquet=parquet, geo={}, report_unreadable=False)
-    assert defects == []
+    parquet = SimpleNamespace(
+        metadata=SimpleNamespace(
+            num_rows=5000, num_row_groups=8, row_group=lambda i: SimpleNamespace(num_rows=625)
+        )
+    )
+    defects = checks._ordering_defect(
+        "data", parquet, {}, [(0.0, 0.0, 0.0, 0.0)] * 5, subject="asset 'data'"
+    )
+    assert defects is None
 
 
 @pytest.mark.parametrize(
@@ -822,7 +832,7 @@ def test_consistent_partition_schemas_are_clean(tmp_path: Path) -> None:
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
     assets.write_geoparquet(parts / "b.parquet")
-    assert checks._check_partition_schemas(_partitioned_collection(tmp_path)) == []
+    assert _partition_schemas(_partitioned_collection(tmp_path)) == []
 
 
 def test_diverging_partition_schemas_flag_dat_014(tmp_path: Path) -> None:
@@ -830,7 +840,7 @@ def test_diverging_partition_schemas_flag_dat_014(tmp_path: Path) -> None:
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
     assets.write_geoparquet(parts / "b.parquet", columns={"extra": list(range(6))})
-    defects = checks._check_partition_schemas(_partitioned_collection(tmp_path))
+    defects = _partition_schemas(_partitioned_collection(tmp_path))
     assert [d.rule_id for d in defects] == [DAT_PARTITION_SCHEMA]
     assert defects[0].severity is Severity.ERROR
     assert "extra" in defects[0].message
@@ -839,19 +849,19 @@ def test_diverging_partition_schemas_flag_dat_014(tmp_path: Path) -> None:
 
 def test_remote_partition_glob_is_skipped(tmp_path: Path) -> None:
     node = _partitioned_collection(tmp_path, glob="s3://bucket/parts/*.parquet")
-    assert checks._check_partition_schemas(node) == []
+    assert _partition_schemas(node) == []
 
 
 def test_escaping_partition_glob_is_skipped(tmp_path: Path) -> None:
     node = _partitioned_collection(tmp_path, glob="../elsewhere/*.parquet")
-    assert checks._check_partition_schemas(node) == []
+    assert _partition_schemas(node) == []
 
 
 def test_single_partition_file_has_nothing_to_compare(tmp_path: Path) -> None:
     parts = tmp_path / "parts"
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
-    assert checks._check_partition_schemas(_partitioned_collection(tmp_path)) == []
+    assert _partition_schemas(_partitioned_collection(tmp_path)) == []
 
 
 # --- partition bytes (PTL-DAT-006/007/008/012 over the glob) -----------------
@@ -870,8 +880,17 @@ class _NoAssets:
         return None
 
 
+def _partition_schemas(node: Node) -> list:
+    with file_owner._FileCache() as cache:
+        return checks._check_partition_schemas(node, cache)
+
+
 def _partition_bytes(node: Node, reader: object | None = None) -> list:
-    return checks._check_partition_geoparquet(node, reader or _NoAssets())
+    with file_owner._FileCache() as cache:
+        defects, total = checks._check_partition_geoparquet(node, reader or _NoAssets(), cache)
+    source = checks._DataResults()
+    source.extend(defects, partition_total=total)
+    return source.build()
 
 
 def test_conformant_partitions_are_clean(tmp_path: Path) -> None:
@@ -959,7 +978,9 @@ def test_partition_severities_fold_separately() -> None:
         checks.DataDefect(DAT_ROWGROUP_STATS, Severity.ERROR, "e", "x"),
         checks.DataDefect(DAT_ROWGROUP_STATS, Severity.WARNING, "w", "x"),
     ]
-    folded = checks._fold_partition_defects(defects, 2)
+    source = checks._DataResults()
+    source.extend(defects, partition_total=2)
+    folded = source.build()
     assert [d.severity for d in folded] == [Severity.ERROR, Severity.WARNING]
 
 
