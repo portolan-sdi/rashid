@@ -63,6 +63,7 @@ DAT_PARTITION_SCHEMA = "PTL-DAT-014"
 DAT_TABULAR = "PTL-DAT-015"
 DAT_MIRROR = "PTL-DAT-016"
 DAT_VECTOR_COLUMNS = "PTL-DAT-017"
+DAT_NATIVE_CRS = "PTL-DAT-018"
 
 # Requirement IDs from the spec's requirements manifest
 # (specs/portolan/requirements.yaml) enforced by each check;
@@ -88,11 +89,25 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     # run at five or more groups, a single group is measured over its rows, and
     # two to four are left alone rather than faulted on a threshold they cannot
     # express.
-    DAT_ORDERING: ("PORTO-FMT-006", "PORTO-FMT-043", "PORTO-FMT-044", "PORTO-FMT-045"),
+    # FMT-055 makes a file with a native geospatial column vector data even
+    # without a `geo` key; the checks that now run on such a file carry it.
+    DAT_ORDERING: (
+        "PORTO-FMT-006",
+        "PORTO-FMT-043",
+        "PORTO-FMT-044",
+        "PORTO-FMT-045",
+        "PORTO-FMT-055",
+    ),
     # ERROR when neither statistics source exists; WARNING when a 2.x file
     # relies on native statistics without the RECOMMENDED covering column.
-    DAT_ROWGROUP_STATS: ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043", "PORTO-FMT-045"),
-    DAT_ROWGROUP_SIZE: ("PORTO-FMT-009", "PORTO-FMT-043", "PORTO-FMT-045"),
+    DAT_ROWGROUP_STATS: (
+        "PORTO-FMT-007",
+        "PORTO-FMT-008",
+        "PORTO-FMT-043",
+        "PORTO-FMT-045",
+        "PORTO-FMT-055",
+    ),
+    DAT_ROWGROUP_SIZE: ("PORTO-FMT-009", "PORTO-FMT-043", "PORTO-FMT-045", "PORTO-FMT-055"),
     DAT_COG_STATS: (
         "PORTO-FMT-026",
         "PORTO-FMT-027",
@@ -117,6 +132,9 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     ),
     # A mirror must reproduce the collection's items (PORTO-FMT-042).
     DAT_MIRROR: ("PORTO-FMT-042",),
+    # The native crs resolves from the file alone: a defined-or-absent value
+    # is the MUST (FMT-056), self-contained PROJJSON the SHOULD (FMT-057).
+    DAT_NATIVE_CRS: ("PORTO-FMT-056", "PORTO-FMT-057", "PORTO-FMT-045"),
 }
 
 # Assets are declared on collections and items; catalogs carry none.

@@ -21,6 +21,7 @@ from rashid.data import (
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
     DAT_MIRROR,
+    DAT_NATIVE_CRS,
     DAT_ORDERING,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
@@ -102,6 +103,7 @@ _DATA_RULE_IDS = frozenset(
         DAT_TABULAR,
         DAT_MIRROR,
         DAT_VECTOR_COLUMNS,
+        DAT_NATIVE_CRS,
     }
 )
 
