@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +12,16 @@ from tests.conftest import CatalogBuilder, mutate_json
 from tests.integration.test_href_behavior import _check
 
 pytestmark = pytest.mark.integration
+
+
+def _publish(server: HttpsServer, root: Path) -> None:
+    server.routes.update(
+        {
+            "/" + path.relative_to(root).as_posix(): Route(body=path.read_bytes())
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+    )
 
 
 def test_live_probes_explicit_default_port(catalog: CatalogBuilder) -> None:
@@ -56,11 +67,7 @@ def test_queried_document_asset_reads_its_own_bytes(
         },
     )
     root = catalog.write()
-    for path in root.rglob("*"):
-        if path.is_file():
-            https_server.routes["/" + path.relative_to(root).as_posix()] = Route(
-                body=path.read_bytes()
-            )
+    _publish(https_server, root)
     https_server.routes["/roads/collection.json?raw=1"] = Route(body=payload)
     report = _check(https_server.url("catalog.json"), "--no-live")
     assert not [f for f in report["findings"] if f["rule_id"] in ("PTL-DAT-001", "PTL-DAT-002")]
@@ -84,11 +91,7 @@ def test_legal_path_delimiters_reach_the_same_https_resource(
         },
     )
     root = catalog.write()
-    for path in root.rglob("*"):
-        if path.is_file():
-            https_server.routes["/" + path.relative_to(root).as_posix()] = Route(
-                body=path.read_bytes()
-            )
+    _publish(https_server, root)
     https_server.routes["/roads/" + name] = Route(body=b"abc")
     report = _check(https_server.url("catalog.json"), "--no-live")
     assert any(s.path == "/roads/" + name for s in https_server.seen)
