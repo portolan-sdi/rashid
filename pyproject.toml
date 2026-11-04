@@ -23,7 +23,7 @@ authors = [{ name = "Portolan contributors" }]
 # abseil ABI break, so a >=25 floor would make rashid uninstallable next to them
 # (#36; also fixed on main by #49 — the floors agree whichever merges first).
 # shapely joins the stack for the item-mirror comparison in
-# checks._geometry_agrees, which decodes the mirror's WKB and the item's GeoJSON
+# mirror._geometry_agrees, which decodes the mirror's WKB and the item's GeoJSON
 # and compares them structurally. Its floor follows the same rule: 2.1 is the
 # newest series shapely ships.
 # jsonschema-rs screens each object before jsonschema sees it

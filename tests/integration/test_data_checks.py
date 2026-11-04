@@ -27,7 +27,7 @@ from pyproj import CRS, Transformer
 import rashid.data.checks as checks
 from rashid import _trace
 from rashid.catalog import Node
-from rashid.data import DataDefect, _DataResults, geoparquet, raster, spatial, storage
+from rashid.data import DataDefect, _DataResults, geoparquet, mirror, raster, spatial, storage
 from rashid.data._files import _AssetFiles
 from rashid.data.reader import Locator
 from rashid.model import Severity
@@ -710,7 +710,7 @@ def test_mirror_rows_read_a_file_with_no_geo_metadata(tmp_path: Path) -> None:
     """No ``geo`` key names the primary column, so the plain name is used."""
     path = tmp_path / "items.parquet"
     pq.write_table(pa.table({"id": ["a"], "geometry": [_wkb_point(5.0, 51.0)]}), path)
-    rows = checks._read_mirror_rows(pq.ParquetFile(path))
+    rows = mirror._read_mirror_rows(pq.ParquetFile(path))
     assert rows is not None
     assert rows.ids == ["a"]
     assert rows.geometry == [_wkb_point(5.0, 51.0)]
@@ -718,7 +718,7 @@ def test_mirror_rows_read_a_file_with_no_geo_metadata(tmp_path: Path) -> None:
 
 
 def test_unreadable_mirror_columns_yield_no_rows() -> None:
-    assert checks._read_mirror_rows(_UnreadableParquet("id", "geometry")) is None
+    assert mirror._read_mirror_rows(_UnreadableParquet("id", "geometry")) is None
 
 
 @pytest.mark.parametrize(
@@ -767,7 +767,7 @@ def test_unreadable_mirror_columns_yield_no_rows() -> None:
 )
 def test_wkb_encodings_agree_with_the_item_geometry(geometry: object, blob: bytes) -> None:
     """Every encoding a mirror may carry reaches shapely and matches the item."""
-    assert checks._geometry_agrees(_mirror_item(geometry=geometry), blob)
+    assert mirror._geometry_agrees(_mirror_item(geometry=geometry), blob)
 
 
 @pytest.mark.parametrize(
@@ -781,9 +781,9 @@ def test_wkb_encodings_agree_with_the_item_geometry(geometry: object, blob: byte
     ],
 )
 def test_unreadable_wkb_leaves_the_row_alone(blob: bytes) -> None:
-    assert checks._from_wkb(blob) is None
+    assert mirror._from_wkb(blob) is None
     item = _mirror_item(geometry={"type": "Point", "coordinates": [5.0, 51.0]})
-    assert checks._geometry_agrees(item, blob)
+    assert mirror._geometry_agrees(item, blob)
 
 
 @pytest.mark.parametrize(
@@ -801,7 +801,7 @@ def test_unreadable_wkb_leaves_the_row_alone(blob: bytes) -> None:
     ],
 )
 def test_geojson_geometry_builds_a_shape(geometry: object, expected: str) -> None:
-    built = checks._shape(geometry)
+    built = mirror._shape(geometry)
     assert built is not None
     assert built.geom_type == expected
 
@@ -818,13 +818,13 @@ def test_geojson_geometry_builds_a_shape(geometry: object, expected: str) -> Non
     ],
 )
 def test_unusable_geojson_geometry_is_none(geometry: object) -> None:
-    assert checks._shape(geometry) is None
+    assert mirror._shape(geometry) is None
 
 
 def test_geometry_agreement_holds_within_the_tolerance() -> None:
     item = _mirror_item(geometry={"type": "Point", "coordinates": [5.0, 51.0]})
-    assert checks._geometry_agrees(item, _wkb_point(5.0 + 9e-7, 51.0))
-    assert not checks._geometry_agrees(item, _wkb_point(5.0 + 2e-6, 51.0))
+    assert mirror._geometry_agrees(item, _wkb_point(5.0 + 9e-7, 51.0))
+    assert not mirror._geometry_agrees(item, _wkb_point(5.0 + 2e-6, 51.0))
 
 
 @pytest.mark.parametrize(
@@ -838,17 +838,17 @@ def test_geometry_agreement_holds_within_the_tolerance() -> None:
 )
 def test_geometry_agreement_on_unusable_rows(blob: object, expected: bool) -> None:
     item = _mirror_item(geometry={"type": "Point", "coordinates": [5.0, 51.0]})
-    assert checks._geometry_agrees(item, blob) is expected
+    assert mirror._geometry_agrees(item, blob) is expected
 
 
 def test_geometry_agreement_is_silent_without_an_item_geometry() -> None:
-    assert checks._geometry_agrees(_mirror_item(geometry=None), _wkb_point(0.0, 0.0))
+    assert mirror._geometry_agrees(_mirror_item(geometry=None), _wkb_point(0.0, 0.0))
 
 
 def test_geometry_agreement_counts_vertices() -> None:
     item = _mirror_item(geometry={"type": "Polygon", "coordinates": [_SQUARE_JSON]})
     triangle = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 0.0)]
-    assert not checks._geometry_agrees(item, _wkb_polygon([triangle]))
+    assert not mirror._geometry_agrees(item, _wkb_polygon([triangle]))
 
 
 def test_geometry_agreement_reads_structure_not_only_vertices() -> None:
@@ -863,7 +863,7 @@ def test_geometry_agreement_reads_structure_not_only_vertices() -> None:
         geometry={"type": "MultiPolygon", "coordinates": [[_SQUARE_JSON], [_INNER_JSON]]}
     )
     one_part_with_a_hole = struct.pack("<BII", 1, 6, 1) + _wkb_polygon([_SQUARE, _INNER])
-    assert not checks._geometry_agrees(item, one_part_with_a_hole)
+    assert not mirror._geometry_agrees(item, one_part_with_a_hole)
 
 
 @pytest.mark.parametrize(
@@ -880,40 +880,40 @@ def test_geometry_agreement_reads_structure_not_only_vertices() -> None:
     ],
 )
 def test_timestamp_parsing(value: str, expected: datetime | None) -> None:
-    assert checks._parse_timestamp(value) == expected
+    assert mirror._parse_timestamp(value) == expected
 
 
 def test_datetime_agreement_holds_within_the_tolerance() -> None:
     item = _mirror_item(properties={"datetime": "2024-01-01T00:00:00Z"})
-    assert checks._datetime_agrees(item, datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC))
-    assert not checks._datetime_agrees(item, datetime(2024, 1, 1, 0, 0, 2, tzinfo=UTC))
+    assert mirror._datetime_agrees(item, datetime(2024, 1, 1, 0, 0, 1, tzinfo=UTC))
+    assert not mirror._datetime_agrees(item, datetime(2024, 1, 1, 0, 0, 2, tzinfo=UTC))
 
 
 def test_datetime_agreement_normalizes_the_zone() -> None:
     item = _mirror_item(properties={"datetime": "2024-01-01T00:00:00Z"})
-    assert checks._datetime_agrees(item, datetime(2024, 1, 1))  # naive column reads as UTC
-    assert checks._datetime_agrees(item, "2024-01-01T01:00:00+01:00")
+    assert mirror._datetime_agrees(item, datetime(2024, 1, 1))  # naive column reads as UTC
+    assert mirror._datetime_agrees(item, "2024-01-01T01:00:00+01:00")
 
 
 @pytest.mark.parametrize("value", [None, "yesterday", 1704067200])
 def test_datetime_agreement_fails_on_an_unusable_row(value: object) -> None:
     item = _mirror_item(properties={"datetime": "2024-01-01T00:00:00Z"})
-    assert not checks._datetime_agrees(item, value)
+    assert not mirror._datetime_agrees(item, value)
 
 
 @pytest.mark.parametrize("properties", [None, {}, {"datetime": None}, {"datetime": 5}])
 def test_datetime_agreement_is_silent_without_an_item_datetime(properties: object) -> None:
-    assert checks._datetime_agrees(_mirror_item(properties=properties), None)
+    assert mirror._datetime_agrees(_mirror_item(properties=properties), None)
 
 
 def test_bbox_agreement() -> None:
     item = _mirror_item(bbox=[4.0, 50.0, 6.0, 52.0])
-    assert checks._bbox_agrees(item, [4.0, 50.0, 6.0, 52.0 + 5e-7])
-    assert not checks._bbox_agrees(item, [4.0, 50.0, 6.0, 52.5])
-    assert not checks._bbox_agrees(item, None)
-    assert checks._bbox_agrees(_mirror_item(), None)
+    assert mirror._bbox_agrees(item, [4.0, 50.0, 6.0, 52.0 + 5e-7])
+    assert not mirror._bbox_agrees(item, [4.0, 50.0, 6.0, 52.5])
+    assert not mirror._bbox_agrees(item, None)
+    assert mirror._bbox_agrees(_mirror_item(), None)
 
 
 def test_bbox_agreement_drops_the_z_ordinates() -> None:
     item = _mirror_item(bbox=[4.0, 50.0, 0.0, 6.0, 52.0, 100.0])
-    assert checks._bbox_agrees(item, [4.0, 50.0, 6.0, 52.0])
+    assert mirror._bbox_agrees(item, [4.0, 50.0, 6.0, 52.0])
