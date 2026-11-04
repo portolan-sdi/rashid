@@ -414,5 +414,6 @@ def stream(url: str, chunk_size: int) -> Iterator[bytes]:
     else:
         _fallback("GET", url, "obstore cannot request this path")
     with _urlopen(url, "GET") as response:
-        while chunk := response.read(chunk_size):
+        # A filling read can consume EOF with a short chunk, then read TLS past EOF on Windows.
+        while chunk := response.read1(chunk_size):
             yield chunk
