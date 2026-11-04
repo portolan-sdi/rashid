@@ -63,10 +63,10 @@ from datetime import timedelta
 from functools import cache
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError
-from urllib.parse import urlsplit
+from urllib.parse import quote
 
 from rashid import _trace
-from rashid._href import is_https_href, store_path, url_authority
+from rashid._href import is_https_href, object_location
 from rashid._http import user_agent
 
 if TYPE_CHECKING:
@@ -137,18 +137,14 @@ def reset() -> None:
 
 
 def _locate(url: str) -> tuple[HTTPStore, str] | None:
-    """The store for ``url``'s host and its object path; None if obstore cannot request it.
-
-    ``urlsplit``, not ``urlparse``: the latter moves a ``;…`` suffix of the last
-    segment out of the path, and the object requested would lose it.
-    """
-    parsed = urlsplit(url)
-    if parsed.scheme.lower() != "https" or not parsed.netloc:
+    """The store and path from the shared object identity; None for urllib-only paths."""
+    location = object_location(url)
+    if location is None or location[0] != "https" or not location[1]:
         raise ValueError(f"refusing to fetch non-https URL: {url!r}")
-    path = store_path(parsed)
-    if path is None:
+    scheme, authority, path, query = location
+    if not path or path.startswith("/") or query:
         return None
-    return _store(f"https://{url_authority(parsed)}"), path
+    return _store(f"{scheme}://{authority}"), path
 
 
 def _error(method: str, url: str, exc: Exception) -> StoreError:
@@ -231,8 +227,11 @@ def _request(url: str, method: str, headers: dict[str, str] | None) -> Request:
     """Build every urllib request with the shared agent and HTTPS policy."""
     from urllib.request import Request
 
-    if not is_https_href(url):
-        raise ValueError(f"refusing to fetch non-https URL: {url!r}")
+    located = _locate(url)
+    if located is not None:
+        store, path = located
+        # Match obstore's path-segment encoding, including literal sub-delimiters.
+        url = store.url + quote(path, safe="/!$&'()*+,-.:;=@_~[]^|")
     return Request(url, method=method, headers={"User-Agent": user_agent(), **(headers or {})})
 
 
