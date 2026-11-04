@@ -61,8 +61,8 @@ def is_geospatial(node: Node, graph: CatalogGraph) -> bool | None:
     attribute table beside it is described. With no signal either way, return
     None: callers report that uncertainty rather than guess past it.
     """
-    for child in graph.children_of(node):
-        if child.kind == "item" and child.data.get("geometry") is not None:
+    for child in graph.items_of(node):
+        if child.data.get("geometry") is not None:
             return True
     if _has_spatial_media_type(node):
         return True
@@ -80,7 +80,7 @@ def _undecided_because(node: Node, graph: CatalogGraph) -> str:
     and a structural fault must not reach the reader only through a sentence
     about thumbnails.
     """
-    items = sum(1 for child in graph.children_of(node) if child.kind == "item")
+    items = len(graph.items_of(node))
     if items == 0:
         # Phrased as absent geometry evidence, not as a structural verdict:
         # whether the collection owes items at all is PTL-COL-005's question.

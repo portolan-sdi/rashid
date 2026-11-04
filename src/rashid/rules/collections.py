@@ -76,7 +76,7 @@ class SingleFileCollectionRule(Rule):
             return
         if _data_asset_state(node) is not _NO_DATA_ASSET:
             return
-        items = [child for child in graph.children_of(node) if child.kind == "item"]
+        items = graph.items_of(node)
         if len(items) != 1:
             return
         item = items[0]
@@ -146,11 +146,7 @@ class RasterSceneItemRule(Rule):
             return
         if not keys:
             return
-        scene_items = [
-            item
-            for item in graph.children_of(node)
-            if item.kind == "item" and _raster_asset_keys(item)
-        ]
+        scene_items = [item for item in graph.items_of(node) if _raster_asset_keys(item)]
         if not scene_items:
             return
         names = ", ".join(str(item.id or item.path) for item in scene_items[:3])
