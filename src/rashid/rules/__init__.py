@@ -62,6 +62,7 @@ from rashid.rules.provenance import (
 from rashid.rules.providers import HostContactRule, ProducerPresentRule, SingleHostRule
 from rashid.rules.temporal import DatetimePresentRule, DatetimeValidRule
 from rashid.rules.titles import HumanReadableTitleRule, LinkTitleRule, TitleDescriptionRule
+from rashid.rules.versions import VersionChainRule
 from rashid.rules.viz import (
     DefaultStyleRoleRule,
     LargeVectorWithoutVisualRule,
@@ -110,6 +111,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     SchemaUriConsistencyRule(),
     VersionExtensionRule(),
     ExtensionVersionRule(),
+    VersionChainRule(),
     MirrorViaLinkRule(),
     MirrorCanonicalLinkRule(),
     MirrorUpdatedRule(),

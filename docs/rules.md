@@ -96,6 +96,7 @@ The rule's message reports absent geometry evidence only. `PTL-COL-005` answers 
 | `PTL-LIC` | 001–003 | Requires an SPDX identifier or `other`, a license link for `other`, and no `proprietary` value. |
 | `PTL-FIL` | 001–005 | Requires `AGENTS.md` and `README.md` on disk. Requires Markdown links with `rel:"agents"` and `rel:"describedby"`. Requires a non-empty README with a title heading. Warns heuristically when a collection README omits license or provenance information. |
 | `PTL-AST` | 001–009 | Checks asset `href`, media type, and roles. Requires the COG media type for primary raster data and HTTPS instead of S3 URLs. Requires `file:size` and multihash-encoded `file:checksum`; their absence produces a warning under the SHOULD requirement. Rule `003` exempts assets that refer to their containing STAC object and reports either field on them as an error. Prohibits assets on catalogs. Rule `007` requires each collection to refer to its data: an asset with the `data` role on the collection or on one of its items, or a `partition:glob`. PMTiles alone does not supply primary data. Rule `008` requires each item to carry an asset with the `data` role. Rule `009` requires PMTiles assets to carry `visual` and reference GeoParquet through their collection or its items, or through `partition:glob`. |
+| `PTL-VER` | 001 | Warns about inconsistent version navigation. See [Version chains](#version-chains). |
 | `PTL-CNF` | 001–004 | Requires a versioned Portolan schema URI that agrees with the root catalog. Requires the STAC version extension for dataset versioning. Requires each registered extension to use the version in the profile's extension registry. |
 | `PTL-PRO` | 001–004 | Checks mirror `via` and `canonical` links plus the `updated` synchronization time. Prohibits upstream links on official catalogs. |
 | `PTL-VIZ` | 001–006 | Requires thumbnails on geospatial collections, style assets for visual derivatives, and `rel:"pmtiles"` registration for PMTiles. Reports large vectors without a visual derivative. Requires the MapLibre style media type in PMTiles collections. Requires the `default` role on one of several styles. |
@@ -197,3 +198,32 @@ uv run pre-commit install \
 ```
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). The commit message hook uses commitizen to enforce the format.
+
+## Version chains
+
+`PTL-VER-001` checks version links on catalogs, collections, and items, even when the extension declaration is missing. `PTL-CNF-003` checks version field declarations separately.
+
+The [Portolan versioning requirement](https://github.com/portolan-sdi/portolan-spec/blob/main/specs/portolan/core.md#conformance-and-versioning) delegates dataset versioning to the [STAC version extension](https://github.com/stac-extensions/version). Its navigation semantics follow [RFC 5829](https://www.rfc-editor.org/rfc/rfc5829.html).
+
+The rule produces warnings for:
+
+- A predecessor, successor, or latest link that resolves inside the catalog but does not name a readable STAC object.
+- A predecessor without its reciprocal successor, or a successor without its reciprocal predecessor. An unresolved partner link gets its own warning instead.
+- A cycle, including a self predecessor or successor.
+- A latest link whose target has a successor in the known version graph.
+- More than one latest link on the same resource, even when the targets are not loaded.
+- A relative history link in a local catalog that does not name an existing file.
+
+A version history may be a changelog, catalog, or collection. Branches and merges are allowed. A single version may name itself as latest.
+
+The rule does not require version labels to match IDs or dates, require labels to be unique across a collection, or require unrelated histories to share one head. Deprecation does not change the version graph.
+
+Resolution uses the graph's existing href policy, including absolute STAC links under the language root's published self base. Absolute history documents and targets outside that base need network probes. This metadata rule does not fetch them. If an inverse link cannot be judged, the rule leaves that pair unchecked.
+
+History-file existence is checked only for local catalogs. A remote crawl mirror omits arbitrary history documents, so their absence from the mirror does not show a broken link.
+
+For remote catalogs, version targets absent from the loaded graph are also left unchecked. Only loaded targets are used to check reciprocity, cycles, and whether latest names a head. The limit of one latest link applies regardless of loaded targets. The rule does not fetch missing targets.
+
+`is-version-of` and `has-version` describe an overarching resource rather than predecessor and successor edges. They do not join the version graph.
+
+The rule cites no numbered requirement: the manifest has no entry for the delegated extension's navigation semantics. Its stable ID uses a separate metadata group and does not consume a data-pass ID.
