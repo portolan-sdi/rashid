@@ -4,22 +4,11 @@ from __future__ import annotations
 
 import posixpath
 import re
-from pathlib import PurePosixPath
-from typing import Any, Protocol
-from urllib.parse import ParseResult, SplitResult, quote, unquote, urljoin, urlparse, urlsplit
+from typing import TYPE_CHECKING
+from urllib.parse import SplitResult, quote, unquote, urljoin, urlsplit
 
-
-class _SelfLinked(Protocol):
-    path: PurePosixPath
-    data: dict[str, Any]
-
-
-def parse_href(href: str) -> ParseResult | None:
-    """Parse an untrusted href; malformed authorities have no parsed value."""
-    try:
-        return urlparse(href)
-    except ValueError:
-        return None
+if TYPE_CHECKING:
+    from rashid.catalog import Node
 
 
 def split_href(href: str) -> SplitResult | None:
@@ -32,7 +21,7 @@ def split_href(href: str) -> SplitResult | None:
 
 def is_absolute_href(href: str) -> bool:
     """True for hrefs with a URI scheme or a leading slash."""
-    parsed = parse_href(href)
+    parsed = split_href(href)
     return href.startswith("/") or parsed is None or bool(parsed.scheme)
 
 
@@ -48,7 +37,7 @@ def off_https_reference(href: str) -> bool:
     return parsed is None or parsed.scheme.lower() not in ("", "https")
 
 
-def self_link_base(root: _SelfLinked | None) -> str | None:
+def self_link_base(root: Node | None) -> str | None:
     """The URL prefix a root catalog is published under, from its ``self`` link.
 
     core.md, Links: a catalog served over the internet from a single fixed
@@ -66,7 +55,7 @@ def self_link_base(root: _SelfLinked | None) -> str | None:
         if not isinstance(link, dict) or link.get("rel") != "self":
             continue
         href = link.get("href")
-        if isinstance(href, str) and parse_href(href) is not None and is_absolute_href(href):
+        if isinstance(href, str) and split_href(href) is not None and is_absolute_href(href):
             prefix, sep, tail = containment_href(href).rpartition("/")
             if tail == root.path.name:
                 return prefix + sep
@@ -75,8 +64,8 @@ def self_link_base(root: _SelfLinked | None) -> str | None:
 
 def is_catalog_url(location: str) -> bool:
     """True when ``location`` is an https URL rather than a filesystem path."""
-    parsed = parse_href(location)
-    return parsed is not None and parsed.scheme.lower() == "https" and bool(parsed.netloc)
+    parsed = split_href(location)
+    return parsed is not None and is_https_href(location) and bool(parsed.netloc)
 
 
 def split_catalog_url(url: str) -> tuple[str, str]:
@@ -87,8 +76,8 @@ def split_catalog_url(url: str) -> tuple[str, str]:
     directory and its ``catalog.json`` do on disk. The base always ends in one
     slash and the root URL is the base plus ``catalog.json``.
     """
-    parsed = parse_href(url)
-    if parsed is None or parsed.scheme.lower() != "https" or not parsed.netloc:
+    parsed = split_href(url)
+    if parsed is None or not is_https_href(url) or not parsed.netloc:
         raise ValueError(f"catalog URL must be https, got: {url!r}")
     parsed = parsed._replace(query="", fragment="")
     parsed = parsed._replace(scheme=parsed.scheme.lower(), netloc=parsed.netloc.lower())
@@ -102,13 +91,8 @@ def split_catalog_url(url: str) -> tuple[str, str]:
 
 def is_https_href(href: str) -> bool:
     """Data-reader policy: an HTTPS scheme, even without an authority."""
-    parsed = parse_href(href)
+    parsed = split_href(href)
     return parsed is not None and parsed.scheme.lower() == "https"
-
-
-def is_schema_url(href: str) -> bool:
-    """Schema-fetch policy: the literal, case-sensitive HTTPS prefix."""
-    return href.startswith("https://")
 
 
 def containment_href(href: str) -> str:
@@ -175,11 +159,11 @@ def crawl_prefix(base: str, directory: str, href: str) -> str | None:
     below the root: a catalog is a hostile input here, and a path that climbs
     out of the tree would otherwise name where its bytes get written.
     """
-    parsed = parse_href(href)
+    parsed = split_href(href)
     if parsed is None:
         return None
     if parsed.scheme or href.startswith("/"):
-        if parsed.scheme.lower() != "https" or not href.startswith(base):
+        if not is_https_href(href) or not href.startswith(base):
             return None
         candidate = containment_href(href[len(base) :])
     else:
@@ -219,8 +203,8 @@ def normalize_live_base(base_url: str) -> str:
     catalog-controlled hrefs into request URLs, so any weaker scheme would let
     a hostile tree downgrade or redirect the probes.
     """
-    parsed = parse_href(base_url)
-    if parsed is None or parsed.scheme.lower() != "https" or not parsed.netloc:
+    parsed = split_href(base_url)
+    if parsed is None or not is_https_href(base_url) or not parsed.netloc:
         raise ValueError(f"live base_url must be an https URL, got: {base_url!r}")
     return base_url.rstrip("/") + "/"
 
@@ -234,7 +218,7 @@ def live_host_href(directory: str, href: str, base: str | None) -> str | None:
     publish = split_href(base) if base is not None else None
     if parsed is None or (base is not None and publish is None):
         return None
-    if parsed.scheme.lower() == "https" and parsed.netloc:
+    if is_https_href(href) and parsed.netloc:
         if publish is not None and url_authority(parsed) != url_authority(publish):
             return None
         return href

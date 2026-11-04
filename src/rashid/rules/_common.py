@@ -12,7 +12,6 @@ from rashid._href import (
     is_absolute_href,
     local_path,
     object_location,
-    parse_href,
     split_href,
     wire_url,
 )
@@ -122,7 +121,7 @@ def is_raster_data_asset(asset: dict[str, Any]) -> bool:
     href = asset.get("href")
     if not isinstance(href, str):
         return False
-    parsed = parse_href(href)
+    parsed = split_href(href)
     return parsed is not None and parsed.path.lower().endswith(TIFF_SUFFIXES)
 
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from rashid._href import parse_href
+from rashid._href import split_href
 from rashid._multihash import is_well_formed_multihash
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
@@ -105,7 +105,7 @@ class AssetHrefSchemeRule(Rule):
             href = asset.get("href")
             if not isinstance(href, str) or not href:
                 continue  # PTL-AST-001 reports missing hrefs
-            parsed = parse_href(href)
+            parsed = split_href(href)
             if parsed is None:
                 continue  # PTL-LNK-006 reports the malformed URI reference.
             scheme = parsed.scheme.lower()

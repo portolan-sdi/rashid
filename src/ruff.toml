@@ -4,7 +4,7 @@ extend = "../pyproject.toml"
 [lint.flake8-tidy-imports.extend-banned-api]
 "urllib.parse.urljoin" = { msg = "Use rashid._href for URL interpretation." }
 "urllib.parse.urlsplit" = { msg = "Use rashid._href.split_href." }
-"urllib.parse.urlparse" = { msg = "Use rashid._href.parse_href." }
+"urllib.parse.urlparse" = { msg = "Use rashid._href.split_href." }
 "urllib.request.Request" = { msg = "Use rashid._store.request for the shared HTTPS and User-Agent policy." }
 "urllib.request.urlopen" = { msg = "Use rashid._store for HTTP transport." }
 "json.loads" = { msg = "Use rashid._json.loads for counted JSON parsing." }

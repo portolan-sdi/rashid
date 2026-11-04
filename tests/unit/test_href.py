@@ -11,7 +11,6 @@ from rashid._href import (
     is_absolute_href,
     is_catalog_url,
     is_https_href,
-    is_schema_url,
     live_host_href,
     location_key,
     normalize_live_base,
@@ -30,24 +29,21 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize(
-    "href,absolute,https,catalog,schema",
+    "href,absolute,https,catalog",
     [
-        ("./file.json", False, False, False, False),
-        ("/file.json", True, False, False, False),
-        ("//host/file.json", True, False, False, False),
-        ("s3://bucket/file", True, False, False, False),
-        ("https://host/file", True, True, True, True),
-        ("HTTPS://host/file", True, True, True, False),
-        ("https:///file", True, True, False, True),
+        ("./file.json", False, False, False),
+        ("/file.json", True, False, False),
+        ("//host/file.json", True, False, False),
+        ("s3://bucket/file", True, False, False),
+        ("https://host/file", True, True, True),
+        ("HTTPS://host/file", True, True, True),
+        ("https:///file", True, True, False),
     ],
 )
-def test_absolute_and_fetch_policies(
-    href: str, absolute: bool, https: bool, catalog: bool, schema: bool
-) -> None:
+def test_absolute_and_fetch_policies(href: str, absolute: bool, https: bool, catalog: bool) -> None:
     assert is_absolute_href(href) is absolute
     assert is_https_href(href) is https
     assert is_catalog_url(href) is catalog
-    assert is_schema_url(href) is schema
 
 
 @pytest.mark.parametrize(
@@ -273,9 +269,8 @@ def test_file_location(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("href", ["https://[broken/a", "https://host／a"])
 def test_malformed_authorities_are_safe_at_every_href_entry_point(href: str) -> None:
-    from rashid._href import is_uri_reference, parse_href, split_href
+    from rashid._href import is_uri_reference, split_href
 
-    assert parse_href(href) is None
     assert split_href(href) is None
     assert is_absolute_href(href)
     assert not is_catalog_url(href)
