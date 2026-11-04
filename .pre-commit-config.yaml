@@ -2,7 +2,7 @@
 #   commit stage  — fast, file-scoped checks (formatting, hygiene, spelling,
 #                   workflow lint, duplicate code).
 #   pre-push stage — whole-project gates (types, dead code,
-#                   dependency hygiene, import contracts). CI runs both
+#                   dependency hygiene, import contracts, security). CI runs both
 #                   stages via `pre-commit run --all-files [--hook-stage
 #                   pre-push]`, so nothing here is skippable by accident.
 repos:
@@ -76,6 +76,13 @@ repos:
         files: '^(src/rashid/.*\.py|tests/.*\.py|\.jscpd(-baseline)?\.json)$'
         pass_filenames: false
         stages: [pre-commit]
+
+      - id: bandit
+        name: bandit (security)
+        entry: uv run bandit -r src/rashid -c pyproject.toml
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
 
       - id: deptry
         name: deptry (dependency hygiene)
