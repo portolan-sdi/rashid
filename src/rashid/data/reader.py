@@ -5,7 +5,8 @@ The data pass needs an asset's actual bytes two ways: a whole-object stream
 footer or COG/PMTiles header is a small read at a known offset). This module
 provides both over the two href kinds a conformant catalog uses: relative paths
 resolved against the catalog tree, and absolute ``https`` URLs. Remote reads go
-through :mod:`rashid._store`; the geospatial parsing lives in :mod:`rashid.data.checks`.
+through :mod:`rashid._store`; the format-specific modules in :mod:`rashid.data`
+parse geospatial data.
 
 Non-fetchable hrefs — ``s3``/``http``/``file`` or a relative path that escapes
 the tree — resolve to ``None``; the metadata pass already reports those

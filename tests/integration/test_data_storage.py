@@ -27,7 +27,7 @@ import rashid.data._files as file_owner
 import rashid.data.checks as checks
 from rashid.catalog import Node
 from rashid.cli import main
-from rashid.data import DataDefect, _DataResults, geoparquet, raster
+from rashid.data import DataDefect, _DataResults, geoparquet, partitions, raster
 from rashid.data._files import _AssetFiles
 from rashid.data.reader import Locator
 from rashid.model import Severity
@@ -879,12 +879,12 @@ class _NoAssets:
 
 
 def _partition_schemas(node: Node) -> list:
-    schemas, _, _ = checks._check_partitions(node, _NoAssets())
+    schemas, _, _ = partitions._check_partitions(node, _NoAssets())
     return schemas
 
 
 def _partition_bytes(node: Node, reader: object | None = None) -> list:
-    _, defects, total = checks._check_partitions(node, reader or _NoAssets())
+    _, defects, total = partitions._check_partitions(node, reader or _NoAssets())
     source = _DataResults()
     source.extend(defects, partition_total=total)
     return source.build()

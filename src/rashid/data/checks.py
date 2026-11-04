@@ -63,16 +63,13 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import posixpath
-from pathlib import Path
 from typing import Any
 
 import rasterio
 
 from rashid import _trace
-from rashid._href import is_absolute_href
 from rashid.catalog import CatalogGraph, Node
-from rashid.data import DataDefect, _DataResults, _files
+from rashid.data import DataDefect, _DataResults
 from rashid.data._files import _AssetFiles
 from rashid.data.geoparquet import (
     _check_geoparquet,
@@ -81,8 +78,9 @@ from rashid.data.geoparquet import (
     _geo_from_parquet,
 )
 from rashid.data.mirror import _check_mirror
+from rashid.data.partitions import _check_partitions
 from rashid.data.raster import _check_raster, _geo_from_raster
-from rashid.data.reader import AssetReader, Locator
+from rashid.data.reader import AssetReader
 from rashid.data.spatial import (
     _bbox_mismatch_message,
     _bbox_within,
@@ -97,11 +95,9 @@ from rashid.data.spatial import (
     _Wgs84Bounds,
 )
 from rashid.data.storage import _check_bytes, _expected_format
-from rashid.model import Severity, json_pointer
+from rashid.model import Severity
 from rashid.registry import (
     DAT_CONSISTENCY,
-    DAT_PARTITION_SCHEMA,
-    DAT_UNAVAILABLE,
 )
 from rashid.rules._common import (
     asset_refers_to_self,
@@ -248,126 +244,6 @@ def _check_consistency(
         message = _bbox_mismatch_message(key, declared_bbox, bounds, geo.epsg)
         defects.append(DataDefect(DAT_CONSISTENCY, Severity.WARNING, message, key))
     return defects, bounds
-
-
-# --- partition schema consistency ------------------------------------------
-
-
-def _partition_files(node: Node) -> list[tuple[str, Path]]:
-    """Local files the collection's ``partition:glob`` matches, sorted.
-
-    The glob is expanded against the collection's own directory. A remote or
-    absolute pattern (``s3://``, ``https://``, ``/data``) cannot be listed from
-    the local tree, and one that normalizes outside the catalog is not the
-    catalog's to read, so both yield nothing. Each entry pairs the relative
-    match, which names the file in a message, with its path on disk.
-    """
-    pattern = node.data.get("partition:glob")
-    if not isinstance(pattern, str) or not pattern.strip():
-        return []
-    if is_absolute_href(pattern):
-        return []  # remote or absolute: not listable from here
-    normalized = posixpath.normpath(pattern)
-    if normalized.startswith(".."):
-        return []  # escapes the catalog tree
-    base = node.abs_path.parent
-    return _files._partition_files(base, normalized)
-
-
-def _check_partitions(
-    node: Node, reader: AssetReader
-) -> tuple[list[DataDefect], list[DataDefect], int]:
-    """Read each partition's schema and GeoParquet checks through one handle.
-
-    Only the column maps survive each file, so an arbitrarily large glob does
-    not retain an open descriptor per partition. Declared assets are compared
-    for schema here; their format findings come from the asset pass alone.
-    """
-    files = _partition_files(node)
-    if not files:
-        return [], [], 0
-    schemas: list[tuple[str, dict[str, str]]] = []
-    already_read = _asset_paths(node, reader)
-    found: list[DataDefect] = []
-    checked = 0
-    for match, path in files:
-        declared = str(path) in already_read
-        if not declared:
-            checked += 1
-        with _AssetFiles(Locator(is_remote=False, source=str(path))) as opened:
-            try:
-                parquet = opened.parquet()
-            except Exception as exc:
-                found.append(
-                    DataDefect(
-                        DAT_UNAVAILABLE,
-                        Severity.WARNING,
-                        f"partition file '{match}' data validation could not run: {exc}",
-                        match,
-                    )
-                )
-                continue
-            schemas.append((match, {field.name: str(field.type) for field in parquet.schema_arrow}))
-            if not declared:
-                found.extend(_check_geoparquet(match, opened, subject=f"partition file '{match}'"))
-    return _partition_schema_defects(schemas), found, checked
-
-
-def _partition_schema_defects(schemas: list[tuple[str, dict[str, str]]]) -> list[DataDefect]:
-    """Every listed partition MUST share the first readable file's schema."""
-    if len(schemas) < 2:
-        return []  # nothing to compare
-    reference_name, reference = schemas[0]
-    defects: list[DataDefect] = []
-    for name, schema in schemas[1:]:
-        difference = _schema_difference(reference, schema)
-        if difference is None:
-            continue
-        defects.append(
-            DataDefect(
-                DAT_PARTITION_SCHEMA,
-                Severity.ERROR,
-                f"partition file '{name}' does not share '{reference_name}'s "
-                f"Parquet schema: {difference}",
-                "",
-                json_pointer=json_pointer("partition:glob"),
-            )
-        )
-    return defects
-
-
-def _asset_paths(node: Node, reader: AssetReader) -> set[str]:
-    """Local paths the per-asset loop already reads on this node.
-
-    A glob wide enough to match a declared asset would otherwise fault the same
-    file twice, once per pass.
-    """
-    paths: set[str] = set()
-    for _pointer, _key, asset in assets_of(node):
-        href = asset.get("href")
-        if not isinstance(href, str) or not href:
-            continue
-        located = reader.locate(node, href)
-        if located is not None and not located.is_remote:
-            paths.add(located.source)
-    return paths
-
-
-def _schema_difference(reference: dict[str, str], other: dict[str, str]) -> str | None:
-    """A one-line description of how two column maps diverge, or None if equal."""
-    missing = sorted(set(reference) - set(other))
-    extra = sorted(set(other) - set(reference))
-    if missing or extra:
-        parts = []
-        if missing:
-            parts.append(f"missing column(s) {missing}")
-        if extra:
-            parts.append(f"extra column(s) {extra}")
-        return ", ".join(parts)
-    for name in reference:
-        if reference[name] != other[name]:
-            return f"column '{name}' is {other[name]}, expected {reference[name]}"
-    return None
 
 
 # --- spatial extraction ----------------------------------------------------
