@@ -1,0 +1,2 @@
+# Fixture checksums and sizes require the exact committed bytes on every OS.
+tests/fixtures/** -text
