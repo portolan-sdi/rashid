@@ -22,12 +22,13 @@ from rashid.model import Finding, Severity
 from rashid.rule import Rule
 from rashid.rules._common import (
     PMTILES_MEDIA_TYPE,
+    assets_of,
     declares_geometry,
     is_pmtiles_asset,
+    is_tiff_media_type,
     links_of,
     roles_of,
 )
-from rashid.rules.assets import _assets_of
 
 STYLE_MEDIA_TYPE = "application/vnd.mapbox.style+json"
 _THUMBNAIL_TYPES = ("image/png", "image/jpeg", "image/webp")
@@ -39,11 +40,14 @@ _LARGE_VECTOR_BYTES = 100_000_000
 
 def _has_spatial_media_type(node: Node) -> bool:
     """Whether any asset's media type is spatial whatever the metadata says."""
-    for _pointer, _key, asset in _assets_of(node):
+    for _pointer, _key, asset in assets_of(node):
         media_type = asset.get("type")
         if is_pmtiles_asset(asset) or (
             isinstance(media_type, str)
-            and (media_type.startswith("image/tiff") or media_type == "application/vnd.laszip+copc")
+            and (
+                is_tiff_media_type(media_type, policy="literal-prefix")
+                or media_type == "application/vnd.laszip+copc"
+            )
         ):
             return True
     return False
@@ -104,7 +108,7 @@ _RESOLVE_HINT = (
 
 def _pmtiles_registration(node: Node) -> tuple[bool, bool]:
     """(has_pmtiles_asset, has_pmtiles_link) for a collection."""
-    has_asset = any(is_pmtiles_asset(asset) for _p, _k, asset in _assets_of(node))
+    has_asset = any(is_pmtiles_asset(asset) for _p, _k, asset in assets_of(node))
     has_link = any(link.get("rel") == "pmtiles" for link in links_of(node))
     return has_asset, has_link
 
@@ -132,7 +136,7 @@ class ThumbnailRule(Rule):
             return
         thumbnails = [
             (pointer, key, asset)
-            for pointer, key, asset in _assets_of(node)
+            for pointer, key, asset in assets_of(node)
             if "thumbnail" in roles_of(asset)
         ]
         if geospatial is None:
@@ -184,11 +188,11 @@ class StylesForDerivativeRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        has_visual = any("visual" in roles_of(asset) for _p, _k, asset in _assets_of(node))
+        has_visual = any("visual" in roles_of(asset) for _p, _k, asset in assets_of(node))
         has_pmtiles_asset, has_pmtiles_link = _pmtiles_registration(node)
         if not (has_visual or has_pmtiles_asset or has_pmtiles_link):
             return
-        if not any("style" in roles_of(asset) for _p, _k, asset in _assets_of(node)):
+        if not any("style" in roles_of(asset) for _p, _k, asset in assets_of(node)):
             yield self.finding(
                 node,
                 "collection has a visualization derivative but no asset with the 'style' role",
@@ -279,7 +283,7 @@ class StyleMediaTypeRule(Rule):
         has_asset, has_link = _pmtiles_registration(node)
         if not has_asset and not has_link:
             return
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             if "style" not in roles_of(asset):
                 continue
             media_type = asset.get("type")
@@ -312,7 +316,7 @@ class DefaultStyleRoleRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        styles = [(key, asset) for _p, key, asset in _assets_of(node) if "style" in roles_of(asset)]
+        styles = [(key, asset) for _p, key, asset in assets_of(node) if "style" in roles_of(asset)]
         if len(styles) < 2:
             return
         marked = sorted(key for key, asset in styles if "default" in roles_of(asset))
@@ -356,11 +360,11 @@ class LargeVectorWithoutVisualRule(Rule):
         geospatial = is_geospatial(node, graph)
         if geospatial is False:
             return
-        has_visual = any("visual" in roles_of(asset) for _p, _k, asset in _assets_of(node))
+        has_visual = any("visual" in roles_of(asset) for _p, _k, asset in assets_of(node))
         has_pmtiles_asset, has_pmtiles_link = _pmtiles_registration(node)
         if has_visual or has_pmtiles_asset or has_pmtiles_link:
             return
-        for _pointer, key, asset in _assets_of(node):
+        for _pointer, key, asset in assets_of(node):
             if "data" not in roles_of(asset):
                 continue
             if asset.get("type") != "application/vnd.apache.parquet":

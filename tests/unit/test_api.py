@@ -33,7 +33,7 @@ EXPORTS = {
     "canonical_spdx_id": "rashid._spdx",
     "decode_multihash": "rashid._multihash",
     "encode_multihash": "rashid._multihash",
-    "has_cog": "rashid.rules.item_mirror",
+    "has_cog": "rashid.rules._common",
     "is_cog_media_type": "rashid.rules._common",
     "is_well_formed_multihash": "rashid._multihash",
     "links_of": "rashid.rules._common",

@@ -35,6 +35,7 @@ from rashid.data import (
 )
 from rashid.data.reader import Locator
 from rashid.model import Severity
+from rashid.rules._common import is_source_asset
 
 pytestmark = pytest.mark.integration
 
@@ -584,7 +585,7 @@ def test_spatial_ordering_zero_extent_is_ordered() -> None:
     ],
 )
 def test_is_source(roles: object, expected: bool) -> None:
-    assert checks._is_source({"roles": roles}) is expected
+    assert is_source_asset({"roles": roles}) is expected
 
 
 def test_bbox_helpers() -> None:

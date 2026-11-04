@@ -115,7 +115,14 @@ from rashid.data import (
 from rashid.data._files import _AssetFiles
 from rashid.data.reader import AssetReader, Locator
 from rashid.model import Severity
-from rashid.rules._common import asset_refers_to_self
+from rashid.rules._common import (
+    asset_refers_to_self,
+    assets_of,
+    has_table_columns,
+    is_source_asset,
+    is_tiff_media_type,
+    roles_of,
+)
 from rashid.rules.item_mirror import is_mirror_asset
 
 # Multihash function code -> hashlib algorithm name.
@@ -269,7 +276,7 @@ def check_node(
     schemas, partitions, total = _check_partitions(node, reader)
     results.extend(schemas)
     results.extend(partitions, partition_total=total)
-    for key, asset in _assets_of(node):
+    for _pointer, key, asset in assets_of(node):
         href = asset.get("href")
         if not isinstance(href, str) or not href:
             continue  # PTL-AST-001 reports a missing href
@@ -283,13 +290,6 @@ def check_node(
                 bounds.append(actual)
     results.extend(_check_collection_extent(node, bounds))
     return results.build()
-
-
-def _assets_of(node: Node) -> list[tuple[str, dict[str, Any]]]:
-    assets = node.data.get("assets")
-    if not isinstance(assets, dict):
-        return []
-    return [(key, asset) for key, asset in assets.items() if isinstance(asset, dict)]
 
 
 def _check_asset(
@@ -309,7 +309,7 @@ def _check_asset(
     defects.extend(_check_bytes(key, asset=asset, expected=expected, node=node, reader=reader))
 
     located = reader.locate(node, href)
-    if located is None or _is_source(asset):
+    if located is None or is_source_asset(asset):
         # PORTO-FMT-045: the format requirements apply to the catalog's own
         # cloud-native assets, and a source asset is not one. It names the
         # upstream original a cloud-native asset was derived from, which is a
@@ -340,21 +340,6 @@ def _check_asset(
             )
             defects.extend(consistency)
     return defects, bounds
-
-
-def _is_source(asset: dict[str, Any]) -> bool:
-    """Whether the asset carries the ``source`` role.
-
-    Only ``source``. An earlier version also matched ``alternate``, which is
-    not a role: the Alternate Assets extension defines an ``alternate`` field
-    holding other locations for the same bytes, and core.md uses "alternate"
-    as prose for a non-primary representation. Neither makes it a role name,
-    and no catalog emitted one.
-    """
-    roles = asset.get("roles")
-    if not isinstance(roles, list):
-        return False
-    return any(isinstance(role, str) and role == "source" for role in roles)
 
 
 def _check_bytes(
@@ -1385,7 +1370,7 @@ def _check_tabular(
     file itself: a temporal (timestamp/date) column is the machine-detectable
     signal, so its absence keeps the extent SHOULD silent rather than guessed.
     """
-    if node.kind != "collection" or "data" not in _asset_roles(asset):
+    if node.kind != "collection" or "data" not in roles_of(asset):
         return []
     try:
         parquet = files.parquet()
@@ -1394,7 +1379,7 @@ def _check_tabular(
     if isinstance(_geo_metadata(parquet), dict) or _native_geometry(parquet) is not None:
         return []  # GeoParquet: the geospatial storage rules own it
     defects: list[DataDefect] = []
-    if not _has_table_columns(node, asset):
+    if not has_table_columns(node, asset):
         defects.append(
             DataDefect(
                 DAT_TABULAR,
@@ -1430,7 +1415,7 @@ def _check_vector_columns(
     business, and a partitioned collection has no data asset to reach here, so
     its columns are checked wherever its partition files are described.
     """
-    if "data" not in _asset_roles(asset):
+    if "data" not in roles_of(asset):
         return []
     try:
         parquet = files.parquet()
@@ -1438,7 +1423,7 @@ def _check_vector_columns(
         return []
     if not isinstance(_geo_metadata(parquet), dict) and _native_geometry(parquet) is None:
         return []  # plain Parquet: the Tabular Data SHOULDs own it
-    if _has_table_columns(node, asset):
+    if has_table_columns(node, asset):
         return []
     where = (
         "the item does not document its columns in properties"
@@ -1453,33 +1438,6 @@ def _check_vector_columns(
             key,
         )
     ]
-
-
-def _asset_roles(asset: dict[str, Any]) -> list[str]:
-    raw = asset.get("roles")
-    if not isinstance(raw, list):
-        return []
-    return [role for role in raw if isinstance(role, str)]
-
-
-def _has_table_columns(node: Node, asset: dict[str, Any]) -> bool:
-    """Whether ``table:columns`` is declared anywhere the extension allows.
-
-    The extension defines two placements, the object and the asset, and the
-    reference catalog carries it on the collection. An item's fields live under
-    ``properties``, which is where PORTO-FMT-047 asks for it. A per-asset
-    declaration is the PORTO-FMT-048 escape for a collection whose data assets
-    describe differing schemas, so it satisfies the collection SHOULD too.
-    """
-    holders = [node.data, asset]
-    properties = node.data.get("properties")
-    if isinstance(properties, dict):
-        holders.append(properties)
-    for holder in holders:
-        columns = holder.get("table:columns")
-        if isinstance(columns, list) and len(columns) > 0:
-            return True
-    return False
 
 
 def _has_temporal_column(parquet: Any) -> bool:
@@ -1933,7 +1891,7 @@ def _asset_paths(node: Node, reader: AssetReader) -> set[str]:
     file twice, once per pass.
     """
     paths: set[str] = set()
-    for _key, asset in _assets_of(node):
+    for _pointer, _key, asset in assets_of(node):
         href = asset.get("href")
         if not isinstance(href, str) or not href:
             continue
@@ -1967,7 +1925,7 @@ def _expected_format(media_type: str) -> str | None:
     lowered = media_type.lower()
     if "parquet" in lowered:
         return "parquet"
-    if lowered.startswith("image/tiff"):
+    if is_tiff_media_type(media_type, policy="prefix"):
         return "tiff"
     if "pmtiles" in lowered:
         return "pmtiles"

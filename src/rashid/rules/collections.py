@@ -24,9 +24,9 @@ from collections.abc import Iterable
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import TIFF_SUFFIXES, is_raster_data_asset, roles_of
-from rashid.rules.assets import _assets_of
+from rashid.rules._common import TIFF_SUFFIXES, assets_of, is_raster_data_asset, roles_of
 from rashid.rules.item_mirror import mirror_assets
+from rashid.rules.partitions import is_partitioned
 
 _HAS_DATA_ASSET = "has-data-asset"
 _NO_DATA_ASSET = "no-data-asset"
@@ -72,7 +72,7 @@ class SingleFileCollectionRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        if _is_partitioned(node):
+        if is_partitioned(node, include_declaration=False):
             return
         if _data_asset_state(node) is not _NO_DATA_ASSET:
             return
@@ -81,7 +81,7 @@ class SingleFileCollectionRule(Rule):
             return
         item = items[0]
         data_assets = [
-            (key, asset) for _p, key, asset in _assets_of(item) if "data" in roles_of(asset)
+            (key, asset) for _p, key, asset in assets_of(item) if "data" in roles_of(asset)
         ]
         if len(data_assets) != 1:
             return
@@ -207,7 +207,7 @@ class MissingItemTreeRule(Rule):
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         # A partitioned collection MAY leave its parts off items
         # (PORTO-CORE-021), so partition files are not scenes.
-        if _is_partitioned(node):
+        if is_partitioned(node, include_declaration=False):
             return
         # items_of, not children_of: the spec lets a catalog below a
         # collection organize its items, and those items still count.
@@ -341,7 +341,7 @@ def _declared_filenames(node: Node) -> set[str]:
     legitimate, and a wrong role is PTL-AST-001's finding, not this one.
     """
     declared: set[str] = set()
-    for _pointer, _key, asset in _assets_of(node):
+    for _pointer, _key, asset in assets_of(node):
         href = asset.get("href")
         if isinstance(href, str) and href:
             declared.add(href.rsplit("/", 1)[-1])
@@ -357,14 +357,10 @@ def _undeclared_scene_files(node: Node, graph: CatalogGraph) -> list[str]:
     )
 
 
-def _is_partitioned(node: Node) -> bool:
-    return any(key.startswith("partition:") for key in node.data)
-
-
 def _raster_asset_keys(node: Node) -> list[str]:
     """Keys of the node's primary raster assets, in declaration order."""
     keys: list[str] = []
-    for _pointer, key, asset in _assets_of(node):
+    for _pointer, key, asset in assets_of(node):
         if is_raster_data_asset(asset):
             keys.append(key)
     return keys
@@ -372,7 +368,7 @@ def _raster_asset_keys(node: Node) -> list[str]:
 
 def _data_asset_state(node: Node) -> str:
     """Whether the collection exposes its data itself, and whether that is knowable."""
-    for _pointer, _key, asset in _assets_of(node):
+    for _pointer, _key, asset in assets_of(node):
         roles = roles_of(asset)
         if not roles:
             return _UNKNOWN

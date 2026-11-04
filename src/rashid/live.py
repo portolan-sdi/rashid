@@ -85,7 +85,7 @@ from rashid._http import user_agent
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.model import Finding, Severity
 from rashid.remote import wire_url
-from rashid.rules._common import links_of
+from rashid.rules._common import assets_of, links_of
 
 if TYPE_CHECKING:
     from urllib.request import Request
@@ -349,13 +349,7 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
     for node in graph.iter(*_LIVE_KINDS):
         if node.parse_error is not None:
             continue
-        assets = node.data.get("assets")
-        if not isinstance(assets, dict):
-            continue
-        for key in sorted(assets):
-            asset = assets[key]
-            if not isinstance(asset, dict):
-                continue
+        for _pointer, key, asset in sorted(assets_of(node), key=lambda entry: entry[1]):
             href = asset.get("href")
             if not isinstance(href, str):
                 continue

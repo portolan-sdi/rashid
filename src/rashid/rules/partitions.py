@@ -44,7 +44,7 @@ class PartitionFieldsRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        if not _is_partitioned(node):
+        if not is_partitioned(node):
             return
         scheme = node.data.get("partition:scheme")
         if not isinstance(scheme, str) or not scheme.strip():
@@ -82,8 +82,10 @@ class PartitionFieldsRule(Rule):
             )
 
 
-def _is_partitioned(node: Node) -> bool:
-    return any(key.startswith("partition:") for key in node.data) or _declares_extension(node)
+def is_partitioned(node: Node, *, include_declaration: bool = True) -> bool:
+    return any(key.startswith("partition:") for key in node.data) or (
+        include_declaration and _declares_extension(node)
+    )
 
 
 def _declares_extension(node: Node) -> bool:

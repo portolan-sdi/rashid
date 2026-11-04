@@ -44,6 +44,7 @@ from rashid import _trace
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.data.reader import AssetReader, FilesystemHttpReader, Locator
 from rashid.model import Finding, Severity
+from rashid.rules._common import assets_of
 
 DAT_UNAVAILABLE = "PTL-DAT-000"
 DAT_CHECKSUM = "PTL-DAT-001"
@@ -364,11 +365,8 @@ def _reads_remote(node: Node, reader: AssetReader) -> bool:
     too, where the validator meets the same failure and the pass reports it
     as a systemic one.
     """
-    assets = node.data.get("assets")
-    if not isinstance(assets, dict):
-        return False
-    for asset in assets.values():
-        href = asset.get("href") if isinstance(asset, dict) else None
+    for _pointer, _key, asset in assets_of(node):
+        href = asset.get("href")
         if isinstance(href, str) and href:
             try:
                 located = reader.locate(node, href)

@@ -9,8 +9,7 @@ from rashid._href import is_absolute_href, is_uri_reference
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import STRUCTURAL_RELS, links_of
-from rashid.rules.assets import _assets_of
+from rashid.rules._common import STRUCTURAL_RELS, assets_of, links_of
 
 # What each required structural link points at, for the fix hints.
 _REQUIRED_LINK_TARGETS = {
@@ -234,7 +233,7 @@ class LinkResolutionRule(Rule):
             (f"/links/{index}/href", link.get("href")) for index, link in enumerate(links_of(node))
         ]
         locations.extend(
-            (f"{pointer}/href", asset.get("href")) for pointer, _key, asset in _assets_of(node)
+            (f"{pointer}/href", asset.get("href")) for pointer, _key, asset in assets_of(node)
         )
         for pointer, href in locations:
             if isinstance(href, str) and href and not is_uri_reference(href):

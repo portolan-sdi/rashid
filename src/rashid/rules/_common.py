@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os.path
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 from rashid._href import is_absolute_href, local_path, object_location, parse_href, split_href
@@ -45,6 +46,39 @@ def roles_of(asset: dict[str, Any]) -> list[str]:
     return [role for role in raw if isinstance(role, str)]
 
 
+def is_source_asset(asset: dict[str, Any]) -> bool:
+    """Only the source role exempts upstream bytes from format requirements."""
+    return "source" in roles_of(asset)
+
+
+def assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
+    """(pointer_prefix, asset_key, asset) triples in declaration order."""
+    assets = node.data.get("assets")
+    if not isinstance(assets, dict):
+        return []
+    return [
+        (f"/assets/{key}", key, asset) for key, asset in assets.items() if isinstance(asset, dict)
+    ]
+
+
+def is_tiff_media_type(
+    value: object, *, policy: Literal["base-type", "prefix", "literal-prefix"] = "base-type"
+) -> bool:
+    """TIFF intent under the metadata, byte-probe, or spatial-media policy.
+
+    Primary raster intent matches the normalized base type. Byte probing
+    retains its case-insensitive prefix match; spatial-media evidence retains
+    its literal prefix match, independently of roles and hrefs.
+    """
+    if not isinstance(value, str):
+        return False
+    if policy == "literal-prefix":
+        return value.startswith(_TIFF_MEDIA_TYPE)
+    if policy == "prefix":
+        return value.lower().startswith(_TIFF_MEDIA_TYPE)
+    return value.split(";", 1)[0].strip().lower() == _TIFF_MEDIA_TYPE
+
+
 def is_cog_media_type(value: object) -> bool:
     """True when a media type names a cloud-optimized GeoTIFF.
 
@@ -67,20 +101,20 @@ def is_raster_data_asset(asset: dict[str, Any]) -> bool:
     href establishes raster intent. Upstream source assets are deliberately
     excluded because the spec permits them to remain ordinary GeoTIFFs.
     """
-    roles = roles_of(asset)
-    if "data" not in roles or "source" in roles:
+    if "data" not in roles_of(asset) or is_source_asset(asset):
         return False
-    media_type = asset.get("type")
-    if (
-        isinstance(media_type, str)
-        and media_type.split(";", 1)[0].strip().lower() == _TIFF_MEDIA_TYPE
-    ):
+    if is_tiff_media_type(asset.get("type")):
         return True
     href = asset.get("href")
     if not isinstance(href, str):
         return False
     parsed = parse_href(href)
     return parsed is not None and parsed.path.lower().endswith(TIFF_SUFFIXES)
+
+
+def has_cog(node: Node) -> bool:
+    """Whether any asset declares a COG, regardless of its roles or href."""
+    return any(is_cog_media_type(asset.get("type")) for _pointer, _key, asset in assets_of(node))
 
 
 def is_pmtiles_asset(asset: dict[str, Any]) -> bool:
@@ -162,25 +196,9 @@ def declares_geometry(
     name or a geometry column takes precedence over a negative column list.
     None means neither a primary geometry nor a column list was declared.
     """
-    holders: list[dict[str, Any]] = [node.data]
-    properties = node.data.get("properties")
-    if isinstance(properties, dict):
-        holders.append(properties)
-    if asset is None:
-        assets = node.data.get("assets")
-        if isinstance(assets, dict):
-            holders += [
-                value
-                for value in assets.values()
-                if isinstance(value, dict) and "source" not in roles_of(value)
-            ]
-    else:
-        holders.append(asset)
-    if collection is not None and collection is not node:
-        holders.append(collection.data)
     declared: list[dict[str, Any]] = []
     found = False
-    for holder in holders:
+    for holder in table_declarations(node, asset, collection):
         primary = holder.get("table:primary_geometry")
         if isinstance(primary, str) and primary:
             return True
@@ -189,3 +207,35 @@ def declares_geometry(
             found = True
             declared += [column for column in columns if isinstance(column, dict)]
     return names_a_geometry_column(declared) if found else None
+
+
+def table_declarations(
+    node: Node, asset: dict[str, Any] | None = None, collection: Node | None = None
+) -> Iterator[dict[str, Any]]:
+    """Table metadata holders; no asset means all non-source assets.
+
+    An explicit asset limits the declarations to that asset and its object.
+    Geometry applicability also accepts empty column lists as negative evidence;
+    column documentation requires a nonempty list instead.
+    """
+    holders: list[dict[str, Any]] = [node.data]
+    properties = node.data.get("properties")
+    if isinstance(properties, dict):
+        holders.append(properties)
+    if asset is None:
+        holders += [
+            value for _pointer, _key, value in assets_of(node) if not is_source_asset(value)
+        ]
+    else:
+        holders.append(asset)
+    if collection is not None and collection is not node:
+        holders.append(collection.data)
+    yield from holders
+
+
+def has_table_columns(node: Node, asset: dict[str, Any]) -> bool:
+    """A nonempty column declaration at object, properties, or asset level."""
+    return any(
+        isinstance(columns := holder.get("table:columns"), list) and bool(columns)
+        for holder in table_declarations(node, asset)
+    )

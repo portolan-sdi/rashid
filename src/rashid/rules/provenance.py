@@ -14,7 +14,7 @@ from typing import Literal
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import links_of, parse_rfc3339
+from rashid.rules._common import links_of, parse_rfc3339, roles_of
 from rashid.rules.providers import providers_of
 
 Provenance = Literal["official", "mirror"]
@@ -23,8 +23,8 @@ Provenance = Literal["official", "mirror"]
 def provenance_of(node: Node) -> Provenance | None:
     """Derive a collection's provenance, or None when underivable."""
     providers = providers_of(node)
-    producers = [p for p in providers if "producer" in _roles(p)]
-    hosts = [p for p in providers if "host" in _roles(p)]
+    producers = [p for p in providers if "producer" in roles_of(p)]
+    hosts = [p for p in providers if "host" in roles_of(p)]
     if not producers or len(hosts) != 1:
         return None
     host_name = _normalized_name(hosts[0])
@@ -34,13 +34,6 @@ def provenance_of(node: Node) -> Provenance | None:
         if _normalized_name(producer) == host_name:
             return "official"
     return "mirror"
-
-
-def _roles(provider: dict[str, object]) -> list[str]:
-    raw = provider.get("roles")
-    if not isinstance(raw, list):
-        return []
-    return [r for r in raw if isinstance(r, str)]
 
 
 def _normalized_name(provider: dict[str, object]) -> str | None:

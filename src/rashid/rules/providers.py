@@ -8,6 +8,7 @@ from typing import Any
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
+from rashid.rules._common import roles_of
 
 
 def providers_of(node: Node) -> list[dict[str, Any]]:
@@ -15,13 +16,6 @@ def providers_of(node: Node) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
         return []
     return [p for p in raw if isinstance(p, dict)]
-
-
-def _roles(provider: dict[str, Any]) -> list[str]:
-    raw = provider.get("roles")
-    if not isinstance(raw, list):
-        return []
-    return [r for r in raw if isinstance(r, str)]
 
 
 class ProducerPresentRule(Rule):
@@ -44,7 +38,7 @@ class ProducerPresentRule(Rule):
                 ' ["producer", "host"], "url": "https://example.org"}]',
             )
             return
-        if not any("producer" in _roles(p) for p in providers):
+        if not any("producer" in roles_of(p) for p in providers):
             yield self.finding(
                 node,
                 "no provider carries the 'producer' role",
@@ -67,7 +61,7 @@ class SingleHostRule(Rule):
         providers = providers_of(node)
         if not providers:
             return  # PTL-PRV-001 reports the absence
-        hosts = [p for p in providers if "host" in _roles(p)]
+        hosts = [p for p in providers if "host" in roles_of(p)]
         if len(hosts) != 1:
             yield self.finding(
                 node,
@@ -79,7 +73,7 @@ class SingleHostRule(Rule):
                 actual=len(hosts),
             )
             return
-        if "host" not in _roles(providers[-1]):
+        if "host" not in roles_of(providers[-1]):
             yield self.finding(
                 node,
                 "the host provider must be the last element of the providers list",
@@ -98,7 +92,7 @@ class HostContactRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        hosts = [p for p in providers_of(node) if "host" in _roles(p)]
+        hosts = [p for p in providers_of(node) if "host" in roles_of(p)]
         if len(hosts) != 1:
             return  # PTL-PRV-002 reports host-count problems
         host = hosts[0]

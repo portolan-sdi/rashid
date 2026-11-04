@@ -20,8 +20,7 @@ from collections.abc import Iterable
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import is_cog_media_type, is_raster_data_asset, roles_of
-from rashid.rules.assets import _assets_of
+from rashid.rules._common import assets_of, is_raster_data_asset, roles_of
 
 PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
 MIRROR_ROLE = "collection-mirror"
@@ -37,13 +36,7 @@ def mirror_assets(node: Node) -> list[tuple[str, str, dict[str, object]]]:
     the same intent shows up. The asset key carries no signal: the
     stac-geoparquet spec names none, so the producer chooses it.
     """
-    found = []
-    for pointer, key, asset in _assets_of(node):
-        href = asset.get("href")
-        by_href = isinstance(href, str) and href.rsplit("/", 1)[-1] == MIRROR_FILENAME
-        if MIRROR_ROLE in roles_of(asset) or by_href:
-            found.append((pointer, key, asset))
-    return found
+    return [entry for entry in assets_of(node) if is_mirror_asset(entry[2])]
 
 
 def is_mirror_asset(asset: dict[str, object]) -> bool:
@@ -59,21 +52,11 @@ def is_mirror_asset(asset: dict[str, object]) -> bool:
     )
 
 
-def has_cog(node: Node) -> bool:
-    """Whether the node carries at least one cloud-optimized GeoTIFF asset.
-
-    A COG asset is what makes an item a scene. Any tool deciding whether a
-    collection owes an items.parquet mirror needs the same answer rashid
-    uses for ``PTL-MIR-001``.
-    """
-    return any(is_cog_media_type(asset.get("type")) for _pointer, _key, asset in _assets_of(node))
-
-
 def _scene_items(node: Node, graph: CatalogGraph) -> list[Node]:
     return [
         item
         for item in graph.items_of(node)
-        if any(is_raster_data_asset(asset) for _pointer, _key, asset in _assets_of(item))
+        if any(is_raster_data_asset(asset) for _pointer, _key, asset in assets_of(item))
     ]
 
 

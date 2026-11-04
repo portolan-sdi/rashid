@@ -17,6 +17,7 @@ from rashid.rule import Rule
 from rashid.rules._common import (
     COG_MEDIA_TYPE,
     asset_refers_to_self,
+    assets_of,
     declares_geometry,
     is_cog_media_type,
     is_pmtiles_asset,
@@ -27,20 +28,8 @@ from rashid.rules._common import (
 
 def _has_data_asset(node: Node) -> bool:
     return any(
-        "data" in roles_of(asset) and not is_pmtiles_asset(asset)
-        for _, _, asset in _assets_of(node)
+        "data" in roles_of(asset) and not is_pmtiles_asset(asset) for _, _, asset in assets_of(node)
     )
-
-
-def _assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
-    """(pointer_prefix, asset_key, asset) triples for a node's assets."""
-    found: list[tuple[str, str, dict[str, Any]]] = []
-    assets = node.data.get("assets")
-    if isinstance(assets, dict):
-        for key, asset in assets.items():
-            if isinstance(asset, dict):
-                found.append((f"/assets/{key}", key, asset))
-    return found
 
 
 def _item_asset_templates(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
@@ -63,7 +52,7 @@ class AssetFieldsRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             href = asset.get("href")
             if not isinstance(href, str) or not href.strip():
                 yield self.finding(
@@ -112,7 +101,7 @@ class AssetHrefSchemeRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             href = asset.get("href")
             if not isinstance(href, str) or not href:
                 continue  # PTL-AST-001 reports missing hrefs
@@ -158,7 +147,7 @@ class CogMediaTypeRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, key, asset in [*_assets_of(node), *_item_asset_templates(node)]:
+        for pointer, key, asset in [*assets_of(node), *_item_asset_templates(node)]:
             if not is_raster_data_asset(asset):
                 continue
             media_type = asset.get("type")
@@ -194,7 +183,7 @@ class AssetFileFieldsRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             href = asset.get("href")
             if isinstance(href, str) and asset_refers_to_self(node, href, graph):
                 for field in ("file:size", "file:checksum"):
@@ -331,7 +320,7 @@ class ChecksumMultihashRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             checksum = asset.get("file:checksum")
             if checksum is None:
                 continue  # PTL-AST-003 reports the absence
@@ -370,7 +359,7 @@ class PMTilesDataRule(Rule):
             yield from self._check_assets(owner, reference)
 
     def _check_assets(self, node: Node, reference: bool) -> Iterable[Finding]:
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             if not is_pmtiles_asset(asset):
                 continue
             if "visual" not in roles_of(asset):
@@ -409,5 +398,5 @@ def _has_geoparquet_reference(collection: Node, graph: CatalogGraph) -> bool:
         and not is_pmtiles_asset(asset)
         and _reference_has_geometry(owner, asset, collection)
         for owner in [collection, *graph.items_of(collection)]
-        for _, _, asset in _assets_of(owner)
+        for _, _, asset in assets_of(owner)
     )
