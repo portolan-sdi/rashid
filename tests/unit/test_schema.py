@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import RulesConfig, validate, validate_schema
+from rashid import RulesConfig, ValidationOptions, validate, validate_schema
 from rashid._jsonschema import SchemaError
 from rashid.catalog import CatalogGraph
 from rashid.model import Severity
@@ -262,14 +262,14 @@ def test_runner_wires_schema_pass(catalog: CatalogBuilder) -> None:
     def check(data: dict) -> list[SchemaError]:
         return [_error("bad root")] if data.get("type") == "Catalog" else []
 
-    report = validate(root, schema=True, schema_validator=check)
+    report = validate(root, options=ValidationOptions(schema=True, schema_validator=check))
     assert not report.passed
     assert any(f.rule_id == "PTL-SCH-001" for f in report.findings)
 
 
 def test_schema_off_by_default(catalog: CatalogBuilder) -> None:
     root = catalog.write()
-    report = validate(root, schema_validator=lambda data: ["never seen"])
+    report = validate(root, options=ValidationOptions(schema_validator=lambda data: ["never seen"]))
     assert all(f.rule_id != "PTL-SCH-001" for f in report.findings)
 
 
@@ -283,9 +283,11 @@ def test_disabling_sch_rule_skips_pass(catalog: CatalogBuilder) -> None:
 
     report = validate(
         root,
-        config=RulesConfig(disabled=frozenset({"PTL-SCH-001"})),
-        schema=True,
-        schema_validator=check,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=frozenset({"PTL-SCH-001"})),
+            schema=True,
+            schema_validator=check,
+        ),
     )
     assert all(f.rule_id != "PTL-SCH-001" for f in report.findings)
     assert calls == []  # the pass was skipped entirely, validator never invoked
@@ -302,7 +304,7 @@ def test_real_schema_accepts_the_builder(catalog: CatalogBuilder) -> None:
 
     collection = catalog.collection("roads")
     collection.item("seg1")
-    report = validate(catalog.write(), schema=True)
+    report = validate(catalog.write(), options=ValidationOptions(schema=True))
     schema_errors = [f for f in report.findings if f.rule_id == "PTL-SCH-001"]
     # Fetching the profile schema can fail after the reachability probe passed.
     skip_if_network_flaked(f.message for f in schema_errors)
@@ -384,7 +386,7 @@ def test_root_self_link_passes_both_passes(catalog: CatalogBuilder) -> None:
         ),
     )
 
-    report = validate(root, schema=True, data=False)
+    report = validate(root, options=ValidationOptions(schema=True, data=False))
     errors = [f for f in report.findings if f.severity is Severity.ERROR]
     assert errors == [], errors
     assert _schema_uri_for(CatalogGraph.load(root)) == PORTOLAN_URI

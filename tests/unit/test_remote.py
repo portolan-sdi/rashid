@@ -17,8 +17,8 @@ from urllib.parse import unquote
 import pytest
 from click.testing import CliRunner
 
+from rashid import ValidationOptions, validate
 from rashid import remote as remote_mod
-from rashid import validate
 from rashid.catalog import CatalogGraph
 from rashid.cli import main
 from rashid.data.reader import FilesystemHttpReader, LocalOnlyReader
@@ -516,7 +516,7 @@ def _check_url(root: Path, fetcher: DirFetcher | None = None, **kwargs: Any):  #
     fetcher = fetcher or DirFetcher(root)
     kwargs.setdefault("live_prober", StatusProber())
     kwargs.setdefault("data", False)
-    return validate(_ROOT_URL, fetcher=fetcher, **kwargs)
+    return validate(_ROOT_URL, options=ValidationOptions(fetcher=fetcher, **kwargs))
 
 
 def test_url_mode_runs_the_metadata_pass_over_the_crawled_tree(catalog: CatalogBuilder) -> None:
@@ -533,7 +533,7 @@ def test_url_mode_reports_the_same_metadata_findings_as_the_directory(
 ) -> None:
     root = _nested(catalog)
     mutate_json(root / "sector-1" / "roads" / "collection.json", lambda d: d.pop("license"))
-    local = validate(root, data=False)
+    local = validate(root, options=ValidationOptions(data=False))
     remote = _check_url(root, live=False)
     skip = {GEN_PARTIAL_TREE}
     assert {(f.rule_id, f.path) for f in remote.findings if f.rule_id not in skip} == {
@@ -655,7 +655,10 @@ def test_url_mode_reports_a_capped_crawl(catalog: CatalogBuilder) -> None:
 
 def test_url_mode_accepts_the_directory_url(catalog: CatalogBuilder) -> None:
     root = _nested(catalog)
-    report = validate(_BASE.rstrip("/"), fetcher=DirFetcher(root), data=False, live=False)
+    report = validate(
+        _BASE.rstrip("/"),
+        options=ValidationOptions(fetcher=DirFetcher(root), data=False, live=False),
+    )
     assert report.files_checked == 5
 
 
@@ -680,7 +683,7 @@ def test_url_mode_does_not_report_a_missing_local_partition_or_scene(
     root = _nested(catalog)
     (root / "scenes" / "scene-a.tif").write_bytes(b"II*\x00")
     (root / "scenes" / "scene-b.tif").write_bytes(b"II*\x00")
-    local = validate(root, data=False)
+    local = validate(root, options=ValidationOptions(data=False))
     assert "PTL-COL-005" in {f.rule_id for f in local.findings}
     remote = _check_url(root, live=False)
     assert "PTL-COL-005" not in {f.rule_id for f in remote.findings}
@@ -757,10 +760,15 @@ def test_cli_accepts_a_catalog_url(
     root = _nested(catalog)
     seen: dict[str, Any] = {}
 
-    def fake_validate(location: Path | str, **kwargs: Any):  # type: ignore[no-untyped-def]
+    def fake_validate(location: Path | str, *, options: ValidationOptions):  # type: ignore[no-untyped-def]
         seen["location"] = location
-        seen.update(kwargs)
-        return validate(location, fetcher=DirFetcher(root), live_prober=FakeProber(), data=False)
+        seen.update(vars(options))
+        return validate(
+            location,
+            options=ValidationOptions(
+                fetcher=DirFetcher(root), live_prober=FakeProber(), data=False
+            ),
+        )
 
     monkeypatch.setattr("rashid.cli.validate", fake_validate)
     result = CliRunner().invoke(main, ["check", _ROOT_URL])
@@ -882,3 +890,18 @@ def test_default_fetcher_crawls_a_served_tree(
 def test_crawl_result_is_a_plain_record() -> None:
     result = Crawl(base=_BASE)
     assert result.statuses == {} and result.errors == {} and not result.capped
+
+
+def test_options_can_be_reused_without_resolving_the_callers_live_default(
+    catalog: CatalogBuilder,
+) -> None:
+    root = _nested(catalog)
+    prober = StatusProber()
+    options = ValidationOptions(data=False, fetcher=DirFetcher(root), live_prober=prober)
+
+    local = validate(root, options=options)
+    assert not any(f.rule_id.startswith("PTL-LIV") for f in local.findings)
+    remote = validate(_ROOT_URL, options=options)
+    assert remote.files_checked == local.files_checked
+    assert options.live is None
+    assert prober.range_calls  # URL mode still probes the host after a local validation.

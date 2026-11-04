@@ -58,8 +58,8 @@ def _run_once(scenario: str, size: str, seed: int, warm: bool) -> None:
 
     with scenarios.target(scenario, size, seed) as target:
         if warm:
-            rashid.validate(target.location, **target.options)
-        rashid.validate(target.location, **target.options)
+            rashid.validate(target.location, options=target.options)
+        rashid.validate(target.location, options=target.options)
 
 
 def _counts(scenario: str, size: str, seed: int, warm: bool) -> None:
@@ -83,7 +83,7 @@ def _self_argv(scenario: str, size: str, seed: int, warm: bool) -> list[str]:
 
 
 def profiler_command(
-    mode: str, scenario: str, size: str, seed: int, warm: bool, out: Path
+    mode: str, *, scenario: str, size: str, seed: int, warm: bool, out: Path
 ) -> list[str]:
     """The argv that runs this script's ``run`` mode under the profiler for ``mode``."""
     target = _self_argv(scenario, size, seed, warm)
@@ -179,7 +179,9 @@ def _profile(args: argparse.Namespace) -> int:
     stem = f"{args.scenario}-{args.size}-{args.seed}{'-warm' if args.warm else ''}"
     suffix = {"mem": "bin", "instr": "cachegrind", "time": "txt"}[args.mode]
     out = _PROFILES / f"{stem}.{args.mode}.{suffix}"
-    command = profiler_command(args.mode, args.scenario, args.size, args.seed, args.warm, out)
+    command = profiler_command(
+        args.mode, scenario=args.scenario, size=args.size, seed=args.seed, warm=args.warm, out=out
+    )
     print("$", " ".join(command), file=sys.stderr)
     if args.mode == "instr":
         result = subprocess.run(command, capture_output=True, text=True, env=_instr_env())

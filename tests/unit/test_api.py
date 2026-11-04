@@ -9,13 +9,17 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+from collections.abc import Iterable
 from datetime import timedelta
 from pathlib import Path, PurePosixPath
 
 import pytest
 
-from rashid import api
-from rashid.catalog import Node
+from rashid import api, validate
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
+from tests.conftest import CatalogBuilder
 
 pytestmark = pytest.mark.unit
 
@@ -25,6 +29,7 @@ EXPORTS = {
     "SHA2_256": "rashid._multihash",
     "SPDX_LICENSE_IDS": "rashid._spdx",
     "STRUCTURAL_RELS": "rashid.rules._common",
+    "ValidationOptions": "rashid.runner",
     "canonical_spdx_id": "rashid._spdx",
     "decode_multihash": "rashid._multihash",
     "encode_multihash": "rashid._multihash",
@@ -49,6 +54,30 @@ def _node(data: dict[str, object]) -> Node:
 
 def test_all_lists_every_documented_export() -> None:
     assert sorted(api.__all__) == sorted(EXPORTS)
+
+
+@pytest.mark.parametrize("include_rule", [True, False])
+def test_options_use_the_custom_rule_set(catalog: CatalogBuilder, include_rule: bool) -> None:
+    class CustomRule(Rule):
+        id = "CUSTOM-001"
+        default_severity = Severity.INFO
+        description = "custom catalog check"
+
+        def check_graph(self, graph: CatalogGraph) -> Iterable[Finding]:
+            assert graph.root is not None
+            yield self.finding(graph.root, "custom rule ran")
+
+    report = validate(
+        catalog.write(),
+        options=api.ValidationOptions(
+            rules=[CustomRule()] if include_rule else [],
+            structural=False,
+            extensions=False,
+            data=False,
+        ),
+    )
+
+    assert [f.rule_id for f in report.findings] == (["CUSTOM-001"] if include_rule else [])
 
 
 @pytest.mark.parametrize("name", sorted(EXPORTS))

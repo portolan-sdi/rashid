@@ -12,11 +12,11 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
 
 import rashid.data as data_pass
+from rashid import ValidationOptions
 from rashid.catalog import CatalogGraph, Node
 from rashid.config import RulesConfig
 from rashid.data import (
@@ -303,7 +303,7 @@ def test_missing_geospatial_stack_downgrades_to_warning(
 def test_data_pass_surfaces_by_default(catalog: CatalogBuilder) -> None:
     """The data pass is on by default; an injected defect surfaces without data=True."""
     root = _graph(catalog).root_path
-    report = validate(root, data_validator=_defect_on_items())
+    report = validate(root, options=ValidationOptions(data_validator=_defect_on_items()))
     assert any(f.rule_id == DAT_CHECKSUM for f in report.findings)
 
 
@@ -320,9 +320,11 @@ def test_disabling_one_rule_silences_only_it(catalog: CatalogBuilder) -> None:
 
     report = validate(
         graph_root,
-        config=RulesConfig(disabled=frozenset({DAT_SIZE})),
-        data=True,
-        data_validator=two_defects,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=frozenset({DAT_SIZE})),
+            data=True,
+            data_validator=two_defects,
+        ),
     )
     ids = {f.rule_id for f in report.findings}
     assert DAT_CHECKSUM in ids
@@ -359,7 +361,12 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
             DAT_VECTOR_COLUMNS,
         }
     )
-    validate(graph_root, config=RulesConfig(disabled=all_ids), data=True, data_validator=spy)
+    validate(
+        graph_root,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=all_ids), data=True, data_validator=spy
+        ),
+    )
 
     assert called is False
 
@@ -413,7 +420,7 @@ def test_data_pass_runs_by_default(catalog: CatalogBuilder) -> None:
         calls.append(node)
         return []
 
-    validate(root, structural=False, data_validator=spy)
+    validate(root, options=ValidationOptions(structural=False, data_validator=spy))
     assert calls, "the data pass did not run under the default configuration"
 
 
@@ -426,5 +433,5 @@ def test_data_false_skips_the_pass(catalog: CatalogBuilder) -> None:
         calls.append(node)
         return []
 
-    validate(root, structural=False, data=False, data_validator=spy)
+    validate(root, options=ValidationOptions(structural=False, data=False, data_validator=spy))
     assert calls == []

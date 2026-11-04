@@ -10,7 +10,8 @@ authoritative oracle that catches any drift between rashid's hand rules and the
 canonical schema, and any requirement the hand rules do not yet cover.
 
 Because it overlaps the hand rules by design, the pass is opt-in (CLI
-``--schema``; ``validate(..., schema=True)``). When it runs, a defect may be
+``--schema``; ``validate(path, options=ValidationOptions(schema=True))``).
+When it runs, a defect may be
 reported twice — once by a hand rule with a fix hint, once here with the schema's
 own message; the second is the canonical verdict.
 

@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from rashid import RulesConfig, validate
+from rashid import RulesConfig, ValidationOptions, validate
 from rashid._jsonschema import SchemaError, vendored_extension_schemas
 from rashid.catalog import CatalogGraph
 from rashid.extensions import SchemaUnavailable, default_validator, validate_extensions
@@ -160,7 +160,7 @@ def test_an_older_version_does_not_downgrade_an_error_to_a_warning(
             }
         },
     )
-    report = validate(catalog.write(), data=False)
+    report = validate(catalog.write(), options=ValidationOptions(data=False))
     assert "PTL-CNF-004" in _ids(report.findings)
     assert "PTL-EXT-001" in _ids(report.findings)
     assert not report.passed
@@ -356,7 +356,7 @@ def test_the_pass_runs_by_default(catalog: CatalogBuilder) -> None:
             "proj:code": 4326,
         }
     }
-    report = validate(catalog.write(), data=False)
+    report = validate(catalog.write(), options=ValidationOptions(data=False))
     assert "PTL-EXT-001" in _ids(report.findings)
 
 
@@ -370,7 +370,7 @@ def test_extensions_false_skips_the_pass(catalog: CatalogBuilder) -> None:
             "proj:code": 4326,
         }
     }
-    report = validate(catalog.write(), data=False, extensions=False)
+    report = validate(catalog.write(), options=ValidationOptions(data=False, extensions=False))
     assert "PTL-EXT-001" not in _ids(report.findings)
 
 
@@ -385,7 +385,10 @@ def test_disabling_the_rule_skips_the_pass(catalog: CatalogBuilder) -> None:
         }
     }
     report = validate(
-        catalog.write(), config=RulesConfig(disabled=frozenset({"PTL-EXT-001"})), data=False
+        catalog.write(),
+        options=ValidationOptions(
+            config=RulesConfig(disabled=frozenset({"PTL-EXT-001"})), data=False
+        ),
     )
     assert "PTL-EXT-001" not in _ids(report.findings)
 

@@ -19,7 +19,7 @@ from rashid.data import validate_data
 from rashid.live import validate_live
 from rashid.model import Finding, Report, RuleSummary, Severity
 from rashid.registry import CHECKS, CheckInfo, describe
-from rashid.runner import validate
+from rashid.runner import ValidationOptions, validate
 from rashid.schema import validate_schema
 from rashid.structural import validate_structural
 
@@ -36,6 +36,7 @@ __all__ = [
     "RuleSummary",
     "RulesConfig",
     "Severity",
+    "ValidationOptions",
     "describe",
     "validate",
     "validate_data",

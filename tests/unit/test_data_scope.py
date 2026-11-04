@@ -21,6 +21,7 @@ from click.testing import CliRunner
 
 import rashid.cli as cli_mod
 import rashid.data.reader as reader_mod
+from rashid import ValidationOptions
 from rashid.catalog import CatalogGraph, Node
 from rashid.cli import main
 from rashid.data import DataDefect, Validator, validate_data
@@ -222,9 +223,11 @@ def test_runner_threads_the_factory_through(catalog: CatalogBuilder) -> None:
 
     validate(
         root,
-        structural=False,
-        data_validator=_reader_recorder(seen),
-        data_reader_factory=LocalOnlyReader,
+        options=ValidationOptions(
+            structural=False,
+            data_validator=_reader_recorder(seen),
+            data_reader_factory=LocalOnlyReader,
+        ),
     )
 
     assert set(seen) == {"local only"}
@@ -235,7 +238,9 @@ def test_runner_defaults_to_the_filesystem_http_reader(catalog: CatalogBuilder) 
     root = catalog.write()
     seen: list[str] = []
 
-    validate(root, structural=False, data_validator=_reader_recorder(seen))
+    validate(
+        root, options=ValidationOptions(structural=False, data_validator=_reader_recorder(seen))
+    )
 
     assert set(seen) == {"remote"}
 
@@ -247,8 +252,8 @@ def _capture_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Record what the CLI asks the runner for, without running a pass."""
     captured: dict[str, Any] = {}
 
-    def fake_validate(catalog_path: Path | str, **kwargs: Any) -> Report:
-        captured.update(kwargs)
+    def fake_validate(catalog_path: Path | str, *, options: ValidationOptions) -> Report:
+        captured.update(vars(options))
         return Report(findings=[])
 
     monkeypatch.setattr(cli_mod, "validate", fake_validate)

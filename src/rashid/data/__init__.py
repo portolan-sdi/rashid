@@ -9,10 +9,10 @@ contradict and still pass. core.md makes several of these a hard MUST:
 always match what is in the bucket", and each format carries a required media
 type.
 
-This opt-in pass reads the bytes — local files and remote ``https`` assets — and
-reports where they diverge from the claim. Like the structural and schema passes
-it is off by default (CLI ``--data``; ``validate(..., data=True)``), reaches the
-network, and downgrades to a single WARNING when it cannot run.
+This pass reads the bytes — local files and remote ``https`` assets — and
+reports where they diverge from the claim. It runs by default; CLI ``--no-data``
+or ``ValidationOptions(data=False)`` skips it. It reaches the network for remote
+assets and downgrades to a single WARNING when it cannot run.
 
 Which bytes it may read is the caller's choice. ``reader_factory`` supplies the
 :class:`~rashid.data.reader.AssetReader`, defaulting to

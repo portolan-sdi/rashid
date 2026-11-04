@@ -24,6 +24,7 @@ import pytest
 import rashid.data as data_pass
 import rashid.live as live_pass
 import rashid.runner as runner
+from rashid import ValidationOptions
 from rashid.catalog import Node
 from rashid.config import RulesConfig
 from rashid.data import DAT_MIRROR, DAT_UNAVAILABLE, DataDefect
@@ -90,9 +91,11 @@ def test_mirror_rule_keeps_the_pass_alive(catalog: CatalogBuilder) -> None:
 
     validate(
         root,
-        config=RulesConfig(disabled=runner._DATA_RULE_IDS - {DAT_MIRROR}),
-        structural=False,
-        data_validator=spy,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=runner._DATA_RULE_IDS - {DAT_MIRROR}),
+            structural=False,
+            data_validator=spy,
+        ),
     )
 
     assert seen, "the data pass was skipped while PTL-DAT-016 was still enabled"
@@ -105,9 +108,11 @@ def test_disabling_every_rule_still_skips_the_pass(catalog: CatalogBuilder) -> N
 
     validate(
         root,
-        config=RulesConfig(disabled=runner._DATA_RULE_IDS),
-        structural=False,
-        data_validator=spy,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=runner._DATA_RULE_IDS),
+            structural=False,
+            data_validator=spy,
+        ),
     )
 
     assert seen == []

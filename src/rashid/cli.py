@@ -12,7 +12,7 @@ from pathlib import Path
 
 import click
 
-from rashid import _trace
+from rashid import ValidationOptions, _trace
 from rashid.data.reader import LocalOnlyReader
 from rashid.model import Report, Severity
 from rashid.remote import is_catalog_url
@@ -214,14 +214,16 @@ def check(
     with _trace.span("check"):
         report = validate(
             catalog,
-            structural=structural,
-            extensions=extensions,
-            schema=schema,
-            schema_allow_network=schema_allow_network,
-            data=data,
-            data_reader_factory=LocalOnlyReader if data_scope == "local" else None,
-            live=live,
-            live_base_url=live_base_url,
+            options=ValidationOptions(
+                structural=structural,
+                extensions=extensions,
+                schema=schema,
+                schema_allow_network=schema_allow_network,
+                data=data,
+                data_reader_factory=LocalOnlyReader if data_scope == "local" else None,
+                live=live,
+                live_base_url=live_base_url,
+            ),
         )
     root = click.get_current_context().find_root().obj or {}
     show_timings = root.get("timings", False)

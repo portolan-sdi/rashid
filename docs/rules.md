@@ -157,10 +157,10 @@ Combine `--data-scope local` with `--live` to recover most checks for remote ass
 The Python API accepts a reader factory instead of a scope flag:
 
 ```python
-from rashid import validate
+from rashid import ValidationOptions, validate
 from rashid.data.reader import LocalOnlyReader
 
-report = validate("path/to/catalog", data_reader_factory=LocalOnlyReader)
+report = validate("path/to/catalog", options=ValidationOptions(data_reader_factory=LocalOnlyReader))
 ```
 
 Pass the same factory to run the data pass directly:

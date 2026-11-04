@@ -350,7 +350,9 @@ def check_node(
             continue  # PTL-AST-003 requires both file metadata fields to be absent
         log.debug("data: %s asset %r: %s", node.path, key, href)
         with _trace.span("data.asset"):
-            defects.extend(_check_asset(node, key, asset, href, reader, graph))
+            defects.extend(
+                _check_asset(node, key=key, asset=asset, href=href, reader=reader, graph=graph)
+            )
     return _collapse_shared_fields(defects)
 
 
@@ -385,6 +387,7 @@ def _assets_of(node: Node) -> list[tuple[str, dict[str, Any]]]:
 
 def _check_asset(
     node: Node,
+    *,
     key: str,
     asset: dict[str, Any],
     href: str,
@@ -396,7 +399,9 @@ def _check_asset(
     media_type = asset.get("type")
     expected = _expected_format(media_type) if isinstance(media_type, str) else None
 
-    defects.extend(_check_bytes(key, asset, href, expected, node, reader))
+    defects.extend(
+        _check_bytes(key, asset=asset, href=href, expected=expected, node=node, reader=reader)
+    )
 
     located = reader.locate(node, href)
     if located is None or _is_source(asset):
@@ -424,7 +429,11 @@ def _check_asset(
             defects.extend(_check_tabular(node, key, asset, files))
             defects.extend(_check_vector_columns(node, key, asset, files))
         if expected in {"parquet", "tiff", "pmtiles"}:
-            defects.extend(_check_consistency(node, key, asset, expected, located, files))
+            defects.extend(
+                _check_consistency(
+                    node, key=key, asset=asset, expected=expected, located=located, files=files
+                )
+            )
     return defects
 
 
@@ -445,6 +454,7 @@ def _is_source(asset: dict[str, Any]) -> bool:
 
 def _check_bytes(
     key: str,
+    *,
     asset: dict[str, Any],
     href: str,
     expected: str | None,
@@ -836,6 +846,7 @@ def _check_cog_stats(key: str, files: _AssetFiles) -> list[DataDefect]:
 
 def _check_consistency(
     node: Node,
+    *,
     key: str,
     asset: dict[str, Any],
     expected: str,
@@ -994,10 +1005,10 @@ def _check_geoparquet(
 
     row_defects = _row_ordering_defects(
         key,
-        parquet,
-        geo,
-        sum(row_counts),
-        groups,
+        parquet=parquet,
+        geo=geo,
+        rows=sum(row_counts),
+        groups=groups,
         report_unreadable=not metrics_apply,
         subject=subject,
     )
@@ -1655,11 +1666,11 @@ def _column_index(meta: Any) -> dict[str, int]:
 
 def _row_ordering_defects(
     key: str,
+    *,
     parquet: Any,
     geo: dict[str, Any],
     rows: int,
     groups: int,
-    *,
     report_unreadable: bool,
     subject: str | None = None,
 ) -> list[DataDefect]:

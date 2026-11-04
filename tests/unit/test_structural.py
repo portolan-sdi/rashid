@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import RulesConfig, validate, validate_structural
+from rashid import RulesConfig, ValidationOptions, validate, validate_structural
 from rashid._jsonschema import SchemaError
 from rashid.catalog import CatalogGraph
 from rashid.model import Severity
@@ -157,20 +157,27 @@ def test_runner_wires_structural_pass(catalog: CatalogBuilder) -> None:
     def check(data: dict) -> list[SchemaError]:
         return [_error("bad root")] if data.get("type") == "Catalog" else []
 
-    report = validate(root, structural=True, structural_validator=check)
+    report = validate(root, options=ValidationOptions(structural=True, structural_validator=check))
     assert not report.passed
     assert any(f.rule_id == "PTL-STR-001" for f in report.findings)
 
 
 def test_structural_on_by_default(catalog: CatalogBuilder) -> None:
     root = catalog.write()
-    report = validate(root, structural_validator=lambda data: [_error("seen")])
+    report = validate(
+        root, options=ValidationOptions(structural_validator=lambda data: [_error("seen")])
+    )
     assert any(f.rule_id == "PTL-STR-001" for f in report.findings)
 
 
 def test_structural_can_be_disabled(catalog: CatalogBuilder) -> None:
     root = catalog.write()
-    report = validate(root, structural=False, structural_validator=lambda data: [_error("never")])
+    report = validate(
+        root,
+        options=ValidationOptions(
+            structural=False, structural_validator=lambda data: [_error("never")]
+        ),
+    )
     assert all(f.rule_id != "PTL-STR-001" for f in report.findings)
 
 
@@ -184,9 +191,11 @@ def test_disabling_str_rule_skips_pass(catalog: CatalogBuilder) -> None:
 
     report = validate(
         root,
-        config=RulesConfig(disabled=frozenset({"PTL-STR-001"})),
-        structural=True,
-        structural_validator=check,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=frozenset({"PTL-STR-001"})),
+            structural=True,
+            structural_validator=check,
+        ),
     )
     assert all(f.rule_id != "PTL-STR-001" for f in report.findings)
     assert calls == []  # the pass was skipped entirely, validator never invoked

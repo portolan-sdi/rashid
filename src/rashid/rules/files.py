@@ -45,9 +45,9 @@ def _readme_text(node: Node, graph: CatalogGraph) -> str | None:
 
 def _link_findings(
     rule: Rule,
+    *,
     node: Node,
     graph: CatalogGraph,
-    *,
     rel: str,
     target: str,
     index: int,
@@ -132,7 +132,9 @@ def _check_markdown_link(
         return
     candidates: list[tuple[tuple[bool, bool, int], list[Finding]]] = []
     for index, link in matches:
-        findings = _link_findings(rule, node, graph, rel=rel, target=target, index=index, link=link)
+        findings = _link_findings(
+            rule, node=node, graph=graph, rel=rel, target=target, index=index, link=link
+        )
         if not findings:
             return
         rank = (

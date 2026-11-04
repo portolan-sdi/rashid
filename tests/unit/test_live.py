@@ -19,7 +19,7 @@ from urllib.request import Request
 
 import pytest
 
-from rashid import RulesConfig, _store, validate, validate_live
+from rashid import RulesConfig, ValidationOptions, _store, validate, validate_live
 from rashid import live as live_mod
 from rashid.catalog import CatalogGraph
 from rashid.live import (
@@ -459,7 +459,7 @@ def test_runner_wires_live_pass(catalog: CatalogBuilder) -> None:
     catalog.collection("roads", assets={"data": _remote_asset()})
     root = catalog.write()
     prober = FakeProber(range_response=ProbeResponse(status=200, headers={}))
-    report = validate(root, live=True, live_prober=prober)
+    report = validate(root, options=ValidationOptions(live=True, live_prober=prober))
     assert any(f.rule_id == LIV_RANGE for f in report.findings)
 
 
@@ -467,7 +467,7 @@ def test_live_off_by_default(catalog: CatalogBuilder) -> None:
     catalog.collection("roads", assets={"data": _remote_asset()})
     root = catalog.write()
     prober = FakeProber()
-    validate(root, live_prober=prober)
+    validate(root, options=ValidationOptions(live_prober=prober))
     assert prober.range_calls == []
 
 
@@ -489,7 +489,7 @@ def test_disabling_all_liv_rules_skips_pass(catalog: CatalogBuilder) -> None:
             }
         )
     )
-    report = validate(root, config=config, live=True, live_prober=prober)
+    report = validate(root, options=ValidationOptions(config=config, live=True, live_prober=prober))
     assert prober.range_calls == []
     assert all(not f.rule_id.startswith("PTL-LIV") for f in report.findings)
 
@@ -502,7 +502,10 @@ def test_disabling_one_liv_rule_silences_only_it(catalog: CatalogBuilder) -> Non
         preflight_response=ProbeResponse(status=403, headers={}),
     )
     report = validate(
-        root, config=RulesConfig(disabled=frozenset({LIV_RANGE})), live=True, live_prober=prober
+        root,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=frozenset({LIV_RANGE})), live=True, live_prober=prober
+        ),
     )
     ids = {f.rule_id for f in report.findings}
     assert LIV_RANGE not in ids
@@ -595,10 +598,12 @@ def test_runner_threads_live_base_url(catalog: CatalogBuilder) -> None:
     prober = FakeProber()
     validate(
         root,
-        structural=False,
-        live=True,
-        live_prober=prober,
-        live_base_url="https://data.example.org/cat",
+        options=ValidationOptions(
+            structural=False,
+            live=True,
+            live_prober=prober,
+            live_base_url="https://data.example.org/cat",
+        ),
     )
     assert "https://data.example.org/cat/roads/data.parquet" in prober.head_calls
 
@@ -866,7 +871,12 @@ def test_runner_reports_missing_link_targets(catalog: CatalogBuilder) -> None:
     catalog.subcatalog("sector-1").collection("roads")
     root = catalog.write()
     prober = StatusProber({f"{_BASE}/sector-1/catalog.json": 404})
-    report = validate(root, structural=False, live=True, live_prober=prober, live_base_url=_BASE)
+    report = validate(
+        root,
+        options=ValidationOptions(
+            structural=False, live=True, live_prober=prober, live_base_url=_BASE
+        ),
+    )
     assert [f.rule_id for f in report.findings if f.rule_id == LIV_LINK_TARGET] == [LIV_LINK_TARGET]
     assert not report.passed
 
@@ -877,11 +887,13 @@ def test_disabling_link_target_rule_silences_it(catalog: CatalogBuilder) -> None
     prober = StatusProber({f"{_BASE}/sector-1/catalog.json": 404})
     report = validate(
         root,
-        structural=False,
-        config=RulesConfig(disabled=frozenset({LIV_LINK_TARGET})),
-        live=True,
-        live_prober=prober,
-        live_base_url=_BASE,
+        options=ValidationOptions(
+            structural=False,
+            config=RulesConfig(disabled=frozenset({LIV_LINK_TARGET})),
+            live=True,
+            live_prober=prober,
+            live_base_url=_BASE,
+        ),
     )
     assert LIV_LINK_TARGET not in {f.rule_id for f in report.findings}
 
@@ -1079,16 +1091,23 @@ def test_known_status_does_not_stand_in_for_an_asset_head(catalog: CatalogBuilde
 def test_runner_reports_self_base_and_it_can_be_disabled(catalog: CatalogBuilder) -> None:
     root = _self_linked_tree(catalog)
     other = "https://mirror.example.net/copy"
-    report = validate(root, live=True, live_prober=StatusProber(), live_base_url=other, data=False)
+    report = validate(
+        root,
+        options=ValidationOptions(
+            live=True, live_prober=StatusProber(), live_base_url=other, data=False
+        ),
+    )
     [finding] = [f for f in report.findings if f.rule_id == LIV_SELF_BASE]
     assert finding.severity is Severity.WARNING  # a SHOULD: warns, does not fail the run
     report = validate(
         root,
-        config=RulesConfig(disabled=frozenset({LIV_SELF_BASE})),
-        live=True,
-        live_prober=StatusProber(),
-        live_base_url=other,
-        data=False,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=frozenset({LIV_SELF_BASE})),
+            live=True,
+            live_prober=StatusProber(),
+            live_base_url=other,
+            data=False,
+        ),
     )
     assert LIV_SELF_BASE not in {f.rule_id for f in report.findings}
 

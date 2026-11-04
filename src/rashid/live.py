@@ -412,6 +412,7 @@ def _header_set(value: str | None) -> set[str]:
 
 def _server_finding(
     rule_id: str,
+    *,
     host: str,
     rep: _Target,
     message: str,
@@ -433,7 +434,7 @@ def _server_finding(
 
 
 def _off_https_finding(
-    node: Node, pointer: str, subject: str, probe: str, url: str, location: str
+    node: Node, *, pointer: str, subject: str, probe: str, url: str, location: str
 ) -> Finding:
     return Finding(
         rule_id=LIV_OFF_HTTPS,
@@ -459,9 +460,9 @@ def _check_range(host: str, rep: _Target, response: ProbeResponse) -> list[Findi
     return [
         _server_finding(
             LIV_RANGE,
-            host,
-            rep,
-            "range requests unsupported: " + "; ".join(problems),
+            host=host,
+            rep=rep,
+            message="range requests unsupported: " + "; ".join(problems),
             fix_hint="serve assets from storage that honors the Range header with 206 responses",
             expected=206,
             actual=response.status,
@@ -476,9 +477,9 @@ def _check_cors(host: str, rep: _Target, response: ProbeResponse) -> list[Findin
         return [
             _server_finding(
                 LIV_CORS_ORIGIN,
-                host,
-                rep,
-                "no Access-Control-Allow-Origin on a GET carrying an Origin header",
+                host=host,
+                rep=rep,
+                message="no Access-Control-Allow-Origin on a GET carrying an Origin header",
                 fix_hint="enable a read-permitting CORS policy, e.g. Access-Control-Allow-Origin: *",
             )
         ]
@@ -491,9 +492,9 @@ def _check_cors(host: str, rep: _Target, response: ProbeResponse) -> list[Findin
     return [
         _server_finding(
             LIV_CORS_EXPOSE,
-            host,
-            rep,
-            "Access-Control-Expose-Headers omits " + ", ".join(missing),
+            host=host,
+            rep=rep,
+            message="Access-Control-Expose-Headers omits " + ", ".join(missing),
             fix_hint="expose " + ", ".join(_REQUIRED_EXPOSED) + " to browsers",
         )
     ]
@@ -518,9 +519,9 @@ def _check_preflight(host: str, rep: _Target, response: ProbeResponse) -> list[F
     return [
         _server_finding(
             LIV_CORS_PREFLIGHT,
-            host,
-            rep,
-            "CORS preflight failed: " + "; ".join(problems),
+            host=host,
+            rep=rep,
+            message="CORS preflight failed: " + "; ".join(problems),
             fix_hint=(
                 "allow the GET and HEAD methods and the "
                 + ", ".join(_REQUIRED_REQUEST)
@@ -690,11 +691,11 @@ def _check_heads(
             findings.append(
                 _off_https_finding(
                     target.node,
-                    f"/assets/{target.key}/href",
-                    f"asset '{target.key}'",
-                    "HEAD",
-                    target.url,
-                    location,
+                    pointer=f"/assets/{target.key}/href",
+                    subject=f"asset '{target.key}'",
+                    probe="HEAD",
+                    url=target.url,
+                    location=location,
                 )
             )
     return findings
@@ -730,11 +731,11 @@ def _check_server(
 def _ranged_off_https(rep: _Target, location: str) -> Finding:
     return _off_https_finding(
         rep.node,
-        f"/assets/{rep.key}/href",
-        f"asset '{rep.key}'",
-        "a ranged GET of",
-        rep.url,
-        location,
+        pointer=f"/assets/{rep.key}/href",
+        subject=f"asset '{rep.key}'",
+        probe="a ranged GET of",
+        url=rep.url,
+        location=location,
     )
 
 
@@ -823,11 +824,11 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
             findings.append(
                 _off_https_finding(
                     target.node,
-                    f"/links/{target.index}/href",
-                    f"link rel:{target.rel!r} href '{target.href}'",
-                    "HEAD",
-                    target.url,
-                    location,
+                    pointer=f"/links/{target.index}/href",
+                    subject=f"link rel:{target.rel!r} href '{target.href}'",
+                    probe="HEAD",
+                    url=target.url,
+                    location=location,
                 )
             )
             continue

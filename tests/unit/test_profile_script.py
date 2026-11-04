@@ -51,7 +51,9 @@ def test_parse_cachegrind_reads_the_instruction_total(profile: ModuleType) -> No
 def test_time_runs_the_script_under_pinned_pyinstrument(
     profile: ModuleType, tmp_path: Path
 ) -> None:
-    command = profile.profiler_command("time", "remote", "large", 3, True, tmp_path / "x")
+    command = profile.profiler_command(
+        "time", scenario="remote", size="large", seed=3, warm=True, out=tmp_path / "x"
+    )
     assert command[command.index("-o") + 1] == str(tmp_path / "x")
     assert command[:7] == [
         "uv",
@@ -77,7 +79,9 @@ def test_time_runs_the_script_under_pinned_pyinstrument(
 
 def test_mem_writes_to_the_output_file(profile: ModuleType, tmp_path: Path) -> None:
     out = tmp_path / "m.bin"
-    command = profile.profiler_command("mem", "data", "small", 0, False, out)
+    command = profile.profiler_command(
+        "mem", scenario="data", size="small", seed=0, warm=False, out=out
+    )
     assert command[2:4] == ["--with", "memray==1.20.0"]
     assert command[command.index("-o") + 1] == str(out)
     assert command[-1] == "run"
@@ -85,7 +89,9 @@ def test_mem_writes_to_the_output_file(profile: ModuleType, tmp_path: Path) -> N
 
 def test_instr_runs_this_interpreter_under_cachegrind(profile: ModuleType, tmp_path: Path) -> None:
     out = tmp_path / "c.out"
-    command = profile.profiler_command("instr", "metadata", "small", 0, False, out)
+    command = profile.profiler_command(
+        "instr", scenario="metadata", size="small", seed=0, warm=False, out=out
+    )
     assert command[:3] == ["valgrind", "--tool=cachegrind", "--cache-sim=no"]
     assert command[3] == f"--cachegrind-out-file={out}"
     assert command[4] == sys.executable
@@ -93,7 +99,9 @@ def test_instr_runs_this_interpreter_under_cachegrind(profile: ModuleType, tmp_p
 
 def test_no_profiler_for_counts(profile: ModuleType, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no profiler"):
-        profile.profiler_command("counts", "metadata", "small", 0, False, tmp_path)
+        profile.profiler_command(
+            "counts", scenario="metadata", size="small", seed=0, warm=False, out=tmp_path
+        )
 
 
 def test_instr_without_valgrind_exits_2(
