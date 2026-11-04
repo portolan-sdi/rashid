@@ -176,6 +176,67 @@ def test_rebuilding_graph_indexes_from_source_is_order_independent(catalog: Cata
                 assert relative_path(".", str(path)) == str(path)
 
 
+@pytest.mark.parametrize("suffix", ["?token=x#piece", "#piece", "?token=%3F%23", "?#", "?"])
+def test_suffix_is_ignored_for_containment_and_retained_for_wire_and_live(suffix: str) -> None:
+    from rashid._href import containment_href, href_suffix
+    from rashid.remote import wire_url
+
+    href = "./a%20b.parquet" + suffix
+    assert containment_href(href) == "./a%20b.parquet"
+    assert href_suffix(href) == suffix
+    assert relative_path("roads", href) == "roads/a%20b.parquet"
+    assert crawl_prefix("https://h/cat/", "roads", href) == "roads/a%20b.parquet" + suffix
+    assert live_host_href("roads", href, "https://h/cat/") == (
+        "https://h/cat/roads/a%20b.parquet" + suffix
+    )
+    assert wire_url("https://h/cat/", "roads/a%20b.parquet" + suffix) == (
+        "https://h/cat/roads/a%20b.parquet" + suffix
+    )
+    assert wire_url("https://h/cat/", "a b.parquet" + suffix) == (
+        "https://h/cat/a%20b.parquet" + suffix
+    )
+
+
+def test_uri_reference_grammar_preserves_encoded_and_reserved_characters() -> None:
+    from rashid._href import is_uri_reference
+
+    for href in (
+        "",
+        "?",
+        "#",
+        "./a%20b.parquet",
+        "../file;v=1",
+        "https://h/a?x=%23%3F#fragment",
+        "https://user:password@h:443/a",
+        "https://[::1]/a",
+        "mailto:a@example.org",
+        "urn:example:animal:ferret:nose",
+        "//host/path",
+        "/absolute/path",
+        "./x:y",
+    ):
+        assert is_uri_reference(href), href
+    for href in (
+        "./a b",
+        "./a%",
+        "./a%2x",
+        "./a\\b",
+        "./café",
+        "./a[0]",
+        "./a?q=[x]",
+        "./a#one#two",
+        "1scheme:path",
+        ":path",
+        "https://[broken",
+        "https://h:port/a",
+        "\nhttps://h/a",
+        "https://h/a\r",
+        "https://h/a\x7f",
+        "https://h/a\x00",
+    ):
+        assert not is_uri_reference(href), href
+
+
 @pytest.mark.parametrize(
     "left,right,equal",
     [
@@ -210,22 +271,42 @@ def test_file_location(tmp_path: Path) -> None:
         str(tmp_path.as_uri()) + "/x/../a%20b.json"
     )
 
-@pytest.mark.parametrize("suffix", ["?token=x#piece", "#piece", "?token=%3F%23", "?#", "?"])
-def test_suffix_is_ignored_for_containment_and_retained_for_wire_and_live(suffix: str) -> None:
-    from rashid._href import containment_href, href_suffix
-    from rashid.remote import wire_url
 
-    href = "./a%20b.parquet" + suffix
-    assert containment_href(href) == "./a%20b.parquet"
-    assert href_suffix(href) == suffix
-    assert relative_path("roads", href) == "roads/a%20b.parquet"
-    assert crawl_prefix("https://h/cat/", "roads", href) == "roads/a%20b.parquet" + suffix
-    assert live_host_href("roads", href, "https://h/cat/") == (
-        "https://h/cat/roads/a%20b.parquet" + suffix
+@pytest.mark.parametrize("href", ["https://[broken/a", "https://host／a"])
+def test_malformed_authorities_are_safe_at_every_href_entry_point(href: str) -> None:
+    from rashid._href import is_uri_reference, parse_href, split_href
+
+    assert parse_href(href) is None
+    assert split_href(href) is None
+    assert is_absolute_href(href)
+    assert not is_catalog_url(href)
+    assert not is_https_href(href)
+    assert not is_uri_reference(href)
+    assert relative_path("roads", href) is None
+    assert crawl_prefix("https://h/", "roads", href) is None
+    assert live_host_href("roads", href, "https://h/") is None
+    assert live_host_href("roads", "./a", href) is None
+    assert resolve_live_base(None, None, href) == (None, False)
+    assert location_key(href) is None
+    assert object_location(href) is None
+    assert object_location("./a", base=href) is None
+    with pytest.raises(ValueError, match="catalog URL must be https"):
+        split_catalog_url(href)
+    with pytest.raises(ValueError, match="live base_url must be an https URL"):
+        normalize_live_base(href)
+    assert location_key("https://h:bad/a") is None
+
+
+def test_local_resolution_decodes_once_and_keeps_request_spelling() -> None:
+    from rashid._href import local_path, request_target
+
+    directory = "my%20%2520%20roads"
+    href = "./a%20b%2520.parquet?token=x#piece"
+    assert relative_path(directory, href) == "my%20%2520%20roads/a%20b%2520.parquet"
+    assert local_path(directory, href) == "my %20 roads/a b%20.parquet"
+    assert request_target(directory, href) == (
+        "my%20%2520%20roads/a%20b%2520.parquet?token=x#piece"
     )
-    assert wire_url("https://h/cat/", "roads/a%20b.parquet" + suffix) == (
-        "https://h/cat/roads/a%20b.parquet" + suffix
-    )
-    assert wire_url("https://h/cat/", "a b.parquet" + suffix) == (
-        "https://h/cat/a%20b.parquet" + suffix
-    )
+    for unsafe in ("%2e%2e/%2e%2e/outside", "%2Foutside", "a%5Cb", "a%00b"):
+        assert local_path("roads", unsafe) is None
+        assert request_target("roads", unsafe) == "roads/" + unsafe

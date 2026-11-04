@@ -6,7 +6,7 @@ import posixpath
 import re
 from pathlib import PurePosixPath
 from typing import Any, Protocol
-from urllib.parse import ParseResult, SplitResult, unquote, urlparse, urlsplit
+from urllib.parse import ParseResult, SplitResult, unquote, urljoin, urlparse, urlsplit
 
 
 class _SelfLinked(Protocol):
@@ -32,7 +32,8 @@ def split_href(href: str) -> SplitResult | None:
 
 def is_absolute_href(href: str) -> bool:
     """True for hrefs with a URI scheme or a leading slash."""
-    return href.startswith("/") or bool(urlparse(href).scheme)
+    parsed = parse_href(href)
+    return href.startswith("/") or parsed is None or bool(parsed.scheme)
 
 
 def href_host(href: str) -> str:
@@ -65,7 +66,7 @@ def self_link_base(root: _SelfLinked | None) -> str | None:
         if not isinstance(link, dict) or link.get("rel") != "self":
             continue
         href = link.get("href")
-        if isinstance(href, str) and is_absolute_href(href):
+        if isinstance(href, str) and parse_href(href) is not None and is_absolute_href(href):
             prefix, sep, tail = containment_href(href).rpartition("/")
             if tail == root.path.name:
                 return prefix + sep
@@ -74,8 +75,8 @@ def self_link_base(root: _SelfLinked | None) -> str | None:
 
 def is_catalog_url(location: str) -> bool:
     """True when ``location`` is an https URL rather than a filesystem path."""
-    parsed = urlparse(location)
-    return parsed.scheme.lower() == "https" and bool(parsed.netloc)
+    parsed = parse_href(location)
+    return parsed is not None and parsed.scheme.lower() == "https" and bool(parsed.netloc)
 
 
 def split_catalog_url(url: str) -> tuple[str, str]:
@@ -86,9 +87,10 @@ def split_catalog_url(url: str) -> tuple[str, str]:
     directory and its ``catalog.json`` do on disk. The base always ends in one
     slash and the root URL is the base plus ``catalog.json``.
     """
-    if not is_catalog_url(url):
+    parsed = parse_href(url)
+    if parsed is None or parsed.scheme.lower() != "https" or not parsed.netloc:
         raise ValueError(f"catalog URL must be https, got: {url!r}")
-    parsed = urlparse(url)._replace(query="", fragment="")
+    parsed = parsed._replace(query="", fragment="")
     parsed = parsed._replace(scheme=parsed.scheme.lower(), netloc=parsed.netloc.lower())
     path = parsed.path
     if path.endswith("/catalog.json") or path == "catalog.json":
@@ -100,7 +102,8 @@ def split_catalog_url(url: str) -> tuple[str, str]:
 
 def is_https_href(href: str) -> bool:
     """Data-reader policy: an HTTPS scheme, even without an authority."""
-    return urlparse(href).scheme.lower() == "https"
+    parsed = parse_href(href)
+    return parsed is not None and parsed.scheme.lower() == "https"
 
 
 def is_schema_url(href: str) -> bool:
@@ -118,22 +121,32 @@ def href_suffix(href: str) -> str:
     return href[len(containment_href(href)) :]
 
 
-def relative_path(directory: str, href: str) -> str | None:
-    """Graph policy: a relative href normalized below the catalog root."""
-    if not href or is_absolute_href(href):
-        return None
-    joined = posixpath.normpath(posixpath.join(directory, containment_href(href)))
+def _relative_join(directory: str, path: str) -> str | None:
+    joined = posixpath.normpath(posixpath.join(directory, path))
     if joined == "." or joined.startswith(".."):
         return None
     return joined
 
 
-def request_target(directory: str, href: str) -> str | None:
-    """Root-relative request target, preserving href encoding and its suffix.
+def relative_path(directory: str, href: str) -> str | None:
+    """Encoded, root-relative document identity; never a decoded filename."""
+    if not href or is_absolute_href(href):
+        return None
+    return _relative_join(directory, containment_href(href))
 
-    Feed this to remote.wire_url for the crawl, data reads, and live probes;
-    filesystem containment paths are not request targets.
-    """
+
+def local_path(directory: str, href: str) -> str | None:
+    """Decode only a classified relative href at the local filesystem boundary."""
+    if relative_path(directory, href) is None:
+        return None
+    path = unquote(containment_href(href))
+    if posixpath.isabs(path) or "\\" in path or "\x00" in path:
+        return None
+    return _relative_join(unquote(directory), path)
+
+
+def request_target(directory: str, href: str) -> str | None:
+    """Encoded request target, including its original query and fragment."""
     path = relative_path(directory, href)
     return path + href_suffix(href) if path is not None else None
 
@@ -162,7 +175,9 @@ def crawl_prefix(base: str, directory: str, href: str) -> str | None:
     below the root: a catalog is a hostile input here, and a path that climbs
     out of the tree would otherwise name where its bytes get written.
     """
-    parsed = urlparse(href)
+    parsed = parse_href(href)
+    if parsed is None:
+        return None
     if parsed.scheme or href.startswith("/"):
         if parsed.scheme.lower() != "https" or not href.startswith(base):
             return None
@@ -191,6 +206,12 @@ def safe_crawl_path(candidate: str) -> str | None:
     return rel
 
 
+def crawl_mirror_path(href: str) -> str | None:
+    """Keep encoded mirror names; reject separators that hide STAC filenames."""
+    path = safe_crawl_path(containment_href(href))
+    return path if path is not None and not _ENCODED_SLASH.search(path) else None
+
+
 def normalize_live_base(base_url: str) -> str:
     """Validate and normalize a publish base URL to https with one trailing slash.
 
@@ -198,8 +219,8 @@ def normalize_live_base(base_url: str) -> str:
     catalog-controlled hrefs into request URLs, so any weaker scheme would let
     a hostile tree downgrade or redirect the probes.
     """
-    parsed = urlparse(base_url)
-    if parsed.scheme.lower() != "https" or not parsed.netloc:
+    parsed = parse_href(base_url)
+    if parsed is None or parsed.scheme.lower() != "https" or not parsed.netloc:
         raise ValueError(f"live base_url must be an https URL, got: {base_url!r}")
     return base_url.rstrip("/") + "/"
 
@@ -209,9 +230,12 @@ def live_host_href(directory: str, href: str, base: str | None) -> str | None:
 
     remote.wire_url encodes the resulting candidate's path for probing.
     """
-    parsed = urlparse(href)
+    parsed = parse_href(href)
+    publish = parse_href(base) if base is not None else None
+    if parsed is None or (base is not None and publish is None):
+        return None
     if parsed.scheme.lower() == "https" and parsed.netloc:
-        if base is not None and parsed.netloc.lower() != urlparse(base).netloc.lower():
+        if publish is not None and parsed.netloc.lower() != publish.netloc.lower():
             return None
         return href
     if base is None:
@@ -236,15 +260,48 @@ def resolve_live_base(
     return None, False
 
 
-def location_key(url: str) -> tuple[str, str, str]:
-    parsed = urlparse(url)
+def location_key(url: str) -> tuple[str, str, str] | None:
+    parsed = parse_href(url)
+    if parsed is None:
+        return None
     scheme = parsed.scheme.lower()
     host = parsed.hostname or ""
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
     default = {"https": 443, "http": 80}.get(scheme)
     netloc = host if port is None or port == default else f"{host}:{port}"
     path = posixpath.normpath(parsed.path or "/")
     return scheme, netloc, path.rstrip("/") + "/"
+
+
+# RFC 3986 sections 2 and 3: unreserved, sub-delims, and pct-encoded.
+_URI_ATOM = r"(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[A-Fa-f0-9]{2})"
+_URI_PATH = re.compile(rf"(?:{_URI_ATOM}|[:@/])*")
+_URI_QUERY = re.compile(rf"(?:{_URI_ATOM}|[:@/?])*")
+_URI_AUTHORITY = re.compile(
+    rf"(?:(?:{_URI_ATOM}|:)*@)?"
+    rf"(?:{_URI_ATOM}*|\[(?:{_URI_ATOM}|:)+\])(?::[0-9]*)?"
+)
+
+
+def is_uri_reference(href: str) -> bool:
+    """RFC 3986 URI-reference syntax, without resolving or decoding the href."""
+    # urlsplit strips some whitespace and controls; reject them before parsing.
+    if not href.isascii() or any(ord(char) <= 32 or ord(char) == 127 for char in href):
+        return False
+    parsed = split_href(href)
+    if parsed is None:
+        return False
+    if not parsed.scheme and not href.startswith("/") and ":" in parsed.path.split("/", 1)[0]:
+        return False
+    return bool(
+        _URI_PATH.fullmatch(parsed.path)
+        and _URI_QUERY.fullmatch(parsed.query)
+        and _URI_QUERY.fullmatch(parsed.fragment)
+        and _URI_AUTHORITY.fullmatch(parsed.netloc)
+    )
 
 
 _ENCODED_SLASH = re.compile(r"%2f", re.IGNORECASE)
@@ -272,13 +329,19 @@ def store_path(parsed: SplitResult) -> str | None:
     return path
 
 
-def object_location(url: str) -> tuple[str, str, str, str]:
+def object_location(url: str, *, base: str | None = None) -> tuple[str, str, str, str] | None:
     """Identify objects by the path transport requests.
 
     obstore uses the decoded store path; urllib preserves the URL path.
     Only file URLs use filesystem path normalization.
     """
-    parsed = urlsplit(url)
+    try:
+        resolved = urljoin(base, url) if base is not None else url
+    except ValueError:
+        return None
+    parsed = split_href(resolved)
+    if parsed is None:
+        return None
     if parsed.scheme == "file":
         path = posixpath.normpath(unquote(parsed.path))
     else:

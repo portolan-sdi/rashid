@@ -80,13 +80,15 @@ class FilesystemHttpReader:
             if is_https_href(href):
                 return Locator(is_remote=True, source=href)
             return None  # s3/http/file: not browser-fetchable; PTL-AST-002 covers it
-        rel = self._graph.resolve_path(node, href)
+        rel = self._graph.local_path(node, href)
         if rel is None:
             return None
         path = self._graph.root_path / Path(*rel.parts)
+        if not path.is_relative_to(self._graph.root_path):
+            return None
         if path.is_file():
             return Locator(is_remote=False, source=str(path))
-        target = request_target(str(node.path.parent), href)
+        target = request_target(str(self._graph.href_path(node).parent), href)
         if self._graph.base_url is not None and target is not None:
             return Locator(is_remote=True, source=wire_url(self._graph.base_url, target))
         return None

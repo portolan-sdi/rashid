@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from rashid._href import is_absolute_href
+from rashid._href import is_absolute_href, is_uri_reference
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
 from rashid.rules._common import STRUCTURAL_RELS, links_of
+from rashid.rules.assets import _assets_of
 
 # What each required structural link points at, for the fix hints.
 _REQUIRED_LINK_TARGETS = {
@@ -155,7 +156,7 @@ class StructuralLinkTypeRule(Rule):
 
 def _unresolved_message(node: Node, graph: CatalogGraph, rel: str, href: str) -> tuple[str, str]:
     """Distinguish missing files from files that are not STAC objects."""
-    resolved = graph.resolve_path(node, href)
+    resolved = graph.local_path(node, href)
     if resolved is not None and graph.file_exists(resolved):
         message = (
             f"link rel:'{rel}' href '{href}' resolves to a file"
@@ -197,7 +198,10 @@ def _wrong_target(node: Node, graph: CatalogGraph, rel: str, target: Node) -> st
 
 
 class LinkResolutionRule(Rule):
-    """Every structural link the pass can place resolves to the correct object.
+    """Link and asset hrefs use URI-reference syntax; structural links resolve.
+
+    Syntax is checked before resolving targets, including hrefs on links
+    whose targets this pass cannot judge.
 
     A relative href resolves against the file tree directly. An absolute
     href resolves through the published base the root self link names
@@ -225,7 +229,25 @@ class LinkResolutionRule(Rule):
     description = "structural links must resolve against the file tree to the correct object"
     kinds = ("catalog", "collection", "item")
 
+    def _invalid_hrefs(self, node: Node) -> Iterable[Finding]:
+        locations = [
+            (f"/links/{index}/href", link.get("href")) for index, link in enumerate(links_of(node))
+        ]
+        locations.extend(
+            (f"{pointer}/href", asset.get("href")) for pointer, _key, asset in _assets_of(node)
+        )
+        for pointer, href in locations:
+            if isinstance(href, str) and href and not is_uri_reference(href):
+                yield self.finding(
+                    node,
+                    f"href {href!r} is not a valid URI reference",
+                    json_pointer=pointer,
+                    fix_hint="percent-encode characters that RFC 3986 does not permit in a URI reference",
+                    actual=href,
+                )
+
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        yield from self._invalid_hrefs(node)
         for index, link in enumerate(links_of(node)):
             rel = link.get("rel")
             if rel not in STRUCTURAL_RELS:
@@ -240,6 +262,8 @@ class LinkResolutionRule(Rule):
                     fix_hint="set the link's href to the target's path, e.g. '../catalog.json'",
                 )
                 continue
+            if not is_uri_reference(href):
+                continue  # The syntax finding above names this exact href.
             judgeable, target = graph.resolve_structural_link(node, href)
             if not judgeable:
                 # The spec permits absolute structural links, and without a

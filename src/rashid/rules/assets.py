@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import Any
-from urllib.parse import urlparse
 
+from rashid._href import parse_href
 from rashid._multihash import is_well_formed_multihash
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
@@ -116,7 +116,10 @@ class AssetHrefSchemeRule(Rule):
             href = asset.get("href")
             if not isinstance(href, str) or not href:
                 continue  # PTL-AST-001 reports missing hrefs
-            scheme = urlparse(href).scheme.lower()
+            parsed = parse_href(href)
+            if parsed is None:
+                continue  # PTL-LNK-006 reports the malformed URI reference.
+            scheme = parsed.scheme.lower()
             if not scheme or scheme == "https":
                 continue
             if scheme == "s3":

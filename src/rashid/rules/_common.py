@@ -5,9 +5,9 @@ from __future__ import annotations
 import os.path
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote, urljoin, urlparse, urlsplit
+from urllib.parse import quote
 
-from rashid._href import is_absolute_href, object_location
+from rashid._href import is_absolute_href, local_path, object_location, parse_href, split_href
 from rashid.catalog import CatalogGraph, Node
 from rashid.remote import wire_url
 
@@ -79,14 +79,16 @@ def is_raster_data_asset(asset: dict[str, Any]) -> bool:
     href = asset.get("href")
     if not isinstance(href, str):
         return False
-    return urlparse(href).path.lower().endswith(TIFF_SUFFIXES)
+    parsed = parse_href(href)
+    return parsed is not None and parsed.path.lower().endswith(TIFF_SUFFIXES)
 
 
 def is_pmtiles_asset(asset: dict[str, Any]) -> bool:
     """Identify PMTiles by media type or href, including URL query strings."""
     href = asset.get("href")
+    parsed = split_href(href) if isinstance(href, str) else None
     return asset.get("type") == PMTILES_MEDIA_TYPE or (
-        isinstance(href, str) and urlsplit(href).path.lower().endswith(".pmtiles")
+        parsed is not None and parsed.path.lower().endswith(".pmtiles")
     )
 
 
@@ -106,7 +108,7 @@ def parse_rfc3339(value: object) -> datetime | None:
 
 def asset_refers_to_self(node: Node, href: str, graph: CatalogGraph | None = None) -> bool:
     """Compare an asset href with the containing object's known locations."""
-    if not href:
+    if not href or split_href(href) is None:
         return False
     if os.path.normcase(os.path.normpath(href)) == os.path.normcase(str(node.abs_path)):
         return True
@@ -115,10 +117,10 @@ def asset_refers_to_self(node: Node, href: str, graph: CatalogGraph | None = Non
     local = "file://" + ("" if path.startswith("/") else "/") + quote(path, safe="/:")
     if not is_absolute_href(href):
         if graph is not None and graph.base_url is not None:
-            location = wire_url(graph.base_url, str(node.path))
-            return object_location(urljoin(location, href)) == object_location(location)
-        # Relative filesystem paths are literal filenames, not encoded URLs.
-        return object_location(urljoin(local, quote(href, safe="/:"))) == object_location(local)
+            location = wire_url(graph.base_url, str(graph.href_path(node)))
+            return object_location(href, base=location) == object_location(location)
+        # File identity follows the reader's decoded, suffix-free local href.
+        return local_path(quote(str(node.path.parent), safe="/"), href) == str(node.path)
     locations = [local]
     locations.extend(
         link["href"]
@@ -129,12 +131,13 @@ def asset_refers_to_self(node: Node, href: str, graph: CatalogGraph | None = Non
     )
     if graph is not None:
         locations.extend(
-            wire_url(base, str(node.path))
+            wire_url(base, str(graph.href_path(node)))
             for base in (graph.base_url, graph.published_base())
             if base is not None
         )
     return any(
-        object_location(urljoin(location, href)) == object_location(location)
+        (known := object_location(location)) is not None
+        and object_location(href, base=location) == known
         for location in locations
     )
 

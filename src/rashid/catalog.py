@@ -15,7 +15,13 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 from rashid import _json
-from rashid._href import is_absolute_href, relative_path, self_link_base, structural_prefix
+from rashid._href import (
+    is_absolute_href,
+    local_path,
+    relative_path,
+    self_link_base,
+    structural_prefix,
+)
 
 Kind = Literal["catalog", "collection", "item", "unknown"]
 
@@ -255,14 +261,12 @@ class CatalogGraph:
         Returns the target node, or None when the href is absolute, escapes
         the catalog root, or does not land on a known STAC object file.
         """
-        resolved = self.resolve_path(from_node, href)
-        if resolved is None:
-            return None
-        return self.nodes.get(resolved)
+        resolved = self.local_path(from_node, href)
+        return self.nodes.get(resolved) if resolved is not None else None
 
     def resolve_path(self, from_node: Node, href: str) -> PurePosixPath | None:
-        """Normalize a relative href to a root-relative POSIX path."""
-        resolved = relative_path(str(from_node.path.parent), href)
+        """Normalize a relative href without decoding its document identity."""
+        resolved = relative_path(str(self.href_path(from_node).parent), href)
         return PurePosixPath(resolved) if resolved is not None else None
 
     def href_path(self, node: Node) -> PurePosixPath:
@@ -272,6 +276,13 @@ class CatalogGraph:
             if self.base_url is not None
             else PurePosixPath(quote(str(node.path), safe="/"))
         )
+
+    def local_path(self, from_node: Node, href: str) -> PurePosixPath | None:
+        """Path in the local tree: decoded filenames, or encoded mirror names."""
+        if self.base_url is not None:
+            return self.resolve_path(from_node, href)
+        resolved = local_path(str(self.href_path(from_node).parent), href)
+        return PurePosixPath(resolved) if resolved is not None else None
 
     def resolve_structural_link(self, node: Node, href: str) -> tuple[bool, Node | None]:
         """Resolve structural links using the language tree's published prefix."""

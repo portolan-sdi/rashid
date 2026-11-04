@@ -21,7 +21,9 @@ _COG = "image/tiff; application=geotiff; profile=cloud-optimized"
 
 
 def _check(root: Path | str, *flags: str) -> dict[str, Any]:
-    result = CliRunner().invoke(main, ["check", "--json", *flags, str(root)])
+    result = CliRunner().invoke(
+        main, ["check", "--json", *flags, str(root)], catch_exceptions=False
+    )
     assert result.exit_code in (0, 1), result.output
     return json.loads(result.output)
 
@@ -174,6 +176,80 @@ def test_remote_relative_asset_preserves_query_in_wire_request(
     report = _check(https_server.url("catalog.json"), "--no-live")
     assert [f for f in report["findings"] if f["rule_id"] == "PTL-DAT-002"]
     assert "/roads/data.bin?token=x" in [s.path for s in https_server.seen]
+
+
+@pytest.mark.parametrize("location", ["asset", "structural", "nonstructural"])
+@pytest.mark.parametrize(
+    "href",
+    [
+        "./bad name.bin",
+        "./bad\tname.bin",
+        "./bad<name>.bin",
+        "./bad\\name.bin",
+        "./bad%name.bin",
+        "./bad%2x.bin",
+        "./café.bin",
+        "./bad[name].bin",
+    ],
+)
+def test_invalid_uri_references_are_errors_at_the_href(
+    catalog: CatalogBuilder, location: str, href: str
+) -> None:
+    from urllib.parse import quote
+
+    catalog.collection("roads")
+    root = catalog.write()
+    path = root / "roads/collection.json"
+    if location == "asset":
+        pointer = "/assets/data/href"
+        mutate_json(path, lambda d: d["assets"]["data"].update(href=href))
+    else:
+        pointer = "/links/4/href"
+        mutate_json(
+            path,
+            lambda d: d["links"].append(
+                {
+                    "rel": "child" if location == "structural" else "via",
+                    "href": href,
+                    "type": "application/json",
+                    "title": "Target",
+                }
+            ),
+        )
+    findings = [
+        f
+        for f in _check(root, "--no-data")["findings"]
+        if f["rule_id"] == "PTL-LNK-006" and "valid URI reference" in f["message"]
+    ]
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "error"
+    assert findings[0]["json_pointer"] == pointer
+    assert findings[0]["actual"] == href
+    encoded = quote(href, safe="/")
+    if location == "asset":
+        mutate_json(path, lambda d: d["assets"]["data"].update(href=encoded))
+    else:
+        mutate_json(path, lambda d: d["links"][-1].update(href=encoded))
+    assert not [
+        f for f in _check(root, "--no-data")["findings"] if "valid URI reference" in f["message"]
+    ]
+
+
+def test_issue_208_reference_catalog_repro(tmp_path: Path) -> None:
+    import shutil
+
+    root = tmp_path / "reference"
+    shutil.copytree(Path(__file__).parents[1] / "fixtures/reference-catalog", root)
+    assert _check(root, "--no-data")["error_count"] == 0
+    mutate_json(
+        root / "boundaries/boston-open-space/collection.json",
+        lambda d: d["assets"]["data"].update(href="./boston open space.parquet"),
+    )
+    report = _check(root, "--no-data")
+    assert report["error_count"] == 1
+    findings = [f for f in report["findings"] if f["severity"] == "error"]
+    assert findings[0]["path"] == "boundaries/boston-open-space/collection.json"
+    assert findings[0]["json_pointer"] == "/assets/data/href"
 
 
 @pytest.mark.parametrize("suffixes", [("#one", "#two"), ("?token=x#one", "?token=y#two")])

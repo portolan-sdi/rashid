@@ -90,7 +90,7 @@ def _link_findings(
         )
         return findings
     expected = node.path.parent / target
-    if graph.resolve_path(node, href) != expected or not graph.file_exists(expected):
+    if graph.local_path(node, href) != expected or not graph.file_exists(expected):
         findings.append(
             rule.finding(
                 node,
@@ -112,7 +112,7 @@ def _points_at_sibling(
     href = link.get("href")
     if not isinstance(href, str) or not href or is_absolute_href(href):
         return False
-    return graph.resolve_path(node, href) == node.path.parent / target
+    return graph.local_path(node, href) == node.path.parent / target
 
 
 def _check_markdown_link(

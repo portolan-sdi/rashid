@@ -37,7 +37,7 @@ from typing import Protocol
 from urllib.parse import quote
 
 from rashid import _json, _store, _trace
-from rashid._href import containment_href, crawl_prefix, href_suffix, split_href
+from rashid._href import containment_href, crawl_mirror_path, crawl_prefix, href_suffix, split_href
 from rashid.catalog import ROOT_CATALOG
 
 log = logging.getLogger(__name__)
@@ -240,8 +240,11 @@ def _write(dest: Path, rel: str, body: bytes) -> str | None:
     store allows a name longer than a filesystem does. Either is reported,
     not raised.
     """
+    path = crawl_mirror_path(rel)
+    if path is None:
+        return "unsafe document path or encoded '/' separator cannot be mirrored"
     root = dest.resolve()
-    target = root.joinpath(*rel.split("/"))
+    target = root.joinpath(*path.split("/"))
     try:
         target.relative_to(root)
     except ValueError:  # pragma: no cover - guarded upstream
