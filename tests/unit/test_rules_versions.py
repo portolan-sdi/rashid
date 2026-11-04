@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import pytest
@@ -305,8 +305,9 @@ def test_remote_history_is_not_checked_against_crawl_mirror(
 
 
 @pytest.mark.parametrize("broken", ["predecessor-version", "successor-version"])
+@pytest.mark.parametrize("path_type", [PurePosixPath, PureWindowsPath], ids=["posix", "windows"])
 def test_unresolved_partner_does_not_add_reciprocal_warning(
-    catalog: CatalogBuilder, broken: str
+    catalog: CatalogBuilder, broken: str, path_type: type[PurePath]
 ) -> None:
     root = _chain(catalog)
     name = "new" if broken == "predecessor-version" else "old"
@@ -315,7 +316,8 @@ def test_unresolved_partner_does_not_add_reciprocal_warning(
     findings = _findings(root)
     assert len(findings) == 1
     assert findings[0]["message"] == f"{broken} does not resolve to a STAC resource"
-    assert findings[0]["path"] == str(_path(root, name).relative_to(root))
+    expected_path = path_type(_path(root, name)).relative_to(path_type(root))
+    assert findings[0]["path"] == expected_path.as_posix()
 
     # A genuinely absent partner still needs its own diagnostic.
     _remove(root, name, broken)
