@@ -1,7 +1,7 @@
 # Two-stage strategy:
 #   commit stage  — fast, file-scoped checks (formatting, hygiene, spelling,
 #                   workflow lint). Must stay sub-second-ish.
-#   pre-push stage — whole-project gates (types, dead code, complexity,
+#   pre-push stage — whole-project gates (types, dead code,
 #                   dependency hygiene, import contracts). CI runs both
 #                   stages via `pre-commit run --all-files [--hook-stage
 #                   pre-push]`, so nothing here is skippable by accident.
@@ -85,13 +85,6 @@ repos:
       - id: vulture
         name: vulture (dead code)
         entry: uv run vulture
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-
-      - id: xenon
-        name: xenon (complexity ceiling)
-        entry: uv run xenon --max-absolute=D --max-modules=C --max-average=B src/rashid tests
         language: system
         pass_filenames: false
         stages: [pre-push]

@@ -23,8 +23,7 @@ Hooks run checks at commit and push time. CI runs both sets.
 # actionlint, zizmor, and file hygiene checks
 uv run pre-commit run --all-files
 
-# On push: deptry, strict mypy, vulture,
-# xenon complexity checks, and import-linter
+# On push: deptry, strict mypy, vulture, and import-linter
 uv run pre-commit run --all-files --hook-stage pre-push
 ```
 
