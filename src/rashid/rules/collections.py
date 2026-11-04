@@ -22,7 +22,7 @@ import re
 from collections.abc import Iterable
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import TIFF_SUFFIXES, assets_of, is_raster_data_asset, roles_of
 from rashid.rules.item_mirror import mirror_assets
@@ -90,7 +90,7 @@ class SingleFileCollectionRule(Rule):
             node,
             f"collection holds a single data file, but item {item.id or item.path!s} wraps it"
             f" as asset '{key}'; single-file collections carry their data at collection level",
-            json_pointer="/assets",
+            json_pointer=json_pointer("assets"),
             fix_hint=f"move the item's '{key}' asset into the collection's assets, then delete"
             f" the item JSON, its directory, and the collection's rel:'item' link to it",
         )
@@ -138,7 +138,7 @@ class RasterSceneItemRule(Rule):
                 node,
                 f"collection lists {len(keys)} scene COGs as collection-level assets"
                 f" ({listed}); each raster scene belongs on its own item",
-                json_pointer="/assets",
+                json_pointer=json_pointer("assets"),
                 fix_hint="create one item per scene, move each COG onto its item as an"
                 " item-level asset with that scene's geometry and datetime, and link the"
                 " items from the collection with rel:'item'",
@@ -155,7 +155,7 @@ class RasterSceneItemRule(Rule):
             f"collection exposes COG asset '{keys[0]}' at collection level while items"
             f" ({names}) carry scene COGs; a collection-level COG is only for a"
             " single-COG collection, which has no item directory",
-            json_pointer=f"/assets/{keys[0]}",
+            json_pointer=json_pointer("assets", keys[0]),
             fix_hint=f"move the '{keys[0]}' asset onto an item of its own alongside the"
             " other scenes",
         )
@@ -221,7 +221,7 @@ class MissingItemTreeRule(Rule):
                 f" ({_name_some(scenes)}) but the collection publishes no items:"
                 " no item JSON, no item directory, and no rel:'item' link"
                 " (PORTO-CORE-015, PORTO-CORE-032, PORTO-CORE-071)",
-                json_pointer="/links",
+                json_pointer=json_pointer("links"),
                 fix_hint="create one item per scene, each in its own subdirectory,"
                 " carrying that scene's COG as an item-level asset with its own"
                 " geometry and datetime, and add a rel:'item' link to each",
@@ -301,7 +301,7 @@ class CollectionIdRule(Rule):
                 node,
                 f"collection id '{node.id}' does not follow the naming convention"
                 " (lowercase letters, numbers, hyphens, underscores; starts with a letter)",
-                json_pointer="/id",
+                json_pointer=json_pointer("id"),
                 fix_hint="rename the id to lowercase, replacing spaces and other characters"
                 " with hyphens, e.g. 'road-centerlines-2024'",
                 actual=node.id,
@@ -317,7 +317,7 @@ class CollectionIdRule(Rule):
                     node,
                     f"collection id '{node.id}' is not unique within the catalog"
                     f" (also used by '{other.path}')",
-                    json_pointer="/id",
+                    json_pointer=json_pointer("id"),
                     fix_hint="give this collection a distinct id, e.g. prefix it with its"
                     " parent catalog's name",
                     actual=node.id,

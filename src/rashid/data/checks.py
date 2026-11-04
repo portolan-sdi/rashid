@@ -92,7 +92,7 @@ from rashid.catalog import CatalogGraph, Node
 from rashid.data import DataDefect, _DataResults, _files
 from rashid.data._files import _AssetFiles
 from rashid.data.reader import AssetReader, Locator
-from rashid.model import Severity
+from rashid.model import Severity, json_pointer
 from rashid.registry import (
     DAT_CHECKSUM,
     DAT_COG,
@@ -810,7 +810,7 @@ def _check_collection_extent(node: Node, bounds: list[_Wgs84Bounds]) -> list[Dat
             f"collection '{node.id}' declared bbox {_fmt_bbox(declared)} is inconsistent with "
             f"its asset union {_fmt_bbox(union.outer)}",
             "",
-            json_pointer="/extent/spatial/bbox/0",
+            json_pointer=json_pointer("extent", "spatial", "bbox", 0),
         )
     ]
 
@@ -836,7 +836,11 @@ def _epsg_defect(node: Node, key: str, declared: _EpsgDeclaration, actual: int) 
             expected=actual,
             actual=declared.value,
         )
-    where = "in its properties" if declared.pointer.startswith("/properties") else "at its root"
+    where = (
+        "in its properties"
+        if declared.pointer.startswith(json_pointer("properties"))
+        else "at its root"
+    )
     return DataDefect(
         DAT_CONSISTENCY,
         Severity.WARNING,
@@ -1876,7 +1880,7 @@ def _partition_schema_defects(schemas: list[tuple[str, dict[str, str]]]) -> list
                 f"partition file '{name}' does not share '{reference_name}'s "
                 f"Parquet schema: {difference}",
                 "",
-                json_pointer="/partition:glob",
+                json_pointer=json_pointer("partition:glob"),
             )
         )
     return defects
@@ -2115,8 +2119,8 @@ def _declared_epsg(node: Node, asset: dict[str, Any]) -> _EpsgDeclaration | None
     """
     sources: tuple[tuple[Any, str | None], ...] = (
         (asset, None),
-        (node.data.get("properties", {}), "/properties/proj:epsg"),
-        (node.data, "/proj:epsg"),
+        (node.data.get("properties", {}), json_pointer("properties", "proj:epsg")),
+        (node.data, json_pointer("proj:epsg")),
     )
     for source, pointer in sources:
         if isinstance(source, dict):

@@ -10,7 +10,7 @@ from typing import Any
 
 from rashid import _json
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 
 SCHEMA_URI_PATTERN = re.compile(
@@ -40,14 +40,14 @@ class SchemaUriDeclaredRule(Rule):
             yield self.finding(
                 node,
                 "stac_extensions declares no Portolan schema URI",
-                json_pointer="/stac_extensions",
+                json_pointer=json_pointer("stac_extensions"),
                 fix_hint=("add e.g. https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"),
             )
         elif len(uris) > 1:
             yield self.finding(
                 node,
                 f"stac_extensions declares {len(uris)} Portolan schema URIs; exactly one expected",
-                json_pointer="/stac_extensions",
+                json_pointer=json_pointer("stac_extensions"),
                 fix_hint="keep the one Portolan schema URI this object conforms to and remove"
                 " the others from stac_extensions",
                 expected=1,
@@ -92,7 +92,7 @@ class SchemaUriConsistencyRule(Rule):
                     ),
                     path=str(node.path),
                     object_id=node.id,
-                    json_pointer="/stac_extensions",
+                    json_pointer=json_pointer("stac_extensions"),
                     fix_hint=(
                         f"replace the declared URI with the root catalog's {root_uri}, or"
                         " migrate the whole catalog to one schema version"
@@ -136,12 +136,12 @@ class VersionExtensionRule(Rule):
         used = [field for field in _VERSION_FIELDS if field in container]
         if not used or _declares_version_extension(node):
             return
-        prefix = "/properties/" if node.kind == "item" else "/"
+        tokens = ("properties",) if node.kind == "item" else ()
         yield self.finding(
             node,
             f"dataset version field(s) {used} used without declaring the STAC"
             " version extension in stac_extensions",
-            json_pointer=f"{prefix}{used[0]}",
+            json_pointer=json_pointer(*tokens, used[0]),
             fix_hint=f"add '{_VERSION_EXTENSION_PREFIX}v1.2.0/schema.json' to stac_extensions",
         )
 
@@ -270,7 +270,7 @@ class ExtensionVersionRule(Rule):
                 node,
                 f"{name} extension declared at {parsed['version']}, but the Portolan"
                 f" extension registry pins {pinned}",
-                json_pointer=f"/stac_extensions/{index}",
+                json_pointer=json_pointer("stac_extensions", index),
                 fix_hint=f"replace '{uri}' with '{expected}' in stac_extensions",
                 expected=expected,
                 actual=uri,

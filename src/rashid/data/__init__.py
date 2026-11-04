@@ -43,7 +43,7 @@ from typing import Any
 from rashid import _trace
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.data.reader import AssetReader, FilesystemHttpReader, Locator
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.registry import DAT_UNAVAILABLE
 from rashid.rules._common import assets_of
 
@@ -125,7 +125,11 @@ class _DataResults:
                 )
             results.append(
                 DataDefect(
-                    first.rule_id, first.severity, message, "", json_pointer="/partition:glob"
+                    first.rule_id,
+                    first.severity,
+                    message,
+                    "",
+                    json_pointer=json_pointer("partition:glob"),
                 )
             )
         return results
@@ -309,9 +313,9 @@ def _to_findings(node: Node, defects: list[DataDefect]) -> list[Finding]:
     for defect in defects:
         pointer = defect.json_pointer
         if pointer is None:
-            pointer = f"/assets/{defect.asset_key}"
+            pointer = json_pointer("assets", defect.asset_key)
             if defect.field is not None:
-                pointer = f"{pointer}/{defect.field}"
+                pointer = json_pointer(defect.field, prefix=pointer)
         findings.append(
             Finding(
                 rule_id=defect.rule_id,

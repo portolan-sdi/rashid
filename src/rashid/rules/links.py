@@ -7,7 +7,7 @@ from typing import Any
 
 from rashid._href import is_absolute_href, is_uri_reference
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import STRUCTURAL_RELS, assets_of, links_of
 
@@ -72,7 +72,7 @@ class RequiredLinksRule(Rule):
                 yield self.finding(
                     node,
                     f"missing required structural link rel:'{rel}'",
-                    json_pointer="/links",
+                    json_pointer=json_pointer("links"),
                     fix_hint=f"add a rel:'{rel}' link to links, with a relative href to"
                     f" {_REQUIRED_LINK_TARGETS[rel]} and type application/json",
                 )
@@ -121,7 +121,7 @@ class ChildLinkCompletenessRule(Rule):
             yield self.finding(
                 node,
                 f"contained object '{contained.path}' has no {expected} link",
-                json_pointer="/links",
+                json_pointer=json_pointer("links"),
                 fix_hint=f"add a rel:'{expected}' link pointing to {contained.path}",
             )
 
@@ -146,7 +146,7 @@ class StructuralLinkTypeRule(Rule):
                 yield self.finding(
                     node,
                     f"link rel:'{rel}' has type {actual!r}, expected '{expected}'",
-                    json_pointer=f"/links/{index}/type",
+                    json_pointer=json_pointer("links", index, "type"),
                     fix_hint=f"set the link's type to '{expected}'",
                     expected=expected,
                     actual=actual,
@@ -230,10 +230,12 @@ class LinkResolutionRule(Rule):
 
     def _invalid_hrefs(self, node: Node) -> Iterable[Finding]:
         locations = [
-            (f"/links/{index}/href", link.get("href")) for index, link in enumerate(links_of(node))
+            (json_pointer("links", index, "href"), link.get("href"))
+            for index, link in enumerate(links_of(node))
         ]
         locations.extend(
-            (f"{pointer}/href", asset.get("href")) for pointer, _key, asset in assets_of(node)
+            (json_pointer("href", prefix=pointer), asset.get("href"))
+            for pointer, _key, asset in assets_of(node)
         )
         for pointer, href in locations:
             if isinstance(href, str) and href and not is_uri_reference(href):
@@ -252,7 +254,7 @@ class LinkResolutionRule(Rule):
             if rel not in STRUCTURAL_RELS:
                 continue
             href = link.get("href")
-            pointer = f"/links/{index}/href"
+            pointer = json_pointer("links", index, "href")
             if not isinstance(href, str) or not href:
                 yield self.finding(
                     node,
@@ -310,10 +312,10 @@ class IconMediaTypeRule(Rule):
                 continue
             if actual is None:
                 message = "logo link rel:'icon' declares no type"
-                pointer = f"/links/{index}"
+                pointer = json_pointer("links", index)
             else:
                 message = f"logo link rel:'icon' has type {actual!r}, which no browser renders"
-                pointer = f"/links/{index}/type"
+                pointer = json_pointer("links", index, "type")
             yield self.finding(
                 node,
                 message,
@@ -340,7 +342,7 @@ class IconTitleRule(Rule):
             yield self.finding(
                 node,
                 "logo link rel:'icon' has no title",
-                json_pointer=f"/links/{index}",
+                json_pointer=json_pointer("links", index),
                 fix_hint="add a title naming what the logo shows; a page that renders"
                 " the logo uses it as the image's accessible label",
             )
@@ -362,7 +364,7 @@ class IconRelativeHrefRule(Rule):
                 yield self.finding(
                     node,
                     "logo link rel:'icon' has no href",
-                    json_pointer=f"/links/{index}/href",
+                    json_pointer=json_pointer("links", index, "href"),
                     fix_hint="set the href to the image's path relative to this file,"
                     " e.g. './_assets/logo.png'",
                 )
@@ -370,7 +372,7 @@ class IconRelativeHrefRule(Rule):
                 yield self.finding(
                     node,
                     f"logo link rel:'icon' should be relative, got '{href}'",
-                    json_pointer=f"/links/{index}/href",
+                    json_pointer=json_pointer("links", index, "href"),
                     fix_hint="copy the image into the catalog and point the href at it,"
                     " e.g. './_assets/logo.png'",
                     actual=href,
@@ -422,7 +424,7 @@ class ContainmentStaysInLanguageRule(Rule):
                 node,
                 f"link rel:'{rel}' reaches into the alternate-language tree at"
                 f" '{there.path}'{named}",
-                json_pointer=f"/links/{index}",
+                json_pointer=json_pointer("links", index),
                 fix_hint="change the link to rel:'alternate' with type 'application/json'"
                 " and an hreflang naming the target's language",
                 actual=href,

@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import assets_of, is_raster_data_asset, roles_of
 
@@ -88,7 +88,7 @@ class ItemMirrorPresentRule(Rule):
             node,
             f"raster collection models {len(scenes)} scene(s) as items but publishes no"
             " stac-geoparquet mirror",
-            json_pointer="/assets",
+            json_pointer=json_pointer("assets"),
             fix_hint="write the items to items.parquet in the collection root, then register it"
             f' as a collection-level asset with roles ["{MIRROR_ROLE}"] and type'
             f" {PARQUET_MEDIA_TYPE}",
@@ -118,7 +118,7 @@ class ItemMirrorRegistrationRule(Rule):
                 yield self.finding(
                     node,
                     f"mirror asset '{key}' does not carry the '{MIRROR_ROLE}' role",
-                    json_pointer=f"{pointer}/roles",
+                    json_pointer=json_pointer("roles", prefix=pointer),
                     fix_hint=f'add "{MIRROR_ROLE}" to the asset\'s roles',
                 )
             if asset.get("type") != PARQUET_MEDIA_TYPE:
@@ -126,7 +126,7 @@ class ItemMirrorRegistrationRule(Rule):
                     node,
                     f"mirror asset '{key}' has type {asset.get('type')!r},"
                     f" expected '{PARQUET_MEDIA_TYPE}'",
-                    json_pointer=f"{pointer}/type",
+                    json_pointer=json_pointer("type", prefix=pointer),
                     fix_hint=f"set the mirror asset's type to '{PARQUET_MEDIA_TYPE}'",
                     expected=PARQUET_MEDIA_TYPE,
                     actual=asset.get("type"),

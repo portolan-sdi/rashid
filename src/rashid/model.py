@@ -25,6 +25,11 @@ class Severity(Enum):
     INFO = "info"
 
 
+def json_pointer(*tokens: str | int, prefix: str = "") -> str:
+    """Build a JSON pointer, optionally extending an already-built prefix."""
+    return prefix + "".join("/" + str(token) for token in tokens)
+
+
 @dataclass(frozen=True)
 class Finding:
     """A single defect found in a single object.

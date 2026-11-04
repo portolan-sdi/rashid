@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import roles_of
 
@@ -33,7 +33,7 @@ class ProducerPresentRule(Rule):
             yield self.finding(
                 node,
                 "collection declares no providers",
-                json_pointer="/providers",
+                json_pointer=json_pointer("providers"),
                 fix_hint='add a providers array, e.g. [{"name": "Statistics Agency", "roles":'
                 ' ["producer", "host"], "url": "https://example.org"}]',
             )
@@ -42,7 +42,7 @@ class ProducerPresentRule(Rule):
             yield self.finding(
                 node,
                 "no provider carries the 'producer' role",
-                json_pointer="/providers",
+                json_pointer=json_pointer("providers"),
                 fix_hint='add "producer" to the roles of the organization that made the data,'
                 " or add that organization as a new provider",
             )
@@ -66,7 +66,7 @@ class SingleHostRule(Rule):
             yield self.finding(
                 node,
                 f"expected exactly one provider with the 'host' role, found {len(hosts)}",
-                json_pointer="/providers",
+                json_pointer=json_pointer("providers"),
                 fix_hint='leave the "host" role on exactly one provider, the organization'
                 " serving these files, and drop it from the rest",
                 expected=1,
@@ -77,7 +77,7 @@ class SingleHostRule(Rule):
             yield self.finding(
                 node,
                 "the host provider must be the last element of the providers list",
-                json_pointer="/providers",
+                json_pointer=json_pointer("providers"),
                 fix_hint="move the host provider to the end of the providers array",
             )
 
@@ -104,6 +104,6 @@ class HostContactRule(Rule):
             yield self.finding(
                 node,
                 f"host provider '{host.get('name', '?')}' has neither a url nor an email",
-                json_pointer="/providers",
+                json_pointer=json_pointer("providers"),
                 fix_hint="add a url to a maintainer contact page, or an email field",
             )

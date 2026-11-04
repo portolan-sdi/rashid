@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import (
     PMTILES_MEDIA_TYPE,
@@ -148,7 +148,7 @@ class ThumbnailRule(Rule):
                     " geospatial cannot be decided from metadata:"
                     f" {_undecided_because(node, graph)}",
                     severity=Severity.WARNING,
-                    json_pointer="/assets",
+                    json_pointer=json_pointer("assets"),
                     fix_hint=f"{_RESOLVE_HINT}; add a thumbnail if the collection is geospatial",
                 )
             return
@@ -156,7 +156,7 @@ class ThumbnailRule(Rule):
             yield self.finding(
                 node,
                 "geospatial collection has no asset with the 'thumbnail' role",
-                json_pointer="/assets",
+                json_pointer=json_pointer("assets"),
                 fix_hint="add a thumbnail generated from the collection's default styling",
             )
             return
@@ -167,7 +167,7 @@ class ThumbnailRule(Rule):
                     node,
                     f"thumbnail asset '{key}' has type {media_type!r}, expected image/png,"
                     " image/jpeg or image/webp",
-                    json_pointer=f"{pointer}/type",
+                    json_pointer=json_pointer("type", prefix=pointer),
                     fix_hint="set the thumbnail's type to the media type of the file it points"
                     " at, 'image/png', 'image/jpeg' or 'image/webp'",
                     expected=list(_THUMBNAIL_TYPES),
@@ -201,7 +201,7 @@ class StylesForDerivativeRule(Rule):
             yield self.finding(
                 node,
                 "collection has a visualization derivative but no asset with the 'style' role",
-                json_pointer="/assets",
+                json_pointer=json_pointer("assets"),
                 fix_hint="register the MapLibre style in styles/ as a collection-level"
                 ' asset with roles ["style"]',
             )
@@ -224,7 +224,7 @@ class PMTilesRegistrationRule(Rule):
             yield self.finding(
                 node,
                 "PMTiles asset is not registered through a rel:'pmtiles' link",
-                json_pointer="/links",
+                json_pointer=json_pointer("links"),
                 fix_hint='add {"rel": "pmtiles", "href": <the PMTiles href>, "type":'
                 f' "{PMTILES_MEDIA_TYPE}", "pmtiles:layers": [<default-visible layers>]}}'
                 " to links",
@@ -238,7 +238,7 @@ class PMTilesRegistrationRule(Rule):
                     node,
                     f"rel:'pmtiles' link has type {link.get('type')!r},"
                     f" expected '{PMTILES_MEDIA_TYPE}'",
-                    json_pointer=f"/links/{index}/type",
+                    json_pointer=json_pointer("links", index, "type"),
                     fix_hint=f"set the link's type to '{PMTILES_MEDIA_TYPE}'",
                     expected=PMTILES_MEDIA_TYPE,
                     actual=link.get("type"),
@@ -248,7 +248,7 @@ class PMTilesRegistrationRule(Rule):
                 yield self.finding(
                     node,
                     "rel:'pmtiles' link has no pmtiles:layers array of default-visible layers",
-                    json_pointer=f"/links/{index}",
+                    json_pointer=json_pointer("links", index),
                     fix_hint="add pmtiles:layers to the link, naming the tile layers a client"
                     ' should show by default, e.g. ["roads"]',
                 )
@@ -261,7 +261,7 @@ class PMTilesRegistrationRule(Rule):
                 node,
                 "rel:'pmtiles' link used without declaring the web-map-links extension"
                 " schema in stac_extensions",
-                json_pointer="/stac_extensions",
+                json_pointer=json_pointer("stac_extensions"),
                 fix_hint=f"add '{_WEB_MAP_LINKS_PREFIX}v1.3.0/schema.json' to stac_extensions",
             )
 
@@ -296,7 +296,7 @@ class StyleMediaTypeRule(Rule):
                 yield self.finding(
                     node,
                     f"style asset '{key}' has type {media_type!r}, expected '{STYLE_MEDIA_TYPE}'",
-                    json_pointer=f"{pointer}/type",
+                    json_pointer=json_pointer("type", prefix=pointer),
                     fix_hint=f"set the style asset's type to '{STYLE_MEDIA_TYPE}'",
                     expected=STYLE_MEDIA_TYPE,
                     actual=media_type,
@@ -337,7 +337,7 @@ class DefaultStyleRoleRule(Rule):
         yield self.finding(
             node,
             message,
-            json_pointer="/assets",
+            json_pointer=json_pointer("assets"),
             fix_hint="add 'default' to the roles of exactly one style asset",
         )
 
@@ -383,7 +383,7 @@ class LargeVectorWithoutVisualRule(Rule):
                     f"data asset '{key}' is {size} bytes with no visual derivative, and"
                     " whether this collection is geospatial cannot be decided from"
                     f" metadata: {_undecided_because(node, graph)}",
-                    json_pointer="/assets",
+                    json_pointer=json_pointer("assets"),
                     fix_hint=f"{_RESOLVE_HINT}; publish a PMTiles derivative with a MapLibre"
                     " style if the collection is geospatial",
                 )
@@ -392,6 +392,6 @@ class LargeVectorWithoutVisualRule(Rule):
                 node,
                 f"vector data asset '{key}' is {size} bytes with no visual"
                 " derivative; rendering from source is unlikely to be viable",
-                json_pointer="/assets",
+                json_pointer=json_pointer("assets"),
                 fix_hint="publish a PMTiles derivative with a MapLibre style",
             )

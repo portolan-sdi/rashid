@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 
 # A "raw slug": word characters chained with _ or . and no spaces at all,
@@ -39,7 +39,7 @@ class TitleDescriptionRule(Rule):
                 yield self.finding(
                     node,
                     f"missing or empty '{field}'",
-                    json_pointer=f"/{field}",
+                    json_pointer=json_pointer(field),
                     fix_hint=f"add a '{field}': {_FIELD_HINTS[field]}",
                 )
 
@@ -86,11 +86,11 @@ def _title_positions(node: Node) -> Iterable[tuple[str, Any]]:
     if node.kind == "item":
         properties = node.data.get("properties")
         if isinstance(properties, dict):
-            yield "/properties/title", properties.get("title")
+            yield json_pointer("properties", "title"), properties.get("title")
     else:
-        yield "/title", node.data.get("title")
+        yield json_pointer("title"), node.data.get("title")
         for index, link in _child_item_links(node):
-            yield f"/links/{index}/title", link.get("title")
+            yield json_pointer("links", index, "title"), link.get("title")
 
 
 class LinkTitleRule(Rule):
@@ -110,7 +110,7 @@ class LinkTitleRule(Rule):
                 yield self.finding(
                     node,
                     f"link rel:'{rel}' href '{link.get('href')}' has no title",
-                    json_pointer=f"/links/{index}/title",
+                    json_pointer=json_pointer("links", index, "title"),
                     fix_hint="add a title to the link, matching the title of the object it"
                     " points at",
                 )

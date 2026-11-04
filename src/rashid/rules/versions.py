@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 
 from rashid._href import is_absolute_href
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 
 _NEIGHBOURS = {
@@ -44,7 +44,7 @@ class VersionChainRule(Rule):
                 older, newer = (target, node) if rel == "predecessor-version" else (node, target)
                 successors.setdefault(older.path, set()).add(newer.path)
         for node, index, rel, target in links:
-            pointer = f"/links/{index}/href"
+            pointer = json_pointer("links", index, "href")
             if rel in _NEIGHBOURS:
                 inverse = _NEIGHBOURS[rel]
                 if (target.path, inverse) not in uncertain and node.path not in resolved.get(
@@ -63,7 +63,9 @@ class VersionChainRule(Rule):
                 )
         for path in _cycle_origins(successors):
             yield self.finding(
-                graph.nodes[path], "version history contains a cycle", json_pointer="/links"
+                graph.nodes[path],
+                "version history contains a cycle",
+                json_pointer=json_pointer("links"),
             )
 
     def _resolve_links(
@@ -75,7 +77,7 @@ class VersionChainRule(Rule):
         for node in graph.iter("catalog", "collection", "item"):
             latest = 0
             for index, rel, href in _version_links(node):
-                pointer = f"/links/{index}/href"
+                pointer = json_pointer("links", index, "href")
                 if rel == "latest-version":
                     latest += 1
                     if latest == 2:
@@ -83,7 +85,7 @@ class VersionChainRule(Rule):
                             self.finding(
                                 node,
                                 "at most one latest-version link is allowed",
-                                json_pointer="/links",
+                                json_pointer=json_pointer("links"),
                             )
                         )
                 if rel == "version-history":
@@ -123,7 +125,7 @@ class VersionChainRule(Rule):
         yield self.finding(
             node,
             "version-history does not resolve to an existing file",
-            json_pointer=f"/links/{index}/href",
+            json_pointer=json_pointer("links", index, "href"),
         )
 
 

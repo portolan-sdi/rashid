@@ -81,7 +81,7 @@ from rashid._href import (
     resolve_live_base,
 )
 from rashid.catalog import CatalogGraph, Kind, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.registry import (
     LIV_CORS_EXPOSE,
     LIV_CORS_ORIGIN,
@@ -209,7 +209,7 @@ class _Target:
             message=f"host '{host}': {message}",
             path=str(self.node.path),
             object_id=self.node.id,
-            json_pointer=f"/assets/{self.key}/href",
+            json_pointer=json_pointer("assets", self.key, "href"),
             fix_hint=fix_hint,
             expected=expected,
             actual=actual,
@@ -476,7 +476,7 @@ def _check_head(target: _Target, response: ProbeResponse) -> list[Finding]:
             )
         ]
     length = response.header("content-length")
-    pointer = f"/assets/{target.key}"
+    pointer = json_pointer("assets", target.key)
     if length is None or not length.isdigit():
         return [
             Finding(
@@ -634,7 +634,7 @@ def _check_heads(
             findings.append(
                 _off_https_finding(
                     target.node,
-                    pointer=f"/assets/{target.key}/href",
+                    pointer=json_pointer("assets", target.key, "href"),
                     subject=f"asset '{target.key}'",
                     result=_ProbeRedirect("HEAD", target.url, location),
                 )
@@ -671,7 +671,7 @@ def _check_server(rep: _Target, ranged: ProbeResponse, preflighted: ProbeRespons
 def _ranged_off_https(rep: _Target, location: str) -> Finding:
     return _off_https_finding(
         rep.node,
-        pointer=f"/assets/{rep.key}/href",
+        pointer=json_pointer("assets", rep.key, "href"),
         subject=f"asset '{rep.key}'",
         result=_ProbeRedirect("a ranged GET of", rep.url, location),
     )
@@ -762,7 +762,7 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
             findings.append(
                 _off_https_finding(
                     target.node,
-                    pointer=f"/links/{target.index}/href",
+                    pointer=json_pointer("links", target.index, "href"),
                     subject=f"link rel:{target.rel!r} href '{target.href}'",
                     result=_ProbeRedirect("HEAD", target.url, location),
                 )
@@ -778,7 +778,7 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
                 ),
                 path=str(target.node.path),
                 object_id=target.node.id,
-                json_pointer=f"/links/{target.index}/href",
+                json_pointer=json_pointer("links", target.index, "href"),
                 fix_hint="upload the linked document to the publish host, or correct the href",
                 expected="2xx",
                 actual=status,
@@ -824,7 +824,7 @@ def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
             ),
             path=str(root.path),
             object_id=root.id,
-            json_pointer=f"/links/{index}/href",
+            json_pointer=json_pointer("links", index, "href"),
             fix_hint=(
                 f"set the root self link to {base}{root.path.name}, or publish"
                 " the catalog at the location the self link names"

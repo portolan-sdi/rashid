@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from rashid._href import is_absolute_href
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import links_of
 
@@ -70,7 +70,7 @@ def _link_findings(
             rule.finding(
                 node,
                 f"rel:{rel!r} link has type {link.get('type')!r}, expected 'text/markdown'",
-                json_pointer=f"/links/{index}/type",
+                json_pointer=json_pointer("links", index, "type"),
                 fix_hint=f"set the rel:{rel!r} link type to 'text/markdown'",
                 expected=_MARKDOWN,
                 actual=link.get("type"),
@@ -82,7 +82,7 @@ def _link_findings(
             rule.finding(
                 node,
                 f"rel:{rel!r} link href must be a relative path, got {href!r}",
-                json_pointer=f"/links/{index}/href",
+                json_pointer=json_pointer("links", index, "href"),
                 fix_hint=f'set the href to "./{target}"',
                 expected=f"./{target}",
                 actual=href,
@@ -95,7 +95,7 @@ def _link_findings(
             rule.finding(
                 node,
                 f"rel:{rel!r} link href {href!r} does not resolve to the sibling {target}",
-                json_pointer=f"/links/{index}/href",
+                json_pointer=json_pointer("links", index, "href"),
                 fix_hint=f'set the href to "./{target}" and make sure that file exists next to'
                 " this object",
                 expected=f"./{target}",
@@ -136,7 +136,7 @@ def _check_markdown_link(
         yield rule.finding(
             node,
             f"missing rel:{rel!r} link to {target}",
-            json_pointer="/links",
+            json_pointer=json_pointer("links"),
             fix_hint=f'add {{"rel": "{rel}", "href": "./{target}", "type": "text/markdown"}}',
         )
         return

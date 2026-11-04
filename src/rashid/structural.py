@@ -20,7 +20,7 @@ from typing import Any
 
 from rashid._jsonschema import SchemaError, SchemaPass, Validator, schema_targets, stac_registry
 from rashid.catalog import CatalogGraph
-from rashid.model import Finding
+from rashid.model import Finding, json_pointer
 from rashid.registry import STR_INVALID, STR_UNAVAILABLE
 
 _PASS = SchemaPass("structural", STR_INVALID, STR_UNAVAILABLE)
@@ -71,7 +71,7 @@ def default_validator() -> Validator:
                         f"'type' must be one of {expected} for STAC {STAC_VERSION}, "
                         f"got {stac_type!r}"
                     ),
-                    json_pointer="/type",
+                    json_pointer=json_pointer("type"),
                 )
             ]
         return validator(data)

@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 
 # DBL_MAX and friends written out by broken exporters as "effectively
@@ -20,7 +20,7 @@ def _bboxes_of(node: Node) -> list[tuple[str, Any]]:
     found: list[tuple[str, Any]] = []
     if node.kind == "item":
         if "bbox" in node.data:
-            found.append(("/bbox", node.data["bbox"]))
+            found.append((json_pointer("bbox"), node.data["bbox"]))
         return found
     extent = node.data.get("extent")
     if isinstance(extent, dict):
@@ -29,7 +29,7 @@ def _bboxes_of(node: Node) -> list[tuple[str, Any]]:
             boxes = spatial.get("bbox")
             if isinstance(boxes, list):
                 for index, box in enumerate(boxes):
-                    found.append((f"/extent/spatial/bbox/{index}", box))
+                    found.append((json_pointer("extent", "spatial", "bbox", index), box))
     return found
 
 

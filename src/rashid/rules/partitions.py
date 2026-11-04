@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 
 # Version-tolerant prefix of the partition extension's schema URI, matching
@@ -51,7 +51,7 @@ class PartitionFieldsRule(Rule):
             yield self.finding(
                 node,
                 "partitioned collection declares no partition:scheme",
-                json_pointer="/partition:scheme",
+                json_pointer=json_pointer("partition:scheme"),
                 fix_hint="add partition:scheme naming the directory layout, e.g. 'hive'",
             )
         keys = node.data.get("partition:keys")
@@ -59,7 +59,7 @@ class PartitionFieldsRule(Rule):
             yield self.finding(
                 node,
                 "partitioned collection declares no partition:keys",
-                json_pointer="/partition:keys",
+                json_pointer=json_pointer("partition:keys"),
                 fix_hint='add partition:keys listing the partition columns, e.g. ["year"]',
             )
         glob = node.data.get("partition:glob")
@@ -68,7 +68,7 @@ class PartitionFieldsRule(Rule):
                 node,
                 "partitioned collection declares no partition:glob, the normative"
                 " bulk-access path for its partitions",
-                json_pointer="/partition:glob",
+                json_pointer=json_pointer("partition:glob"),
                 fix_hint="add partition:glob, e.g. 's3://bucket/data/*.parquet'",
             )
         if not _declares_extension(node):
@@ -76,7 +76,7 @@ class PartitionFieldsRule(Rule):
                 node,
                 "partition:* fields used without declaring the partition extension"
                 " schema in stac_extensions",
-                json_pointer="/stac_extensions",
+                json_pointer=json_pointer("stac_extensions"),
                 fix_hint=f"add '{_PARTITION_EXTENSION_PREFIX}v1.0.0/schema.json'"
                 " to stac_extensions",
             )
@@ -110,7 +110,7 @@ class PartitionGlobSchemeRule(Rule):
             yield self.finding(
                 node,
                 "partition:glob uses HTTP or HTTPS, which cannot list partition objects",
-                json_pointer="/partition:glob",
+                json_pointer=json_pointer("partition:glob"),
                 fix_hint="use a relative glob or a bucket-native scheme such as s3:// or gs://",
                 actual=glob,
             )

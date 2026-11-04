@@ -12,7 +12,7 @@ from typing import Any
 from rashid._href import parse_href
 from rashid._multihash import is_well_formed_multihash
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import (
     COG_MEDIA_TYPE,
@@ -38,7 +38,7 @@ def _item_asset_templates(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
     if isinstance(templates, dict):
         for key, template in templates.items():
             if isinstance(template, dict):
-                found.append((f"/item_assets/{key}", key, template))
+                found.append((json_pointer("item_assets", key), key, template))
     return found
 
 
@@ -58,7 +58,7 @@ class AssetFieldsRule(Rule):
                 yield self.finding(
                     node,
                     f"asset '{key}' has no href",
-                    json_pointer=f"{pointer}/href",
+                    json_pointer=json_pointer("href", prefix=pointer),
                     fix_hint="set href to the file's path relative to this object,"
                     " e.g. './data.parquet'",
                 )
@@ -76,7 +76,7 @@ class AssetFieldsRule(Rule):
             yield self.finding(
                 node,
                 f"asset '{key}' has no type (media type)",
-                json_pointer=f"{pointer}/type",
+                json_pointer=json_pointer("type", prefix=pointer),
                 fix_hint="add the file's IANA media type, e.g."
                 " 'application/vnd.apache.parquet' for GeoParquet",
             )
@@ -85,7 +85,7 @@ class AssetFieldsRule(Rule):
             yield self.finding(
                 node,
                 f"asset '{key}' has no roles",
-                json_pointer=f"{pointer}/roles",
+                json_pointer=json_pointer("roles", prefix=pointer),
                 fix_hint='add a roles array naming what the asset is for, e.g. ["data"],'
                 ' ["thumbnail"], or ["visual"]',
             )
@@ -115,7 +115,7 @@ class AssetHrefSchemeRule(Rule):
                 yield self.finding(
                     node,
                     f"asset '{key}' href uses s3://; absolute hrefs must use https",
-                    json_pointer=f"{pointer}/href",
+                    json_pointer=json_pointer("href", prefix=pointer),
                     fix_hint="use the https endpoint; expose s3 URLs via the alternate extension",
                     expected="https",
                     actual=scheme,
@@ -124,7 +124,7 @@ class AssetHrefSchemeRule(Rule):
                 yield self.finding(
                     node,
                     f"asset '{key}' href uses scheme '{scheme}'; absolute hrefs must use https",
-                    json_pointer=f"{pointer}/href",
+                    json_pointer=json_pointer("href", prefix=pointer),
                     fix_hint="rewrite the href as the https URL that serves this file",
                     expected="https",
                     actual=scheme,
@@ -158,7 +158,7 @@ class CogMediaTypeRule(Rule):
             yield self.finding(
                 node,
                 f"raster data asset '{key}' has type {media_type!r}, expected '{COG_MEDIA_TYPE}'",
-                json_pointer=f"{pointer}/type",
+                json_pointer=json_pointer("type", prefix=pointer),
                 fix_hint=f"set the asset's type to '{COG_MEDIA_TYPE}'",
                 expected=COG_MEDIA_TYPE,
                 actual=media_type,
@@ -191,7 +191,7 @@ class AssetFileFieldsRule(Rule):
                         yield self.finding(
                             node,
                             f"self-referencing asset '{key}' must omit {field}",
-                            json_pointer=f"{pointer}/{field}",
+                            json_pointer=json_pointer(field, prefix=pointer),
                             fix_hint=f"remove {field} from the asset that refers to this STAC object",
                         )
                 continue
@@ -201,7 +201,7 @@ class AssetFileFieldsRule(Rule):
                     node,
                     f"asset '{key}' has no file:size",
                     severity=Severity.WARNING,
-                    json_pointer=f"{pointer}/file:size",
+                    json_pointer=json_pointer("file:size", prefix=pointer),
                     fix_hint="add file:size, the asset's size in bytes as an integer",
                 )
             elif isinstance(size, bool) or not isinstance(size, int) or size <= 0:
@@ -209,7 +209,7 @@ class AssetFileFieldsRule(Rule):
                     node,
                     f"asset '{key}' file:size must be a positive integer, got {size!r}",
                     severity=Severity.WARNING,
-                    json_pointer=f"{pointer}/file:size",
+                    json_pointer=json_pointer("file:size", prefix=pointer),
                     fix_hint="set file:size to the asset's byte count, unquoted and greater than 0",
                     actual=size,
                 )
@@ -218,7 +218,7 @@ class AssetFileFieldsRule(Rule):
                     node,
                     f"asset '{key}' has no file:checksum",
                     severity=Severity.WARNING,
-                    json_pointer=f"{pointer}/file:checksum",
+                    json_pointer=json_pointer("file:checksum", prefix=pointer),
                     fix_hint="add file:checksum, the multihash of the asset bytes:"
                     " '1220' followed by the sha256 hex digest",
                 )
@@ -244,7 +244,7 @@ class CatalogAssetsRule(Rule):
             yield self.finding(
                 node,
                 "catalog declares assets; assets (data files) must sit at collection or item level",
-                json_pointer="/assets",
+                json_pointer=json_pointer("assets"),
                 fix_hint="move the assets onto the collection (or item) that owns the data",
             )
 
@@ -279,7 +279,7 @@ class CollectionDataRule(Rule):
             node,
             "collection refers to no primary data: no asset with the data role on the"
             " collection or its items, and no partition:glob",
-            json_pointer="/assets",
+            json_pointer=json_pointer("assets"),
             fix_hint='add the data file as an asset with roles ["data"], on the collection'
             " for a single file or on each item for several",
         )
@@ -305,7 +305,7 @@ class ItemDataRule(Rule):
         yield self.finding(
             node,
             "item carries no asset with the data role",
-            json_pointer="/assets",
+            json_pointer=json_pointer("assets"),
             fix_hint='add the item\'s data file as an asset with roles ["data"]',
         )
 
@@ -328,7 +328,7 @@ class ChecksumMultihashRule(Rule):
                 yield self.finding(
                     node,
                     f"asset '{key}' file:checksum is not a well-formed multihash",
-                    json_pointer=f"{pointer}/file:checksum",
+                    json_pointer=json_pointer("file:checksum", prefix=pointer),
                     fix_hint="prefix the digest with the multihash code and length, "
                     "e.g. '1220' + sha256 hex",
                     actual=checksum,
@@ -366,7 +366,7 @@ class PMTilesDataRule(Rule):
                 yield self.finding(
                     node,
                     f"PMTiles asset '{key}' has no visual role",
-                    json_pointer=f"{pointer}/roles",
+                    json_pointer=json_pointer("roles", prefix=pointer),
                     fix_hint="add visual to the PMTiles asset's roles",
                 )
             if not reference:

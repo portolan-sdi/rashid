@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from rashid._href import is_absolute_href, local_path, object_location, parse_href, split_href
 from rashid.catalog import CatalogGraph, Node
+from rashid.model import json_pointer
 from rashid.remote import wire_url
 
 # Rels that make the tree navigable; every one carries type requirements and
@@ -57,7 +58,9 @@ def assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
     if not isinstance(assets, dict):
         return []
     return [
-        (f"/assets/{key}", key, asset) for key, asset in assets.items() if isinstance(asset, dict)
+        (json_pointer("assets", key), key, asset)
+        for key, asset in assets.items()
+        if isinstance(asset, dict)
     ]
 
 

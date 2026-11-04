@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any, cast
 from rashid import _json, _trace
 from rashid._href import is_schema_url
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 
 if TYPE_CHECKING:
     from importlib.abc import Traversable
@@ -446,7 +446,7 @@ def describe(error: Any) -> SchemaError:
     while error.context:
         error = best_match(_matched_branch(error.context))
     # RFC 6901 JSON pointer: "" at the document root, "/links/0/type" below.
-    pointer = "".join(f"/{part}" for part in error.absolute_path)
+    pointer = json_pointer(*error.absolute_path)
     message = error.message
     if error.validator == "contains":
         requirement = _contains_requirement(error.validator_value)

@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import parse_rfc3339
 
@@ -35,7 +35,7 @@ class DatetimePresentRule(Rule):
             yield self.finding(
                 node,
                 "item has no datetime and no complete start_datetime/end_datetime interval",
-                json_pointer="/properties",
+                json_pointer=json_pointer("properties"),
                 fix_hint="add properties.datetime, or both properties.start_datetime and"
                 " properties.end_datetime, as RFC 3339 date-times",
             )
@@ -62,7 +62,7 @@ class DatetimeValidRule(Rule):
                 yield self.finding(
                     node,
                     f"'{field}' value {value!r} is not an RFC 3339 date-time",
-                    json_pointer=f"/properties/{field}",
+                    json_pointer=json_pointer("properties", field),
                     fix_hint=f"rewrite '{field}' as an RFC 3339 date-time,"
                     " e.g. '2024-01-01T00:00:00Z'",
                     actual=value,
@@ -73,7 +73,7 @@ class DatetimeValidRule(Rule):
             yield self.finding(
                 node,
                 "start_datetime is after end_datetime",
-                json_pointer="/properties/start_datetime",
+                json_pointer=json_pointer("properties", "start_datetime"),
                 fix_hint="swap the two values, or correct whichever one is wrong, so"
                 " start_datetime is the earlier date-time",
                 expected=props.get("end_datetime"),
