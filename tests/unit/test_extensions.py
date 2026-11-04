@@ -52,7 +52,7 @@ def test_all_valid_yields_no_findings(catalog: CatalogBuilder) -> None:
 def test_violation_becomes_an_error_carrying_the_pointer(catalog: CatalogBuilder) -> None:
     catalog.collection("roads", stac_extensions=[PROJECTION_URI])
 
-    def check(data: dict, uri: str) -> list[SchemaError]:
+    def check(data: dict, uri: str) -> list[SchemaError]:  # noqa: ARG001 - extension validator callback accepts data and schema URI
         if data.get("type") == "Collection":
             return [SchemaError(message="4326 is not of type 'string'", json_pointer="/x")]
         return []
@@ -72,7 +72,7 @@ def test_the_portolan_profile_uri_is_not_validated_here(catalog: CatalogBuilder)
     catalog.collection("roads")
     calls: list[str] = []
 
-    def check(data: dict, uri: str) -> list[SchemaError]:
+    def check(data: dict, uri: str) -> list[SchemaError]:  # noqa: ARG001 - extension validator callback accepts data and schema URI
         calls.append(uri)
         return []
 
@@ -84,7 +84,7 @@ def test_a_systemic_validator_failure_reports_once(catalog: CatalogBuilder) -> N
     catalog.collection("roads", stac_extensions=[PROJECTION_URI])
     catalog.collection("rails", stac_extensions=[PROJECTION_URI])
 
-    def explode(data: dict, uri: str) -> list[SchemaError]:
+    def explode(data: dict, uri: str) -> list[SchemaError]:  # noqa: ARG001 - failing extension validator retains its callback signature
         raise RuntimeError("registry is broken")
 
     findings = validate_extensions(_graph(catalog), explode)

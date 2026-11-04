@@ -73,7 +73,7 @@ class FilesystemHttpReader:
     def __init__(self, graph: CatalogGraph) -> None:
         self._graph = graph
 
-    def locate(self, node: Node, href: str) -> Locator | None:
+    def locate(self, node: Node, href: str) -> Locator | None:  # noqa: PLR0911 - guard clauses distinguish href classes and local or remote locations
         if not href:
             return None
         if is_absolute_href(href):

@@ -72,7 +72,7 @@ def test_degradation_reports_are_not_gate_members() -> None:
 def _spy() -> tuple[list[str], data_pass.Validator]:
     seen: list[str] = []
 
-    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+    def check(node: Node, reader: AssetReader) -> list[DataDefect]:  # noqa: ARG001 - data validator callback requires node and reader
         seen.append(str(node.path))
         return []
 

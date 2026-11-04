@@ -284,7 +284,7 @@ class _AssetFiles:
     """
 
     def __init__(self, located: Locator) -> None:
-        self._located = located
+        self.located = located
         self._parquet: Any = None
         self._parquet_error: Exception | None = None
         self._handle: Any = None
@@ -296,9 +296,9 @@ class _AssetFiles:
             raise self._parquet_error.with_traceback(None)
         if self._parquet is None:
             try:
-                source: Any = self._located.source
-                if self._located.is_remote:
-                    source = self._handle = self._located.open_binary()
+                source: Any = self.located.source
+                if self.located.is_remote:
+                    source = self._handle = self.located.open_binary()
                 self._parquet = _parquet_file(source)
             except Exception as exc:
                 self._parquet_error = exc
@@ -310,7 +310,7 @@ class _AssetFiles:
             raise self._raster_error.with_traceback(None)
         if self._raster is None:
             try:
-                self._raster = _raster_open(self._located.gdal_path())
+                self._raster = _raster_open(self.located.gdal_path())
             except Exception as exc:
                 self._raster_error = exc
                 raise
@@ -350,9 +350,7 @@ def check_node(
             continue  # PTL-AST-003 requires both file metadata fields to be absent
         log.debug("data: %s asset %r: %s", node.path, key, href)
         with _trace.span("data.asset"):
-            defects.extend(
-                _check_asset(node, key=key, asset=asset, href=href, reader=reader, graph=graph)
-            )
+            defects.extend(_check_asset(node, key=key, asset=asset, reader=reader, graph=graph))
     return _collapse_shared_fields(defects)
 
 
@@ -390,18 +388,16 @@ def _check_asset(
     *,
     key: str,
     asset: dict[str, Any],
-    href: str,
     reader: AssetReader,
     graph: CatalogGraph | None = None,
 ) -> list[DataDefect]:
+    href = asset["href"]
     _trace.count("data.assets")
     defects: list[DataDefect] = []
     media_type = asset.get("type")
     expected = _expected_format(media_type) if isinstance(media_type, str) else None
 
-    defects.extend(
-        _check_bytes(key, asset=asset, href=href, expected=expected, node=node, reader=reader)
-    )
+    defects.extend(_check_bytes(key, asset=asset, expected=expected, node=node, reader=reader))
 
     located = reader.locate(node, href)
     if located is None or _is_source(asset):
@@ -430,9 +426,7 @@ def _check_asset(
             defects.extend(_check_vector_columns(node, key, asset, files))
         if expected in {"parquet", "tiff", "pmtiles"}:
             defects.extend(
-                _check_consistency(
-                    node, key=key, asset=asset, expected=expected, located=located, files=files
-                )
+                _check_consistency(node, key=key, asset=asset, expected=expected, files=files)
             )
     return defects
 
@@ -456,7 +450,6 @@ def _check_bytes(
     key: str,
     *,
     asset: dict[str, Any],
-    href: str,
     expected: str | None,
     node: Node,
     reader: AssetReader,
@@ -483,7 +476,7 @@ def _check_bytes(
     leaves until it is iterated), which makes asking for one the cheapest
     fetchability test available through the ``AssetReader`` protocol.
     """
-    stream = reader.stream(node, href)
+    stream = reader.stream(node, asset["href"])
     if stream is None:
         return []  # not fetchable; metadata pass owns missing/foreign hrefs
 
@@ -850,11 +843,10 @@ def _check_consistency(
     key: str,
     asset: dict[str, Any],
     expected: str,
-    located: Locator,
     files: _AssetFiles,
 ) -> list[DataDefect]:
     try:
-        geo = _extract_geo(expected, located, files)
+        geo = _extract_geo(expected, files)
     except Exception as exc:  # unreadable header is advisory, not fatal
         return [
             DataDefect(
@@ -1007,8 +999,6 @@ def _check_geoparquet(
         key,
         parquet=parquet,
         geo=geo,
-        rows=sum(row_counts),
-        groups=groups,
         report_unreadable=not metrics_apply,
         subject=subject,
     )
@@ -1090,7 +1080,7 @@ class _MirrorRows:
     bboxes: list[Any] | None
 
 
-def _check_mirror(
+def _check_mirror(  # noqa: PLR0911 - guard clauses follow the documented skip conditions
     node: Node, key: str, files: _AssetFiles, graph: CatalogGraph | None
 ) -> list[DataDefect]:
     """A mirror MUST reproduce the collection's items (PORTO-FMT-042).
@@ -1669,8 +1659,6 @@ def _row_ordering_defects(
     *,
     parquet: Any,
     geo: dict[str, Any],
-    rows: int,
-    groups: int,
     report_unreadable: bool,
     subject: str | None = None,
 ) -> list[DataDefect]:
@@ -1691,6 +1679,8 @@ def _row_ordering_defects(
     unreadable covering column then leaves row order checked, not unchecked.
     """
     subject = subject or f"asset '{key}'"
+    rows = parquet.metadata.num_rows
+    groups = parquet.metadata.num_row_groups
     if rows < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
         return []  # too few rows for a chunk's box to describe anything
     row_boxes = _row_bboxes(parquet, geo)
@@ -2093,13 +2083,13 @@ def _detect_format(head: bytes) -> str | None:
 # --- spatial extraction ----------------------------------------------------
 
 
-def _extract_geo(expected: str, located: Locator, files: _AssetFiles) -> _Geo | None:
+def _extract_geo(expected: str, files: _AssetFiles) -> _Geo | None:
     if expected == "parquet":
         return _geo_from_parquet(files)
     if expected == "tiff":
         return _geo_from_raster(files)
     if expected == "pmtiles":
-        return _geo_from_pmtiles(located)
+        return _geo_from_pmtiles(files.located)
     return None
 
 

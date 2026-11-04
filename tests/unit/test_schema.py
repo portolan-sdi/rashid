@@ -75,7 +75,7 @@ def test_validator_failure_is_a_single_warning(catalog: CatalogBuilder) -> None:
     catalog.collection("b")
     graph = _graph(catalog)
 
-    def boom(data: dict) -> list[str]:
+    def boom(data: dict) -> list[str]:  # noqa: ARG001 - failing schema validator retains its callback signature
         raise RuntimeError("could not reach schemas.portolan-sdi.org")
 
     findings = validate_schema(graph, boom)
@@ -90,7 +90,7 @@ def test_missing_package_is_a_warning(
 ) -> None:
     import rashid.schema as schema
 
-    def raise_import(uri: str, allow_network: bool = False) -> None:
+    def raise_import(uri: str, allow_network: bool = False) -> None:  # noqa: ARG001 - replacement schema factory accepts URI and allow_network by keyword
         raise ImportError("No module named 'jsonschema'")
 
     monkeypatch.setattr(schema, "default_validator", raise_import)
@@ -105,7 +105,7 @@ def test_schema_fetch_failure_is_a_warning(
 ) -> None:
     import rashid.schema as schema
 
-    def raise_fetch(uri: str, allow_network: bool = False) -> None:
+    def raise_fetch(uri: str, allow_network: bool = False) -> None:  # noqa: ARG001 - replacement schema factory accepts URI and allow_network by keyword
         raise OSError("connection refused")
 
     monkeypatch.setattr(schema, "default_validator", raise_fetch)

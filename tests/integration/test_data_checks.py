@@ -312,7 +312,7 @@ def test_wgs84_bounds_skip_an_unprojectable_bbox(epsg: int) -> None:
 
 def test_consistency_skips_the_bbox_it_cannot_reproject(monkeypatch: pytest.MonkeyPatch) -> None:
     geo = checks._Geo(bbox=[3.0e6, -1.0e6, 5.0e6, 1.0e6], epsg=3832, crs=CRS.from_epsg(3832))
-    monkeypatch.setattr(checks, "_extract_geo", lambda expected, located, files: geo)
+    monkeypatch.setattr(checks, "_extract_geo", lambda expected, files: geo)
     located = Locator(is_remote=False, source="unused")
     files = checks._AssetFiles(located)
 
@@ -321,7 +321,6 @@ def test_consistency_skips_the_bbox_it_cannot_reproject(monkeypatch: pytest.Monk
         key="data",
         asset=_asset(),
         expected="parquet",
-        located=located,
         files=files,
     )
 
@@ -474,7 +473,7 @@ def test_consistency_unreadable_is_info() -> None:
     located = Locator(is_remote=False, source="/no/such/file.parquet")
     files = checks._AssetFiles(located)
     defects = checks._check_consistency(
-        node, key="data", asset=_asset(), expected="parquet", located=located, files=files
+        node, key="data", asset=_asset(), expected="parquet", files=files
     )
     assert [d.rule_id for d in defects] == [checks.DAT_CONSISTENCY]
     assert defects[0].severity is Severity.INFO

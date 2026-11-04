@@ -98,69 +98,71 @@ class HttpsServer:
         return f"{self.base}/{path.lstrip('/')}"
 
 
+class _Handler(BaseHTTPRequestHandler):
+    state: HttpsServer
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *_args: object) -> None:
+        return None
+
+    def _answer(self, send_body: bool) -> None:
+        if not self.state.counted(self.path):
+            self._respond(send_body)
+            return
+        self.state.enter()
+        try:
+            self._respond(send_body)
+        finally:
+            self.state.leave()
+
+    def _respond(self, send_body: bool) -> None:
+        self.state.seen.append(
+            Seen(self.command, self.path, {k.lower(): v for k, v in self.headers.items()})
+        )
+        route = self.state.routes.get(self.path, Route(status=404))
+        if route.latency:
+            time.sleep(route.latency)
+        body, status = route.body, route.status
+        if self.state.take_failure(route, self.headers.get("User-Agent", "")):
+            body, status = b"", 503
+        headers = dict(route.headers)
+        byte_range = self.headers.get("Range")
+        if byte_range and route.honor_range and status == 200:
+            first, last = byte_range.removeprefix("bytes=").split("-")
+            start, end = int(first), min(int(last), len(body) - 1)
+            headers["Content-Range"] = f"bytes {start}-{end}/{len(body)}"
+            body, status = body[start : end + 1], 206
+        self.send_response(status)
+        for name, value in headers.items():
+            self.send_header(name, value)
+        if route.length:
+            self.send_header("Content-Length", str(len(body)))
+        else:
+            self.send_header("Connection", "close")
+        self.end_headers()
+        if not send_body:
+            return
+        if not route.delay:
+            self.wfile.write(body)
+            return
+        for index in range(len(body)):
+            if index:
+                time.sleep(route.delay)
+            self.wfile.write(body[index : index + 1])
+            self.wfile.flush()
+
+    def do_GET(self) -> None:
+        self._answer(True)
+
+    def do_HEAD(self) -> None:
+        self._answer(False)
+
+    def do_OPTIONS(self) -> None:
+        self._answer(False)
+
+
 def _handler(server: HttpsServer) -> type[BaseHTTPRequestHandler]:
-    class Handler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-
-        def log_message(self, *_args: object) -> None:
-            return None
-
-        def _answer(self, send_body: bool) -> None:
-            if not server.counted(self.path):
-                self._respond(send_body)
-                return
-            server.enter()
-            try:
-                self._respond(send_body)
-            finally:
-                server.leave()
-
-        def _respond(self, send_body: bool) -> None:
-            server.seen.append(
-                Seen(self.command, self.path, {k.lower(): v for k, v in self.headers.items()})
-            )
-            route = server.routes.get(self.path, Route(status=404))
-            if route.latency:
-                time.sleep(route.latency)
-            body, status = route.body, route.status
-            if server.take_failure(route, self.headers.get("User-Agent", "")):
-                body, status = b"", 503
-            headers = dict(route.headers)
-            byte_range = self.headers.get("Range")
-            if byte_range and route.honor_range and status == 200:
-                first, last = byte_range.removeprefix("bytes=").split("-")
-                start, end = int(first), min(int(last), len(body) - 1)
-                headers["Content-Range"] = f"bytes {start}-{end}/{len(body)}"
-                body, status = body[start : end + 1], 206
-            self.send_response(status)
-            for name, value in headers.items():
-                self.send_header(name, value)
-            if route.length:
-                self.send_header("Content-Length", str(len(body)))
-            else:
-                self.send_header("Connection", "close")
-            self.end_headers()
-            if not send_body:
-                return
-            if not route.delay:
-                self.wfile.write(body)
-                return
-            for index in range(len(body)):
-                if index:
-                    time.sleep(route.delay)
-                self.wfile.write(body[index : index + 1])
-                self.wfile.flush()
-
-        def do_GET(self) -> None:
-            self._answer(True)
-
-        def do_HEAD(self) -> None:
-            self._answer(False)
-
-        def do_OPTIONS(self) -> None:
-            self._answer(False)
-
-    return Handler
+    return type("Handler", (_Handler,), {"state": server})
 
 
 class _Server(ThreadingHTTPServer):

@@ -213,6 +213,29 @@ class _Target:
     url: str
     declared_size: int | None
 
+    def server_finding(
+        self,
+        rule_id: str,
+        *,
+        message: str,
+        fix_hint: str | None = None,
+        expected: object | None = None,
+        actual: object | None = None,
+    ) -> Finding:
+        """Report a hosting defect against this asset and its URL's host."""
+        host = urlparse(self.url).netloc.lower()
+        return Finding(
+            rule_id=rule_id,
+            severity=Severity.ERROR,
+            message=f"host '{host}': {message}",
+            path=str(self.node.path),
+            object_id=self.node.id,
+            json_pointer=f"/assets/{self.key}/href",
+            fix_hint=fix_hint,
+            expected=expected,
+            actual=actual,
+        )
+
 
 @dataclass(frozen=True)
 class _LinkTarget:
@@ -410,46 +433,32 @@ def _header_set(value: str | None) -> set[str]:
     return {token.strip().lower() for token in value.split(",") if token.strip()}
 
 
-def _server_finding(
-    rule_id: str,
-    *,
-    host: str,
-    rep: _Target,
-    message: str,
-    fix_hint: str | None = None,
-    expected: object | None = None,
-    actual: object | None = None,
-) -> Finding:
-    return Finding(
-        rule_id=rule_id,
-        severity=Severity.ERROR,
-        message=f"host '{host}': {message}",
-        path=str(rep.node.path),
-        object_id=rep.node.id,
-        json_pointer=f"/assets/{rep.key}/href",
-        fix_hint=fix_hint,
-        expected=expected,
-        actual=actual,
-    )
+@dataclass(frozen=True)
+class _ProbeRedirect:
+    """A probe request and the non-https location its response names."""
+
+    probe: str
+    url: str
+    location: str
 
 
 def _off_https_finding(
-    node: Node, *, pointer: str, subject: str, probe: str, url: str, location: str
+    node: Node, *, pointer: str, subject: str, result: _ProbeRedirect
 ) -> Finding:
     return Finding(
         rule_id=LIV_OFF_HTTPS,
         severity=Severity.ERROR,
-        message=f"{subject}: {probe} {url} redirected off https to {location}",
+        message=f"{subject}: {result.probe} {result.url} redirected off https to {result.location}",
         path=str(node.path),
         object_id=node.id,
         json_pointer=pointer,
         fix_hint="serve the object over https, and redirect only to https URLs",
         expected="https",
-        actual=location,
+        actual=result.location,
     )
 
 
-def _check_range(host: str, rep: _Target, response: ProbeResponse) -> list[Finding]:
+def _check_range(rep: _Target, response: ProbeResponse) -> list[Finding]:
     problems: list[str] = []
     if response.status != 206:
         problems.append(f"a ranged GET returned {response.status}, expected 206 Partial Content")
@@ -458,10 +467,8 @@ def _check_range(host: str, rep: _Target, response: ProbeResponse) -> list[Findi
     if not problems:
         return []
     return [
-        _server_finding(
+        rep.server_finding(
             LIV_RANGE,
-            host=host,
-            rep=rep,
             message="range requests unsupported: " + "; ".join(problems),
             fix_hint="serve assets from storage that honors the Range header with 206 responses",
             expected=206,
@@ -470,15 +477,13 @@ def _check_range(host: str, rep: _Target, response: ProbeResponse) -> list[Findi
     ]
 
 
-def _check_cors(host: str, rep: _Target, response: ProbeResponse) -> list[Finding]:
+def _check_cors(rep: _Target, response: ProbeResponse) -> list[Finding]:
     if response.header("access-control-allow-origin") is None:
         # CORS is off entirely; the exposed-headers MUST is subsumed — one
         # finding for the root cause, not two for the same absent policy.
         return [
-            _server_finding(
+            rep.server_finding(
                 LIV_CORS_ORIGIN,
-                host=host,
-                rep=rep,
                 message="no Access-Control-Allow-Origin on a GET carrying an Origin header",
                 fix_hint="enable a read-permitting CORS policy, e.g. Access-Control-Allow-Origin: *",
             )
@@ -490,17 +495,15 @@ def _check_cors(host: str, rep: _Target, response: ProbeResponse) -> list[Findin
     if not missing:
         return []
     return [
-        _server_finding(
+        rep.server_finding(
             LIV_CORS_EXPOSE,
-            host=host,
-            rep=rep,
             message="Access-Control-Expose-Headers omits " + ", ".join(missing),
             fix_hint="expose " + ", ".join(_REQUIRED_EXPOSED) + " to browsers",
         )
     ]
 
 
-def _check_preflight(host: str, rep: _Target, response: ProbeResponse) -> list[Finding]:
+def _check_preflight(rep: _Target, response: ProbeResponse) -> list[Finding]:
     problems: list[str] = []
     if response.status >= 400:
         problems.append(f"preflight returned {response.status}")
@@ -517,10 +520,8 @@ def _check_preflight(host: str, rep: _Target, response: ProbeResponse) -> list[F
     if not problems:
         return []
     return [
-        _server_finding(
+        rep.server_finding(
             LIV_CORS_PREFLIGHT,
-            host=host,
-            rep=rep,
             message="CORS preflight failed: " + "; ".join(problems),
             fix_hint=(
                 "allow the GET and HEAD methods and the "
@@ -693,9 +694,7 @@ def _check_heads(
                     target.node,
                     pointer=f"/assets/{target.key}/href",
                     subject=f"asset '{target.key}'",
-                    probe="HEAD",
-                    url=target.url,
-                    location=location,
+                    result=_ProbeRedirect("HEAD", target.url, location),
                 )
             )
     return findings
@@ -718,13 +717,11 @@ def _probe_host(
     return ranged, preflighted
 
 
-def _check_server(
-    host: str, rep: _Target, ranged: ProbeResponse, preflighted: ProbeResponse
-) -> list[Finding]:
+def _check_server(rep: _Target, ranged: ProbeResponse, preflighted: ProbeResponse) -> list[Finding]:
     """The host-level range and CORS checks, read off ``rep``'s two probes."""
-    findings = _check_range(host, rep, ranged)
-    findings.extend(_check_cors(host, rep, ranged))
-    findings.extend(_check_preflight(host, rep, preflighted))
+    findings = _check_range(rep, ranged)
+    findings.extend(_check_cors(rep, ranged))
+    findings.extend(_check_preflight(rep, preflighted))
     return findings
 
 
@@ -733,9 +730,7 @@ def _ranged_off_https(rep: _Target, location: str) -> Finding:
         rep.node,
         pointer=f"/assets/{rep.key}/href",
         subject=f"asset '{rep.key}'",
-        probe="a ranged GET of",
-        url=rep.url,
-        location=location,
+        result=_ProbeRedirect("a ranged GET of", rep.url, location),
     )
 
 
@@ -759,7 +754,7 @@ def _check_host(
     ranged, preflighted = probed
     location = ranged.off_https()
     if location is None:
-        findings = _check_server(host, first, ranged, preflighted)
+        findings = _check_server(first, ranged, preflighted)
         findings.extend(_check_heads(host, targets, heads))
         return findings
     findings = [_ranged_off_https(first, location)]
@@ -775,7 +770,7 @@ def _check_host(
         ranged, preflighted = probed
         location = ranged.off_https()
         if location is None:
-            findings.extend(_check_server(host, rep, ranged, preflighted))
+            findings.extend(_check_server(rep, ranged, preflighted))
             return findings + head_findings
         findings.append(_ranged_off_https(rep, location))
         skipped = "the ranged GET of every asset tried redirects off https"
@@ -826,9 +821,7 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
                     target.node,
                     pointer=f"/links/{target.index}/href",
                     subject=f"link rel:{target.rel!r} href '{target.href}'",
-                    probe="HEAD",
-                    url=target.url,
-                    location=location,
+                    result=_ProbeRedirect("HEAD", target.url, location),
                 )
             )
             continue

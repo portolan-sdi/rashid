@@ -88,7 +88,7 @@ def _streaming_validator(consumed: dict[str, int | None]) -> Validator:
 def _stub_server(payload: bytes) -> Any:
     """A stand-in for the reader's remote stream that answers every URL with ``payload``."""
 
-    def fake_stream(url: str) -> Iterator[bytes]:
+    def fake_stream(url: str) -> Iterator[bytes]:  # noqa: ARG001 - replacement HTTP stream accepts a URL
         yield payload
 
     return fake_stream
@@ -252,7 +252,7 @@ def _capture_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Record what the CLI asks the runner for, without running a pass."""
     captured: dict[str, Any] = {}
 
-    def fake_validate(catalog_path: Path | str, *, options: ValidationOptions) -> Report:
+    def fake_validate(catalog_path: Path | str, *, options: ValidationOptions) -> Report:  # noqa: ARG001 - CLI runner callback accepts a catalog path and options
         captured.update(vars(options))
         return Report(findings=[])
 

@@ -179,7 +179,7 @@ def main(
     is_flag=True,
     help="Count findings per rule instead of listing them.",
 )
-def check(
+def check(  # noqa: PLR0913, PLR0917 - Click passes one argument per CLI option
     catalog: Path | str,
     as_json: bool,
     structural: bool,

@@ -1215,7 +1215,7 @@ def test_default_head_falls_back_to_urllib(
 ) -> None:
     """An answer obstore drops is asked again over urllib, which keeps the headers."""
 
-    def fail(url: str) -> int:
+    def fail(url: str) -> int:  # noqa: ARG001 - replacement HEAD probe accepts a URL
         raise failure
 
     requests: list[Request] = []
@@ -1233,7 +1233,7 @@ def test_default_head_does_not_ask_a_dead_host_twice(monkeypatch: pytest.MonkeyP
     """A transport failure has no answer to read again; urllib would only wait again."""
     dead = _store.StoreError("HEAD https://data.example.org/x: error sending request")
 
-    def fail(url: str) -> int:
+    def fail(url: str) -> int:  # noqa: ARG001 - replacement HEAD probe accepts a URL
         raise dead
 
     requests: list[Request] = []

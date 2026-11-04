@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from rashid.catalog import CatalogGraph, Node, is_absolute_href
 from rashid.model import Finding, Severity
@@ -43,17 +44,25 @@ def _readme_text(node: Node, graph: CatalogGraph) -> str | None:
         return None
 
 
+@dataclass(frozen=True)
+class _LinkCandidate:
+    """A required Markdown link and its location in the document."""
+
+    rel: str
+    target: str
+    index: int
+    link: dict[str, object]
+
+
 def _link_findings(
     rule: Rule,
     *,
     node: Node,
     graph: CatalogGraph,
-    rel: str,
-    target: str,
-    index: int,
-    link: dict[str, object],
+    candidate: _LinkCandidate,
 ) -> list[Finding]:
     """Everything wrong with one candidate link, empty when it conforms."""
+    rel, target, index, link = candidate.rel, candidate.target, candidate.index, candidate.link
     findings: list[Finding] = []
     if link.get("type") != _MARKDOWN:
         findings.append(
@@ -133,7 +142,7 @@ def _check_markdown_link(
     candidates: list[tuple[tuple[bool, bool, int], list[Finding]]] = []
     for index, link in matches:
         findings = _link_findings(
-            rule, node=node, graph=graph, rel=rel, target=target, index=index, link=link
+            rule, node=node, graph=graph, candidate=_LinkCandidate(rel, target, index, link)
         )
         if not findings:
             return

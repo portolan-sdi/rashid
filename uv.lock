@@ -2544,7 +2544,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=7" },
     { name = "pytest-xdist", specifier = ">=3.8" },
     { name = "radon", specifier = ">=6.0.1" },
-    { name = "ruff", specifier = ">=0.16" },
+    { name = "ruff", specifier = ">=0.17.3" },
     { name = "trustme", specifier = ">=1.2.1" },
     { name = "vulture", specifier = ">=2.16" },
     { name = "xenon", specifier = ">=0.9.3" },

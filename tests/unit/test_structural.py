@@ -67,7 +67,7 @@ def test_validator_failure_is_a_single_warning(catalog: CatalogBuilder) -> None:
     catalog.collection("b")
     graph = _graph(catalog)
 
-    def boom(data: dict) -> list[SchemaError]:
+    def boom(data: dict) -> list[SchemaError]:  # noqa: ARG001 - failing structural validator retains its callback signature
         raise RuntimeError("registry resolution failed")
 
     findings = validate_structural(graph, boom)

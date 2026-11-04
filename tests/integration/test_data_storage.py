@@ -12,6 +12,7 @@ import json
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 
 import pytest
 
@@ -416,9 +417,8 @@ def test_single_row_group_without_readable_row_boxes_reports_unevaluated() -> No
     no covering column to read row by row, so ordering stays unmeasured and
     the check says so rather than reporting success.
     """
-    defects = checks._row_ordering_defects(
-        "data", parquet=object(), geo={}, rows=5000, groups=1, report_unreadable=True
-    )
+    parquet = SimpleNamespace(metadata=SimpleNamespace(num_rows=5000, num_row_groups=1))
+    defects = checks._row_ordering_defects("data", parquet=parquet, geo={}, report_unreadable=True)
     assert [d.rule_id for d in defects] == [DAT_ORDERING]
     assert defects[0].severity is Severity.INFO
     assert "could not be evaluated" in defects[0].message
@@ -427,9 +427,8 @@ def test_single_row_group_without_readable_row_boxes_reports_unevaluated() -> No
 def test_unreadable_boxes_stay_quiet_when_the_criteria_apply() -> None:
     """At five or more row groups the footer metrics measure ordering anyway,
     so an unreadable covering column is not a gap worth reporting."""
-    defects = checks._row_ordering_defects(
-        "data", parquet=object(), geo={}, rows=5000, groups=8, report_unreadable=False
-    )
+    parquet = SimpleNamespace(metadata=SimpleNamespace(num_rows=5000, num_row_groups=8))
+    defects = checks._row_ordering_defects("data", parquet=parquet, geo={}, report_unreadable=False)
     assert defects == []
 
 

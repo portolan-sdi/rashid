@@ -63,7 +63,7 @@ dev = [
     "pytest-cov>=7",
     "pytest-xdist>=3.8",
     "diff-cover>=10.4",
-    "ruff>=0.16",
+    "ruff>=0.17.3",
     "mypy>=2.3",
     "import-linter>=2.13",
     "pre-commit>=4.6",
@@ -89,9 +89,38 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "C4", "UP"]
 ignore = ["E501"]
+preview = true
+explicit-preview-rules = true
+extend-select = [
+    "C901",
+    "PLR0911", "PLR0912", "PLR0913", "PLR0914",
+    "PLR0915", "PLR0916", "PLR0917", "PLR1702",
+    "SIM", "FURB", "PIE", "RET", "ARG", "ERA",
+    "PT011", "PT012", "PT017", "PT030", "PLW0129",
+    "TID251", "PERF", "RUF015", "PGH004", "RUF100",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-branches = 12
+max-statements = 50
+max-nested-blocks = 4
+max-args = 5
+max-positional-args = 5
+max-bool-expr = 5
+max-locals = 15
+max-returns = 6
 
 [tool.ruff.lint.isort]
 known-first-party = ["rashid"]
+
+[tool.ruff.lint.per-file-ignores]
+# Rules share check(node, graph); many rules do not need the graph context.
+"src/rashid/rules/*.py" = ["ARG002"]
+# Test doubles retain protocol method and callback signatures. Keep ARG001 on for fixtures.
+"tests/**" = ["ARG002", "ARG005"]
 
 [tool.mypy]
 strict = true

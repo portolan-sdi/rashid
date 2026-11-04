@@ -35,6 +35,7 @@ import re
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -77,16 +78,31 @@ def _counts(scenario: str, size: str, seed: int, warm: bool) -> None:
     print(_trace.format_timings(_trace.timings()))
 
 
-def _self_argv(scenario: str, size: str, seed: int, warm: bool) -> list[str]:
-    argv = [str(Path(__file__).resolve()), scenario, "--size", size, "--seed", str(seed)]
-    return [*argv, "--mode", "run", *(["--warm"] if warm else [])]
+@dataclass(frozen=True)
+class Scenario:
+    """The seeded workload and whether to warm its caches before profiling."""
+
+    name: str
+    size: str
+    seed: int
+    warm: bool
 
 
-def profiler_command(
-    mode: str, *, scenario: str, size: str, seed: int, warm: bool, out: Path
-) -> list[str]:
+def _self_argv(scenario: Scenario) -> list[str]:
+    argv = [
+        str(Path(__file__).resolve()),
+        scenario.name,
+        "--size",
+        scenario.size,
+        "--seed",
+        str(scenario.seed),
+    ]
+    return [*argv, "--mode", "run", *(["--warm"] if scenario.warm else [])]
+
+
+def profiler_command(mode: str, *, scenario: Scenario, out: Path) -> list[str]:
     """The argv that runs this script's ``run`` mode under the profiler for ``mode``."""
-    target = _self_argv(scenario, size, seed, warm)
+    target = _self_argv(scenario)
     if mode == "time":
         return [
             *("uv", "run", "--with", PYINSTRUMENT, "python", "-m", "pyinstrument"),
@@ -180,7 +196,7 @@ def _profile(args: argparse.Namespace) -> int:
     suffix = {"mem": "bin", "instr": "cachegrind", "time": "txt"}[args.mode]
     out = _PROFILES / f"{stem}.{args.mode}.{suffix}"
     command = profiler_command(
-        args.mode, scenario=args.scenario, size=args.size, seed=args.seed, warm=args.warm, out=out
+        args.mode, scenario=Scenario(args.scenario, args.size, args.seed, args.warm), out=out
     )
     print("$", " ".join(command), file=sys.stderr)
     if args.mode == "instr":

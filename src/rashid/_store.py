@@ -195,7 +195,7 @@ def _build_opener(*, refuse: bool) -> OpenerDirector:
     from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
     class _HttpsRedirects(HTTPRedirectHandler):
-        def redirect_request(
+        def redirect_request(  # noqa: PLR0913, PLR0917 - stdlib HTTPRedirectHandler override keeps its signature
             self, req: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str
         ) -> Request | None:
             if urlsplit(newurl).scheme.lower() != "https":
