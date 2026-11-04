@@ -406,3 +406,17 @@ def test_remote_latest_cardinality_includes_unloaded_targets(
     assert findings[0]["path"] == "releases/new/new.json"
     assert findings[0]["json_pointer"] == "/links"
     assert not any(request.path == "/releases/old/old.json" for request in https_server.seen)
+
+
+def test_multiple_back_edges_report_one_cycle_per_origin(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection("releases")
+    for name in ("a", "b", "c"):
+        collection.item(name, stac_extensions=[_VERSION])
+    root = catalog.write()
+    for older, newer in (("a", "b"), ("b", "c"), ("c", "a"), ("c", "b")):
+        _link(root, older, "successor-version", f"../{newer}/{newer}.json")
+        _link(root, newer, "predecessor-version", f"../{older}/{older}.json")
+    findings = _findings(root)
+    assert [(f["path"], f["message"]) for f in findings] == [
+        ("releases/c/c.json", "version history contains a cycle")
+    ]

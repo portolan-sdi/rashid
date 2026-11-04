@@ -143,6 +143,7 @@ def _cycle_origins(successors: dict[PurePosixPath, set[PurePosixPath]]) -> Itera
     """Iterative DFS: each edge is visited once, even for long or branching histories."""
     finished: set[PurePosixPath] = set()
     active: set[PurePosixPath] = set()
+    reported: set[PurePosixPath] = set()
     for start in successors:
         if start in finished:
             continue
@@ -156,7 +157,9 @@ def _cycle_origins(successors: dict[PurePosixPath, set[PurePosixPath]]) -> Itera
                 active.remove(node)
                 finished.add(node)
             elif child in active:
-                yield node
+                if node not in reported:
+                    reported.add(node)
+                    yield node
             elif child not in finished:
                 active.add(child)
                 stack.append((child, iter(sorted(successors.get(child, ())))))
