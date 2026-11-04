@@ -72,7 +72,7 @@ class SingleFileCollectionRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        if is_partitioned(node, include_declaration=False):
+        if is_partitioned(node):
             return
         if _data_asset_state(node) is not _NO_DATA_ASSET:
             return
@@ -207,7 +207,7 @@ class MissingItemTreeRule(Rule):
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         # A partitioned collection MAY leave its parts off items
         # (PORTO-CORE-021), so partition files are not scenes.
-        if is_partitioned(node, include_declaration=False):
+        if is_partitioned(node):
             return
         # items_of, not children_of: the spec lets a catalog below a
         # collection organize its items, and those items still count.

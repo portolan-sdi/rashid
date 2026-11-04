@@ -8,11 +8,12 @@ import pytest
 from click.testing import CliRunner
 
 from rashid.cli import main
-from tests.conftest import CatalogBuilder
+from tests.conftest import CatalogBuilder, default_asset
 
 pytestmark = pytest.mark.integration
 
 _COG_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
+_PARTITION_URI = "https://schemas.portolan-sdi.org/incubating/partition/v1.0.0/schema.json"
 
 
 @pytest.mark.parametrize(
@@ -47,3 +48,22 @@ def test_visual_data_cog_still_needs_style(catalog: CatalogBuilder, roles: list[
     result = CliRunner().invoke(main, ["check", "--no-data", "--json", str(catalog.write())])
     report = json.loads(result.output)
     assert len([f for f in report["findings"] if f["rule_id"] == "PTL-VIZ-002"]) == 1
+
+
+@pytest.mark.parametrize("shape", ["single-item", "missing-items"])
+def test_partition_declaration_exempts_scene_modeling(catalog: CatalogBuilder, shape: str) -> None:
+    collection = catalog.collection("parts", assets={}, stac_extensions=[_PARTITION_URI])
+    if shape == "single-item":
+        collection.item("part", assets={"data": default_asset()})
+    else:
+        collection.overrides["assets"] = {
+            "mirror": {"href": "./items.parquet", "roles": ["collection-mirror"]}
+        }
+    result = CliRunner().invoke(main, ["check", "--no-data", "--json", str(catalog.write())])
+    report = json.loads(result.output)
+    assert {f["json_pointer"] for f in report["findings"] if f["rule_id"] == "PTL-PRT-001"} == {
+        "/partition:scheme",
+        "/partition:keys",
+        "/partition:glob",
+    }
+    assert not [f for f in report["findings"] if f["rule_id"] in {"PTL-COL-001", "PTL-COL-005"}]

@@ -82,10 +82,8 @@ class PartitionFieldsRule(Rule):
             )
 
 
-def is_partitioned(node: Node, *, include_declaration: bool = True) -> bool:
-    return any(key.startswith("partition:") for key in node.data) or (
-        include_declaration and _declares_extension(node)
-    )
+def is_partitioned(node: Node) -> bool:
+    return any(key.startswith("partition:") for key in node.data) or _declares_extension(node)
 
 
 def _declares_extension(node: Node) -> bool:
