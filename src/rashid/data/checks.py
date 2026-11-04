@@ -72,6 +72,7 @@ import struct
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -630,22 +631,37 @@ def _check_overviews(key: str, files: _AssetFiles) -> list[DataDefect]:
     try:
         src = files.raster()
         shape = _tile_shape(src)
-        tile = max(shape) if shape is not None else _MAX_TILE
+        tile_height, tile_width = shape if shape is not None else (_MAX_TILE, _MAX_TILE)
+        tile = max(tile_height, tile_width)
         oversized = max(src.width, src.height) > tile
-        has_overviews = bool(src.overviews(1))
+        factors = src.overviews(1)
+        shapes = files.overview_shapes() if oversized and factors else []
     except Exception:  # unreadable raster: the COG check owns reporting it
         return []
-    if oversized and not has_overviews:
-        return [
-            DataDefect(
-                DAT_OVERVIEWS,
-                Severity.ERROR,
-                f"asset '{key}' raster exceeds its own {tile}px internal tile "
-                "but carries no internal overviews",
-                key,
-            )
-        ]
-    return []
+    if not oversized:
+        return []
+    if not factors:
+        reason = f"raster exceeds its own {tile}px internal tile but carries no internal overviews"
+    elif any(
+        not _overview_reduction(previous, shape)
+        for previous, shape in zip([(src.height, src.width), *shapes[:-1]], shapes, strict=True)
+    ):
+        reason = f"overview pyramid factors {factors} must reduce each preceding level by 2–10"
+    elif shapes[-1][1] > tile_width or shapes[-1][0] > tile_height:
+        reason = f"overview pyramid factors {factors} stop before the coarsest level fits one {tile}px internal tile"
+    else:
+        return []
+    return [DataDefect(DAT_OVERVIEWS, Severity.ERROR, f"asset '{key}' {reason}", key)]
+
+
+def _overview_reduction(previous: tuple[int, int], current: tuple[int, int]) -> bool:
+    """Can one scale in [2, 10] yield both dimensions after pixel rounding?"""
+    if previous == current:
+        return False
+    dimensions = list(zip(previous, current, strict=True))
+    scale = max(Fraction(2), *(Fraction(before, after) for before, after in dimensions))
+    # ceil(before / scale) == after, with an exact bound at integer pixels.
+    return scale <= 10 and all(before > (after - 1) * scale for before, after in dimensions)
 
 
 def _check_tile_size(key: str, files: _AssetFiles) -> list[DataDefect]:

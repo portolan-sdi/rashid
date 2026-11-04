@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import math
 from typing import Any
 
 import pyarrow.parquet as pq
@@ -18,10 +19,11 @@ def _parquet_file(source: Any) -> Any:
     return pq.ParquetFile(source)
 
 
-def _raster_open(path: str) -> Any:
+def _raster_open(path: str, *, overview_level: int | None = None) -> Any:
     """``rasterio.open(path)``, counted. Each open reads the TIFF header."""
     _trace.count("raster.opens")
-    return rasterio.open(path)
+    options = {} if overview_level is None else {"overview_level": overview_level}
+    return rasterio.open(path, **options)
 
 
 class _AssetFiles:
@@ -75,6 +77,23 @@ class _AssetFiles:
                 self._raster_error = exc
                 raise
         return self._raster
+
+    def overview_shapes(self) -> list[tuple[int, int]]:
+        """Actual (height, width) of each level; Rasterio's factors are rounded.
+
+        Rasterio exposes rounded width-based factors, not overview dimensions.
+        Open only ambiguous levels; ordinary pyramids reuse the base dataset.
+        """
+        src = self.raster()
+        shapes: list[tuple[int, int]] = []
+        for level, factor in enumerate(src.overviews(1)):
+            height, width = math.ceil(src.height / factor), math.ceil(src.width / factor)
+            if factor == 1 or src.height * width != src.width * height:
+                # A saturated axis or unequal pixel scales makes the factor ambiguous.
+                with _raster_open(self.located.gdal_path(), overview_level=level) as overview:
+                    height, width = overview.height, overview.width
+            shapes.append((height, width))
+        return shapes
 
     def close(self) -> None:
         # One close that raises must not leave the other handles open.
