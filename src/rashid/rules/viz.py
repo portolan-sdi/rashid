@@ -24,6 +24,7 @@ from rashid.rules._common import (
     PMTILES_MEDIA_TYPE,
     assets_of,
     declares_geometry,
+    indexed_links_of,
     is_cog_media_type,
     is_pmtiles_asset,
     is_tiff_media_type,
@@ -230,7 +231,7 @@ class PMTilesRegistrationRule(Rule):
                 " to links",
             )
             return
-        for index, link in enumerate(links_of(node)):
+        for index, link in indexed_links_of(node):
             if link.get("rel") != "pmtiles":
                 continue
             if link.get("type") != PMTILES_MEDIA_TYPE:

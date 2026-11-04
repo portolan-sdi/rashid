@@ -94,7 +94,7 @@ from rashid.registry import (
     LIV_SELF_BASE,
     LIV_UNAVAILABLE,
 )
-from rashid.rules._common import assets_of, links_of
+from rashid.rules._common import assets_of, indexed_links_of
 
 log = logging.getLogger(__name__)
 
@@ -336,7 +336,7 @@ def _link_targets(graph: CatalogGraph, base: str) -> list[_LinkTarget]:
     for node in graph.iter(*_LINK_KINDS):
         if node.parse_error is not None:
             continue
-        for index, link in enumerate(links_of(node)):
+        for index, link in indexed_links_of(node):
             href = link.get("href")
             if not isinstance(href, str) or not href:
                 continue
@@ -809,7 +809,7 @@ def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
     index = next(
         (
             i
-            for i, link in enumerate(links_of(root))
+            for i, link in indexed_links_of(root)
             if link.get("rel") == "self" and is_absolute_href(str(link.get("href", "")))
         ),
         0,

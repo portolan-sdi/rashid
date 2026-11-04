@@ -37,12 +37,17 @@ _COG_PARAMETERS = {"application=geotiff", "profile=cloud-optimized"}
 TIFF_SUFFIXES = (".tif", ".tiff")
 
 
+def indexed_links_of(node: Node) -> Iterator[tuple[int, dict[str, Any]]]:
+    """The node's valid link objects with their original array positions."""
+    raw = node.data.get("links")
+    for index, link in enumerate(raw if isinstance(raw, list) else []):
+        if isinstance(link, dict):
+            yield index, link
+
+
 def links_of(node: Node) -> list[dict[str, Any]]:
     """The node's links array, tolerating a missing or malformed field."""
-    raw = node.data.get("links")
-    if not isinstance(raw, list):
-        return []
-    return [link for link in raw if isinstance(link, dict)]
+    return [link for _index, link in indexed_links_of(node)]
 
 
 def roles_of(asset: dict[str, Any]) -> list[str]:

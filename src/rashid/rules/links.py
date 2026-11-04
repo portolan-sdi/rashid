@@ -9,7 +9,7 @@ from rashid._href import is_absolute_href, is_uri_reference
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import STRUCTURAL_RELS, assets_of, links_of
+from rashid.rules._common import STRUCTURAL_RELS, assets_of, indexed_links_of, links_of
 
 # What each required structural link points at, for the fix hints.
 _REQUIRED_LINK_TARGETS = {
@@ -42,7 +42,7 @@ def _icon_links(node: Node) -> Iterable[tuple[int, dict[str, Any]]]:
     collection and item cards. So the rules below constrain any icon link they
     find rather than only the root's.
     """
-    for index, link in enumerate(links_of(node)):
+    for index, link in indexed_links_of(node):
         if link.get("rel") == "icon":
             yield index, link
 
@@ -136,7 +136,7 @@ class StructuralLinkTypeRule(Rule):
     kinds = ("catalog", "collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for index, link in enumerate(links_of(node)):
+        for index, link in indexed_links_of(node):
             rel = link.get("rel")
             if rel not in STRUCTURAL_RELS:
                 continue
@@ -231,7 +231,7 @@ class LinkResolutionRule(Rule):
     def _invalid_hrefs(self, node: Node) -> Iterable[Finding]:
         locations = [
             (json_pointer("links", index, "href"), link.get("href"))
-            for index, link in enumerate(links_of(node))
+            for index, link in indexed_links_of(node)
         ]
         locations.extend(
             (json_pointer("href", prefix=pointer), asset.get("href"))
@@ -249,7 +249,7 @@ class LinkResolutionRule(Rule):
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         yield from self._invalid_hrefs(node)
-        for index, link in enumerate(links_of(node)):
+        for index, link in indexed_links_of(node):
             rel = link.get("rel")
             if rel not in STRUCTURAL_RELS:
                 continue
@@ -404,7 +404,7 @@ class ContainmentStaysInLanguageRule(Rule):
         if not translations:
             return
         here = graph.language_root_of(node)
-        for index, link in enumerate(links_of(node)):
+        for index, link in indexed_links_of(node):
             rel = link.get("rel")
             if rel not in ("child", "item"):
                 continue

@@ -17,7 +17,7 @@ from rashid._href import is_absolute_href
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import links_of
+from rashid.rules._common import indexed_links_of
 
 _REQUIRED = ("AGENTS.md", "README.md")
 _MARKDOWN = "text/markdown"
@@ -131,7 +131,7 @@ def _check_markdown_link(
     closest to being the required one. Blaming every candidate would report a
     foreign link a fixer must not rewrite.
     """
-    matches = [(index, link) for index, link in enumerate(links_of(node)) if link.get("rel") == rel]
+    matches = [(index, link) for index, link in indexed_links_of(node) if link.get("rel") == rel]
     if not matches:
         yield rule.finding(
             node,
