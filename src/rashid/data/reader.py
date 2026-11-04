@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Protocol
 
 from rashid import _store
-from rashid._href import is_absolute_href, is_https_href
+from rashid._href import is_absolute_href, is_https_href, request_target
 from rashid.catalog import CatalogGraph, Node
 from rashid.remote import wire_url
 
@@ -86,8 +86,9 @@ class FilesystemHttpReader:
         path = self._graph.root_path / Path(*rel.parts)
         if path.is_file():
             return Locator(is_remote=False, source=str(path))
-        if self._graph.base_url is not None:
-            return Locator(is_remote=True, source=wire_url(self._graph.base_url, str(rel)))
+        target = request_target(str(node.path.parent), href)
+        if self._graph.base_url is not None and target is not None:
+            return Locator(is_remote=True, source=wire_url(self._graph.base_url, target))
         return None
 
     def stream(self, node: Node, href: str) -> Iterator[bytes] | None:

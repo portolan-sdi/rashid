@@ -21,6 +21,7 @@ import pytest
 
 from rashid import RulesConfig, ValidationOptions, _store, validate, validate_live
 from rashid import live as live_mod
+from rashid._href import resolve_live_base
 from rashid.catalog import CatalogGraph
 from rashid.live import (
     LIV_CORS_EXPOSE,
@@ -777,7 +778,8 @@ def test_link_findings_follow_sorted_url_order(catalog: CatalogBuilder) -> None:
     asset_urls = {
         t.url for targets in live_mod._targets_by_host(graph, _BASE).values() for t in targets
     }
-    base, _named = live_mod._resolve_base(graph, _BASE)
+    base, _named = resolve_live_base(_BASE, graph.base_url, graph.published_base())
+    assert base is not None
     link_urls = [t.url for t in live_mod._link_targets(graph, base)]
     assert link_urls == sorted(link_urls) and len(link_urls) > 2
     prober = StatusProber(dict.fromkeys(link_urls, 404))

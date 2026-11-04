@@ -37,7 +37,7 @@ from typing import Protocol
 from urllib.parse import quote
 
 from rashid import _json, _store, _trace
-from rashid._href import crawl_prefix
+from rashid._href import containment_href, crawl_prefix, href_suffix, split_href
 from rashid.catalog import ROOT_CATALOG
 
 log = logging.getLogger(__name__)
@@ -167,15 +167,16 @@ def crawl(
             result.statuses[url] = outcome.status
             if not outcome.ok:
                 continue
-            written = _write(dest, rel, outcome.body)
+            path = containment_href(rel)
+            written = _write(dest, path, outcome.body)
             if written is not None:
                 result.errors[url] = written
                 continue
-            if not rel.endswith(".json"):
+            if not path.endswith(".json"):
                 continue
             result.documents += 1
             _trace.count("crawl.documents")
-            follows = _follow_paths(base, rel, outcome.body)
+            follows = _follow_paths(base, path, outcome.body)
             queue.enqueue(follows, next_level, result)
         level = next_level
     return result
@@ -191,10 +192,13 @@ class _CrawlQueue:
 
     def enqueue(self, follows: list[str], next_level: list[str], result: Crawl) -> None:
         for follow in follows:
-            if follow in self.seen:
+            # The first URL for a document supplies its request suffix;
+            # aliases must not consume the budget for distinct descendants.
+            identity = containment_href(follow)
+            if identity in self.seen:
                 continue
-            self.seen.add(follow)
-            if follow.endswith(".json"):
+            self.seen.add(identity)
+            if containment_href(follow).endswith(".json"):
                 if self.queued_documents >= self.max_documents:
                     result.capped = True
                     continue
@@ -209,7 +213,13 @@ def wire_url(base: str, rel: str) -> str:
     and the data reader so the three agree on the URL for one href, and so a
     status the crawl recorded is found under the URL the live pass asks for.
     """
-    return f"{base}{quote(str(rel), safe='/%')}"
+    path = containment_href(str(rel))
+    parsed = split_href(path)
+    origin = ""
+    if parsed is not None and parsed.scheme and parsed.netloc:
+        origin = path[: len(path) - len(parsed.path)] if parsed.path else path
+        path = parsed.path
+    return f"{base}{origin}{quote(path, safe='/%')}{href_suffix(str(rel))}"
 
 
 def _fetch_one(fetcher: Fetcher, url: str) -> Fetched | str:
@@ -282,7 +292,7 @@ def _follow_paths(base: str, rel: str, body: bytes) -> list[str]:
         path = crawl_prefix(base, directory, href)
         # Only a JSON document is followed and written. A child or item link
         # to anything else is not a STAC object; the live pass still HEADs it.
-        if path is not None and path.endswith(".json"):
+        if path is not None and containment_href(path).endswith(".json"):
             paths.append(path)
     return paths
 

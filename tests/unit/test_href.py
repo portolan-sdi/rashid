@@ -210,3 +210,22 @@ def test_file_location(tmp_path: Path) -> None:
         str(tmp_path.as_uri()) + "/x/../a%20b.json"
     )
 
+@pytest.mark.parametrize("suffix", ["?token=x#piece", "#piece", "?token=%3F%23", "?#", "?"])
+def test_suffix_is_ignored_for_containment_and_retained_for_wire_and_live(suffix: str) -> None:
+    from rashid._href import containment_href, href_suffix
+    from rashid.remote import wire_url
+
+    href = "./a%20b.parquet" + suffix
+    assert containment_href(href) == "./a%20b.parquet"
+    assert href_suffix(href) == suffix
+    assert relative_path("roads", href) == "roads/a%20b.parquet"
+    assert crawl_prefix("https://h/cat/", "roads", href) == "roads/a%20b.parquet" + suffix
+    assert live_host_href("roads", href, "https://h/cat/") == (
+        "https://h/cat/roads/a%20b.parquet" + suffix
+    )
+    assert wire_url("https://h/cat/", "roads/a%20b.parquet" + suffix) == (
+        "https://h/cat/roads/a%20b.parquet" + suffix
+    )
+    assert wire_url("https://h/cat/", "a b.parquet" + suffix) == (
+        "https://h/cat/a%20b.parquet" + suffix
+    )

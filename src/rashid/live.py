@@ -64,16 +64,23 @@ says they did not run.
 from __future__ import annotations
 
 import logging
-import posixpath
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.error import HTTPError
-from urllib.parse import urlparse
 
 from rashid import _store, _trace
-from rashid._href import is_absolute_href
+from rashid._href import (
+    href_host,
+    is_absolute_href,
+    is_https_href,
+    live_host_href,
+    location_key,
+    normalize_live_base,
+    off_https_reference,
+    resolve_live_base,
+)
 from rashid._http import user_agent
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.model import Finding, Severity
@@ -182,7 +189,7 @@ class ProbeResponse:
         if not 300 <= self.status < 400:
             return None
         location = self.header("location")
-        if location is None or urlparse(location).scheme.lower() in ("", "https"):
+        if location is None or not off_https_reference(location):
             return None
         return location
 
@@ -224,7 +231,7 @@ class _Target:
         actual: object | None = None,
     ) -> Finding:
         """Report a hosting defect against this asset and its URL's host."""
-        host = urlparse(self.url).netloc.lower()
+        host = href_host(self.url)
         return Finding(
             rule_id=rule_id,
             severity=Severity.ERROR,
@@ -265,7 +272,7 @@ def _open(request: Request) -> Any:
 def _request(url: str, method: str, headers: dict[str, str]) -> ProbeResponse:
     from urllib.request import Request
 
-    if urlparse(url).scheme.lower() != "https":
+    if not is_https_href(url):
         raise ValueError(f"refusing to probe non-https URL: {url!r}")
     # Every probe shape — ranged GET, HEAD, OPTIONS preflight — funnels through
     # here, so setting the agent once covers all of them.
@@ -337,7 +344,7 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
     Node iteration is path-sorted and asset keys are sorted, so each host's
     first target — the probe representative — is deterministic.
     """
-    base = _normalize_base(base_url) if base_url is not None else None
+    base = normalize_live_base(base_url) if base_url is not None else None
     by_host: dict[str, list[_Target]] = {}
     for node in graph.iter(*_LIVE_KINDS):
         if node.parse_error is not None:
@@ -352,11 +359,13 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
             href = asset.get("href")
             if not isinstance(href, str):
                 continue
-            url = _own_url(graph, node, href, base)
+            url = live_host_href(str(graph.href_path(node).parent), href, base)
             if url is None:
                 continue
+            if not is_absolute_href(href):
+                url = wire_url("", url)
             size = asset.get("file:size")
-            by_host.setdefault(urlparse(url).netloc.lower(), []).append(
+            by_host.setdefault(href_host(url), []).append(
                 _Target(
                     node=node,
                     key=key,
@@ -365,29 +374,6 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
                 )
             )
     return by_host
-
-
-def _own_url(graph: CatalogGraph, node: Node, href: str, base: str | None) -> str | None:
-    """The URL a href on ``node`` is served from, or None when it is out of scope.
-
-    An absolute ``https`` href is probed as declared, except that once ``base``
-    (already normalized) names the publish host, an href on any other host is a
-    copy someone else serves: core.md's hosting MUSTs do not reach it
-    (PORTO-CORE-073), whatever roles it carries. A relative href joins onto
-    ``base``; without one it cannot be placed. Absolute non-https hrefs and
-    hrefs escaping the tree are never probed.
-    """
-    parsed = urlparse(href)
-    if parsed.scheme.lower() == "https" and parsed.netloc:
-        if base is not None and parsed.netloc.lower() != urlparse(base).netloc.lower():
-            return None
-        return href
-    if base is None:
-        return None
-    rel = graph.resolve_path(node, href)
-    if rel is None:
-        return None
-    return wire_url(base, str(rel))
 
 
 def _link_targets(graph: CatalogGraph, base: str) -> list[_LinkTarget]:
@@ -405,26 +391,17 @@ def _link_targets(graph: CatalogGraph, base: str) -> list[_LinkTarget]:
             href = link.get("href")
             if not isinstance(href, str) or not href:
                 continue
-            url = _own_url(graph, node, href, base)
-            if url is None or url in first:
+            url = live_host_href(str(graph.href_path(node).parent), href, base)
+            if url is None:
+                continue
+            if not is_absolute_href(href):
+                url = wire_url("", url)
+            if url in first:
                 continue
             first[url] = _LinkTarget(
                 node=node, index=index, rel=link.get("rel"), href=href, url=url
             )
     return [first[url] for url in sorted(first)]
-
-
-def _normalize_base(base_url: str) -> str:
-    """Validate and normalize a publish base URL to https with one trailing slash.
-
-    https-only for the same reason the data reader is: the base joins with
-    catalog-controlled hrefs into request URLs, so any weaker scheme would let
-    a hostile tree downgrade or redirect the probes.
-    """
-    parsed = urlparse(base_url)
-    if parsed.scheme.lower() != "https" or not parsed.netloc:
-        raise ValueError(f"live base_url must be an https URL, got: {base_url!r}")
-    return base_url.rstrip("/") + "/"
 
 
 def _header_set(value: str | None) -> set[str]:
@@ -629,7 +606,7 @@ class _HeadCache:
         if response is not None:
             _trace.count("live.head_cache_hits")
             return response
-        host = urlparse(url).netloc.lower()
+        host = href_host(url)
         if host in self.failed:
             return None
         error = self._errors.pop(url, None)
@@ -861,7 +838,8 @@ def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
     claimed = graph.published_base()
     if root is None or claimed is None:
         return []
-    if _same_location(claimed, base):
+    claimed_location = location_key(claimed)
+    if claimed_location is not None and claimed_location == location_key(base):
         return []
     index = next(
         (
@@ -890,43 +868,6 @@ def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
             actual=claimed,
         )
     ]
-
-
-def _same_location(left: str, right: str) -> bool:
-    """True when two base URLs name one location, whatever their spelling."""
-    return _location_key(left) == _location_key(right)
-
-
-def _location_key(url: str) -> tuple[str, str, str]:
-    parsed = urlparse(url)
-    scheme = parsed.scheme.lower()
-    host = parsed.hostname or ""
-    port = parsed.port
-    default = {"https": 443, "http": 80}.get(scheme)
-    netloc = host if port is None or port == default else f"{host}:{port}"
-    path = posixpath.normpath(parsed.path or "/")
-    return scheme, netloc, path.rstrip("/") + "/"
-
-
-def _resolve_base(graph: CatalogGraph, base_url: str | None) -> tuple[str | None, bool]:
-    """The publish base to probe under, and whether the caller supplied it.
-
-    The caller's ``base_url`` wins, then the base recorded on the graph (the
-    URL ``rashid check`` was given), then the root ``self`` link
-    (PORTO-CORE-081): a catalog that states its own published location needs
-    no ``--live-base-url``. A ``self`` link that is not an https URL with a
-    host is ignored rather than probed, for the reason :func:`_normalize_base`
-    gives.
-    """
-    named = base_url if base_url is not None else graph.base_url
-    if named is not None:
-        return _normalize_base(named), True
-    claimed = graph.published_base()
-    if claimed is not None:
-        parsed = urlparse(claimed)
-        if parsed.scheme.lower() == "https" and parsed.netloc:
-            return _normalize_base(claimed), False
-    return None, False
 
 
 def validate_live(
@@ -959,7 +900,7 @@ def validate_live(
     """
     if prober is None:
         prober = _DefaultProber()
-    base, named = _resolve_base(graph, base_url)
+    base, named = resolve_live_base(base_url, graph.base_url, graph.published_base())
     by_host = _targets_by_host(graph, base)
     findings: list[Finding] = []
     if not by_host:
@@ -979,7 +920,7 @@ def validate_live(
     for host in sorted(by_host):
         findings.extend(_check_host(host, by_host[host], prober, heads))
     if base is not None:
-        base_host = urlparse(base).netloc.lower()
+        base_host = href_host(base)
         findings.extend(_check_links(base_host, _link_targets(graph, base), heads))
         if named:
             findings.extend(_check_self_base(graph, base))

@@ -35,6 +35,18 @@ def is_absolute_href(href: str) -> bool:
     return href.startswith("/") or bool(urlparse(href).scheme)
 
 
+def href_host(href: str) -> str:
+    """Live authority key, retaining the declared port and ignoring host case."""
+    parsed = split_href(href)
+    return parsed.netloc.lower() if parsed is not None else ""
+
+
+def off_https_reference(href: str) -> bool:
+    """Reject non-HTTPS redirects while allowing relative Location values."""
+    parsed = split_href(href)
+    return parsed is None or parsed.scheme.lower() not in ("", "https")
+
+
 def self_link_base(root: _SelfLinked | None) -> str | None:
     """The URL prefix a root catalog is published under, from its ``self`` link.
 
@@ -54,7 +66,7 @@ def self_link_base(root: _SelfLinked | None) -> str | None:
             continue
         href = link.get("href")
         if isinstance(href, str) and is_absolute_href(href):
-            prefix, sep, tail = href.rpartition("/")
+            prefix, sep, tail = containment_href(href).rpartition("/")
             if tail == root.path.name:
                 return prefix + sep
     return None
@@ -96,14 +108,34 @@ def is_schema_url(href: str) -> bool:
     return href.startswith("https://")
 
 
+def containment_href(href: str) -> str:
+    """Href spelling used for containment, without query or fragment."""
+    return href.split("#", 1)[0].split("?", 1)[0]
+
+
+def href_suffix(href: str) -> str:
+    """The original query and fragment, including empty delimiters and escapes."""
+    return href[len(containment_href(href)) :]
+
+
 def relative_path(directory: str, href: str) -> str | None:
     """Graph policy: a relative href normalized below the catalog root."""
     if not href or is_absolute_href(href):
         return None
-    joined = posixpath.normpath(posixpath.join(directory, href))
+    joined = posixpath.normpath(posixpath.join(directory, containment_href(href)))
     if joined == "." or joined.startswith(".."):
         return None
     return joined
+
+
+def request_target(directory: str, href: str) -> str | None:
+    """Root-relative request target, preserving href encoding and its suffix.
+
+    Feed this to remote.wire_url for the crawl, data reads, and live probes;
+    filesystem containment paths are not request targets.
+    """
+    path = relative_path(directory, href)
+    return path + href_suffix(href) if path is not None else None
 
 
 def structural_prefix(href: str, base: str | None) -> str | None:
@@ -112,6 +144,7 @@ def structural_prefix(href: str, base: str | None) -> str | None:
     Relative hrefs resolve from their document; absolute hrefs resolve from
     the language root after removing this prefix. No HTTPS restriction applies.
     """
+    href = containment_href(href)
     if not is_absolute_href(href):
         return href
     if base is None or not href.startswith(base):
@@ -120,7 +153,7 @@ def structural_prefix(href: str, base: str | None) -> str | None:
 
 
 def crawl_prefix(base: str, directory: str, href: str) -> str | None:
-    """The path under ``base`` that ``href`` names; None when it is not the tree's.
+    """The root-relative href under ``base``, retaining its request suffix.
 
     A relative href joins onto the document's directory. An absolute https
     href is followed only when it starts with the base — a link to another
@@ -133,10 +166,11 @@ def crawl_prefix(base: str, directory: str, href: str) -> str | None:
     if parsed.scheme or href.startswith("/"):
         if parsed.scheme.lower() != "https" or not href.startswith(base):
             return None
-        candidate = href[len(base) :].split("#", 1)[0].split("?", 1)[0]
+        candidate = containment_href(href[len(base) :])
     else:
-        candidate = posixpath.join(directory, href.split("#", 1)[0].split("?", 1)[0])
-    return safe_crawl_path(candidate)
+        candidate = posixpath.join(directory, containment_href(href))
+    path = safe_crawl_path(candidate)
+    return path + href_suffix(href) if path is not None else None
 
 
 def safe_crawl_path(candidate: str) -> str | None:
@@ -173,8 +207,7 @@ def normalize_live_base(base_url: str) -> str:
 def live_host_href(directory: str, href: str, base: str | None) -> str | None:
     """Live policy: HTTPS on the publish authority, at any path on that host.
 
-    The result is unencoded; remote.wire_url remains the wire encoder.
-    T4 adapts graph nodes to this pure policy.
+    remote.wire_url encodes the resulting candidate's path for probing.
     """
     parsed = urlparse(href)
     if parsed.scheme.lower() == "https" and parsed.netloc:
@@ -183,8 +216,8 @@ def live_host_href(directory: str, href: str, base: str | None) -> str | None:
         return href
     if base is None:
         return None
-    rel = relative_path(directory, href)
-    return base + rel if rel is not None else None
+    target = request_target(directory, href)
+    return base + target if target is not None else None
 
 
 def resolve_live_base(
@@ -193,7 +226,7 @@ def resolve_live_base(
     """Explicit base wins over crawl base, then a fetchable root self base.
 
     The boolean distinguishes caller-provided locations from self claims.
-    T4 supplies the graph's two bases at its existing call sites.
+    The caller supplies its crawl base and root self claim.
     """
     named = explicit if explicit is not None else crawled
     if named is not None:

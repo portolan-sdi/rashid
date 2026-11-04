@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 import pytest
 from click.testing import CliRunner
@@ -68,7 +68,7 @@ class DirFetcher:
     def get(self, url: str) -> Fetched:
         self.calls.append(url)
         assert url.startswith(self.base), url
-        rel = unquote(url[len(self.base) :])
+        rel = unquote(urlsplit(url[len(self.base) :]).path)
         if rel in self.broken:
             raise FetchError(f"GET {url}: connection refused")
         if rel in self.missing:
@@ -316,7 +316,7 @@ def test_crawl_normalizes_absolute_hrefs_like_relative_ones(
     fetcher = DirFetcher(root)
     dest = tmp_path / "dest"
     result = crawl(_BASE, dest, fetcher)
-    assert f"{_BASE}sector-1/catalog.json" in fetcher.calls
+    assert f"{_BASE}sector-1/catalog.json?v=2#top" in fetcher.calls
     assert (dest / "sector-1" / "catalog.json").exists()
     assert result.documents == 5
 
@@ -904,3 +904,35 @@ def test_options_can_be_reused_without_resolving_the_callers_live_default(
     assert remote.files_checked == local.files_checked
     assert options.live is None
     assert prober.range_calls  # URL mode still probes the host after a local validation.
+
+
+def test_signed_request_target_matches_crawl_status_and_data_reader(
+    catalog: CatalogBuilder, tmp_path: Path
+) -> None:
+    from rashid._href import live_host_href, request_target
+
+    asset_href = "./data%20file.parquet?token=x#piece"
+    catalog.collection("roads", assets={"data": {"href": asset_href}})
+    root = catalog.write()
+    child_href = "./roads/collection.json?token=x#one"
+    mutate_json(
+        root / "catalog.json",
+        lambda d: next(link for link in d["links"] if link.get("rel") == "child").update(
+            href=child_href
+        ),
+    )
+    dest = tmp_path / "download"
+    fetched = crawl(_BASE, dest, DirFetcher(root))
+    target = request_target(".", child_href)
+    assert target == "roads/collection.json?token=x#one"
+    assert fetched.statuses[wire_url(_BASE, target)] == 200
+    assert live_host_href(".", child_href, _BASE) == wire_url(_BASE, target)
+    graph = CatalogGraph.load(dest)
+    graph.base_url = _BASE
+    node = graph.nodes[PurePosixPath("roads/collection.json")]
+    asset_target = request_target("roads", asset_href)
+    assert asset_target == "roads/data%20file.parquet?token=x#piece"
+    located = FilesystemHttpReader(graph).locate(node, asset_href)
+    assert located is not None
+    assert located.source == wire_url(_BASE, asset_target)
+    assert live_host_href("roads", asset_href, _BASE) == located.source
