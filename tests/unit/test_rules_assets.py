@@ -442,21 +442,46 @@ def test_self_reference_default_port(catalog: CatalogBuilder, scheme: str, port:
 
 
 @pytest.mark.parametrize(
-    "encoded,plain",
+    "encoded,plain,equal",
     [
-        ("roads%2Fcollection.json", "roads/collection.json"),
-        ("roads%3Bv/collection.json", "roads;v/collection.json"),
+        ("roads%2Fcollection.json", "roads/collection.json", False),
+        ("roads%3Bv/collection.json", "roads;v/collection.json", True),
+        ("roads%20v/collection.json", "roads v/collection.json", True),
+        ("roads%3Bv/collection.json?x=1", "roads;v/collection.json?x=1", False),
     ],
 )
-def test_reserved_url_characters_are_distinct(
-    catalog: CatalogBuilder, encoded: str, plain: str
+def test_self_reference_follows_transport_identity(
+    catalog: CatalogBuilder, encoded: str, plain: str, equal: bool
 ) -> None:
     catalog.collection(
         "roads",
         links=[{"rel": "self", "href": f"https://example.org/{plain}"}],
         assets={"separate": _asset(href=f"https://example.org/{encoded}")},
     )
-    assert findings_for(validate(catalog.write()), "PTL-AST-003") == []
+    findings = findings_for(validate(catalog.write()), "PTL-AST-003")
+    assert len(findings) == (2 if equal else 0)
+    assert all(f.severity is Severity.ERROR for f in findings)
+
+
+@pytest.mark.parametrize(
+    "directory,encoded", [("sector 1", "sector%201"), ("東京", "%E6%9D%B1%E4%BA%AC")]
+)
+@pytest.mark.parametrize("prefix", ["catalog", "catalog%2Fv"])
+def test_published_self_reference_under_encoded_directory(
+    catalog: CatalogBuilder, directory: str, encoded: str, prefix: str
+) -> None:
+    catalog.overrides["links"] = [
+        {"rel": "self", "href": f"https://example.org/{prefix}/catalog.json"}
+    ]
+    catalog.subcatalog(directory).collection(
+        "roads",
+        assets={
+            "self": _asset(href=f"https://example.org/{prefix}/{encoded}/roads/collection.json")
+        },
+    )
+    findings = findings_for(validate(catalog.write()), "PTL-AST-003")
+    assert len(findings) == 2
+    assert all(f.severity is Severity.ERROR for f in findings)
 
 
 @pytest.mark.parametrize("scope", ["asset", "collection", "item", "glob"])
@@ -488,6 +513,57 @@ def test_pmtiles_reference_geometry(
             (data if scope == "asset" else collection.overrides)["table:columns"] = columns
     findings = findings_for(validate(catalog.write()), "PTL-AST-009")
     assert [f.severity for f in findings] == ([] if expected is None else [expected])
+
+
+@pytest.mark.parametrize(
+    "scope", ["asset", "collection", "properties", "item", "item-asset", "item-collection", "glob"]
+)
+@pytest.mark.parametrize("with_columns", [False, True])
+def test_pmtiles_reference_primary_geometry(
+    catalog: CatalogBuilder, scope: str, with_columns: bool
+) -> None:
+    declaration = {"table:primary_geometry": "footprint"}
+    if with_columns:
+        declaration["table:columns"] = [{"name": "footprint", "type": "binary"}]
+    data = default_asset()
+    collection = catalog.collection(
+        "roads", assets={"map": {"href": "./map.pmtiles", "roles": ["visual"]}}
+    )
+    if scope == "glob":
+        collection.overrides.update({"partition:glob": "./parts/*.parquet", **declaration})
+    elif scope in {"item", "item-asset", "item-collection"}:
+        item = collection.item("part", assets={"data": data})
+        if scope == "item-asset":
+            data.update(declaration)
+        elif scope == "item-collection":
+            collection.overrides.update(declaration)
+        else:
+            item.overrides["properties"] = declaration
+    else:
+        collection.overrides["assets"]["data"] = data
+        if scope == "asset":
+            data.update(declaration)
+        elif scope == "properties":
+            collection.overrides["properties"] = declaration
+        else:
+            collection.overrides.update(declaration)
+    assert findings_for(validate(catalog.write()), "PTL-AST-009") == []
+
+
+@pytest.mark.parametrize("role", ["source", "metadata"])
+def test_pmtiles_reference_ignores_other_assets_primary_geometry(
+    catalog: CatalogBuilder, role: str
+) -> None:
+    catalog.collection(
+        "roads",
+        **{"table:columns": [{"name": "population", "type": "int64"}]},
+        assets={
+            "data": default_asset(),
+            "other": _asset(roles=[role], **{"table:primary_geometry": "footprint"}),
+            "map": {"href": "./map.pmtiles", "roles": ["visual"]},
+        },
+    )
+    assert len(findings_for(validate(catalog.write()), "PTL-AST-009")) == 1
 
 
 @pytest.mark.parametrize("reference", ["missing", "unknown", "spatial", "nonspatial"])

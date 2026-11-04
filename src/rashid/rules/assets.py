@@ -17,11 +17,10 @@ from rashid.rule import Rule
 from rashid.rules._common import (
     COG_MEDIA_TYPE,
     asset_refers_to_self,
-    column_declarations,
+    declares_geometry,
     is_cog_media_type,
     is_pmtiles_asset,
     is_raster_data_asset,
-    names_a_geometry_column,
     roles_of,
 )
 
@@ -389,8 +388,7 @@ class PMTilesDataRule(Rule):
 
 
 def _reference_has_geometry(owner: Node, asset: dict[str, Any], collection: Node) -> bool:
-    columns = column_declarations(owner, asset, collection)
-    return columns is None or names_a_geometry_column(columns)
+    return declares_geometry(owner, asset, collection) is not False
 
 
 def _has_geoparquet_reference(collection: Node, graph: CatalogGraph) -> bool:

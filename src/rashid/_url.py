@@ -7,8 +7,6 @@ import re
 from urllib.parse import SplitResult, unquote, urlsplit
 
 _ENCODED_SLASH = re.compile(r"%2f", re.IGNORECASE)
-_ESCAPE = re.compile(r"%[0-9a-fA-F]{2}")
-_UNRESERVED = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
 
 def url_authority(parsed: SplitResult) -> str:
@@ -33,24 +31,16 @@ def store_path(parsed: SplitResult) -> str | None:
     return path
 
 
-def _normalize_escape(match: re.Match[str]) -> str:
-    char = chr(int(match[0][1:], 16))
-    return char if char in _UNRESERVED else match[0].upper()
-
-
 def object_location(url: str) -> tuple[str, str, str, str]:
-    """Preserve reserved escapes and path segments, as the urllib fallback does.
+    """Identify objects by the path transport requests.
 
-    Only file URLs use filesystem path normalization. HTTP paths with encoded
-    separators or empty/dot segments can name distinct objects in the store.
+    obstore uses the decoded store path; urllib preserves the URL path.
+    Only file URLs use filesystem path normalization.
     """
     parsed = urlsplit(url)
-    path = (
-        posixpath.normpath(unquote(parsed.path))
-        if parsed.scheme == "file"
-        else _ESCAPE.sub(
-            _normalize_escape if store_path(parsed) is not None else lambda match: match[0].upper(),
-            parsed.path,
-        )
-    )
+    if parsed.scheme == "file":
+        path = posixpath.normpath(unquote(parsed.path))
+    else:
+        stored = store_path(parsed)
+        path = parsed.path if stored is None else stored
     return parsed.scheme.lower(), url_authority(parsed), path, parsed.query

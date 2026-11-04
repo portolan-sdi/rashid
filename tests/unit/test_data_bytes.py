@@ -312,3 +312,41 @@ def test_self_references_skip_byte_checks(
         assert defects == []
         assert reader.consumed == 0
         assert not reader.closed
+
+
+@pytest.mark.parametrize(
+    "directory,encoded", [("sector 1", "sector%201"), ("東京", "%E6%9D%B1%E4%BA%AC")]
+)
+@pytest.mark.parametrize("base", ["crawl", "published"])
+@pytest.mark.parametrize("absolute", [False, True])
+def test_encoded_node_path_self_reference_skips_byte_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    directory: str,
+    encoded: str,
+    base: str,
+    absolute: bool,
+) -> None:
+    node = _item(_asset(**{"file:size": 1, "file:checksum": _multihash(b"wrong")}))
+    node.path = PurePosixPath(directory) / node.path
+    node.abs_path = tmp_path / node.path
+    root = Node(PurePosixPath("catalog.json"), tmp_path / "catalog.json", "catalog", "root", {})
+    graph = CatalogGraph(tmp_path, nodes={root.path: root, node.path: node})
+    # The encoded separator selects urllib, which preserves URL escapes.
+    prefix = "https://example.org/catalog%2Fv/"
+    if base == "crawl":
+        graph.base_url = prefix
+    else:
+        root.data["links"] = [{"rel": "self", "href": prefix + "catalog.json"}]
+    if not absolute and base == "published":
+        # A locally loaded graph resolves relative hrefs as filesystem paths.
+        href = "./seg1.json"
+    else:
+        href = f"{prefix}{encoded}/roads/seg1/seg1.json"
+        if not absolute:
+            href = f"../../../{encoded}/roads/seg1/seg1.json"
+    node.data["assets"]["data"]["href"] = href
+    reader = _CountingReader(payload=b"{}")
+    monkeypatch.setattr(reader, "stream", lambda node, href: reader.stream_handed)
+    assert checks.check_node(node, reader, graph) == []
+    assert reader.consumed == 0

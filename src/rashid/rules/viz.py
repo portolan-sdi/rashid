@@ -22,10 +22,9 @@ from rashid.model import Finding, Severity
 from rashid.rule import Rule
 from rashid.rules._common import (
     PMTILES_MEDIA_TYPE,
-    column_declarations,
+    declares_geometry,
     is_pmtiles_asset,
     links_of,
-    names_a_geometry_column,
     roles_of,
 )
 from rashid.rules.assets import _assets_of
@@ -67,10 +66,7 @@ def is_geospatial(node: Node, graph: CatalogGraph) -> bool | None:
             return True
     if _has_spatial_media_type(node):
         return True
-    columns = column_declarations(node)
-    if columns is not None:
-        return names_a_geometry_column(columns)
-    return None
+    return declares_geometry(node)
 
 
 def _undecided_because(node: Node, graph: CatalogGraph) -> str:

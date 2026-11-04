@@ -47,6 +47,38 @@ def test_geospatial_collection_without_thumbnail(catalog: CatalogBuilder) -> Non
     assert "thumbnail" in findings[0].message
 
 
+@pytest.mark.parametrize("scope", ["collection", "properties", "asset", "source"])
+@pytest.mark.parametrize("primary", ["footprint", None, 1])
+def test_primary_geometry_marks_collection_geospatial(
+    catalog: CatalogBuilder, scope: str, primary: object
+) -> None:
+    declaration = {
+        "table:columns": [{"name": "footprint", "type": "binary"}],
+        "table:primary_geometry": primary,
+    }
+    data = default_asset()
+    collection = catalog.collection("roads", assets={"data": data})
+    if scope == "collection":
+        collection.overrides.update(declaration)
+    elif scope == "properties":
+        collection.overrides["properties"] = declaration
+    elif scope == "asset":
+        data.update(declaration)
+    else:
+        data["table:columns"] = declaration["table:columns"]
+        collection.overrides["assets"]["source"] = {
+            **default_asset(),
+            **declaration,
+            "roles": ["source"],
+        }
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
+    if primary == "footprint" and scope != "source":
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.ERROR
+    else:
+        assert findings == []
+
+
 def test_thumbnail_with_wrong_type(catalog: CatalogBuilder) -> None:
     bad = thumbnail_asset()
     bad["type"] = "image/gif"

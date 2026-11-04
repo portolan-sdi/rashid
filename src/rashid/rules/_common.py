@@ -9,6 +9,7 @@ from urllib.parse import quote, urljoin, urlparse, urlsplit
 
 from rashid._url import object_location
 from rashid.catalog import CatalogGraph, Node, is_absolute_href
+from rashid.remote import wire_url
 
 # Rels that make the tree navigable; every one carries type requirements and
 # must be relative and resolvable.
@@ -114,7 +115,7 @@ def asset_refers_to_self(node: Node, href: str, graph: CatalogGraph | None = Non
     local = "file://" + ("" if path.startswith("/") else "/") + quote(path, safe="/:")
     if not is_absolute_href(href):
         if graph is not None and graph.base_url is not None:
-            location = urljoin(graph.base_url, str(node.path))
+            location = wire_url(graph.base_url, str(node.path))
             return object_location(urljoin(location, href)) == object_location(location)
         # Relative filesystem paths are literal filenames, not encoded URLs.
         return object_location(urljoin(local, quote(href, safe="/:"))) == object_location(local)
@@ -128,7 +129,7 @@ def asset_refers_to_self(node: Node, href: str, graph: CatalogGraph | None = Non
     )
     if graph is not None:
         locations.extend(
-            urljoin(base, str(node.path))
+            wire_url(base, str(node.path))
             for base in (graph.base_url, graph.published_base())
             if base is not None
         )
@@ -147,15 +148,16 @@ def names_a_geometry_column(columns: list[dict[str, Any]]) -> bool:
     return False
 
 
-def column_declarations(
+def declares_geometry(
     node: Node, asset: dict[str, Any] | None = None, collection: Node | None = None
-) -> list[dict[str, Any]] | None:
-    """Combine ``table:columns`` from the node, its properties, and its assets.
+) -> bool | None:
+    """Read table geometry evidence from the node, its properties, and its assets.
 
     With an asset, read only that asset and its owner/collection declarations;
     otherwise read all non-source assets. Source columns describe upstream
-    data rather than what the collection publishes. Positive geometry evidence
-    takes precedence over a negative declaration. None means no list was declared.
+    data rather than what the collection publishes. A ``table:primary_geometry``
+    name or a geometry column takes precedence over a negative column list.
+    None means neither a primary geometry nor a column list was declared.
     """
     holders: list[dict[str, Any]] = [node.data]
     properties = node.data.get("properties")
@@ -176,8 +178,11 @@ def column_declarations(
     declared: list[dict[str, Any]] = []
     found = False
     for holder in holders:
+        primary = holder.get("table:primary_geometry")
+        if isinstance(primary, str) and primary:
+            return True
         columns = holder.get("table:columns")
         if isinstance(columns, list):
             found = True
             declared += [column for column in columns if isinstance(column, dict)]
-    return declared if found else None
+    return names_a_geometry_column(declared) if found else None
