@@ -428,3 +428,143 @@ def test_asset_file_fields_for_self_reference(
         assert all(f.severity is Severity.ERROR for f in findings)
         assert {f.json_pointer for f in findings} == {f"/assets/object/{field}" for field in fields}
         assert all(f.fix_hint for f in findings)
+
+
+@pytest.mark.parametrize("scheme,port", [("https", 443), ("http", 80)])
+def test_self_reference_default_port(catalog: CatalogBuilder, scheme: str, port: int) -> None:
+    url = f"{scheme}://example.org/roads/collection.json"
+    catalog.collection(
+        "roads",
+        links=[{"rel": "self", "href": url}],
+        assets={"self": _asset(href=f"{scheme}://example.org:{port}/roads/collection.json")},
+    )
+    assert len(findings_for(validate(catalog.write()), "PTL-AST-003")) == 2
+
+
+@pytest.mark.parametrize(
+    "encoded,plain",
+    [
+        ("roads%2Fcollection.json", "roads/collection.json"),
+        ("roads%3Bv/collection.json", "roads;v/collection.json"),
+    ],
+)
+def test_reserved_url_characters_are_distinct(
+    catalog: CatalogBuilder, encoded: str, plain: str
+) -> None:
+    catalog.collection(
+        "roads",
+        links=[{"rel": "self", "href": f"https://example.org/{plain}"}],
+        assets={"separate": _asset(href=f"https://example.org/{encoded}")},
+    )
+    assert findings_for(validate(catalog.write()), "PTL-AST-003") == []
+
+
+@pytest.mark.parametrize("scope", ["asset", "collection", "item", "glob"])
+@pytest.mark.parametrize(
+    "columns,expected",
+    [
+        ([{"name": "population", "type": "int64"}], Severity.ERROR),
+        ([{"name": "geometry", "type": "binary"}], None),
+        (None, None),
+    ],
+)
+def test_pmtiles_reference_geometry(
+    catalog: CatalogBuilder, scope: str, columns: object, expected: object
+) -> None:
+    data = default_asset()
+    collection = catalog.collection(
+        "roads", assets={"map": {"href": "./map.pmtiles", "roles": ["visual"]}}
+    )
+    if scope == "glob":
+        collection.overrides["partition:glob"] = "./parts/*.parquet"
+        if columns is not None:
+            collection.overrides["table:columns"] = columns
+    elif scope == "item":
+        properties = {} if columns is None else {"table:columns": columns}
+        collection.item("data", assets={"data": data}, properties=properties)
+    else:
+        collection.overrides["assets"]["data"] = data
+        if columns is not None:
+            (data if scope == "asset" else collection.overrides)["table:columns"] = columns
+    findings = findings_for(validate(catalog.write()), "PTL-AST-009")
+    assert [f.severity for f in findings] == ([] if expected is None else [expected])
+
+
+@pytest.mark.parametrize("reference", ["missing", "unknown", "spatial", "nonspatial"])
+def test_pmtiles_reference_scanned_once(catalog: CatalogBuilder, reference: str) -> None:
+    from unittest.mock import patch
+
+    from rashid.rules import assets
+
+    collection = catalog.collection("roads", assets={})
+    if reference != "missing":
+        collection.overrides["assets"]["data"] = default_asset()
+    if reference == "spatial":
+        collection.overrides["table:columns"] = [{"name": "geometry", "type": "binary"}]
+    elif reference == "nonspatial":
+        collection.overrides["table:columns"] = [{"name": "population", "type": "int64"}]
+    for i in range(10):
+        collection.item(str(i), assets={"map": {"href": "./map.pmtiles", "roles": ["visual"]}})
+    with patch.object(
+        assets, "_has_geoparquet_reference", wraps=assets._has_geoparquet_reference
+    ) as scan:
+        root = catalog.write()
+        first = findings_for(validate(root), "PTL-AST-009")
+        assert scan.call_count == 1
+        mutate_json(root / "roads/collection.json", lambda data: data.__setitem__("assets", {}))
+        second = findings_for(validate(root), "PTL-AST-009")
+    assert scan.call_count == 2
+    assert len(first) == (10 if reference in {"missing", "nonspatial"} else 0)
+    assert len(second) == 10
+    assert all(f.severity is Severity.ERROR for f in second)
+
+
+@pytest.mark.parametrize("spatial_scope", ["asset", "collection"])
+def test_pmtiles_reference_combines_column_declarations(
+    catalog: CatalogBuilder, spatial_scope: str
+) -> None:
+    spatial = [{"name": "geometry", "type": "binary"}]
+    tabular = [{"name": "population", "type": "int64"}]
+    data = _asset(**{"table:columns": spatial if spatial_scope == "asset" else tabular})
+    catalog.collection(
+        "roads",
+        **{"table:columns": spatial if spatial_scope == "collection" else tabular},
+        assets={"data": data, "map": {"href": "./map.pmtiles", "roles": ["visual"]}},
+    )
+    assert findings_for(validate(catalog.write()), "PTL-AST-009") == []
+
+
+@pytest.mark.parametrize("organized", [False, True])
+def test_pmtiles_item_findings_name_the_item(catalog: CatalogBuilder, organized: bool) -> None:
+    collection = catalog.collection("roads", assets={})
+    collection.item("tiles", assets={"map": {"href": "./map.pmtiles", "roles": ["data"]}})
+    root = catalog.write()
+    if organized:
+        nest_items_under_organizing_catalog(root, root / "roads")
+    findings = findings_for(validate(root), "PTL-AST-009")
+    assert len(findings) == 2
+    assert {f.path for f in findings} == {
+        "roads/2024/tiles/tiles.json" if organized else "roads/tiles/tiles.json"
+    }
+    assert {f.object_id for f in findings} == {"tiles"}
+    assert {f.json_pointer for f in findings} == {"/assets/map", "/assets/map/roles"}
+    assert all(f.severity is Severity.ERROR for f in findings)
+
+
+def test_orphan_pmtiles_item_still_reports_errors(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from pathlib import PurePosixPath
+
+    from rashid.catalog import CatalogGraph, Node
+    from rashid.rules.assets import PMTilesDataRule
+
+    node = Node(
+        PurePosixPath("tiles.json"),
+        tmp_path / "tiles.json",
+        "item",
+        "tiles",
+        {"assets": {"map": {"href": "./map.pmtiles", "roles": ["data"]}}},
+    )
+    graph = CatalogGraph(tmp_path, nodes={node.path: node})
+    findings = list(PMTilesDataRule().check(node, graph))
+    assert len(findings) == 2
+    assert all(f.path == "tiles.json" and f.severity is Severity.ERROR for f in findings)

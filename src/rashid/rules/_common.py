@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import os.path
-import posixpath
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote, unquote, urljoin, urlparse, urlsplit
+from urllib.parse import quote, urljoin, urlparse, urlsplit
 
+from rashid._url import object_location
 from rashid.catalog import CatalogGraph, Node, is_absolute_href
 
 # Rels that make the tree navigable; every one carries type requirements and
 # must be relative and resolvable.
 STRUCTURAL_RELS = ("root", "parent", "child", "item", "collection")
+
+PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
 
 # core.md, Assets: Portolan raster data is COG, declared with this media type.
 # A plain GeoTIFF may appear only as an upstream source, not as primary data.
@@ -82,8 +84,8 @@ def is_raster_data_asset(asset: dict[str, Any]) -> bool:
 def is_pmtiles_asset(asset: dict[str, Any]) -> bool:
     """Identify PMTiles by media type or href, including URL query strings."""
     href = asset.get("href")
-    return asset.get("type") == "application/vnd.pmtiles" or (
-        isinstance(href, str) and urlparse(href).path.lower().endswith(".pmtiles")
+    return asset.get("type") == PMTILES_MEDIA_TYPE or (
+        isinstance(href, str) and urlsplit(href).path.lower().endswith(".pmtiles")
     )
 
 
@@ -111,7 +113,11 @@ def asset_refers_to_self(node: Node, href: str, graph: CatalogGraph | None = Non
     path = node.abs_path.as_posix()
     local = "file://" + ("" if path.startswith("/") else "/") + quote(path, safe="/:")
     if not is_absolute_href(href):
-        return _object_location(urljoin(local, href)) == _object_location(local)
+        if graph is not None and graph.base_url is not None:
+            location = urljoin(graph.base_url, str(node.path))
+            return object_location(urljoin(location, href)) == object_location(location)
+        # Relative filesystem paths are literal filenames, not encoded URLs.
+        return object_location(urljoin(local, quote(href, safe="/:"))) == object_location(local)
     locations = [local]
     locations.extend(
         link["href"]
@@ -127,16 +133,51 @@ def asset_refers_to_self(node: Node, href: str, graph: CatalogGraph | None = Non
             if base is not None
         )
     return any(
-        _object_location(urljoin(location, href)) == _object_location(location)
+        object_location(urljoin(location, href)) == object_location(location)
         for location in locations
     )
 
 
-def _object_location(url: str) -> tuple[str, str, str, str]:
-    parsed = urlsplit(url)
-    return (
-        parsed.scheme.lower(),
-        parsed.netloc.lower(),
-        posixpath.normpath(unquote(parsed.path)),
-        parsed.query,
-    )
+def names_a_geometry_column(columns: list[dict[str, Any]]) -> bool:
+    for column in columns:
+        name = str(column.get("name", "")).casefold()
+        ctype = str(column.get("type", "")).casefold()
+        if name in ("geometry", "geom") or "geometry" in ctype:
+            return True
+    return False
+
+
+def column_declarations(
+    node: Node, asset: dict[str, Any] | None = None, collection: Node | None = None
+) -> list[dict[str, Any]] | None:
+    """Combine ``table:columns`` from the node, its properties, and its assets.
+
+    With an asset, read only that asset and its owner/collection declarations;
+    otherwise read all non-source assets. Source columns describe upstream
+    data rather than what the collection publishes. Positive geometry evidence
+    takes precedence over a negative declaration. None means no list was declared.
+    """
+    holders: list[dict[str, Any]] = [node.data]
+    properties = node.data.get("properties")
+    if isinstance(properties, dict):
+        holders.append(properties)
+    if asset is None:
+        assets = node.data.get("assets")
+        if isinstance(assets, dict):
+            holders += [
+                value
+                for value in assets.values()
+                if isinstance(value, dict) and "source" not in roles_of(value)
+            ]
+    else:
+        holders.append(asset)
+    if collection is not None and collection is not node:
+        holders.append(collection.data)
+    declared: list[dict[str, Any]] = []
+    found = False
+    for holder in holders:
+        columns = holder.get("table:columns")
+        if isinstance(columns, list):
+            found = True
+            declared += [column for column in columns if isinstance(column, dict)]
+    return declared if found else None

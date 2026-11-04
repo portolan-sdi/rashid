@@ -16,15 +16,20 @@ mistakes "could not tell" for "nothing to fix".
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import links_of, roles_of
+from rashid.rules._common import (
+    PMTILES_MEDIA_TYPE,
+    column_declarations,
+    is_pmtiles_asset,
+    links_of,
+    names_a_geometry_column,
+    roles_of,
+)
 from rashid.rules.assets import _assets_of
 
-PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
 STYLE_MEDIA_TYPE = "application/vnd.mapbox.style+json"
 _THUMBNAIL_TYPES = ("image/png", "image/jpeg", "image/webp")
 _WEB_MAP_LINKS_PREFIX = "https://stac-extensions.github.io/web-map-links/"
@@ -33,45 +38,13 @@ _WEB_MAP_LINKS_PREFIX = "https://stac-extensions.github.io/web-map-links/"
 _LARGE_VECTOR_BYTES = 100_000_000
 
 
-def _column_declarations(node: Node) -> list[dict[str, Any]] | None:
-    """Every ``table:columns`` entry describing the collection's own data.
-
-    The table extension allows the field on the collection and on the asset
-    that holds the table, and the spec's reference catalog puts it on the data
-    asset, so both are read. Assets carrying the ``source`` role are skipped:
-    an upstream CSV's columns describe what was converted, not what the
-    collection publishes. None means nothing declared any, which is what
-    separates "no geometry column" from "no column list".
-    """
-    holders: list[dict[str, Any]] = [node.data]
-    holders += [asset for _p, _k, asset in _assets_of(node) if "source" not in roles_of(asset)]
-    declared: list[dict[str, Any]] = []
-    found = False
-    for holder in holders:
-        columns = holder.get("table:columns")
-        if isinstance(columns, list):
-            found = True
-            declared += [column for column in columns if isinstance(column, dict)]
-    return declared if found else None
-
-
-def _names_a_geometry_column(columns: list[dict[str, Any]]) -> bool:
-    for column in columns:
-        name = str(column.get("name", "")).casefold()
-        ctype = str(column.get("type", "")).casefold()
-        if name in ("geometry", "geom") or "geometry" in ctype:
-            return True
-    return False
-
-
 def _has_spatial_media_type(node: Node) -> bool:
     """Whether any asset's media type is spatial whatever the metadata says."""
     for _pointer, _key, asset in _assets_of(node):
         media_type = asset.get("type")
-        if isinstance(media_type, str) and (
-            media_type == PMTILES_MEDIA_TYPE
-            or media_type.startswith("image/tiff")
-            or media_type == "application/vnd.laszip+copc"
+        if is_pmtiles_asset(asset) or (
+            isinstance(media_type, str)
+            and (media_type.startswith("image/tiff") or media_type == "application/vnd.laszip+copc")
         ):
             return True
     return False
@@ -94,9 +67,9 @@ def is_geospatial(node: Node, graph: CatalogGraph) -> bool | None:
             return True
     if _has_spatial_media_type(node):
         return True
-    columns = _column_declarations(node)
+    columns = column_declarations(node)
     if columns is not None:
-        return _names_a_geometry_column(columns)
+        return names_a_geometry_column(columns)
     return None
 
 
@@ -135,11 +108,7 @@ _RESOLVE_HINT = (
 
 def _pmtiles_registration(node: Node) -> tuple[bool, bool]:
     """(has_pmtiles_asset, has_pmtiles_link) for a collection."""
-    has_asset = any(
-        asset.get("type") == PMTILES_MEDIA_TYPE
-        or (isinstance(asset.get("href"), str) and str(asset["href"]).endswith(".pmtiles"))
-        for _p, _k, asset in _assets_of(node)
-    )
+    has_asset = any(is_pmtiles_asset(asset) for _p, _k, asset in _assets_of(node))
     has_link = any(link.get("rel") == "pmtiles" for link in links_of(node))
     return has_asset, has_link
 

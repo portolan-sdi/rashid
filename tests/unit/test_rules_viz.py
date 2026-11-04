@@ -452,3 +452,30 @@ def test_single_style_needs_no_default_role(catalog: CatalogBuilder) -> None:
     )
     collection.item("roads-2024")
     assert findings_for(validate(catalog.write()), "PTL-VIZ-006") == []
+
+
+@pytest.mark.parametrize("href", ["https://host/map.PMTILES?download=1", "./map.PmTiLeS#map"])
+def test_pmtiles_suffix_applies_to_visualization(catalog: CatalogBuilder, href: str) -> None:
+    catalog.collection(
+        "roads",
+        assets={
+            "tiles": {"href": href, "type": "application/octet-stream", "roles": ["visual"]},
+            "style": {"href": "./styles/map.json", "type": "application/json", "roles": ["style"]},
+        },
+    )
+    report = validate(catalog.write())
+    assert findings_for(report, "PTL-VIZ-003")
+    assert findings_for(report, "PTL-VIZ-005")
+
+
+@pytest.mark.parametrize("media_type", ["application/octet-stream", None])
+def test_pmtiles_suffix_is_spatial(catalog: CatalogBuilder, media_type: object) -> None:
+    catalog.collection(
+        "roads",
+        assets={
+            "tiles": {"href": "./map.PMTILES?download=1", "type": media_type, "roles": ["visual"]}
+        },
+    )
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR

@@ -17,9 +17,11 @@ from rashid.rule import Rule
 from rashid.rules._common import (
     COG_MEDIA_TYPE,
     asset_refers_to_self,
+    column_declarations,
     is_cog_media_type,
     is_pmtiles_asset,
     is_raster_data_asset,
+    names_a_geometry_column,
     roles_of,
 )
 
@@ -343,7 +345,11 @@ class ChecksumMultihashRule(Rule):
 
 
 class PMTilesDataRule(Rule):
-    """PMTiles renders GeoParquet data owned by the same collection."""
+    """PMTiles renders GeoParquet data owned by the same collection.
+
+    Check the reference once per collection, emitting findings on each asset's
+    owner. Item visits only handle orphans, which have no collection reference.
+    """
 
     id = "PTL-AST-009"
     spec_ids = ("PORTO-FMT-062",)
@@ -352,6 +358,16 @@ class PMTilesDataRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        if node.kind == "item":
+            # Collection checks visit their own items; retain orphan diagnostics.
+            if graph.enclosing_collection_of(node) is None:
+                yield from self._check_assets(node, False)
+            return
+        reference = _has_geoparquet_reference(node, graph)
+        for owner in [node, *graph.items_of(node)]:
+            yield from self._check_assets(owner, reference)
+
+    def _check_assets(self, node: Node, reference: bool) -> Iterable[Finding]:
         for pointer, key, asset in _assets_of(node):
             if not is_pmtiles_asset(asset):
                 continue
@@ -362,8 +378,7 @@ class PMTilesDataRule(Rule):
                     json_pointer=f"{pointer}/roles",
                     fix_hint="add visual to the PMTiles asset's roles",
                 )
-            collection = node if node.kind == "collection" else graph.enclosing_collection_of(node)
-            if collection is None or not _has_geoparquet_reference(collection, graph):
+            if not reference:
                 yield self.finding(
                     node,
                     f"PMTiles asset '{key}' has no GeoParquet reference in its collection",
@@ -373,14 +388,25 @@ class PMTilesDataRule(Rule):
                 )
 
 
+def _reference_has_geometry(owner: Node, asset: dict[str, Any], collection: Node) -> bool:
+    columns = column_declarations(owner, asset, collection)
+    return columns is None or names_a_geometry_column(columns)
+
+
 def _has_geoparquet_reference(collection: Node, graph: CatalogGraph) -> bool:
+    """Accept references unless declared columns positively exclude geometry."""
     glob = collection.data.get("partition:glob")
-    if isinstance(glob, str) and glob.strip():
+    if (
+        isinstance(glob, str)
+        and glob.strip()
+        and _reference_has_geometry(collection, {}, collection)
+    ):
         return True
     return any(
         "data" in roles_of(asset)
         and asset.get("type") == "application/vnd.apache.parquet"
         and not is_pmtiles_asset(asset)
+        and _reference_has_geometry(owner, asset, collection)
         for owner in [collection, *graph.items_of(collection)]
         for _, _, asset in _assets_of(owner)
     )

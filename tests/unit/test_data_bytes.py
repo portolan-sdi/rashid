@@ -282,7 +282,9 @@ def test_stream_without_close_is_tolerated() -> None:
     assert checks.check_node(_item(_asset()), _Bare()) == []
 
 
-@pytest.mark.parametrize("location", ["relative", "absolute", "remote", "other"])
+@pytest.mark.parametrize(
+    "location", ["relative", "absolute", "remote", "other", "encoded", "encoded-relative", "port"]
+)
 def test_self_references_skip_byte_checks(
     location: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -295,12 +297,15 @@ def test_self_references_skip_byte_checks(
         "absolute": str(node.abs_path),
         "remote": "https://example.org/catalog/roads/seg1/seg1.json",
         "other": _HREF,
+        "encoded": "https://example.org/catalog/roads%2Fseg1/seg1.json",
+        "encoded-relative": "../seg1%2Fseg1.json",
+        "port": "https://example.org:443/catalog/roads/seg1/seg1.json",
     }[location]
     node.data["assets"]["data"]["href"] = href
     reader = _CountingReader(payload=b"{}")
     monkeypatch.setattr(reader, "stream", lambda node, href: reader.stream_handed)
     defects = checks.check_node(node, reader, graph)
-    if location == "other":
+    if location in {"other", "encoded", "encoded-relative"}:
         assert {defect.rule_id for defect in defects} == {DAT_CHECKSUM, DAT_SIZE}
         assert reader.consumed == 2
     else:
