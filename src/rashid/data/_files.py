@@ -90,8 +90,8 @@ class _AssetFiles:
         shapes: list[tuple[int, int]] = []
         for level, factor in enumerate(src.overviews(1)):
             height, width = math.ceil(src.height / factor), math.ceil(src.width / factor)
-            if factor == 1 or src.height * width != src.width * height:
-                # A saturated axis or unequal pixel scales makes the factor ambiguous.
+            if factor == 1 or src.width % factor or src.height * width != src.width * height:
+                # Rounding, a saturated axis, or unequal pixel scales makes the factor ambiguous.
                 with _raster_open(self.located.gdal_path(), overview_level=level) as overview:
                     height, width = overview.height, overview.width
             shapes.append((height, width))

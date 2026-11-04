@@ -74,3 +74,20 @@ def test_ordinary_cog_overviews_reuse_the_open_dataset(tmp_path: Path) -> None:
     with _trace.counting() as counts:
         assert not _findings(tmp_path, "PTL-DAT-011")
     assert counts["raster.opens"] == 1
+
+
+def test_square_cog_rounded_overview_factors(tmp_path: Path) -> None:
+    """A 32px overview of a 1000px raster is reported as factor 31."""
+    from rasterio.shutil import copy as copy_raster
+
+    directory = _catalog(tmp_path)
+    source = directory / "source.tif"
+    path = directory / "image.tif"
+    assets.write_cog(source, size=1000, blocksize=256, overviews=False)
+    with rasterio.open(source, "r+", IGNORE_COG_LAYOUT_BREAK="YES") as dst:
+        dst.build_overviews([2, 4, 8, 16, 32], Resampling.nearest)
+    copy_raster(source, path, driver="COG", BLOCKSIZE=256, OVERVIEWS="FORCE_USE_EXISTING")
+    _declare(directory, [path.name])
+    with rasterio.open(path) as src:
+        assert src.overviews(1) == [2, 4, 8, 16, 31]
+    assert not _findings(tmp_path, "PTL-DAT-011")
