@@ -233,13 +233,15 @@ def write_cog(
     overviews: bool = True,
     size: int = 1024,
     blocksize: int | None = None,
+    colormap: dict[int, tuple[int, int, int, int]] | None = None,
 ) -> None:
     """A valid COG (COG driver) with, by default, embedded per-band statistics.
 
     ``overviews=False`` sets the COG driver's ``OVERVIEWS=NONE``: the file stays
     a structurally valid COG (cog_validate passes it with only a warning) but
     carries no internal overviews. ``blocksize`` overrides the internal tile
-    size (default: 512, clamped to the image).
+    size (default: 512, clamped to the image). ``colormap`` embeds a color
+    table (TIFF ``ColorMap`` tag) on band 1, as a classified raster carries.
     """
     arr = (np.arange(size * size, dtype="uint8") % 251).reshape(1, size, size)
     with rasterio.open(
@@ -258,6 +260,8 @@ def write_cog(
         overviews="AUTO" if overviews else "NONE",
     ) as dst:
         dst.write(arr)
+        if colormap is not None:
+            dst.write_colormap(1, colormap)
         if stats:
             band = arr[0]
             tags = {

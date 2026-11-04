@@ -19,15 +19,19 @@ pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
 import pyarrow.parquet as pq  # noqa: E402
+import rasterio  # noqa: E402
+from rasterio.enums import ColorInterp  # noqa: E402
 
 import rashid.data.checks as checks  # noqa: E402
-from rashid.catalog import Node  # noqa: E402
+from rashid.catalog import CatalogGraph, Node  # noqa: E402
 from rashid.data import (  # noqa: E402
+    DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
     DAT_GEOPARQUET_VERSION,
     DAT_ORDERING,
     DAT_OVERVIEWS,
+    DAT_PALETTE_CLASSES,
     DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
@@ -38,6 +42,7 @@ from rashid.data import (  # noqa: E402
 )
 from rashid.data.reader import Locator  # noqa: E402
 from rashid.model import Severity  # noqa: E402
+from tests.conftest import CatalogBuilder, mutate_json  # noqa: E402
 from tests.integration import _data_assets as assets  # noqa: E402
 
 pytestmark = pytest.mark.integration
@@ -79,8 +84,8 @@ def _gpq(path: Path) -> list:
     return checks._check_geoparquet("data", _files(path))
 
 
-def _raster(path: Path) -> list:
-    return checks._check_raster("data", _loc(path), _files(path))
+def _raster(path: Path, asset: dict | None = None) -> list:
+    return checks._check_raster("data", asset or {}, _loc(path), _files(path))
 
 
 # --- GeoParquet ------------------------------------------------------------
@@ -1178,3 +1183,183 @@ def test_non_data_roles_are_not_vector(tmp_path: Path) -> None:
     assets.write_geoparquet(path)
     asset = {"href": "./data.parquet", "roles": ["metadata"]}
     assert checks._check_vector_columns(_tabular_collection(), "data", asset, _files(path)) == []
+
+
+# --- Classification color table (PTL-DAT-018) ------------------------------
+
+# The geohazards-tep flood COG's color table: nodata 0 transparent, then
+# black, blue, green and cyan.
+_FLOOD_TABLE = {
+    0: (0, 0, 0, 0),
+    1: (0, 0, 0, 255),
+    2: (0, 0, 255, 255),
+    3: (0, 255, 0, 255),
+    4: (0, 255, 255, 255),
+}
+
+
+def _classified_asset(**hints: str) -> dict:
+    classes = [{"value": 0, "name": "no-data", "title": "No data", "nodata": True}]
+    for value, name in enumerate(("unchanged", "permanent-water", "flood", "receded"), start=1):
+        entry = {"value": value, "name": name, "title": name.replace("-", " ").capitalize()}
+        if name in hints:
+            entry["color_hint"] = hints[name]
+        classes.append(entry)
+    return {"bands": [{"nodata": 0, "data_type": "uint8", "classification:classes": classes}]}
+
+
+def test_class_colors_matching_the_color_table_are_clean(tmp_path: Path) -> None:
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    asset = _classified_asset(unchanged="000000", flood="00ff00", receded="00FFFF")
+    assert _raster(path, asset) == []
+
+
+def test_class_color_differing_from_the_color_table_is_a_warning(tmp_path: Path) -> None:
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    defects = _raster(path, _classified_asset(**{"permanent-water": "1E90FF"}))
+    assert [d.rule_id for d in defects] == [DAT_CLASS_COLORS]
+    assert defects[0].severity is Severity.WARNING
+    assert defects[0].field == "bands/0/classification:classes/2/color_hint"
+    assert (defects[0].expected, defects[0].actual) == ("0000FF", "1E90FF")
+
+
+def test_asset_level_classes_compare_against_a_single_band(tmp_path: Path) -> None:
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    classes = [{"value": 3, "name": "flood", "color_hint": "FF0000"}]
+    defects = _raster(path, {"nodata": 0, "classification:classes": classes})
+    assert [d.field for d in defects] == ["classification:classes/0/color_hint"]
+
+
+def test_class_colors_without_a_color_table_have_nothing_to_compare(tmp_path: Path) -> None:
+    path = tmp_path / "plain.tif"
+    assets.write_cog(path, nodata=0)
+    assert _raster(path, _classified_asset(flood="FF0000")) == []
+
+
+def test_nodata_class_is_not_compared(tmp_path: Path) -> None:
+    # The nodata class draws transparent whatever its hint says.
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    asset = _classified_asset()
+    asset["bands"][0]["classification:classes"][0]["color_hint"] = "FFFFFF"
+    assert _raster(path, asset) == []
+
+
+def test_malformed_hint_is_left_to_the_metadata_rule(tmp_path: Path) -> None:
+    # PTL-CLS-002 reports a '#'-prefixed hint, so the data pass does not.
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    assert _raster(path, _classified_asset(flood="#FF0000")) == []
+
+
+def test_class_drawn_transparent_must_be_marked_nodata(tmp_path: Path) -> None:
+    # The table hides value 0 (the file's nodata), so a class 0 that is not
+    # marked nodata appears in the legend but never on the map.
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    asset = _classified_asset()
+    del asset["bands"][0]["classification:classes"][0]["nodata"]
+    defects = _raster(path, asset)
+    assert [(d.rule_id, d.severity, d.field) for d in defects] == [
+        (DAT_CLASS_COLORS, Severity.WARNING, "bands/0/classification:classes/0/nodata")
+    ]
+
+
+def test_class_equal_to_file_nodata_without_a_table_is_a_warning(tmp_path: Path) -> None:
+    # Sentinel-2 SCL style: class 0 is the file's nodata and no table exists.
+    path = tmp_path / "scl.tif"
+    assets.write_cog(path, nodata=0)
+    classes = [{"value": 0, "name": "no-data"}, {"value": 4, "name": "vegetation"}]
+    defects = _raster(path, {"bands": [{"nodata": 0, "classification:classes": classes}]})
+    assert [(d.rule_id, d.field) for d in defects] == [
+        (DAT_CLASS_COLORS, "bands/0/classification:classes/0/nodata")
+    ]
+
+
+def test_classes_on_a_picture_channel_are_a_warning(tmp_path: Path) -> None:
+    path = tmp_path / "visual.tif"
+    assets.write_cog(path)
+    with rasterio.open(path, "r+", IGNORE_COG_LAYOUT_BREAK="YES") as dst:
+        dst.colorinterp = [ColorInterp.red]
+    classes = [{"value": 1, "name": "a"}, {"value": 2, "name": "b"}]
+    # Rewriting the header breaks the COG layout, which other rules report.
+    defects = _raster(path, {"bands": [{"classification:classes": classes}]})
+    assert [(d.rule_id, d.field) for d in defects if d.rule_id == DAT_CLASS_COLORS] == [
+        (DAT_CLASS_COLORS, "bands/0/classification:classes")
+    ]
+
+
+class _ShortTable:
+    """A one-band raster whose color table stops short, as an NBITS=4 file's does."""
+
+    count = 1
+    colorinterp = (ColorInterp.palette,)
+    nodatavals = (None,)
+
+    def colormap(self, band: int) -> dict[int, tuple[int, ...]]:
+        return dict.fromkeys(range(16), (0, 0, 0, 255))
+
+
+class _ShortTableFiles:
+    def raster(self) -> _ShortTable:
+        return _ShortTable()
+
+
+def test_class_past_a_short_color_table_is_a_warning() -> None:
+    classes = [{"value": 3, "name": "flood"}, {"value": 20, "name": "beyond"}]
+    asset = {"bands": [{"classification:classes": classes}]}
+    defects = checks._check_class_colors("data", asset, _ShortTableFiles())  # type: ignore[arg-type]
+    assert [(d.rule_id, d.field) for d in defects] == [
+        (DAT_CLASS_COLORS, "bands/0/classification:classes/1/value")
+    ]
+
+
+def test_palette_band_without_classes_is_an_info_hint(tmp_path: Path) -> None:
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    defects = _raster(path, {"bands": [{"nodata": 0, "data_type": "uint8"}]})
+    assert [(d.rule_id, d.severity, d.field) for d in defects] == [
+        (DAT_PALETTE_CLASSES, Severity.INFO, "bands/0")
+    ]
+
+
+def test_palette_band_described_by_bitfields_is_clean(tmp_path: Path) -> None:
+    path = tmp_path / "qa.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    bitfields = [{"offset": 0, "length": 1, "classes": [{"value": 1, "name": "cloud"}]}]
+    assert _raster(path, {"bands": [{"classification:bitfields": bitfields}]}) == []
+
+
+def test_asset_level_classes_describe_a_palette_band(tmp_path: Path) -> None:
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    classes = [{"value": 1, "name": "unchanged", "title": "Unchanged"}]
+    assert _raster(path, {"classification:classes": classes}) == []
+
+
+def test_item_asset_inherits_classes_from_item_assets(catalog: CatalogBuilder) -> None:
+    catalog.collection("flood").item("scene-1")
+    root = catalog.write()
+    template = _classified_asset()
+    mutate_json(
+        root / "flood" / "collection.json",
+        lambda data: data.update(item_assets={"data": template}),
+    )
+    graph = CatalogGraph.load(root)
+    item = next(graph.iter("item"))
+    own = {"href": "./flood.tif"}
+    assert checks._classified_asset(item, "data", own, graph) == template
+    assert checks._classified_asset(item, "other", own, graph) is own
+    collection = next(graph.iter("collection"))
+    assert checks._classified_asset(collection, "data", own, graph) is own
+
+
+def test_unreadable_color_table_is_info(tmp_path: Path) -> None:
+    path = tmp_path / "broken.tif"
+    path.write_bytes(b"II*\x00not a tiff")
+    files = _files(path)
+    defects = checks._check_class_colors("data", _classified_asset(flood="FF0000"), files)
+    assert [(d.rule_id, d.severity) for d in defects] == [(DAT_CLASS_COLORS, Severity.INFO)]

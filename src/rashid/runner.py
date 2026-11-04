@@ -15,6 +15,7 @@ from rashid.catalog import ROOT_CATALOG, CatalogGraph
 from rashid.config import RulesConfig
 from rashid.data import (
     DAT_CHECKSUM,
+    DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
     DAT_CONSISTENCY,
@@ -23,6 +24,7 @@ from rashid.data import (
     DAT_MIRROR,
     DAT_ORDERING,
     DAT_OVERVIEWS,
+    DAT_PALETTE_CLASSES,
     DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
@@ -102,6 +104,8 @@ _DATA_RULE_IDS = frozenset(
         DAT_TABULAR,
         DAT_MIRROR,
         DAT_VECTOR_COLUMNS,
+        DAT_CLASS_COLORS,
+        DAT_PALETTE_CLASSES,
     }
 )
 

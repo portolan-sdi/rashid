@@ -11,6 +11,7 @@
     "Partition": "https://schemas.portolan-sdi.org/incubating/partition/v1.0.0/schema.json",
     "Table": "https://stac-extensions.github.io/table/v1.2.0/schema.json",
     "Alternate Assets": "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json",
+    "Classification": "https://stac-extensions.github.io/classification/v2.0.0/schema.json",
     "Render": "https://stac-extensions.github.io/render/v2.0.0/schema.json",
     "Projection": "https://stac-extensions.github.io/projection/v2.0.0/schema.json",
     "Scientific": "https://stac-extensions.github.io/scientific/v1.0.0/schema.json",

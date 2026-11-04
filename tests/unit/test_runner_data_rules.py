@@ -37,9 +37,15 @@ pytestmark = pytest.mark.unit
 
 
 def _rules_of(prefix: str) -> frozenset[str]:
-    """Every registered check under ``prefix`` that enforces a requirement."""
+    """Every registered rule under ``prefix``, without the pass's ``-000`` sentinel.
+
+    A rule need not cite a requirement (``PTL-DAT-019`` is an uncited hint),
+    but the ``-000`` finding only reports that the pass could not run.
+    """
     return frozenset(
-        info.id for info in CHECKS.values() if info.id.startswith(prefix) and info.spec_ids
+        info.id
+        for info in CHECKS.values()
+        if info.id.startswith(prefix) and not info.id.endswith("-000")
     )
 
 

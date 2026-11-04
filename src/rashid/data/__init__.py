@@ -63,6 +63,8 @@ DAT_PARTITION_SCHEMA = "PTL-DAT-014"
 DAT_TABULAR = "PTL-DAT-015"
 DAT_MIRROR = "PTL-DAT-016"
 DAT_VECTOR_COLUMNS = "PTL-DAT-017"
+DAT_CLASS_COLORS = "PTL-DAT-018"
+DAT_PALETTE_CLASSES = "PTL-DAT-019"
 
 # Requirement IDs from the spec's requirements manifest
 # (specs/portolan/requirements.yaml) enforced by each check;
@@ -117,6 +119,16 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     ),
     # A mirror must reproduce the collection's items (PORTO-FMT-042).
     DAT_MIRROR: ("PORTO-FMT-042",),
+    # A class color_hint must equal the embedded color table entry, and tools
+    # warn when they differ (PORTO-FMT-055 pins the finding to a warning).
+    # A class at the file's nodata value must be marked nodata
+    # (PORTO-FMT-060), warned about for now while catalogs adopt classes.
+    DAT_CLASS_COLORS: ("PORTO-FMT-054", "PORTO-FMT-060"),
+    # A palette band only hints at classes. Continuous rasters ship color
+    # tables too, so whether a raster is classified is the producer's
+    # declaration (PORTO-FMT-049 is enforcement: process) and this INFO hint
+    # cites nothing.
+    DAT_PALETTE_CLASSES: (),
 }
 
 # Assets are declared on collections and items; catalogs carry none.
