@@ -167,6 +167,11 @@ def main(argv: list[str] | None = None) -> int:
         print("valgrind is not installed; --mode instr needs it (Linux).", file=sys.stderr)
         return 2
 
+    return _profile(args)
+
+
+def _profile(args: argparse.Namespace) -> int:
+    """Build the scenario and run the requested external profiler."""
     from tests import scenarios
 
     scenarios.cached(args.scenario, args.size, args.seed)  # build outside the profiler

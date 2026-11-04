@@ -184,6 +184,49 @@ class StructuralLinkTypeRule(Rule):
                 )
 
 
+def _unresolved_message(node: Node, graph: CatalogGraph, rel: str, href: str) -> tuple[str, str]:
+    """Distinguish missing files from files that are not STAC objects."""
+    resolved = graph.resolve_path(node, href)
+    if resolved is not None and graph.file_exists(resolved):
+        message = (
+            f"link rel:'{rel}' href '{href}' resolves to a file"
+            " that is not a recognizable STAC object"
+        )
+        hint = "point the href at the target's catalog.json, collection.json, or item JSON"
+    else:
+        message = f"link rel:'{rel}' href '{href}' does not resolve to any file"
+        hint = (
+            "correct the href to the target's path relative to this file,"
+            " or restore the missing file"
+        )
+    return message, hint
+
+
+def _wrong_target(node: Node, graph: CatalogGraph, rel: str, target: Node) -> str | None:
+    """Explain which structural relationship the target violates."""
+    parent = graph.parent_of(node) if rel == "parent" else None
+    enclosing = (
+        graph.enclosing_collection_of(node) if rel == "collection" and node.kind == "item" else None
+    )
+    if rel == "root" and target is not graph.language_root_of(node):
+        return "must point to the root catalog"
+    if rel == "parent" and target is not parent:
+        return "must point to the containing object" + (
+            f" ({parent.path})" if parent is not None else ""
+        )
+    if rel == "collection" and (target.kind != "collection" or target is not enclosing):
+        return "must point to the item's enclosing collection" + (
+            f" ({enclosing.path})" if enclosing is not None else ""
+        )
+    if rel == "child" and (
+        target.kind not in ("catalog", "collection") or graph.parent_of(target) is not node
+    ):
+        return "must point to a catalog or collection contained by this object"
+    if rel == "item" and (target.kind != "item" or graph.parent_of(target) is not node):
+        return "must point to an item contained by this object"
+    return None
+
+
 class LinkResolutionRule(Rule):
     """Every structural link the pass can place resolves to the correct object.
 
@@ -214,8 +257,6 @@ class LinkResolutionRule(Rule):
     kinds = ("catalog", "collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        parent = graph.parent_of(node)
-        enclosing = graph.enclosing_collection_of(node) if node.kind == "item" else None
         for index, link in enumerate(links_of(node)):
             rel = link.get("rel")
             if rel not in STRUCTURAL_RELS:
@@ -237,21 +278,7 @@ class LinkResolutionRule(Rule):
                 # what the URL points at. It leaves the link unreported.
                 continue
             if target is None:
-                resolved = graph.resolve_path(node, href)
-                if resolved is not None and graph.file_exists(resolved):
-                    message = (
-                        f"link rel:'{rel}' href '{href}' resolves to a file"
-                        " that is not a recognizable STAC object"
-                    )
-                    hint = (
-                        "point the href at the target's catalog.json, collection.json, or item JSON"
-                    )
-                else:
-                    message = f"link rel:'{rel}' href '{href}' does not resolve to any file"
-                    hint = (
-                        "correct the href to the target's path relative to this file,"
-                        " or restore the missing file"
-                    )
+                message, hint = _unresolved_message(node, graph, rel, href)
                 yield self.finding(node, message, json_pointer=pointer, fix_hint=hint, actual=href)
                 continue
             if target.parse_error is not None:
@@ -263,23 +290,7 @@ class LinkResolutionRule(Rule):
                     actual=href,
                 )
                 continue
-            wrong: str | None = None
-            if rel == "root" and target is not graph.language_root_of(node):
-                wrong = "must point to the root catalog"
-            elif rel == "parent" and target is not parent:
-                wrong = "must point to the containing object" + (
-                    f" ({parent.path})" if parent is not None else ""
-                )
-            elif rel == "collection" and (target.kind != "collection" or target is not enclosing):
-                wrong = "must point to the item's enclosing collection" + (
-                    f" ({enclosing.path})" if enclosing is not None else ""
-                )
-            elif rel == "child" and (
-                target.kind not in ("catalog", "collection") or graph.parent_of(target) is not node
-            ):
-                wrong = "must point to a catalog or collection contained by this object"
-            elif rel == "item" and (target.kind != "item" or graph.parent_of(target) is not node):
-                wrong = "must point to an item contained by this object"
+            wrong = _wrong_target(node, graph, rel, target)
             if wrong is not None:
                 yield self.finding(
                     node,

@@ -1595,14 +1595,8 @@ def _native_bboxes(
     return boxes
 
 
-def _covering_bboxes(
-    parquet: Any, geo: dict[str, Any]
-) -> list[tuple[float, float, float, float]] | None:
-    """Per-row-group [minx, miny, maxx, maxy] from the bbox covering column's stats.
-
-    Returns None when the file has no 1.1 ``bbox`` covering column whose leaf
-    fields carry Parquet min/max statistics.
-    """
+def _covering_leaf_indices(parquet: Any, geo: dict[str, Any]) -> dict[str, int] | None:
+    """Resolve all four covering leaves only when they exist in the Parquet schema."""
     primary = geo.get("primary_column")
     columns = geo.get("columns")
     if not isinstance(columns, dict):
@@ -1620,14 +1614,30 @@ def _covering_bboxes(
     if not all(path in index for path in paths.values()):
         return None
 
+    return {corner: index[path] for corner, path in paths.items()}
+
+
+def _covering_bboxes(
+    parquet: Any, geo: dict[str, Any]
+) -> list[tuple[float, float, float, float]] | None:
+    """Per-row-group [minx, miny, maxx, maxy] from the bbox covering column's stats.
+
+    Returns None when the file has no 1.1 ``bbox`` covering column whose leaf
+    fields carry Parquet min/max statistics.
+    """
+    leaves = _covering_leaf_indices(parquet, geo)
+    if leaves is None:
+        return None
+    meta = parquet.metadata
+
     boxes: list[tuple[float, float, float, float]] = []
     for i in range(meta.num_row_groups):
         group = meta.row_group(i)
         try:
-            minx = group.column(index[paths["xmin"]]).statistics.min
-            miny = group.column(index[paths["ymin"]]).statistics.min
-            maxx = group.column(index[paths["xmax"]]).statistics.max
-            maxy = group.column(index[paths["ymax"]]).statistics.max
+            minx = group.column(leaves["xmin"]).statistics.min
+            miny = group.column(leaves["ymin"]).statistics.min
+            maxx = group.column(leaves["xmax"]).statistics.max
+            maxy = group.column(leaves["ymax"]).statistics.max
         except AttributeError:
             return None  # a leaf without statistics does not qualify
         if None in (minx, miny, maxx, maxy):
@@ -1736,25 +1746,14 @@ def _footer_proves_row_ordering(
 
 def _covering_has_no_nulls(parquet: Any, geo: dict[str, Any]) -> bool:
     """Do all four covering leaves have known zero null counts?"""
-    primary = geo.get("primary_column")
-    columns = geo.get("columns")
-    if not isinstance(columns, dict):
-        return False
-    covering = columns.get(primary, {}).get("covering", {}).get("bbox")
-    if not isinstance(covering, dict):
-        return False
-    try:
-        paths = [".".join(covering[corner]) for corner in ("xmin", "ymin", "xmax", "ymax")]
-    except (KeyError, TypeError):
+    leaves = _covering_leaf_indices(parquet, geo)
+    if leaves is None:
         return False
     meta = parquet.metadata
-    index = _column_index(meta)
-    if not all(path in index for path in paths):
-        return False
     for i in range(meta.num_row_groups):
         group = meta.row_group(i)
         try:
-            if any(group.column(index[path]).statistics.null_count != 0 for path in paths):
+            if any(group.column(index).statistics.null_count != 0 for index in leaves.values()):
                 return False
         except AttributeError:
             return False

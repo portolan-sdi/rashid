@@ -171,9 +171,8 @@ def crawl(
         fetcher = _StoreFetcher()
     result = Crawl(base=base)
     root = ROOT_CATALOG.name
-    seen = {root}
+    queue = _CrawlQueue(max_documents=max_documents)
     level = [root]
-    queued_documents = 1  # documents fetched or waiting to be fetched
     depth = 0
     while level:
         log.debug("crawl depth %d: fetching %d document(s) under %s", depth, len(level), base)
@@ -201,18 +200,31 @@ def crawl(
                 continue
             result.documents += 1
             _trace.count("crawl.documents")
-            for follow in _follow_paths(base, rel, outcome.body):
-                if follow in seen:
-                    continue
-                seen.add(follow)
-                if follow.endswith(".json"):
-                    if queued_documents >= max_documents:
-                        result.capped = True
-                        continue
-                    queued_documents += 1
-                next_level.append(follow)
+            follows = _follow_paths(base, rel, outcome.body)
+            queue.enqueue(follows, next_level, result)
         level = next_level
     return result
+
+
+@dataclass
+class _CrawlQueue:
+    """Track unique paths and the JSON document budget across crawl levels."""
+
+    max_documents: int
+    seen: set[str] = field(default_factory=lambda: {ROOT_CATALOG.name})
+    queued_documents: int = 1  # root already queued
+
+    def enqueue(self, follows: list[str], next_level: list[str], result: Crawl) -> None:
+        for follow in follows:
+            if follow in self.seen:
+                continue
+            self.seen.add(follow)
+            if follow.endswith(".json"):
+                if self.queued_documents >= self.max_documents:
+                    result.capped = True
+                    continue
+                self.queued_documents += 1
+            next_level.append(follow)
 
 
 def wire_url(base: str, rel: str) -> str:
