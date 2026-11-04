@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import inspect
+import json
 from collections.abc import Iterable
 from datetime import timedelta
 from pathlib import Path, PurePosixPath
 
 import pytest
 
+import rashid
 from rashid import api, validate
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
@@ -54,6 +57,19 @@ def _node(data: dict[str, object]) -> Node:
 
 def test_all_lists_every_documented_export() -> None:
     assert sorted(api.__all__) == sorted(EXPORTS)
+
+
+@pytest.mark.parametrize("module", [api, rashid], ids=["rashid.api", "rashid"])
+def test_public_api_snapshot(module: object) -> None:
+    snapshot = json.loads(Path(__file__).with_name("api_snapshot.json").read_text(encoding="utf-8"))
+    expected = snapshot[module.__name__]
+    assert sorted(module.__all__) == expected["exports"]
+    assert {
+        name: str(inspect.signature(getattr(module, name)))
+        for name in sorted(module.__all__)
+        # Enum's constructor belongs to Python and changes between Python versions.
+        if callable(getattr(module, name)) and name != "Severity"
+    } == expected["signatures"]
 
 
 @pytest.mark.parametrize("include_rule", [True, False])

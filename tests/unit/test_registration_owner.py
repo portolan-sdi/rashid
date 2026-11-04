@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from collections import Counter
+import ast
+import re
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -56,11 +58,54 @@ def test_metadata_id_without_spec_metadata_is_rejected() -> None:
         registry._build((Uncited(),), ())
 
 
-def test_every_registered_check_is_reachable_from_exactly_one_pass() -> None:
-    passes = ("metadata", "runner", "structural", "extensions", "schema", "data", "live")
-    reached = Counter(rule_id for name in passes for rule_id in registry.check_ids(name))
-    assert reached == Counter(dict.fromkeys(registry.CHECKS, 1))
+def test_registered_ids_equal_ids_emitted_in_src() -> None:
+    """Read executable AST nodes, including registry constants used by passes."""
+    emitted = set()
+    for path in (Path(__file__).resolve().parents[2] / "src/rashid").rglob("*.py"):
+        if path.name == "registry.py":
+            continue  # declarations do not prove an emitter exists
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        aliases = {
+            alias.asname or alias.name: getattr(registry, alias.name, None)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "rashid.registry"
+            for alias in node.names
+        }
+        for node in ast.walk(tree):
+            value = None
+            if isinstance(node, ast.Constant):
+                value = node.value
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                value = aliases.get(node.id)
+            if isinstance(value, str) and re.fullmatch(r"PTL-[A-Z]{3}-\d{3}", value):
+                emitted.add(value)
+    assert emitted == set(registry.CHECKS)
     assert registry.check_ids("metadata") == {rule.id for rule in registry.DEFAULT_RULES}
+
+
+def test_pass_checks_use_the_id_constants_once() -> None:
+    """Pass identity is declared once, then referenced by CheckInfo and emitters."""
+    tree = ast.parse(Path(registry.__file__).read_text(encoding="utf-8"))
+    constants = {
+        node.targets[0].id: node.value.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+        and re.fullmatch(r"PTL-[A-Z]{3}-\d{3}", node.value.value)
+    }
+    declarations = [
+        node.args[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "CheckInfo"
+        and any(keyword.arg == "pass_name" for keyword in node.keywords)
+    ]
+    assert all(isinstance(node, ast.Name) for node in declarations)
+    assert sorted(node.id for node in declarations) == sorted(constants)
+    assert len(set(constants.values())) == len(constants)
 
 
 def test_diagnostic_ids_need_an_explicit_spec_reason() -> None:
