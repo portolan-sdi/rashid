@@ -24,13 +24,15 @@ same verdict on every fixture.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from rashid import _json, _trace
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
 
 if TYPE_CHECKING:
     from importlib.abc import Traversable
@@ -78,6 +80,108 @@ def fetch_schema(schema_uri: str) -> dict[str, Any]:
 
 # One object's raw JSON in, its schema errors out; empty when it is valid.
 Validator = Callable[[dict[str, Any]], list[SchemaError]]
+ExtensionValidator = Callable[[dict[str, Any], str], list[SchemaError]]
+
+
+@dataclass(frozen=True)
+class SchemaTarget:
+    """One object and the schema label used in its findings."""
+
+    node: Node
+    label: str
+    schema_uri: str | None = None
+
+
+def schema_nodes(graph: CatalogGraph) -> Iterator[Node]:
+    """The parsed STAC objects shared by all three schema passes."""
+    return (
+        node for node in graph.iter("catalog", "collection", "item") if node.parse_error is None
+    )
+
+
+def schema_targets(graph: CatalogGraph, label: str) -> Iterator[SchemaTarget]:
+    """One core or profile schema applies to every parsed STAC object."""
+    return (SchemaTarget(node, label) for node in schema_nodes(graph))
+
+
+@dataclass(frozen=True)
+class SchemaPassResult:
+    """Findings so far, and whether per-schema summaries can be emitted."""
+
+    findings: list[Finding]
+    completed: bool
+
+
+@dataclass(frozen=True)
+class SchemaPass:
+    """Schema-pass shell, with explicit initialization and recovery policies.
+
+    All passes report a missing package once. Only the profile pass catches
+    other initialization errors. A recoverable failure belongs to one extension
+    URI; every other validator failure stops the pass, retaining prior findings.
+    """
+
+    name: str
+    invalid_rule: str
+    unavailable_rule: str
+    initialization_errors: tuple[type[Exception], ...] = ()
+
+    def _warning(self, message: str) -> Finding:
+        return Finding(
+            rule_id=self.unavailable_rule,
+            severity=Severity.WARNING,
+            message=f"{self.name} validation {message}",
+            path=".",
+        )
+
+    def run(
+        self,
+        validator: Validator | ExtensionValidator | None,
+        factory: Callable[[], Validator | ExtensionValidator],
+        targets: Iterable[SchemaTarget],
+        *,
+        recover: Callable[[SchemaTarget, Exception], bool] | None = None,
+    ) -> SchemaPassResult:
+        """Initialize once, validate in target order, and stop on systemic failure.
+
+        ``recover`` records a URI-specific failure and returns True to continue.
+        Two-argument extension validators receive the declared URI unchanged.
+        """
+        if validator is None:
+            try:
+                validator = factory()
+            except ImportError:
+                return SchemaPassResult(
+                    [self._warning("skipped: the 'jsonschema' package is not installed")], False
+                )
+            except self.initialization_errors as exc:
+                return SchemaPassResult([self._warning(f"could not run: {exc}")], False)
+
+        findings: list[Finding] = []
+        for target in targets:
+            node = target.node
+            try:
+                if target.schema_uri is None:
+                    errors = cast(Validator, validator)(node.data)
+                else:
+                    errors = cast(ExtensionValidator, validator)(node.data, target.schema_uri)
+            except Exception as exc:  # any unrecovered validator failure is systemic
+                if recover is not None and recover(target, exc):
+                    continue
+                findings.append(self._warning(f"could not run: {exc}"))
+                return SchemaPassResult(findings, False)
+            findings.extend(
+                Finding(
+                    rule_id=self.invalid_rule,
+                    severity=Severity.ERROR,
+                    message=f"{target.label} validation failed: {error.message}",
+                    path=str(node.path),
+                    object_id=node.id,
+                    json_pointer=error.json_pointer,
+                )
+                for error in errors
+            )
+        return SchemaPassResult(findings, True)
 
 
 def _iter_vendored(node: Traversable, prefix: str = "") -> list[tuple[str, str]]:

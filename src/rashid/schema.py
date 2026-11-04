@@ -26,15 +26,14 @@ substitute their own.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from functools import lru_cache
 from importlib import resources
 from typing import Any
 
 from rashid import _json
-from rashid._jsonschema import SchemaError, fetch_schema
-from rashid.catalog import CatalogGraph, Kind
-from rashid.model import Finding, Severity
+from rashid._jsonschema import SchemaPass, Validator, fetch_schema, schema_targets
+from rashid.catalog import CatalogGraph
+from rashid.model import Finding
 from rashid.rules.conformance import declared_schema_uris
 
 SCH_INVALID = "PTL-SCH-001"
@@ -53,11 +52,7 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
 # The pinned v0.1 profile schema, used when the root declares no single URI.
 DEFAULT_SCHEMA_URI = "https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"
 
-# A validator maps one object's raw JSON to a list of schema errors;
-# an empty list means the object satisfies the Portolan profile schema.
-Validator = Callable[[dict[str, Any]], list[SchemaError]]
-
-_SCHEMA_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
+_PASS = SchemaPass("schema", SCH_INVALID, SCH_UNAVAILABLE, initialization_errors=(Exception,))
 
 
 def _schema_uri_for(graph: CatalogGraph) -> str:
@@ -170,56 +165,11 @@ def validate_schema(
     failed fetch), returns a single ``PTL-SCH-000`` warning instead of failing
     the run — a systemic failure is reported once, not once per object.
     """
+    uri = DEFAULT_SCHEMA_URI
     if validator is None:
         uri = schema_uri if schema_uri is not None else _schema_uri_for(graph)
-        try:
-            validator = default_validator(uri, allow_network=allow_network)
-        except ImportError:
-            return [
-                Finding(
-                    rule_id=SCH_UNAVAILABLE,
-                    severity=Severity.WARNING,
-                    message=(
-                        "schema validation skipped: the 'jsonschema' package is not installed"
-                    ),
-                    path=".",
-                )
-            ]
-        except Exception as exc:  # schema fetch/compile failure is systemic
-            return [
-                Finding(
-                    rule_id=SCH_UNAVAILABLE,
-                    severity=Severity.WARNING,
-                    message=f"schema validation could not run: {exc}",
-                    path=".",
-                )
-            ]
-
-    findings: list[Finding] = []
-    for node in graph.iter(*_SCHEMA_KINDS):
-        if node.parse_error is not None:
-            continue
-        try:
-            errors = validator(node.data)
-        except Exception as exc:  # any validator failure is systemic
-            findings.append(
-                Finding(
-                    rule_id=SCH_UNAVAILABLE,
-                    severity=Severity.WARNING,
-                    message=f"schema validation could not run: {exc}",
-                    path=".",
-                )
-            )
-            return findings
-        findings.extend(
-            Finding(
-                rule_id=SCH_INVALID,
-                severity=Severity.ERROR,
-                message=f"Portolan profile schema validation failed: {error.message}",
-                path=str(node.path),
-                object_id=node.id,
-                json_pointer=error.json_pointer,
-            )
-            for error in errors
-        )
-    return findings
+    return _PASS.run(
+        validator,
+        lambda: default_validator(uri, allow_network=allow_network),
+        schema_targets(graph, "Portolan profile schema"),
+    ).findings

@@ -16,12 +16,11 @@ single WARNING so the offline metadata findings still surface.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
-from rashid._jsonschema import SchemaError, stac_registry
-from rashid.catalog import CatalogGraph, Kind
-from rashid.model import Finding, Severity
+from rashid._jsonschema import SchemaError, SchemaPass, Validator, schema_targets, stac_registry
+from rashid.catalog import CatalogGraph
+from rashid.model import Finding
 
 STR_INVALID = "PTL-STR-001"
 STR_UNAVAILABLE = "PTL-STR-000"
@@ -35,9 +34,7 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-Validator = Callable[[dict[str, Any]], list[SchemaError]]
-
-_STRUCTURAL_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
+_PASS = SchemaPass("structural", STR_INVALID, STR_UNAVAILABLE)
 
 # STAC discriminates objects by their `type`; each maps to one core root schema.
 _ROOT_SCHEMAS: dict[str, str] = {
@@ -102,46 +99,6 @@ def validate_structural(graph: CatalogGraph, validator: Validator | None = None)
     warning instead of failing the run — a systemic failure is reported once,
     not once per object.
     """
-    if validator is None:
-        try:
-            validator = default_validator()
-        except ImportError:
-            return [
-                Finding(
-                    rule_id=STR_UNAVAILABLE,
-                    severity=Severity.WARNING,
-                    message=(
-                        "structural validation skipped: the 'jsonschema' package is not installed"
-                    ),
-                    path=".",
-                )
-            ]
-
-    findings: list[Finding] = []
-    for node in graph.iter(*_STRUCTURAL_KINDS):
-        if node.parse_error is not None:
-            continue
-        try:
-            errors = validator(node.data)
-        except Exception as exc:  # any validator failure is systemic
-            findings.append(
-                Finding(
-                    rule_id=STR_UNAVAILABLE,
-                    severity=Severity.WARNING,
-                    message=f"structural validation could not run: {exc}",
-                    path=".",
-                )
-            )
-            return findings
-        findings.extend(
-            Finding(
-                rule_id=STR_INVALID,
-                severity=Severity.ERROR,
-                message=f"STAC 1.1.0 structural validation failed: {error.message}",
-                path=str(node.path),
-                object_id=node.id,
-                json_pointer=error.json_pointer,
-            )
-            for error in errors
-        )
-    return findings
+    return _PASS.run(
+        validator, default_validator, schema_targets(graph, "STAC 1.1.0 structural")
+    ).findings
