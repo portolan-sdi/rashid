@@ -315,18 +315,20 @@ def test_self_references_skip_byte_checks(
 
 
 @pytest.mark.parametrize(
-    "directory,encoded", [("sector 1", "sector%201"), ("東京", "%E6%9D%B1%E4%BA%AC")]
+    "path_encoding",
+    [("sector 1", "sector%201"), ("東京", "%E6%9D%B1%E4%BA%AC")],
+    ids=["space", "unicode"],
 )
 @pytest.mark.parametrize("base", ["crawl", "published"])
 @pytest.mark.parametrize("absolute", [False, True])
 def test_encoded_node_path_self_reference_skips_byte_checks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    directory: str,
-    encoded: str,
+    path_encoding: tuple[str, str],
     base: str,
     absolute: bool,
 ) -> None:
+    directory, encoded = path_encoding
     node = _item(_asset(**{"file:size": 1, "file:checksum": _multihash(b"wrong")}))
     node.path = PurePosixPath(directory) / node.path
     node.abs_path = tmp_path / node.path
