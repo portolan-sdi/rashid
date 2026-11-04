@@ -1541,6 +1541,12 @@ def _covering_bboxes(
     boxes: list[tuple[float, float, float, float]] = []
     for i in range(meta.num_row_groups):
         group = meta.row_group(i)
+        stats = [group.column(index).statistics for index in leaves.values()]
+        if all(
+            stat is not None and stat.has_null_count and stat.null_count == group.num_rows
+            for stat in stats
+        ):
+            continue  # a known geometry-less group is prunable without a box
         try:
             minx = group.column(leaves["xmin"]).statistics.min
             miny = group.column(leaves["ymin"]).statistics.min
@@ -1551,7 +1557,7 @@ def _covering_bboxes(
         if None in (minx, miny, maxx, maxy):
             return None
         boxes.append((float(minx), float(miny), float(maxx), float(maxy)))
-    return boxes
+    return boxes or None
 
 
 def _column_index(meta: Any) -> dict[str, int]:
