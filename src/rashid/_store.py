@@ -30,7 +30,7 @@ A :class:`StoreError` with ``refused`` set means the server answered but the
 answer was not one rashid accepts: a redirect off https, or a HEAD with no
 ``Content-Length``. urllib cannot do better with either, so neither is sent
 again here; the live prober, which reads such an answer anyway, sends it again
-itself through :func:`probe_opener`. That opener does not follow a redirect
+itself through :func:`probe`. That request does not follow a redirect
 off https either. It returns the redirect as the answer, so the prober can
 report where it points.
 
@@ -66,11 +66,11 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
 from rashid import _trace
-from rashid._href import store_path, url_authority
+from rashid._href import is_https_href, store_path, url_authority
 from rashid._http import user_agent
 
 if TYPE_CHECKING:
-    from urllib.request import OpenerDirector
+    from urllib.request import OpenerDirector, Request
 
     from obstore.store import HTTPStore
 
@@ -133,7 +133,7 @@ def reset() -> None:
     """Drop every cached client, so the next request reads ``CLIENT_OPTIONS`` again."""
     _store.cache_clear()
     _opener.cache_clear()
-    probe_opener.cache_clear()
+    _probe_opener.cache_clear()
 
 
 def _locate(url: str) -> tuple[HTTPStore, str] | None:
@@ -192,13 +192,13 @@ def _build_opener(*, refuse: bool) -> OpenerDirector:
     here too.
     """
     import ssl
-    from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
+    from urllib.request import HTTPRedirectHandler, HTTPSHandler, build_opener
 
     class _HttpsRedirects(HTTPRedirectHandler):
         def redirect_request(  # noqa: PLR0913, PLR0917 - stdlib HTTPRedirectHandler override keeps its signature
             self, req: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str
         ) -> Request | None:
-            if urlsplit(newurl).scheme.lower() != "https":
+            if not is_https_href(newurl):
                 if refuse:
                     raise StoreError(f"redirect to a non-https URL refused: {newurl}", refused=True)
                 return None
@@ -217,7 +217,7 @@ def _opener() -> OpenerDirector:
 
 
 @cache
-def probe_opener() -> OpenerDirector:
+def _probe_opener() -> OpenerDirector:
     """The live prober's urllib opener: the same TLS options, and no step off https.
 
     A redirect to another https URL is followed. A redirect off https is the
@@ -227,11 +227,26 @@ def probe_opener() -> OpenerDirector:
     return _build_opener(refuse=False)
 
 
-def _send(url: str, method: str, headers: dict[str, str] | None) -> Any:
-    """Open ``url`` over urllib, retrying a 5xx or a failed connection as obstore does."""
+def _request(url: str, method: str, headers: dict[str, str] | None) -> Request:
+    """Build every urllib request with the shared agent and HTTPS policy."""
     from urllib.request import Request
 
-    request = Request(url, method=method, headers={"User-Agent": user_agent(), **(headers or {})})
+    if not is_https_href(url):
+        raise ValueError(f"refusing to fetch non-https URL: {url!r}")
+    return Request(url, method=method, headers={"User-Agent": user_agent(), **(headers or {})})
+
+
+def probe(url: str, method: str, headers: dict[str, str]) -> Any:
+    """Open one probe, preserving HTTP errors and off-HTTPS redirects for the caller.
+
+    Unlike object reads, probes inspect denied responses and do not retry them.
+    """
+    return _probe_opener().open(_request(url, method, headers), timeout=_IDLE.total_seconds())
+
+
+def _send(url: str, method: str, headers: dict[str, str] | None) -> Any:
+    """Open ``url`` over urllib, retrying a 5xx or a failed connection as obstore does."""
+    request = _request(url, method, headers)
     idle = CLIENT_OPTIONS["read_timeout"].total_seconds()
     deadline = time.monotonic() + _RETRY["retry_timeout"].total_seconds()
     attempt = 0

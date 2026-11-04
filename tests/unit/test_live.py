@@ -1136,7 +1136,7 @@ class _RecordedResponse:
 
 
 def _recorder(requests: list[Request]) -> Any:
-    def fake_open(request: Request) -> _RecordedResponse:
+    def fake_open(request: Request, *, timeout: float) -> _RecordedResponse:  # noqa: ARG001 - network opener signature
         requests.append(request)
         return _RecordedResponse()
 
@@ -1150,7 +1150,7 @@ def _store_fails(url: str) -> int:
 def _record(monkeypatch: pytest.MonkeyPatch, probe: str) -> Request:
     """Run one probe kind against a recording opener and return its Request."""
     requests: list[Request] = []
-    monkeypatch.setattr(live_mod, "_open", _recorder(requests))
+    monkeypatch.setattr(_store._probe_opener(), "open", _recorder(requests))
     monkeypatch.setattr(live_mod._store, "head_size", _store_fails)
     getattr(_DefaultProber(), probe)(_URL)
     (request,) = requests
@@ -1222,7 +1222,7 @@ def test_default_head_falls_back_to_urllib(
 
     requests: list[Request] = []
     monkeypatch.setattr(live_mod._store, "head_size", fail)
-    monkeypatch.setattr(live_mod, "_open", _recorder(requests))
+    monkeypatch.setattr(_store._probe_opener(), "open", _recorder(requests))
 
     response = _DefaultProber().head(_URL)
 
@@ -1240,7 +1240,7 @@ def test_default_head_does_not_ask_a_dead_host_twice(monkeypatch: pytest.MonkeyP
 
     requests: list[Request] = []
     monkeypatch.setattr(live_mod._store, "head_size", fail)
-    monkeypatch.setattr(live_mod, "_open", _recorder(requests))
+    monkeypatch.setattr(_store._probe_opener(), "open", _recorder(requests))
 
     with pytest.raises(_store.StoreError) as raised:
         _DefaultProber().head(_URL)

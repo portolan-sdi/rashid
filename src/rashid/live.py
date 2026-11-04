@@ -67,28 +67,23 @@ import logging
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 from urllib.error import HTTPError
 
 from rashid import _store, _trace
 from rashid._href import (
     href_host,
     is_absolute_href,
-    is_https_href,
     live_host_href,
     location_key,
     normalize_live_base,
     off_https_reference,
     resolve_live_base,
 )
-from rashid._http import user_agent
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.model import Finding, Severity
 from rashid.remote import wire_url
 from rashid.rules._common import assets_of, links_of
-
-if TYPE_CHECKING:
-    from urllib.request import Request
 
 log = logging.getLogger(__name__)
 
@@ -135,8 +130,6 @@ _LIVE_KINDS: tuple[Kind, ...] = ("collection", "item")
 
 # Links are declared on every object kind.
 _LINK_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
-
-_TIMEOUT = 30  # seconds per request
 
 # Concurrent HEADs against one host.
 _WORKERS = 32
@@ -260,25 +253,9 @@ def _lower_headers(items: Any) -> dict[str, str]:
     return {str(name).lower(): str(value) for name, value in items}
 
 
-def _open(request: Request) -> Any:
-    """Send ``request`` through ``rashid._store``'s probe opener.
-
-    It reads the same TLS options as every other transport, and it answers a
-    redirect off https as the 3xx it is instead of following it.
-    """
-    return _store.probe_opener().open(request, timeout=_TIMEOUT)
-
-
-def _request(url: str, method: str, headers: dict[str, str]) -> ProbeResponse:
-    from urllib.request import Request
-
-    if not is_https_href(url):
-        raise ValueError(f"refusing to probe non-https URL: {url!r}")
-    # Every probe shape — ranged GET, HEAD, OPTIONS preflight — funnels through
-    # here, so setting the agent once covers all of them.
-    request = Request(url, method=method, headers={"User-Agent": user_agent(), **headers})
+def _probe_response(url: str, method: str, headers: dict[str, str]) -> ProbeResponse:
     try:
-        with _open(request) as response:
+        with _store.probe(url, method, headers) as response:
             return ProbeResponse(
                 status=response.status, headers=_lower_headers(response.headers.items())
             )
@@ -309,7 +286,7 @@ class _DefaultProber:
     """
 
     def get_range(self, url: str) -> ProbeResponse:
-        return _request(url, "GET", {"Range": "bytes=0-0", "Origin": _PROBE_ORIGIN})
+        return _probe_response(url, "GET", {"Range": "bytes=0-0", "Origin": _PROBE_ORIGIN})
 
     def head(self, url: str) -> ProbeResponse:
         try:
@@ -317,11 +294,11 @@ class _DefaultProber:
         except _store.StoreError as exc:
             if exc.status is None and not exc.refused:
                 raise
-            return _request(url, "HEAD", {"Origin": _PROBE_ORIGIN})
+            return _probe_response(url, "HEAD", {"Origin": _PROBE_ORIGIN})
         return ProbeResponse(status=200, headers={"content-length": str(size)})
 
     def preflight(self, url: str) -> ProbeResponse:
-        return _request(
+        return _probe_response(
             url,
             "OPTIONS",
             {
