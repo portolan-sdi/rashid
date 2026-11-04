@@ -223,6 +223,14 @@ FAULTS = (
         "test_jscpd_baseline_only_shrinks",
     ),
     Fault(
+        "baseline-swap",
+        ".jscpd-baseline.json",
+        '"fingerprints": {',
+        '"fingerprints": {',  # _write_fault swaps one key without changing counts.
+        _QUALITY,
+        "baseline adds clone fingerprints",
+    ),
+    Fault(
         "empty-scan-policy",
         ".jscpd.json",
         '"failOnEmpty": true',
@@ -310,7 +318,7 @@ FAULTS = (
         "def _copy_" + "head(repo:",
         "FAULTS = FAULTS[1:]\n\ndef _copy_" + "head(repo:",
         ("uv", "run", "python", "scripts/gate_selftest.py", "--help"),
-        "expected 42 faults",
+        "expected 43 faults",
     ),
 )
 
@@ -326,7 +334,9 @@ def _copy_head(repo: Path, root: Path) -> None:
         tar.extractall(root, filter="data")
 
 
-def _run(root: Path, command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+def _run(
+    root: Path, command: tuple[str, ...], *, baseline: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     env = {
         key: value
         for key, value in os.environ.items()
@@ -339,6 +349,8 @@ def _run(root: Path, command: tuple[str, ...]) -> subprocess.CompletedProcess[st
         PYTHONPATH=os.pathsep.join((str(root / "src"), str(root))),
         NO_COLOR="1",
     )
+    if baseline is not None:
+        env["RASHID_BASELINE_PATH"] = str(baseline)
     return subprocess.run(
         command, cwd=root, env=env, capture_output=True, text=True, check=False, timeout=180
     )
@@ -381,6 +393,11 @@ def _write_fault(root: Path, fault: Fault, *, broken: bool) -> None:
         if fault.clean not in old:
             raise ValueError(f"{fault.path}: fault no longer applies")
         new = old.replace(fault.clean, new)
+    if fault.name == "baseline-swap" and broken:
+        data = json.loads(new)
+        fingerprints = data["fingerprints"]
+        fingerprints["selftest"] = fingerprints.pop(next(iter(fingerprints)))
+        new = json.dumps(data, indent=2) + "\n"
     path.write_text(new, encoding="utf-8")
     if path.suffix == ".py":
         compile(new, str(path), "exec")
@@ -389,10 +406,13 @@ def _write_fault(root: Path, fault: Fault, *, broken: bool) -> None:
 def exercise(repo: Path, fault: Fault) -> bool:
     """A clean pass and the expected fault diagnostic are both required."""
     with tempfile.TemporaryDirectory(prefix="rashid-gate-") as directory:
-        root = Path(directory)
+        root = Path(directory) / "repo"
+        root.mkdir()
         _copy_head(repo, root)
+        baseline = Path(directory) / "approved-baseline.json"
+        baseline.write_bytes((root / ".jscpd-baseline.json").read_bytes())
         _write_fault(root, fault, broken=False)
-        clean = _run(root, fault.command)
+        clean = _run(root, fault.command, baseline=baseline)
         if clean.returncode:
             print(
                 f"BROKEN {fault.name}: clean copy failed\n{clean.stdout}{clean.stderr}", flush=True
@@ -402,7 +422,7 @@ def exercise(repo: Path, fault: Fault) -> bool:
         (root / fault.path).unlink()
         _copy_head(repo, root)
         _write_fault(root, fault, broken=True)
-        broken = _run(root, fault.command)
+        broken = _run(root, fault.command, baseline=baseline)
         caught = broken.returncode != 0 and fault.diagnostic in broken.stdout + broken.stderr
         print(f"{'CAUGHT' if caught else 'MISSED'} {fault.name}", flush=True)
         if not caught:
@@ -411,8 +431,8 @@ def exercise(repo: Path, fault: Fault) -> bool:
 
 
 def main() -> int:
-    assert len(FAULTS) == 42, f"expected 42 faults, found {len(FAULTS)}"
-    assert len({fault.name for fault in FAULTS}) == 42, "fault names must be unique"
+    assert len(FAULTS) == 43, f"expected 43 faults, found {len(FAULTS)}"
+    assert len({fault.name for fault in FAULTS}) == 43, "fault names must be unique"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fault", choices=[fault.name for fault in FAULTS])
     parser.add_argument(

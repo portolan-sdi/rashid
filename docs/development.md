@@ -62,6 +62,7 @@ T9 split `data/checks.py` into concern modules. The file-owner contract allows t
 `remote.py` has no banned API use, so it needs no Ruff ignore. Production-only API bans live in `src/ruff.toml`; tests and developer scripts can construct raw fixtures without a blanket TID251 exemption.
 
 The committed jscpd baseline accepts existing clones. Its fingerprint and clone counts may only decrease; `test_quality_config.py` pins the counts without running external tools. The archive self-test checks live fingerprints and rejects stale entries.
+Because `origin/main` has no baseline yet, the fingerprint membership comparison becomes active after this PR merges.
 After deleting duplication, regenerate it and lower the pinned counts in the same commit:
 
 ```bash
