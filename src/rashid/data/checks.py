@@ -112,6 +112,7 @@ from rashid.data import (
 )
 from rashid.data.reader import AssetReader, Locator
 from rashid.model import Severity
+from rashid.rules._common import asset_refers_to_self
 from rashid.rules.item_mirror import is_mirror_asset
 
 # Multihash function code -> hashlib algorithm name.
@@ -345,6 +346,8 @@ def check_node(
         href = asset.get("href")
         if not isinstance(href, str) or not href:
             continue  # PTL-AST-001 reports a missing href
+        if asset_refers_to_self(node, href, graph):
+            continue  # PTL-AST-003 requires both file metadata fields to be absent
         log.debug("data: %s asset %r: %s", node.path, key, href)
         with _trace.span("data.asset"):
             defects.extend(_check_asset(node, key, asset, href, reader, graph))

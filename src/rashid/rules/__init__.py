@@ -12,6 +12,7 @@ from rashid.rules.assets import (
     CogMediaTypeRule,
     CollectionDataRule,
     ItemDataRule,
+    PMTilesDataRule,
 )
 from rashid.rules.bbox import BboxValidRule
 from rashid.rules.catalogs import SubcatalogFanoutRule
@@ -51,7 +52,7 @@ from rashid.rules.links import (
     RequiredLinksRule,
     StructuralLinkTypeRule,
 )
-from rashid.rules.partitions import PartitionFieldsRule
+from rashid.rules.partitions import PartitionFieldsRule, PartitionGlobSchemeRule
 from rashid.rules.provenance import (
     MirrorCanonicalLinkRule,
     MirrorUpdatedRule,
@@ -104,6 +105,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     CatalogAssetsRule(),
     CollectionDataRule(),
     ItemDataRule(),
+    PMTilesDataRule(),
     SchemaUriDeclaredRule(),
     SchemaUriConsistencyRule(),
     VersionExtensionRule(),
@@ -119,6 +121,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     DefaultStyleRoleRule(),
     LargeVectorWithoutVisualRule(),
     PartitionFieldsRule(),
+    PartitionGlobSchemeRule(),
     SingleFileCollectionRule(),
     RasterSceneItemRule(),
     MissingItemTreeRule(),

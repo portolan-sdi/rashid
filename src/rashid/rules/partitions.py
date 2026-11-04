@@ -93,3 +93,24 @@ def _declares_extension(node: Node) -> bool:
     return any(
         isinstance(uri, str) and uri.startswith(_PARTITION_EXTENSION_PREFIX) for uri in extensions
     )
+
+
+class PartitionGlobSchemeRule(Rule):
+    """HTTP cannot list objects for partition glob expansion."""
+
+    id = "PTL-PRT-002"
+    spec_ids = ("PORTO-FMT-064",)
+    default_severity = Severity.ERROR
+    description = "partition:glob must not use HTTP or HTTPS"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        glob = node.data.get("partition:glob")
+        if isinstance(glob, str) and glob.lstrip().lower().startswith(("http://", "https://")):
+            yield self.finding(
+                node,
+                "partition:glob uses HTTP or HTTPS, which cannot list partition objects",
+                json_pointer="/partition:glob",
+                fix_hint="use a relative glob or a bucket-native scheme such as s3:// or gs://",
+                actual=glob,
+            )

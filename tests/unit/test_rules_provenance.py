@@ -134,3 +134,22 @@ def test_broken_providers_silence_provenance_rules(catalog: CatalogBuilder) -> N
         "PTL-PRO-003",
         "PTL-PRO-004",
     }
+
+
+@pytest.mark.parametrize("include_html", [True, False])
+def test_mirror_service_via_links(catalog: CatalogBuilder, include_html: bool) -> None:
+    _mirror_collection(catalog)
+    root = catalog.write()
+    if include_html:
+        _add_mirror_links(root)
+    mutate_json(
+        root / "census" / "collection.json",
+        lambda d: d["links"].append(
+            {"rel": "via", "href": "https://source.example.org/wms", "type": "application/xml"}
+        ),
+    )
+    findings = findings_for(validate(root), "PTL-PRO-001")
+    assert len(findings) == (0 if include_html else 1)
+    if findings:
+        assert findings[0].severity is Severity.ERROR
+        assert "text/html" in findings[0].fix_hint

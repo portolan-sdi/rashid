@@ -61,7 +61,7 @@ PERMISSION_TESTS: dict[str, str] = {
 }
 
 _PARTITION_URI = "https://schemas.portolan-sdi.org/incubating/partition/v1.0.0/schema.json"
-_CONTACTS_URI = "https://stac-extensions.github.io/contacts/v0.1.1/schema.json"
+_CONTACTS_URI = "https://stac-extensions.github.io/contacts/v1.0.0/schema.json"
 _WEB_MAP_LINKS_URI = "https://stac-extensions.github.io/web-map-links/v1.3.0/schema.json"
 _PMTILES_LINK = {
     "rel": "pmtiles",

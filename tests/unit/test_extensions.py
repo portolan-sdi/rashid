@@ -530,3 +530,21 @@ def test_a_malformed_language_code_is_an_error(catalog: CatalogBuilder) -> None:
     findings = validate_extensions(CatalogGraph.load(root))
     assert _ids(findings) == ["PTL-EXT-001"]
     assert findings[0].json_pointer == "/language/code"
+
+
+@pytest.mark.parametrize("version", ["v0.1.1", "v1.0.0"])
+@pytest.mark.parametrize("valid", [True, False])
+def test_contacts_versions_validate_offline(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch, version: str, valid: bool
+) -> None:
+    from rashid import extensions as extensions_module
+
+    def no_fetch(uri: str) -> dict:
+        pytest.fail(f"Contacts schema must be bundled: {uri}")
+
+    monkeypatch.setattr(extensions_module, "_fetch_schema", no_fetch)
+    uri = f"https://stac-extensions.github.io/contacts/{version}/schema.json"
+    collection = catalog.collection("roads", stac_extensions=[uri])
+    collection.overrides["contacts"] = [{"name": "Data team"}] if valid else [{"name": 42}]
+    findings = validate_extensions(_graph(catalog))
+    assert _ids(findings) == ([] if valid else ["PTL-EXT-001"])

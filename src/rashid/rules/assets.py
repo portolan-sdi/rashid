@@ -16,14 +16,20 @@ from rashid.model import Finding, Severity
 from rashid.rule import Rule
 from rashid.rules._common import (
     COG_MEDIA_TYPE,
+    asset_refers_to_self,
+    declares_geometry,
     is_cog_media_type,
+    is_pmtiles_asset,
     is_raster_data_asset,
     roles_of,
 )
 
 
 def _has_data_asset(node: Node) -> bool:
-    return any("data" in roles_of(asset) for _, _, asset in _assets_of(node))
+    return any(
+        "data" in roles_of(asset) and not is_pmtiles_asset(asset)
+        for _, _, asset in _assets_of(node)
+    )
 
 
 def _assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
@@ -168,9 +174,10 @@ class CogMediaTypeRule(Rule):
 
 
 class AssetFileFieldsRule(Rule):
-    """Every asset should carry file:size and file:checksum.
+    """Assets should carry file metadata unless they refer to their STAC object.
 
-    core.md, Assets: "Assets SHOULD carry ``file:size`` and ``file:checksum``".
+    Self-references must omit both fields (PORTO-CORE-085). Other assets
+    should carry ``file:size`` and ``file:checksum`` (PORTO-CORE-028).
     A catalog that describes data it does not host cannot checksum bytes it
     never touches, so the absence is a warning rather than an error. A
     ``file:size`` that is present but not a positive integer is reported here
@@ -178,18 +185,30 @@ class AssetFileFieldsRule(Rule):
     """
 
     id = "PTL-AST-003"
-    spec_ids = ("PORTO-CORE-028",)
-    default_severity = Severity.WARNING
-    description = "every asset should carry file:size and file:checksum"
+    spec_ids = ("PORTO-CORE-028", "PORTO-CORE-085")
+    default_severity = Severity.ERROR
+    description = "assets should carry file metadata; self-references must omit it"
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         for pointer, key, asset in _assets_of(node):
+            href = asset.get("href")
+            if isinstance(href, str) and asset_refers_to_self(node, href, graph):
+                for field in ("file:size", "file:checksum"):
+                    if field in asset:
+                        yield self.finding(
+                            node,
+                            f"self-referencing asset '{key}' must omit {field}",
+                            json_pointer=f"{pointer}/{field}",
+                            fix_hint=f"remove {field} from the asset that refers to this STAC object",
+                        )
+                continue
             size = asset.get("file:size")
             if size is None:
                 yield self.finding(
                     node,
                     f"asset '{key}' has no file:size",
+                    severity=Severity.WARNING,
                     json_pointer=f"{pointer}/file:size",
                     fix_hint="add file:size, the asset's size in bytes as an integer",
                 )
@@ -197,6 +216,7 @@ class AssetFileFieldsRule(Rule):
                 yield self.finding(
                     node,
                     f"asset '{key}' file:size must be a positive integer, got {size!r}",
+                    severity=Severity.WARNING,
                     json_pointer=f"{pointer}/file:size",
                     fix_hint="set file:size to the asset's byte count, unquoted and greater than 0",
                     actual=size,
@@ -205,6 +225,7 @@ class AssetFileFieldsRule(Rule):
                 yield self.finding(
                     node,
                     f"asset '{key}' has no file:checksum",
+                    severity=Severity.WARNING,
                     json_pointer=f"{pointer}/file:checksum",
                     fix_hint="add file:checksum, the multihash of the asset bytes:"
                     " '1220' followed by the sha256 hex digest",
@@ -320,3 +341,70 @@ class ChecksumMultihashRule(Rule):
                     "e.g. '1220' + sha256 hex",
                     actual=checksum,
                 )
+
+
+class PMTilesDataRule(Rule):
+    """PMTiles renders GeoParquet data owned by the same collection.
+
+    Check the reference once per collection, emitting findings on each asset's
+    owner. Item visits only handle orphans, which have no collection reference.
+    """
+
+    id = "PTL-AST-009"
+    spec_ids = ("PORTO-FMT-062",)
+    default_severity = Severity.ERROR
+    description = "PMTiles assets must carry visual and reference their collection's GeoParquet"
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        if node.kind == "item":
+            # Collection checks visit their own items; retain orphan diagnostics.
+            if graph.enclosing_collection_of(node) is None:
+                yield from self._check_assets(node, False)
+            return
+        reference = _has_geoparquet_reference(node, graph)
+        for owner in [node, *graph.items_of(node)]:
+            yield from self._check_assets(owner, reference)
+
+    def _check_assets(self, node: Node, reference: bool) -> Iterable[Finding]:
+        for pointer, key, asset in _assets_of(node):
+            if not is_pmtiles_asset(asset):
+                continue
+            if "visual" not in roles_of(asset):
+                yield self.finding(
+                    node,
+                    f"PMTiles asset '{key}' has no visual role",
+                    json_pointer=f"{pointer}/roles",
+                    fix_hint="add visual to the PMTiles asset's roles",
+                )
+            if not reference:
+                yield self.finding(
+                    node,
+                    f"PMTiles asset '{key}' has no GeoParquet reference in its collection",
+                    json_pointer=pointer,
+                    fix_hint="register the rendered GeoParquet as a data asset on the same"
+                    " collection or its items, or set the collection's partition:glob",
+                )
+
+
+def _reference_has_geometry(owner: Node, asset: dict[str, Any], collection: Node) -> bool:
+    return declares_geometry(owner, asset, collection) is not False
+
+
+def _has_geoparquet_reference(collection: Node, graph: CatalogGraph) -> bool:
+    """Accept references unless declared columns positively exclude geometry."""
+    glob = collection.data.get("partition:glob")
+    if (
+        isinstance(glob, str)
+        and glob.strip()
+        and _reference_has_geometry(collection, {}, collection)
+    ):
+        return True
+    return any(
+        "data" in roles_of(asset)
+        and asset.get("type") == "application/vnd.apache.parquet"
+        and not is_pmtiles_asset(asset)
+        and _reference_has_geometry(owner, asset, collection)
+        for owner in [collection, *graph.items_of(collection)]
+        for _, _, asset in _assets_of(owner)
+    )

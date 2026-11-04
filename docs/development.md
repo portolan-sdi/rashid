@@ -93,7 +93,7 @@ The `counts` output includes every operation counter and the time spent in each 
 ```text
 # metadata/small seed=0
 json.parses                           147
-rules.checks                        1,821
+rules.checks                        1,925
 schema.rust_compiles                    3
 schema.rust_passes                    103
 

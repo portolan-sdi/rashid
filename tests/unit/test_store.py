@@ -5,11 +5,15 @@ from __future__ import annotations
 import socket
 from datetime import timedelta
 from importlib.metadata import version
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pytest
 
 from rashid import _store, _trace
+from rashid._url import object_location
+from rashid.catalog import Node
+from rashid.rules._common import asset_refers_to_self
 from tests._https import HttpsServer, Route
 
 _AGENT = f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
@@ -116,6 +120,36 @@ def test_a_semicolon_stays_in_the_path(https_server: HttpsServer) -> None:
 
     assert _store.get(https_server.url("a;v=1.json")) == b"{}"
     assert https_server.seen[0].path == "/a;v=1.json"
+
+
+@pytest.mark.parametrize(
+    "left,right,left_request,right_request",
+    [
+        ("/a%3Bv.json", "/a;v.json", "/a;v.json", "/a;v.json"),
+        ("/a%2Fv.json", "/a/v.json", "/a%2Fv.json", "/a/v.json"),
+        ("/a%20v.json", "/a v.json", "/a%20v.json", "/a%20v.json"),
+        ("/a%3Bv.json?x=1", "/a;v.json?x=1", "/a%3Bv.json?x=1", "/a;v.json?x=1"),
+        ("/a%2fv.json", "/a%2Fv.json", "/a%2fv.json", "/a%2Fv.json"),
+    ],
+)
+def test_self_reference_identity_agrees_with_requests(
+    https_server: HttpsServer, left: str, right: str, left_request: str, right_request: str
+) -> None:
+    for path in (left_request, right_request):
+        https_server.routes[path] = Route(body=b"{}")
+    left_url, right_url = https_server.base + left, https_server.base + right
+    assert _store.get(left_url) == _store.get(right_url) == b"{}"
+    assert [request.path for request in https_server.seen] == [left_request, right_request]
+    same_object = left_request == right_request
+    assert (object_location(left_url) == object_location(right_url)) is same_object
+    node = Node(
+        PurePosixPath("collection.json"),
+        Path("/unused/collection.json"),
+        "collection",
+        "roads",
+        {"links": [{"rel": "self", "href": right_url}]},
+    )
+    assert asset_refers_to_self(node, left_url) is same_object
 
 
 @pytest.mark.parametrize("url", ["http://example.org/x.json", "s3://bucket/x.json"])

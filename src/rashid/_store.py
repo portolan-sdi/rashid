@@ -63,10 +63,11 @@ from datetime import timedelta
 from functools import cache
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 from rashid import _trace
 from rashid._http import user_agent
+from rashid._url import store_path, url_authority
 
 if TYPE_CHECKING:
     from urllib.request import OpenerDirector
@@ -85,8 +86,6 @@ _STATUS = re.compile(r"status code: (\d{3})\b")
 # it would not follow.
 _NO_LENGTH = "MissingContentLength"
 _REDIRECT = "error following redirect"
-
-_ENCODED_SLASH = re.compile(r"%2f", re.IGNORECASE)
 
 #: Client options for every store. Tests add ``allow_invalid_certificates``
 #: here to reach a local server with a self-signed certificate; the urllib
@@ -146,12 +145,10 @@ def _locate(url: str) -> tuple[HTTPStore, str] | None:
     parsed = urlsplit(url)
     if parsed.scheme.lower() != "https" or not parsed.netloc:
         raise ValueError(f"refusing to fetch non-https URL: {url!r}")
-    if parsed.query or _ENCODED_SLASH.search(parsed.path):
+    path = store_path(parsed)
+    if path is None:
         return None
-    path = unquote(parsed.path).lstrip("/")
-    if not path or any(part in ("", ".", "..") for part in path.split("/")):
-        return None
-    return _store(f"https://{parsed.netloc.lower()}"), path
+    return _store(f"https://{url_authority(parsed)}"), path
 
 
 def _error(method: str, url: str, exc: Exception) -> StoreError:
