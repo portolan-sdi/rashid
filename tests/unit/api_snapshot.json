@@ -46,7 +46,7 @@
       "validate_structural"
     ],
     "signatures": {
-      "CheckInfo": "(id: 'str', description: 'str', severity: 'Severity', spec_ids: 'tuple[str, ...]' = (), pass_name: 'PassName' = 'metadata', enables_pass: 'bool' = True, spec_note: 'str | None' = None) -> None",
+      "CheckInfo": "(id: 'str', description: 'str', severity: 'Severity', spec_ids: 'tuple[str, ...]' = (), stage: 'PassName' = 'metadata', enables_pass: 'bool' = True, spec_note: 'str | None' = None) -> None",
       "Finding": "(rule_id: 'str', severity: 'Severity', message: 'str', path: 'str', object_id: 'str | None' = None, json_pointer: 'str | None' = None, fix_hint: 'str | None' = None, expected: 'Any | None' = None, actual: 'Any | None' = None, data: 'dict[str, Any] | None' = None) -> None",
       "Report": "(findings: 'list[Finding]' = <factory>, files_checked: 'int' = 0) -> None",
       "RuleSummary": "(rule_id: 'str', severity: 'Severity', count: 'int', file_count: 'int', description: 'str' = '') -> None",

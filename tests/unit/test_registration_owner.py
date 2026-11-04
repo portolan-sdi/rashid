@@ -30,7 +30,7 @@ def test_duplicate_metadata_ids_are_rejected() -> None:
 
 def test_metadata_and_pass_ids_cannot_collide() -> None:
     rule = registry.DEFAULT_RULES[0]
-    check = replace(registry.CHECKS[rule.id], pass_name="data")
+    check = replace(registry.CHECKS[rule.id], stage="data")
     with pytest.raises(registry.RegistryError, match=f"duplicate.*{rule.id}"):
         registry._build((rule,), (check,))
 
@@ -101,7 +101,7 @@ def test_pass_checks_use_the_id_constants_once() -> None:
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "CheckInfo"
-        and any(keyword.arg == "pass_name" for keyword in node.keywords)
+        and any(keyword.arg == "stage" for keyword in node.keywords)
     ]
     assert all(isinstance(node, ast.Name) for node in declarations)
     assert sorted(node.id for node in declarations) == sorted(constants)
@@ -117,7 +117,7 @@ def test_diagnostic_ids_need_an_explicit_spec_reason() -> None:
 
 
 @pytest.mark.parametrize(
-    ("pass_name", "expected"),
+    ("stage", "expected"),
     [
         ("structural", {"PTL-STR-001"}),
         ("schema", {"PTL-SCH-001"}),
@@ -125,19 +125,17 @@ def test_diagnostic_ids_need_an_explicit_spec_reason() -> None:
     ],
 )
 def test_schema_pass_gates_exclude_diagnostics(
-    pass_name: registry.PassName, expected: set[str]
+    stage: registry.PassName, expected: set[str]
 ) -> None:
-    assert registry.check_ids(pass_name, enables_pass_only=True) == expected
+    assert registry.check_ids(stage, enables_pass_only=True) == expected
 
 
-@pytest.mark.parametrize("pass_name", ["data", "live"])
+@pytest.mark.parametrize("stage", ["data", "live"])
 def test_networked_pass_gates_include_every_check_except_availability(
-    pass_name: registry.PassName,
+    stage: registry.PassName,
 ) -> None:
     expected = {
-        info.id
-        for info in registry.CHECKS.values()
-        if info.pass_name == pass_name and info.spec_ids
+        info.id for info in registry.CHECKS.values() if info.stage == stage and info.spec_ids
     }
-    assert registry.check_ids(pass_name, enables_pass_only=True) == expected
-    assert len(registry.check_ids(pass_name) - expected) == 1
+    assert registry.check_ids(stage, enables_pass_only=True) == expected
+    assert len(registry.check_ids(stage) - expected) == 1
