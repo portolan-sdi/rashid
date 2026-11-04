@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from rashid import _store, _trace
-from rashid._url import object_location
+from rashid._href import object_location
 from rashid.catalog import Node
 from rashid.rules._common import asset_refers_to_self
 from tests._https import HttpsServer, Route
@@ -39,7 +39,7 @@ def test_get_reports_the_status(https_server: HttpsServer, status: int) -> None:
 
 
 def test_a_failure_is_an_os_error(https_server: HttpsServer) -> None:
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="returned 404"):
         _store.get(https_server.url("missing.json"))
 
 
@@ -285,14 +285,8 @@ def test_one_store_per_host(https_server: HttpsServer) -> None:
     assert _store._store.cache_info().currsize == 1
 
 
-def test_only_the_store_and_the_live_prober_import_urllib_request() -> None:
-    """Every read goes through this module, except the live pass's per-host probes.
-
-    Those probes read CORS and range headers, and send OPTIONS, which obstore
-    does not support. This module sends over urllib what obstore cannot. Any
-    other module that reaches for urllib.request bypasses the connection pool
-    and the shared error handling here.
-    """
+def test_only_the_store_imports_urllib_request() -> None:
+    """Every urllib request, including live probes, belongs to the store."""
     import ast
     from pathlib import Path
 
@@ -311,7 +305,7 @@ def test_only_the_store_and_the_live_prober_import_urllib_request() -> None:
             )
             if any(name.startswith("urllib.request") for name in names):
                 importers.add(path.name)
-    assert importers == {"_store.py", "live.py"}
+    assert importers == {"_store.py"}
 
 
 def test_urllib_follows_a_redirect_to_https(https_server: HttpsServer) -> None:

@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 
 # DBL_MAX and friends written out by broken exporters as "effectively
@@ -20,7 +20,7 @@ def _bboxes_of(node: Node) -> list[tuple[str, Any]]:
     found: list[tuple[str, Any]] = []
     if node.kind == "item":
         if "bbox" in node.data:
-            found.append(("/bbox", node.data["bbox"]))
+            found.append((json_pointer("bbox"), node.data["bbox"]))
         return found
     extent = node.data.get("extent")
     if isinstance(extent, dict):
@@ -29,7 +29,7 @@ def _bboxes_of(node: Node) -> list[tuple[str, Any]]:
             boxes = spatial.get("bbox")
             if isinstance(boxes, list):
                 for index, box in enumerate(boxes):
-                    found.append((f"/extent/spatial/bbox/{index}", box))
+                    found.append((json_pointer("extent", "spatial", "bbox", index), box))
     return found
 
 
@@ -47,8 +47,20 @@ class BboxValidRule(Rule):
             yield from self._check_bbox(node, pointer, box)
 
     def _check_bbox(self, node: Node, pointer: str, box: Any) -> Iterable[Finding]:
+        values = self._numeric_values(node, pointer, box)
+        if isinstance(values, Finding):
+            yield values
+            return
+        invalid = self._nonfinite_finding(node, pointer, values)
+        if invalid is not None:
+            yield invalid
+            return
+        yield from self._range_findings(node, pointer, values)
+
+    def _numeric_values(self, node: Node, pointer: str, box: Any) -> list[float] | Finding:
+        """Validate array shape and convert numbers, stopping at the first fault."""
         if not isinstance(box, list) or len(box) not in (4, 6):
-            yield self.finding(
+            return self.finding(
                 node,
                 f"bbox must be an array of 4 or 6 numbers, got {box!r}",
                 json_pointer=pointer,
@@ -56,31 +68,32 @@ class BboxValidRule(Rule):
                 " (or [west, south, min_elev, east, north, max_elev])",
                 actual=box,
             )
-            return
         values: list[float] = []
         for value in box:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
-                yield self.finding(
+                return self.finding(
                     node,
                     f"bbox contains a non-numeric value: {value!r}",
                     json_pointer=pointer,
                     fix_hint="replace the entry with an unquoted WGS84 degree value",
                     actual=value,
                 )
-                return
             values.append(float(value))
+        return values
+
+    def _nonfinite_finding(self, node: Node, pointer: str, values: list[float]) -> Finding | None:
+        """Reject the first nonfinite or sentinel coordinate."""
         for value in values:
             if math.isnan(value) or math.isinf(value):
-                yield self.finding(
+                return self.finding(
                     node,
                     f"bbox contains a NaN or infinite value: {value!r}",
                     json_pointer=pointer,
                     fix_hint="recompute the bbox from the data's geometries and write finite"
                     " WGS84 degrees",
                 )
-                return
             if abs(value) >= _SENTINEL_MAGNITUDE:
-                yield self.finding(
+                return self.finding(
                     node,
                     f"bbox contains an effectively-infinite sentinel value: {value!r}",
                     json_pointer=pointer,
@@ -88,7 +101,10 @@ class BboxValidRule(Rule):
                     " a placeholder instead of a real extent",
                     actual=value,
                 )
-                return
+        return None
+
+    def _range_findings(self, node: Node, pointer: str, values: list[float]) -> Iterable[Finding]:
+        """Check WGS84 ranges and coordinate ordering after structural validation."""
         if len(values) == 4:
             west, south, east, north = values
             elevations: tuple[float, float] | None = None

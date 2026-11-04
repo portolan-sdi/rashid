@@ -64,71 +64,46 @@ says they did not run.
 from __future__ import annotations
 
 import logging
-import posixpath
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 from urllib.error import HTTPError
-from urllib.parse import urlparse
 
 from rashid import _store, _trace
-from rashid._http import user_agent
-from rashid.catalog import CatalogGraph, Kind, Node, is_absolute_href
-from rashid.model import Finding, Severity
-from rashid.remote import wire_url
-from rashid.rules._common import links_of
-
-if TYPE_CHECKING:
-    from urllib.request import Request
+from rashid._href import (
+    href_host,
+    is_absolute_href,
+    live_host_href,
+    location_key,
+    normalize_live_base,
+    off_https_reference,
+    resolve_live_base,
+    wire_url,
+)
+from rashid.catalog import CatalogGraph, Kind, Node
+from rashid.model import Finding, Severity, json_pointer
+from rashid.registry import (
+    LIV_CORS_EXPOSE,
+    LIV_CORS_ORIGIN,
+    LIV_CORS_PREFLIGHT,
+    LIV_HEAD_LENGTH,
+    LIV_LINK_TARGET,
+    LIV_OFF_HTTPS,
+    LIV_RANGE,
+    LIV_SELF_BASE,
+    LIV_UNAVAILABLE,
+)
+from rashid.rules._common import assets_of, indexed_links_of
 
 log = logging.getLogger(__name__)
 
-LIV_UNAVAILABLE = "PTL-LIV-000"
-LIV_RANGE = "PTL-LIV-001"
-LIV_HEAD_LENGTH = "PTL-LIV-002"
-LIV_CORS_ORIGIN = "PTL-LIV-003"
-LIV_CORS_EXPOSE = "PTL-LIV-004"
-LIV_CORS_PREFLIGHT = "PTL-LIV-005"
-LIV_LINK_TARGET = "PTL-LIV-006"
-LIV_SELF_BASE = "PTL-LIV-007"
-LIV_OFF_HTTPS = "PTL-LIV-008"
-
-# Requirement IDs from the spec's requirements manifest
-# (specs/portolan/requirements.yaml) enforced by each check;
-# gated by tests/unit/test_spec_coverage.py.
-SPEC_IDS: dict[str, tuple[str, ...]] = {
-    # Every live check probes the host set built below, and that set is where
-    # PORTO-CORE-073 lands: an absolute href on a host other than the one the
-    # catalog is published under is dropped before a host is ever collected,
-    # so no upstream server is asked to satisfy the Data Storage MUSTs.
-    LIV_RANGE: ("PORTO-CORE-043", "PORTO-CORE-073"),
-    LIV_HEAD_LENGTH: ("PORTO-CORE-043", "PORTO-CORE-073"),
-    LIV_CORS_ORIGIN: ("PORTO-CORE-045", "PORTO-CORE-073"),
-    LIV_CORS_EXPOSE: ("PORTO-CORE-045", "PORTO-CORE-073"),
-    LIV_CORS_PREFLIGHT: ("PORTO-CORE-045", "PORTO-CORE-073"),
-    # core.md, Links: every link MUST resolve (035), against the catalog's own
-    # tree on object storage as much as on disk (036). The publish host is
-    # that tree; the same PORTO-CORE-073 scoping keeps the HEADs off others.
-    LIV_LINK_TARGET: ("PORTO-CORE-035", "PORTO-CORE-036", "PORTO-CORE-073"),
-    # core.md, Links: a published root catalog SHOULD carry an absolute self
-    # link (081). When the caller names the publish base too, the two must
-    # agree, or the publish step wrote the catalog to the wrong location.
-    LIV_SELF_BASE: ("PORTO-CORE-081",),
-    # core.md, Assets: an absolute href MUST use https, because a browser
-    # cannot fetch the other schemes (023). A redirect off https moves the
-    # object to such a URL, so a link that redirects there does not resolve
-    # for an https client either (035). The 073 scoping applies as above.
-    LIV_OFF_HTTPS: ("PORTO-CORE-023", "PORTO-CORE-035", "PORTO-CORE-073"),
-}
 
 # Assets are declared on collections and items; catalogs carry none.
 _LIVE_KINDS: tuple[Kind, ...] = ("collection", "item")
 
 # Links are declared on every object kind.
 _LINK_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
-
-_TIMEOUT = 30  # seconds per request
 
 # Concurrent HEADs against one host.
 _WORKERS = 32
@@ -171,6 +146,10 @@ class ProbeResponse:
     def header(self, name: str) -> str | None:
         return self.headers.get(name.lower())
 
+    def access_denied(self) -> bool:
+        """Only authentication denials make conformance probes inaccessible."""
+        return self.status in (401, 403)
+
     def off_https(self) -> str | None:
         """The non-https URL this response redirects to; None for any other answer.
 
@@ -181,7 +160,7 @@ class ProbeResponse:
         if not 300 <= self.status < 400:
             return None
         location = self.header("location")
-        if location is None or urlparse(location).scheme.lower() in ("", "https"):
+        if location is None or not off_https_reference(location):
             return None
         return location
 
@@ -213,6 +192,29 @@ class _Target:
     url: str
     declared_size: int | None
 
+    def server_finding(
+        self,
+        rule_id: str,
+        *,
+        message: str,
+        fix_hint: str | None = None,
+        expected: object | None = None,
+        actual: object | None = None,
+    ) -> Finding:
+        """Report a hosting defect against this asset and its URL's host."""
+        host = href_host(self.url)
+        return Finding(
+            rule_id=rule_id,
+            severity=Severity.ERROR,
+            message=f"host '{host}': {message}",
+            path=str(self.node.path),
+            object_id=self.node.id,
+            json_pointer=json_pointer("assets", self.key, "href"),
+            fix_hint=fix_hint,
+            expected=expected,
+            actual=actual,
+        )
+
 
 @dataclass(frozen=True)
 class _LinkTarget:
@@ -229,25 +231,9 @@ def _lower_headers(items: Any) -> dict[str, str]:
     return {str(name).lower(): str(value) for name, value in items}
 
 
-def _open(request: Request) -> Any:
-    """Send ``request`` through ``rashid._store``'s probe opener.
-
-    It reads the same TLS options as every other transport, and it answers a
-    redirect off https as the 3xx it is instead of following it.
-    """
-    return _store.probe_opener().open(request, timeout=_TIMEOUT)
-
-
-def _request(url: str, method: str, headers: dict[str, str]) -> ProbeResponse:
-    from urllib.request import Request
-
-    if urlparse(url).scheme.lower() != "https":
-        raise ValueError(f"refusing to probe non-https URL: {url!r}")
-    # Every probe shape — ranged GET, HEAD, OPTIONS preflight — funnels through
-    # here, so setting the agent once covers all of them.
-    request = Request(url, method=method, headers={"User-Agent": user_agent(), **headers})
+def _probe_response(url: str, method: str, headers: dict[str, str]) -> ProbeResponse:
     try:
-        with _open(request) as response:
+        with _store.probe(url, method, headers) as response:
             return ProbeResponse(
                 status=response.status, headers=_lower_headers(response.headers.items())
             )
@@ -270,15 +256,15 @@ class _DefaultProber:
 
     When the host answers but obstore does not return the answer, the HEAD is
     sent again over urllib, so the checks read the full response exactly as
-    before. That covers a non-2xx status, whose headers ``_check_head`` still
-    reads, a missing ``Content-Length``, and a redirect off https, which comes
+    before. That covers a non-2xx status, which obstore reports as an error,
+    a missing ``Content-Length``, and a redirect off https, which comes
     back as the 3xx itself and is never followed. A transport
     failure is not sent again: it marks the host dead, and asking twice only
     doubles the wait.
     """
 
     def get_range(self, url: str) -> ProbeResponse:
-        return _request(url, "GET", {"Range": "bytes=0-0", "Origin": _PROBE_ORIGIN})
+        return _probe_response(url, "GET", {"Range": "bytes=0-0", "Origin": _PROBE_ORIGIN})
 
     def head(self, url: str) -> ProbeResponse:
         try:
@@ -286,11 +272,11 @@ class _DefaultProber:
         except _store.StoreError as exc:
             if exc.status is None and not exc.refused:
                 raise
-            return _request(url, "HEAD", {"Origin": _PROBE_ORIGIN})
+            return _probe_response(url, "HEAD", {"Origin": _PROBE_ORIGIN})
         return ProbeResponse(status=200, headers={"content-length": str(size)})
 
     def preflight(self, url: str) -> ProbeResponse:
-        return _request(
+        return _probe_response(
             url,
             "OPTIONS",
             {
@@ -313,26 +299,22 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
     Node iteration is path-sorted and asset keys are sorted, so each host's
     first target — the probe representative — is deterministic.
     """
-    base = _normalize_base(base_url) if base_url is not None else None
+    base = normalize_live_base(base_url) if base_url is not None else None
     by_host: dict[str, list[_Target]] = {}
     for node in graph.iter(*_LIVE_KINDS):
         if node.parse_error is not None:
             continue
-        assets = node.data.get("assets")
-        if not isinstance(assets, dict):
-            continue
-        for key in sorted(assets):
-            asset = assets[key]
-            if not isinstance(asset, dict):
-                continue
+        for _pointer, key, asset in sorted(assets_of(node), key=lambda entry: entry[1]):
             href = asset.get("href")
             if not isinstance(href, str):
                 continue
-            url = _own_url(graph, node, href, base)
+            url = live_host_href(str(graph.href_path(node).parent), href, base)
             if url is None:
                 continue
+            if not is_absolute_href(href):
+                url = wire_url("", url)
             size = asset.get("file:size")
-            by_host.setdefault(urlparse(url).netloc.lower(), []).append(
+            by_host.setdefault(href_host(url), []).append(
                 _Target(
                     node=node,
                     key=key,
@@ -341,29 +323,6 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
                 )
             )
     return by_host
-
-
-def _own_url(graph: CatalogGraph, node: Node, href: str, base: str | None) -> str | None:
-    """The URL a href on ``node`` is served from, or None when it is out of scope.
-
-    An absolute ``https`` href is probed as declared, except that once ``base``
-    (already normalized) names the publish host, an href on any other host is a
-    copy someone else serves: core.md's hosting MUSTs do not reach it
-    (PORTO-CORE-073), whatever roles it carries. A relative href joins onto
-    ``base``; without one it cannot be placed. Absolute non-https hrefs and
-    hrefs escaping the tree are never probed.
-    """
-    parsed = urlparse(href)
-    if parsed.scheme.lower() == "https" and parsed.netloc:
-        if base is not None and parsed.netloc.lower() != urlparse(base).netloc.lower():
-            return None
-        return href
-    if base is None:
-        return None
-    rel = graph.resolve_path(node, href)
-    if rel is None:
-        return None
-    return wire_url(base, str(rel))
 
 
 def _link_targets(graph: CatalogGraph, base: str) -> list[_LinkTarget]:
@@ -377,30 +336,21 @@ def _link_targets(graph: CatalogGraph, base: str) -> list[_LinkTarget]:
     for node in graph.iter(*_LINK_KINDS):
         if node.parse_error is not None:
             continue
-        for index, link in enumerate(links_of(node)):
+        for index, link in indexed_links_of(node):
             href = link.get("href")
             if not isinstance(href, str) or not href:
                 continue
-            url = _own_url(graph, node, href, base)
-            if url is None or url in first:
+            url = live_host_href(str(graph.href_path(node).parent), href, base)
+            if url is None:
+                continue
+            if not is_absolute_href(href):
+                url = wire_url("", url)
+            if url in first:
                 continue
             first[url] = _LinkTarget(
                 node=node, index=index, rel=link.get("rel"), href=href, url=url
             )
     return [first[url] for url in sorted(first)]
-
-
-def _normalize_base(base_url: str) -> str:
-    """Validate and normalize a publish base URL to https with one trailing slash.
-
-    https-only for the same reason the data reader is: the base joins with
-    catalog-controlled hrefs into request URLs, so any weaker scheme would let
-    a hostile tree downgrade or redirect the probes.
-    """
-    parsed = urlparse(base_url)
-    if parsed.scheme.lower() != "https" or not parsed.netloc:
-        raise ValueError(f"live base_url must be an https URL, got: {base_url!r}")
-    return base_url.rstrip("/") + "/"
 
 
 def _header_set(value: str | None) -> set[str]:
@@ -410,45 +360,39 @@ def _header_set(value: str | None) -> set[str]:
     return {token.strip().lower() for token in value.split(",") if token.strip()}
 
 
-def _server_finding(
-    rule_id: str,
-    host: str,
-    rep: _Target,
-    message: str,
-    fix_hint: str | None = None,
-    expected: object | None = None,
-    actual: object | None = None,
-) -> Finding:
-    return Finding(
-        rule_id=rule_id,
-        severity=Severity.ERROR,
-        message=f"host '{host}': {message}",
-        path=str(rep.node.path),
-        object_id=rep.node.id,
-        json_pointer=f"/assets/{rep.key}/href",
-        fix_hint=fix_hint,
-        expected=expected,
-        actual=actual,
-    )
+@dataclass(frozen=True)
+class _ProbeRedirect:
+    """A probe request and the non-https location its response names."""
+
+    probe: str
+    url: str
+    location: str
 
 
 def _off_https_finding(
-    node: Node, pointer: str, subject: str, probe: str, url: str, location: str
+    node: Node, *, pointer: str, subject: str, result: _ProbeRedirect
 ) -> Finding:
     return Finding(
         rule_id=LIV_OFF_HTTPS,
         severity=Severity.ERROR,
-        message=f"{subject}: {probe} {url} redirected off https to {location}",
+        message=f"{subject}: {result.probe} {result.url} redirected off https to {result.location}",
         path=str(node.path),
         object_id=node.id,
         json_pointer=pointer,
         fix_hint="serve the object over https, and redirect only to https URLs",
         expected="https",
-        actual=location,
+        actual=result.location,
     )
 
 
-def _check_range(host: str, rep: _Target, response: ProbeResponse) -> list[Finding]:
+def _check_range(rep: _Target, response: ProbeResponse) -> list[Finding]:
+    if response.access_denied():
+        return [
+            _unavailable(
+                f"range and CORS probes for {rep.url} returned {response.status}; asset inaccessible",
+                str(rep.node.path),
+            )
+        ]
     problems: list[str] = []
     if response.status != 206:
         problems.append(f"a ranged GET returned {response.status}, expected 206 Partial Content")
@@ -457,11 +401,9 @@ def _check_range(host: str, rep: _Target, response: ProbeResponse) -> list[Findi
     if not problems:
         return []
     return [
-        _server_finding(
+        rep.server_finding(
             LIV_RANGE,
-            host,
-            rep,
-            "range requests unsupported: " + "; ".join(problems),
+            message="range requests unsupported: " + "; ".join(problems),
             fix_hint="serve assets from storage that honors the Range header with 206 responses",
             expected=206,
             actual=response.status,
@@ -469,16 +411,14 @@ def _check_range(host: str, rep: _Target, response: ProbeResponse) -> list[Findi
     ]
 
 
-def _check_cors(host: str, rep: _Target, response: ProbeResponse) -> list[Finding]:
+def _check_cors(rep: _Target, response: ProbeResponse) -> list[Finding]:
     if response.header("access-control-allow-origin") is None:
         # CORS is off entirely; the exposed-headers MUST is subsumed — one
         # finding for the root cause, not two for the same absent policy.
         return [
-            _server_finding(
+            rep.server_finding(
                 LIV_CORS_ORIGIN,
-                host,
-                rep,
-                "no Access-Control-Allow-Origin on a GET carrying an Origin header",
+                message="no Access-Control-Allow-Origin on a GET carrying an Origin header",
                 fix_hint="enable a read-permitting CORS policy, e.g. Access-Control-Allow-Origin: *",
             )
         ]
@@ -489,17 +429,15 @@ def _check_cors(host: str, rep: _Target, response: ProbeResponse) -> list[Findin
     if not missing:
         return []
     return [
-        _server_finding(
+        rep.server_finding(
             LIV_CORS_EXPOSE,
-            host,
-            rep,
-            "Access-Control-Expose-Headers omits " + ", ".join(missing),
+            message="Access-Control-Expose-Headers omits " + ", ".join(missing),
             fix_hint="expose " + ", ".join(_REQUIRED_EXPOSED) + " to browsers",
         )
     ]
 
 
-def _check_preflight(host: str, rep: _Target, response: ProbeResponse) -> list[Finding]:
+def _check_preflight(rep: _Target, response: ProbeResponse) -> list[Finding]:
     problems: list[str] = []
     if response.status >= 400:
         problems.append(f"preflight returned {response.status}")
@@ -516,11 +454,9 @@ def _check_preflight(host: str, rep: _Target, response: ProbeResponse) -> list[F
     if not problems:
         return []
     return [
-        _server_finding(
+        rep.server_finding(
             LIV_CORS_PREFLIGHT,
-            host,
-            rep,
-            "CORS preflight failed: " + "; ".join(problems),
+            message="CORS preflight failed: " + "; ".join(problems),
             fix_hint=(
                 "allow the GET and HEAD methods and the "
                 + ", ".join(_REQUIRED_REQUEST)
@@ -531,8 +467,16 @@ def _check_preflight(host: str, rep: _Target, response: ProbeResponse) -> list[F
 
 
 def _check_head(target: _Target, response: ProbeResponse) -> list[Finding]:
+    if response.access_denied():
+        return [
+            _unavailable(
+                f"asset '{target.key}': HEAD {target.url} returned {response.status}; "
+                "asset inaccessible",
+                str(target.node.path),
+            )
+        ]
     length = response.header("content-length")
-    pointer = f"/assets/{target.key}"
+    pointer = json_pointer("assets", target.key)
     if length is None or not length.isdigit():
         return [
             Finding(
@@ -618,7 +562,7 @@ class _HeadCache:
         _trace.count("live.heads")
         try:
             return self._prober.head(url)
-        except Exception as exc:  # noqa: BLE001 - kept for head() to report in order
+        except Exception as exc:  # kept for head() to report in order
             return exc
 
     def head(self, url: str) -> ProbeResponse | None:
@@ -626,7 +570,7 @@ class _HeadCache:
         if response is not None:
             _trace.count("live.head_cache_hits")
             return response
-        host = urlparse(url).netloc.lower()
+        host = href_host(url)
         if host in self.failed:
             return None
         error = self._errors.pop(url, None)
@@ -690,11 +634,9 @@ def _check_heads(
             findings.append(
                 _off_https_finding(
                     target.node,
-                    f"/assets/{target.key}/href",
-                    f"asset '{target.key}'",
-                    "HEAD",
-                    target.url,
-                    location,
+                    pointer=json_pointer("assets", target.key, "href"),
+                    subject=f"asset '{target.key}'",
+                    result=_ProbeRedirect("HEAD", target.url, location),
                 )
             )
     return findings
@@ -710,31 +652,28 @@ def _probe_host(
         ranged = prober.get_range(rep.url)
         _trace.count("live.preflights")
         preflighted = prober.preflight(rep.url)
-    except Exception as exc:  # noqa: BLE001 - an unreachable host is reported once
+    except Exception as exc:  # an unreachable host is reported once
         log.debug("host %s failed: %s", host, exc)
         heads.failed.setdefault(host, exc)
         return _unavailable(f"live probes against host '{host}' failed: {exc}", str(rep.node.path))
     return ranged, preflighted
 
 
-def _check_server(
-    host: str, rep: _Target, ranged: ProbeResponse, preflighted: ProbeResponse
-) -> list[Finding]:
+def _check_server(rep: _Target, ranged: ProbeResponse, preflighted: ProbeResponse) -> list[Finding]:
     """The host-level range and CORS checks, read off ``rep``'s two probes."""
-    findings = _check_range(host, rep, ranged)
-    findings.extend(_check_cors(host, rep, ranged))
-    findings.extend(_check_preflight(host, rep, preflighted))
+    findings = _check_range(rep, ranged)
+    if not ranged.access_denied():
+        findings.extend(_check_cors(rep, ranged))
+    findings.extend(_check_preflight(rep, preflighted))
     return findings
 
 
 def _ranged_off_https(rep: _Target, location: str) -> Finding:
     return _off_https_finding(
         rep.node,
-        f"/assets/{rep.key}/href",
-        f"asset '{rep.key}'",
-        "a ranged GET of",
-        rep.url,
-        location,
+        pointer=json_pointer("assets", rep.key, "href"),
+        subject=f"asset '{rep.key}'",
+        result=_ProbeRedirect("a ranged GET of", rep.url, location),
     )
 
 
@@ -758,7 +697,7 @@ def _check_host(
     ranged, preflighted = probed
     location = ranged.off_https()
     if location is None:
-        findings = _check_server(host, first, ranged, preflighted)
+        findings = _check_server(first, ranged, preflighted)
         findings.extend(_check_heads(host, targets, heads))
         return findings
     findings = [_ranged_off_https(first, location)]
@@ -774,7 +713,7 @@ def _check_host(
         ranged, preflighted = probed
         location = ranged.off_https()
         if location is None:
-            findings.extend(_check_server(host, rep, ranged, preflighted))
+            findings.extend(_check_server(rep, ranged, preflighted))
             return findings + head_findings
         findings.append(_ranged_off_https(rep, location))
         skipped = "the ranged GET of every asset tried redirects off https"
@@ -823,11 +762,9 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
             findings.append(
                 _off_https_finding(
                     target.node,
-                    f"/links/{target.index}/href",
-                    f"link rel:{target.rel!r} href '{target.href}'",
-                    "HEAD",
-                    target.url,
-                    location,
+                    pointer=json_pointer("links", target.index, "href"),
+                    subject=f"link rel:{target.rel!r} href '{target.href}'",
+                    result=_ProbeRedirect("HEAD", target.url, location),
                 )
             )
             continue
@@ -841,7 +778,7 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
                 ),
                 path=str(target.node.path),
                 object_id=target.node.id,
-                json_pointer=f"/links/{target.index}/href",
+                json_pointer=json_pointer("links", target.index, "href"),
                 fix_hint="upload the linked document to the publish host, or correct the href",
                 expected="2xx",
                 actual=status,
@@ -866,12 +803,13 @@ def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
     claimed = graph.published_base()
     if root is None or claimed is None:
         return []
-    if _same_location(claimed, base):
+    claimed_location = location_key(claimed)
+    if claimed_location is not None and claimed_location == location_key(base):
         return []
     index = next(
         (
             i
-            for i, link in enumerate(links_of(root))
+            for i, link in indexed_links_of(root)
             if link.get("rel") == "self" and is_absolute_href(str(link.get("href", "")))
         ),
         0,
@@ -886,7 +824,7 @@ def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
             ),
             path=str(root.path),
             object_id=root.id,
-            json_pointer=f"/links/{index}/href",
+            json_pointer=json_pointer("links", index, "href"),
             fix_hint=(
                 f"set the root self link to {base}{root.path.name}, or publish"
                 " the catalog at the location the self link names"
@@ -895,43 +833,6 @@ def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
             actual=claimed,
         )
     ]
-
-
-def _same_location(left: str, right: str) -> bool:
-    """True when two base URLs name one location, whatever their spelling."""
-    return _location_key(left) == _location_key(right)
-
-
-def _location_key(url: str) -> tuple[str, str, str]:
-    parsed = urlparse(url)
-    scheme = parsed.scheme.lower()
-    host = parsed.hostname or ""
-    port = parsed.port
-    default = {"https": 443, "http": 80}.get(scheme)
-    netloc = host if port is None or port == default else f"{host}:{port}"
-    path = posixpath.normpath(parsed.path or "/")
-    return scheme, netloc, path.rstrip("/") + "/"
-
-
-def _resolve_base(graph: CatalogGraph, base_url: str | None) -> tuple[str | None, bool]:
-    """The publish base to probe under, and whether the caller supplied it.
-
-    The caller's ``base_url`` wins, then the base recorded on the graph (the
-    URL ``rashid check`` was given), then the root ``self`` link
-    (PORTO-CORE-081): a catalog that states its own published location needs
-    no ``--live-base-url``. A ``self`` link that is not an https URL with a
-    host is ignored rather than probed, for the reason :func:`_normalize_base`
-    gives.
-    """
-    named = base_url if base_url is not None else graph.base_url
-    if named is not None:
-        return _normalize_base(named), True
-    claimed = graph.published_base()
-    if claimed is not None:
-        parsed = urlparse(claimed)
-        if parsed.scheme.lower() == "https" and parsed.netloc:
-            return _normalize_base(claimed), False
-    return None, False
 
 
 def validate_live(
@@ -964,7 +865,7 @@ def validate_live(
     """
     if prober is None:
         prober = _DefaultProber()
-    base, named = _resolve_base(graph, base_url)
+    base, named = resolve_live_base(base_url, graph.base_url, graph.published_base())
     by_host = _targets_by_host(graph, base)
     findings: list[Finding] = []
     if not by_host:
@@ -984,7 +885,7 @@ def validate_live(
     for host in sorted(by_host):
         findings.extend(_check_host(host, by_host[host], prober, heads))
     if base is not None:
-        base_host = urlparse(base).netloc.lower()
+        base_host = href_host(base)
         findings.extend(_check_links(base_host, _link_targets(graph, base), heads))
         if named:
             findings.extend(_check_self_base(graph, base))

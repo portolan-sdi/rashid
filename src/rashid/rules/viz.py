@@ -18,16 +18,19 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import (
     PMTILES_MEDIA_TYPE,
+    assets_of,
     declares_geometry,
+    indexed_links_of,
+    is_cog_media_type,
     is_pmtiles_asset,
+    is_tiff_media_type,
     links_of,
     roles_of,
 )
-from rashid.rules.assets import _assets_of
 
 STYLE_MEDIA_TYPE = "application/vnd.mapbox.style+json"
 _THUMBNAIL_TYPES = ("image/png", "image/jpeg", "image/webp")
@@ -39,11 +42,14 @@ _LARGE_VECTOR_BYTES = 100_000_000
 
 def _has_spatial_media_type(node: Node) -> bool:
     """Whether any asset's media type is spatial whatever the metadata says."""
-    for _pointer, _key, asset in _assets_of(node):
+    for _pointer, _key, asset in assets_of(node):
         media_type = asset.get("type")
         if is_pmtiles_asset(asset) or (
             isinstance(media_type, str)
-            and (media_type.startswith("image/tiff") or media_type == "application/vnd.laszip+copc")
+            and (
+                is_tiff_media_type(media_type, policy="literal-prefix")
+                or media_type == "application/vnd.laszip+copc"
+            )
         ):
             return True
     return False
@@ -61,8 +67,8 @@ def is_geospatial(node: Node, graph: CatalogGraph) -> bool | None:
     attribute table beside it is described. With no signal either way, return
     None: callers report that uncertainty rather than guess past it.
     """
-    for child in graph.children_of(node):
-        if child.kind == "item" and child.data.get("geometry") is not None:
+    for child in graph.items_of(node):
+        if child.data.get("geometry") is not None:
             return True
     if _has_spatial_media_type(node):
         return True
@@ -80,7 +86,7 @@ def _undecided_because(node: Node, graph: CatalogGraph) -> str:
     and a structural fault must not reach the reader only through a sentence
     about thumbnails.
     """
-    items = sum(1 for child in graph.children_of(node) if child.kind == "item")
+    items = len(graph.items_of(node))
     if items == 0:
         # Phrased as absent geometry evidence, not as a structural verdict:
         # whether the collection owes items at all is PTL-COL-005's question.
@@ -104,7 +110,7 @@ _RESOLVE_HINT = (
 
 def _pmtiles_registration(node: Node) -> tuple[bool, bool]:
     """(has_pmtiles_asset, has_pmtiles_link) for a collection."""
-    has_asset = any(is_pmtiles_asset(asset) for _p, _k, asset in _assets_of(node))
+    has_asset = any(is_pmtiles_asset(asset) for _p, _k, asset in assets_of(node))
     has_link = any(link.get("rel") == "pmtiles" for link in links_of(node))
     return has_asset, has_link
 
@@ -132,7 +138,7 @@ class ThumbnailRule(Rule):
             return
         thumbnails = [
             (pointer, key, asset)
-            for pointer, key, asset in _assets_of(node)
+            for pointer, key, asset in assets_of(node)
             if "thumbnail" in roles_of(asset)
         ]
         if geospatial is None:
@@ -143,7 +149,7 @@ class ThumbnailRule(Rule):
                     " geospatial cannot be decided from metadata:"
                     f" {_undecided_because(node, graph)}",
                     severity=Severity.WARNING,
-                    json_pointer="/assets",
+                    json_pointer=json_pointer("assets"),
                     fix_hint=f"{_RESOLVE_HINT}; add a thumbnail if the collection is geospatial",
                 )
             return
@@ -151,7 +157,7 @@ class ThumbnailRule(Rule):
             yield self.finding(
                 node,
                 "geospatial collection has no asset with the 'thumbnail' role",
-                json_pointer="/assets",
+                json_pointer=json_pointer("assets"),
                 fix_hint="add a thumbnail generated from the collection's default styling",
             )
             return
@@ -162,7 +168,7 @@ class ThumbnailRule(Rule):
                     node,
                     f"thumbnail asset '{key}' has type {media_type!r}, expected image/png,"
                     " image/jpeg or image/webp",
-                    json_pointer=f"{pointer}/type",
+                    json_pointer=json_pointer("type", prefix=pointer),
                     fix_hint="set the thumbnail's type to the media type of the file it points"
                     " at, 'image/png', 'image/jpeg' or 'image/webp'",
                     expected=list(_THUMBNAIL_TYPES),
@@ -171,10 +177,10 @@ class ThumbnailRule(Rule):
 
 
 class StylesForDerivativeRule(Rule):
-    """A collection with a visualization derivative registers style assets.
+    """A derivative needs styles unless it is a self-rendering browse COG.
 
-    Self-rendering collections (no derivative) are exempt: whether the data
-    asset is display-ready is not decidable from metadata.
+    A visual COG without the data role declares the display-ready browse
+    path exempted by core.md. Primary data and PMTiles still need styles.
     """
 
     id = "PTL-VIZ-002"
@@ -184,15 +190,19 @@ class StylesForDerivativeRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        has_visual = any("visual" in roles_of(asset) for _p, _k, asset in _assets_of(node))
+        has_visual = any(
+            "visual" in roles_of(asset)
+            and ("data" in roles_of(asset) or not is_cog_media_type(asset.get("type")))
+            for _p, _k, asset in assets_of(node)
+        )
         has_pmtiles_asset, has_pmtiles_link = _pmtiles_registration(node)
         if not (has_visual or has_pmtiles_asset or has_pmtiles_link):
             return
-        if not any("style" in roles_of(asset) for _p, _k, asset in _assets_of(node)):
+        if not any("style" in roles_of(asset) for _p, _k, asset in assets_of(node)):
             yield self.finding(
                 node,
                 "collection has a visualization derivative but no asset with the 'style' role",
-                json_pointer="/assets",
+                json_pointer=json_pointer("assets"),
                 fix_hint="register the MapLibre style in styles/ as a collection-level"
                 ' asset with roles ["style"]',
             )
@@ -215,13 +225,13 @@ class PMTilesRegistrationRule(Rule):
             yield self.finding(
                 node,
                 "PMTiles asset is not registered through a rel:'pmtiles' link",
-                json_pointer="/links",
+                json_pointer=json_pointer("links"),
                 fix_hint='add {"rel": "pmtiles", "href": <the PMTiles href>, "type":'
                 f' "{PMTILES_MEDIA_TYPE}", "pmtiles:layers": [<default-visible layers>]}}'
                 " to links",
             )
             return
-        for index, link in enumerate(links_of(node)):
+        for index, link in indexed_links_of(node):
             if link.get("rel") != "pmtiles":
                 continue
             if link.get("type") != PMTILES_MEDIA_TYPE:
@@ -229,7 +239,7 @@ class PMTilesRegistrationRule(Rule):
                     node,
                     f"rel:'pmtiles' link has type {link.get('type')!r},"
                     f" expected '{PMTILES_MEDIA_TYPE}'",
-                    json_pointer=f"/links/{index}/type",
+                    json_pointer=json_pointer("links", index, "type"),
                     fix_hint=f"set the link's type to '{PMTILES_MEDIA_TYPE}'",
                     expected=PMTILES_MEDIA_TYPE,
                     actual=link.get("type"),
@@ -239,7 +249,7 @@ class PMTilesRegistrationRule(Rule):
                 yield self.finding(
                     node,
                     "rel:'pmtiles' link has no pmtiles:layers array of default-visible layers",
-                    json_pointer=f"/links/{index}",
+                    json_pointer=json_pointer("links", index),
                     fix_hint="add pmtiles:layers to the link, naming the tile layers a client"
                     ' should show by default, e.g. ["roads"]',
                 )
@@ -252,7 +262,7 @@ class PMTilesRegistrationRule(Rule):
                 node,
                 "rel:'pmtiles' link used without declaring the web-map-links extension"
                 " schema in stac_extensions",
-                json_pointer="/stac_extensions",
+                json_pointer=json_pointer("stac_extensions"),
                 fix_hint=f"add '{_WEB_MAP_LINKS_PREFIX}v1.3.0/schema.json' to stac_extensions",
             )
 
@@ -279,7 +289,7 @@ class StyleMediaTypeRule(Rule):
         has_asset, has_link = _pmtiles_registration(node)
         if not has_asset and not has_link:
             return
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             if "style" not in roles_of(asset):
                 continue
             media_type = asset.get("type")
@@ -287,7 +297,7 @@ class StyleMediaTypeRule(Rule):
                 yield self.finding(
                     node,
                     f"style asset '{key}' has type {media_type!r}, expected '{STYLE_MEDIA_TYPE}'",
-                    json_pointer=f"{pointer}/type",
+                    json_pointer=json_pointer("type", prefix=pointer),
                     fix_hint=f"set the style asset's type to '{STYLE_MEDIA_TYPE}'",
                     expected=STYLE_MEDIA_TYPE,
                     actual=media_type,
@@ -312,7 +322,7 @@ class DefaultStyleRoleRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        styles = [(key, asset) for _p, key, asset in _assets_of(node) if "style" in roles_of(asset)]
+        styles = [(key, asset) for _p, key, asset in assets_of(node) if "style" in roles_of(asset)]
         if len(styles) < 2:
             return
         marked = sorted(key for key, asset in styles if "default" in roles_of(asset))
@@ -328,7 +338,7 @@ class DefaultStyleRoleRule(Rule):
         yield self.finding(
             node,
             message,
-            json_pointer="/assets",
+            json_pointer=json_pointer("assets"),
             fix_hint="add 'default' to the roles of exactly one style asset",
         )
 
@@ -356,11 +366,11 @@ class LargeVectorWithoutVisualRule(Rule):
         geospatial = is_geospatial(node, graph)
         if geospatial is False:
             return
-        has_visual = any("visual" in roles_of(asset) for _p, _k, asset in _assets_of(node))
+        has_visual = any("visual" in roles_of(asset) for _p, _k, asset in assets_of(node))
         has_pmtiles_asset, has_pmtiles_link = _pmtiles_registration(node)
         if has_visual or has_pmtiles_asset or has_pmtiles_link:
             return
-        for _pointer, key, asset in _assets_of(node):
+        for _pointer, key, asset in assets_of(node):
             if "data" not in roles_of(asset):
                 continue
             if asset.get("type") != "application/vnd.apache.parquet":
@@ -374,7 +384,7 @@ class LargeVectorWithoutVisualRule(Rule):
                     f"data asset '{key}' is {size} bytes with no visual derivative, and"
                     " whether this collection is geospatial cannot be decided from"
                     f" metadata: {_undecided_because(node, graph)}",
-                    json_pointer="/assets",
+                    json_pointer=json_pointer("assets"),
                     fix_hint=f"{_RESOLVE_HINT}; publish a PMTiles derivative with a MapLibre"
                     " style if the collection is geospatial",
                 )
@@ -383,6 +393,6 @@ class LargeVectorWithoutVisualRule(Rule):
                 node,
                 f"vector data asset '{key}' is {size} bytes with no visual"
                 " derivative; rendering from source is unlikely to be viable",
-                json_pointer="/assets",
+                json_pointer=json_pointer("assets"),
                 fix_hint="publish a PMTiles derivative with a MapLibre style",
             )

@@ -35,6 +35,7 @@ import re
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -46,9 +47,9 @@ MEMRAY = "memray==1.20.0"
 MODES = ("counts", "time", "mem", "import", "instr", "run")
 _PROFILES = REPO / ".cache" / "profiles"
 
-# "import time:       437 |      34470 |       rashid._store"
+# Example import record: "import time:       437 |      34470 |       rashid._store"
 _IMPORT_LINE = re.compile(r"^import time:\s+(\d+) \|\s+(\d+) \|( *)(\S+)")
-# "==12345== I   refs:      1,234,567"
+# Example instruction record: "==12345== I   refs:      1,234,567"
 _CACHEGRIND_REFS = re.compile(r"I\s+refs:\s+([\d,]+)")
 
 
@@ -58,8 +59,8 @@ def _run_once(scenario: str, size: str, seed: int, warm: bool) -> None:
 
     with scenarios.target(scenario, size, seed) as target:
         if warm:
-            rashid.validate(target.location, **target.options)
-        rashid.validate(target.location, **target.options)
+            rashid.validate(target.location, options=target.options)
+        rashid.validate(target.location, options=target.options)
 
 
 def _counts(scenario: str, size: str, seed: int, warm: bool) -> None:
@@ -77,16 +78,31 @@ def _counts(scenario: str, size: str, seed: int, warm: bool) -> None:
     print(_trace.format_timings(_trace.timings()))
 
 
-def _self_argv(scenario: str, size: str, seed: int, warm: bool) -> list[str]:
-    argv = [str(Path(__file__).resolve()), scenario, "--size", size, "--seed", str(seed)]
-    return [*argv, "--mode", "run", *(["--warm"] if warm else [])]
+@dataclass(frozen=True)
+class Scenario:
+    """The seeded workload and whether to warm its caches before profiling."""
+
+    name: str
+    size: str
+    seed: int
+    warm: bool
 
 
-def profiler_command(
-    mode: str, scenario: str, size: str, seed: int, warm: bool, out: Path
-) -> list[str]:
+def _self_argv(scenario: Scenario) -> list[str]:
+    argv = [
+        str(Path(__file__).resolve()),
+        scenario.name,
+        "--size",
+        scenario.size,
+        "--seed",
+        str(scenario.seed),
+    ]
+    return [*argv, "--mode", "run", *(["--warm"] if scenario.warm else [])]
+
+
+def profiler_command(mode: str, *, scenario: Scenario, out: Path) -> list[str]:
     """The argv that runs this script's ``run`` mode under the profiler for ``mode``."""
-    target = _self_argv(scenario, size, seed, warm)
+    target = _self_argv(scenario)
     if mode == "time":
         return [
             *("uv", "run", "--with", PYINSTRUMENT, "python", "-m", "pyinstrument"),
@@ -167,6 +183,11 @@ def main(argv: list[str] | None = None) -> int:
         print("valgrind is not installed; --mode instr needs it (Linux).", file=sys.stderr)
         return 2
 
+    return _profile(args)
+
+
+def _profile(args: argparse.Namespace) -> int:
+    """Build the scenario and run the requested external profiler."""
     from tests import scenarios
 
     scenarios.cached(args.scenario, args.size, args.seed)  # build outside the profiler
@@ -174,7 +195,9 @@ def main(argv: list[str] | None = None) -> int:
     stem = f"{args.scenario}-{args.size}-{args.seed}{'-warm' if args.warm else ''}"
     suffix = {"mem": "bin", "instr": "cachegrind", "time": "txt"}[args.mode]
     out = _PROFILES / f"{stem}.{args.mode}.{suffix}"
-    command = profiler_command(args.mode, args.scenario, args.size, args.seed, args.warm, out)
+    command = profiler_command(
+        args.mode, scenario=Scenario(args.scenario, args.size, args.seed, args.warm), out=out
+    )
     print("$", " ".join(command), file=sys.stderr)
     if args.mode == "instr":
         result = subprocess.run(command, capture_output=True, text=True, env=_instr_env())

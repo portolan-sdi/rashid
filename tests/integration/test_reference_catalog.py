@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from rashid import validate
+from rashid import ValidationOptions, validate
 from rashid.catalog import CatalogGraph
 from rashid.model import Severity
 from rashid.rules.conformance import declared_schema_uris
@@ -45,7 +45,7 @@ def _schema_for_catalog() -> dict:
 
 
 def test_reference_catalog_metadata_pass_is_clean() -> None:
-    report = validate(CATALOG, structural=False, schema=False)
+    report = validate(CATALOG, options=ValidationOptions(structural=False, schema=False))
     blocking = [f for f in report.findings if f.severity is not Severity.INFO]
     assert blocking == [], [(f.rule_id, f.path) for f in blocking]
     # the only findings a conformant catalog may raise are the mirror INFOs
@@ -55,12 +55,14 @@ def test_reference_catalog_metadata_pass_is_clean() -> None:
 
 def test_single_cog_collection_models_its_raster_the_way_the_spec_prescribes() -> None:
     """raster/sample-cog is the single-COG shape PORTO-CORE-072 prescribes."""
-    report = validate(CATALOG, structural=False, schema=False)
+    report = validate(CATALOG, options=ValidationOptions(structural=False, schema=False))
     assert [f for f in report.findings if f.rule_id == "PTL-COL-004"] == []
 
 
 def test_reference_catalog_schema_pass_is_clean() -> None:
     local = validator_from_schema(_schema_for_catalog())
-    report = validate(CATALOG, structural=False, schema=True, schema_validator=local)
+    report = validate(
+        CATALOG, options=ValidationOptions(structural=False, schema=True, schema_validator=local)
+    )
     schema_findings = [f for f in report.findings if f.rule_id.startswith("PTL-SCH")]
     assert schema_findings == [], [(f.rule_id, f.path, f.message) for f in schema_findings]

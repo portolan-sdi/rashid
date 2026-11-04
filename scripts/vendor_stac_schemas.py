@@ -126,8 +126,8 @@ def _refs(node: object) -> list[str]:
 
 
 def _fetch(url: str) -> dict[str, object]:
-    request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})  # noqa: S310
-    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+    request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    with urllib.request.urlopen(request, timeout=30) as response:
         schema: dict[str, object] = json.loads(response.read().decode("utf-8"))
     return schema
 

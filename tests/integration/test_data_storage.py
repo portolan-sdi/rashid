@@ -8,9 +8,11 @@ each non-compliant variant raises exactly the rule it violates (formats.md:30/64
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,11 +20,18 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
-import pyarrow.parquet as pq  # noqa: E402
+import pyarrow.parquet as pq
+from click.testing import CliRunner
 
-import rashid.data.checks as checks  # noqa: E402
-from rashid.catalog import Node  # noqa: E402
-from rashid.data import (  # noqa: E402
+import rashid.data._files as file_owner
+import rashid.data.checks as checks
+from rashid.catalog import Node
+from rashid.cli import main
+from rashid.data import DataDefect, DataResults, geoparquet, partitions, raster
+from rashid.data._files import AssetFiles
+from rashid.data.reader import Locator
+from rashid.model import Severity
+from rashid.registry import (
     DAT_COG,
     DAT_COG_STATS,
     DAT_GEOPARQUET_VERSION,
@@ -33,12 +42,12 @@ from rashid.data import (  # noqa: E402
     DAT_ROWGROUP_STATS,
     DAT_TABULAR,
     DAT_TILE_SIZE,
+    DAT_UNAVAILABLE,
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
 )
-from rashid.data.reader import Locator  # noqa: E402
-from rashid.model import Severity  # noqa: E402
-from tests.integration import _data_assets as assets  # noqa: E402
+from tests.conftest import CatalogBuilder
+from tests.integration import _data_assets as assets
 
 pytestmark = pytest.mark.integration
 
@@ -47,8 +56,8 @@ def _loc(path: Path) -> Locator:
     return Locator(is_remote=False, source=str(path))
 
 
-def _files(path: Path) -> checks._AssetFiles:
-    return checks._AssetFiles(_loc(path))
+def _files(path: Path) -> AssetFiles:
+    return AssetFiles(_loc(path))
 
 
 class _FileReader:
@@ -76,11 +85,11 @@ def _node_with_asset(asset: dict) -> Node:
 
 
 def _gpq(path: Path) -> list:
-    return checks._check_geoparquet("data", _files(path))
+    return geoparquet.check_geoparquet("data", _files(path))
 
 
 def _raster(path: Path) -> list:
-    return checks._check_raster("data", _loc(path), _files(path))
+    return raster.check_raster("data", _loc(path), _files(path))
 
 
 # --- GeoParquet ------------------------------------------------------------
@@ -169,7 +178,7 @@ def test_many_row_groups_use_only_footer_for_ordering(
         def read(self, *_args: object, **_kwargs: object) -> None:
             raise AssertionError("PTL-DAT-006 read row data")
 
-    monkeypatch.setattr(checks.pq, "ParquetFile", lambda source: _FooterOnlyParquet())
+    monkeypatch.setattr(file_owner.pq, "ParquetFile", lambda source: _FooterOnlyParquet())
 
     assert _gpq(path) == []
 
@@ -198,7 +207,7 @@ def test_footer_shortcut_reads_rows_when_covering_values_are_null(
             reads += 1
             return parquet.read(*args, **kwargs)
 
-    monkeypatch.setattr(checks.pq, "ParquetFile", lambda source: _TrackedParquet())
+    monkeypatch.setattr(file_owner.pq, "ParquetFile", lambda source: _TrackedParquet())
     assert _gpq(path) == []
     assert reads == 1
 
@@ -217,9 +226,9 @@ def test_footer_pass_does_not_mask_unordered_rows(tmp_path: Path) -> None:
     path = tmp_path / "footer_false_positive.parquet"
     assets.write_geoparquet(path, points=points, row_group_size=rows_per_group)
     parquet = pq.ParquetFile(path)
-    geo = checks._geo_metadata(parquet) or {}
-    bboxes, _ = checks._rowgroup_stat_defects("data", parquet, geo)
-    assert bboxes is not None and checks._is_spatially_ordered(bboxes)
+    geo = geoparquet.geo_metadata(parquet) or {}
+    bboxes, _ = geoparquet._rowgroup_stat_defects("data", parquet, geo)
+    assert bboxes is not None and geoparquet._is_spatially_ordered(bboxes)
 
     defects = _gpq(path)
     assert [d.rule_id for d in defects] == [DAT_ORDERING]
@@ -231,11 +240,11 @@ def test_incomplete_covering_cannot_prove_zero_nulls() -> None:
         "primary_column": "geometry",
         "columns": {"geometry": {"covering": {"bbox": {"xmin": ["bbox", "xmin"]}}}},
     }
-    assert not checks._covering_has_no_nulls(object(), incomplete)
+    assert not geoparquet._covering_has_no_nulls(object(), incomplete)
 
 
 def test_empty_row_groups_have_no_conservative_chunks() -> None:
-    assert checks._conservative_chunk_bboxes([], []) == []
+    assert geoparquet._conservative_chunk_bboxes([], []) == []
 
 
 @pytest.mark.parametrize("groups", [5, 6, 7])
@@ -400,7 +409,7 @@ def test_all_null_geometry_is_never_faulted_as_disorder(tmp_path: Path) -> None:
         null_rows=set(range(len(points))),
     )
     parquet = pq.ParquetFile(path)
-    assert checks._row_bboxes(parquet, checks._geo_metadata(parquet) or {}) is None
+    assert geoparquet._row_bboxes(parquet, geoparquet.geo_metadata(parquet) or {}) is None
     ordering = [d for d in _gpq(path) if d.rule_id == DAT_ORDERING]
     assert [d for d in ordering if d.severity is Severity.ERROR] == []
 
@@ -412,17 +421,29 @@ def test_single_row_group_without_readable_row_boxes_reports_unevaluated() -> No
     no covering column to read row by row, so ordering stays unmeasured and
     the check says so rather than reporting success.
     """
-    defects = checks._row_ordering_defects("data", object(), {}, 5000, 1, report_unreadable=True)
-    assert [d.rule_id for d in defects] == [DAT_ORDERING]
-    assert defects[0].severity is Severity.INFO
-    assert "could not be evaluated" in defects[0].message
+    parquet = SimpleNamespace(
+        metadata=SimpleNamespace(
+            num_rows=5000, num_row_groups=1, row_group=lambda i: SimpleNamespace(num_rows=5000)
+        )
+    )
+    defects = geoparquet._ordering_defect("data", parquet, {}, [], subject="asset 'data'")
+    assert defects.rule_id == DAT_ORDERING
+    assert defects.severity is Severity.INFO
+    assert "could not be evaluated" in defects.message
 
 
 def test_unreadable_boxes_stay_quiet_when_the_criteria_apply() -> None:
     """At five or more row groups the footer metrics measure ordering anyway,
     so an unreadable covering column is not a gap worth reporting."""
-    defects = checks._row_ordering_defects("data", object(), {}, 5000, 8, report_unreadable=False)
-    assert defects == []
+    parquet = SimpleNamespace(
+        metadata=SimpleNamespace(
+            num_rows=5000, num_row_groups=8, row_group=lambda i: SimpleNamespace(num_rows=625)
+        )
+    )
+    defects = geoparquet._ordering_defect(
+        "data", parquet, {}, [(0.0, 0.0, 0.0, 0.0)] * 5, subject="asset 'data'"
+    )
+    assert defects is None
 
 
 @pytest.mark.parametrize(
@@ -473,7 +494,7 @@ def test_unreadable_boxes_stay_quiet_when_the_criteria_apply() -> None:
     ],
 )
 def test_row_bboxes_declines_coverings_it_cannot_read(geo: dict) -> None:
-    assert checks._row_bboxes(object(), geo) is None
+    assert geoparquet._row_bboxes(object(), geo) is None
 
 
 def test_missing_rowgroup_stats_flag_dat_007(tmp_path: Path) -> None:
@@ -530,7 +551,7 @@ _GEO_2X = {"version": "2.0.0", "primary_column": "geometry", "columns": {"geomet
 def test_native_geo_statistics_satisfy_dat_007() -> None:
     ordered = [(0.0, 0.0, 1.0, 1.0), (1.0, 1.0, 2.0, 2.0), (2.0, 2.0, 3.0, 3.0)]
     groups = [_FakeRowGroup([_FakeColumn("geometry", _FakeGeoStats(b))]) for b in ordered]
-    boxes, defects = checks._rowgroup_stat_defects("data", _FakeParquet(groups), _GEO_2X)
+    boxes, defects = geoparquet._rowgroup_stat_defects("data", _FakeParquet(groups), _GEO_2X)
     assert boxes == ordered
     # The MUST is satisfied, but the covering column stays RECOMMENDED for
     # 2.x files even where native statistics exist (formats.md) — a WARNING.
@@ -541,7 +562,7 @@ def test_native_geo_statistics_satisfy_dat_007() -> None:
 
 def test_absent_native_statistics_still_error() -> None:
     groups = [_FakeRowGroup([_FakeColumn("geometry", None)])]
-    boxes, defects = checks._rowgroup_stat_defects("data", _FakeParquet(groups), _GEO_2X)
+    boxes, defects = geoparquet._rowgroup_stat_defects("data", _FakeParquet(groups), _GEO_2X)
     assert boxes is None
     assert [d.severity for d in defects] == [Severity.ERROR]
     assert defects[0].rule_id == DAT_ROWGROUP_STATS
@@ -558,7 +579,7 @@ def test_old_pyarrow_without_geo_statistics_attr_still_errors() -> None:
     """On pyarrow < 21 the attribute is missing entirely; the reader must fall
     through to "no native source" (ERROR), not crash on the absent attribute."""
     groups = [_FakeRowGroup([_OldPyarrowColumn("geometry")])]  # type: ignore[list-item]
-    boxes, defects = checks._rowgroup_stat_defects("data", _FakeParquet(groups), _GEO_2X)
+    boxes, defects = geoparquet._rowgroup_stat_defects("data", _FakeParquet(groups), _GEO_2X)
     assert boxes is None
     assert [d.severity for d in defects] == [Severity.ERROR]
     assert defects[0].rule_id == DAT_ROWGROUP_STATS
@@ -722,7 +743,7 @@ def test_missing_geo_version_flags_dat_012(tmp_path: Path) -> None:
 
 
 def _tiles(path: Path) -> list:
-    return checks._check_tile_size("data", _files(path))
+    return raster._check_tile_size("data", _files(path))
 
 
 def test_default_512_tiles_are_clean(tmp_path: Path) -> None:
@@ -781,12 +802,35 @@ def _partitioned_collection(directory: Path, glob: str = "parts/*.parquet") -> N
     )
 
 
+def test_partition_glob_matches_use_posix_names(tmp_path: Path) -> None:
+    catalog = CatalogBuilder(tmp_path)
+    catalog.collection("buildings", assets={}, **{"partition:glob": "parts/*.parquet"})
+    catalog.write()
+    parts = tmp_path / "buildings" / "parts"
+    parts.mkdir()
+    assets.write_geoparquet(parts / "a.parquet")
+    assets.write_geoparquet(parts / "b.parquet", version="1.0.0")
+    result = CliRunner().invoke(main, ["check", "--json", str(tmp_path)])
+    assert result.exit_code == 1, result.output
+    findings = [
+        finding
+        for finding in json.loads(result.output)["findings"]
+        if finding["rule_id"] == DAT_GEOPARQUET_VERSION
+    ]
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["message"].startswith("partition file 'parts/b.parquet' geo metadata")
+    assert "\\" not in finding["message"]
+    assert finding["path"] == "buildings/collection.json"
+    assert finding["json_pointer"] == "/partition:glob"
+
+
 def test_consistent_partition_schemas_are_clean(tmp_path: Path) -> None:
     parts = tmp_path / "parts"
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
     assets.write_geoparquet(parts / "b.parquet")
-    assert checks._check_partition_schemas(_partitioned_collection(tmp_path)) == []
+    assert _partition_schemas(_partitioned_collection(tmp_path)) == []
 
 
 def test_diverging_partition_schemas_flag_dat_014(tmp_path: Path) -> None:
@@ -794,7 +838,7 @@ def test_diverging_partition_schemas_flag_dat_014(tmp_path: Path) -> None:
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
     assets.write_geoparquet(parts / "b.parquet", columns={"extra": list(range(6))})
-    defects = checks._check_partition_schemas(_partitioned_collection(tmp_path))
+    defects = _partition_schemas(_partitioned_collection(tmp_path))
     assert [d.rule_id for d in defects] == [DAT_PARTITION_SCHEMA]
     assert defects[0].severity is Severity.ERROR
     assert "extra" in defects[0].message
@@ -803,19 +847,19 @@ def test_diverging_partition_schemas_flag_dat_014(tmp_path: Path) -> None:
 
 def test_remote_partition_glob_is_skipped(tmp_path: Path) -> None:
     node = _partitioned_collection(tmp_path, glob="s3://bucket/parts/*.parquet")
-    assert checks._check_partition_schemas(node) == []
+    assert _partition_schemas(node) == []
 
 
 def test_escaping_partition_glob_is_skipped(tmp_path: Path) -> None:
     node = _partitioned_collection(tmp_path, glob="../elsewhere/*.parquet")
-    assert checks._check_partition_schemas(node) == []
+    assert _partition_schemas(node) == []
 
 
 def test_single_partition_file_has_nothing_to_compare(tmp_path: Path) -> None:
     parts = tmp_path / "parts"
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
-    assert checks._check_partition_schemas(_partitioned_collection(tmp_path)) == []
+    assert _partition_schemas(_partitioned_collection(tmp_path)) == []
 
 
 # --- partition bytes (PTL-DAT-006/007/008/012 over the glob) -----------------
@@ -834,8 +878,16 @@ class _NoAssets:
         return None
 
 
+def _partition_schemas(node: Node) -> list:
+    schemas, _, _ = partitions.check_partitions(node, _NoAssets())
+    return schemas
+
+
 def _partition_bytes(node: Node, reader: object | None = None) -> list:
-    return checks._check_partition_geoparquet(node, reader or _NoAssets())
+    _, defects, total = partitions.check_partitions(node, reader or _NoAssets())
+    source = DataResults()
+    source.extend(defects, partition_total=total)
+    return source.build()
 
 
 def test_conformant_partitions_are_clean(tmp_path: Path) -> None:
@@ -917,13 +969,15 @@ def test_many_failing_partitions_fold_into_one_defect(tmp_path: Path) -> None:
     assert "partition file 'parts/b.parquet'" in defects[0].message
 
 
-def test_partition_severities_fold_separately(tmp_path: Path) -> None:
+def test_partition_severities_fold_separately() -> None:
     """An ERROR and a WARNING of one rule stay two findings, not one."""
     defects = [
-        checks.DataDefect(DAT_ROWGROUP_STATS, Severity.ERROR, "e", "x"),
-        checks.DataDefect(DAT_ROWGROUP_STATS, Severity.WARNING, "w", "x"),
+        DataDefect(DAT_ROWGROUP_STATS, Severity.ERROR, "e", "x"),
+        DataDefect(DAT_ROWGROUP_STATS, Severity.WARNING, "w", "x"),
     ]
-    folded = checks._fold_partition_defects(defects, 2)
+    source = DataResults()
+    source.extend(defects, partition_total=2)
+    folded = source.build()
     assert [d.severity for d in folded] == [Severity.ERROR, Severity.WARNING]
 
 
@@ -935,11 +989,13 @@ def test_plain_parquet_partitions_are_left_alone(tmp_path: Path) -> None:
     assert _partition_bytes(_partitioned_collection(tmp_path)) == []
 
 
-def test_unreadable_partition_is_silent(tmp_path: Path) -> None:
+def test_unreadable_partition_reports_unavailable_data(tmp_path: Path) -> None:
     parts = tmp_path / "parts"
     parts.mkdir()
     (parts / "a.parquet").write_bytes(b"not parquet")
-    assert _partition_bytes(_partitioned_collection(tmp_path)) == []
+    defects = _partition_bytes(_partitioned_collection(tmp_path))
+    assert len(defects) == 1 and defects[0].rule_id == DAT_UNAVAILABLE
+    assert defects[0].severity is Severity.WARNING
 
 
 @pytest.mark.parametrize(
@@ -1014,7 +1070,7 @@ def _tabular_collection(**overrides: object) -> Node:
 
 def _tabular(node: Node, path: Path) -> list:
     asset = {"href": "./data.parquet", "roles": ["data"]}
-    return checks._check_tabular(node, "data", asset, _files(path))
+    return geoparquet.check_tabular(node, "data", asset, _files(path))
 
 
 def _timestamp_column() -> dict[str, list[object]]:
@@ -1049,7 +1105,7 @@ def test_tabular_with_asset_level_table_columns_is_clean(tmp_path: Path) -> None
         "roles": ["data"],
         "table:columns": [{"name": "value", "type": "int64", "description": "a value"}],
     }
-    assert checks._check_tabular(_tabular_collection(), "data", asset, _files(path)) == []
+    assert geoparquet.check_tabular(_tabular_collection(), "data", asset, _files(path)) == []
 
 
 def test_tabular_temporal_column_without_extent_flags_dat_015(tmp_path: Path) -> None:
@@ -1088,14 +1144,14 @@ def test_non_data_roles_are_not_tabular(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False)
     asset = {"href": "./data.parquet", "roles": ["metadata"]}
-    assert checks._check_tabular(_tabular_collection(), "data", asset, _files(path)) == []
+    assert geoparquet.check_tabular(_tabular_collection(), "data", asset, _files(path)) == []
 
 
 def test_item_level_parquet_is_not_tabular(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False)
     node = _node_with_asset({"href": "./data.parquet", "roles": ["data"]})
-    assert checks._check_tabular(node, "data", node.data["assets"]["a"], _files(path)) == []
+    assert geoparquet.check_tabular(node, "data", node.data["assets"]["a"], _files(path)) == []
 
 
 # --- vector column documentation (PTL-DAT-017) ------------------------------
@@ -1122,7 +1178,7 @@ def _vector_item(**overrides: object) -> Node:
 
 def _vector(node: Node, path: Path, **asset_fields: object) -> list:
     asset = {"href": "./data.parquet", "roles": ["data"], **asset_fields}
-    return checks._check_vector_columns(node, "data", asset, _files(path))
+    return geoparquet.check_vector_columns(node, "data", asset, _files(path))
 
 
 def test_vector_collection_without_table_columns_flags_dat_017(tmp_path: Path) -> None:
@@ -1177,4 +1233,4 @@ def test_non_data_roles_are_not_vector(tmp_path: Path) -> None:
     path = tmp_path / "geo.parquet"
     assets.write_geoparquet(path)
     asset = {"href": "./data.parquet", "roles": ["metadata"]}
-    assert checks._check_vector_columns(_tabular_collection(), "data", asset, _files(path)) == []
+    assert geoparquet.check_vector_columns(_tabular_collection(), "data", asset, _files(path)) == []

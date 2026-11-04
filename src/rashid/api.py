@@ -31,17 +31,19 @@ from rashid._multihash import (
 from rashid._spdx import SPDX_LICENSE_IDS, canonical_spdx_id
 from rashid.rules._common import (
     STRUCTURAL_RELS,
+    has_cog,
     is_cog_media_type,
     links_of,
     parse_rfc3339,
     roles_of,
 )
-from rashid.rules.item_mirror import has_cog
+from rashid.runner import ValidationOptions
 
 __all__ = [
     "SHA2_256",
     "SPDX_LICENSE_IDS",
     "STRUCTURAL_RELS",
+    "ValidationOptions",
     "canonical_spdx_id",
     "decode_multihash",
     "encode_multihash",

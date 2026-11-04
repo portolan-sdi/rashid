@@ -1,0 +1,63 @@
+{
+  "rashid.api": {
+    "exports": [
+      "SHA2_256",
+      "SPDX_LICENSE_IDS",
+      "STRUCTURAL_RELS",
+      "ValidationOptions",
+      "canonical_spdx_id",
+      "decode_multihash",
+      "encode_multihash",
+      "has_cog",
+      "is_cog_media_type",
+      "is_well_formed_multihash",
+      "links_of",
+      "parse_rfc3339",
+      "roles_of"
+    ],
+    "signatures": {
+      "ValidationOptions": "(*, config: 'RulesConfig | None' = None, rules: 'Sequence[Rule] | None' = None, structural: 'bool' = True, structural_validator: '_Validator | None' = None, extensions: 'bool' = True, schema: 'bool' = False, schema_validator: '_Validator | None' = None, schema_allow_network: 'bool' = False, data: 'bool' = True, data_validator: 'DataValidator | None' = None, data_reader_factory: 'DataReaderFactory | None' = None, live: 'bool | None' = None, live_prober: 'LiveProber | None' = None, live_base_url: 'str | None' = None, fetcher: 'Fetcher | None' = None, max_documents: 'int' = 10000) -> None",
+      "canonical_spdx_id": "(value: 'object') -> 'str | None'",
+      "decode_multihash": "(value: 'object') -> 'tuple[int, bytes] | None'",
+      "encode_multihash": "(code: 'int', digest: 'bytes') -> 'str'",
+      "has_cog": "(node: 'Node') -> 'bool'",
+      "is_cog_media_type": "(value: 'object') -> 'bool'",
+      "is_well_formed_multihash": "(value: 'object') -> 'bool'",
+      "links_of": "(node: 'Node') -> 'list[dict[str, Any]]'",
+      "parse_rfc3339": "(value: 'object') -> 'datetime | None'",
+      "roles_of": "(asset: 'dict[str, Any]') -> 'list[str]'"
+    }
+  },
+  "rashid": {
+    "exports": [
+      "CHECKS",
+      "CheckInfo",
+      "Finding",
+      "Report",
+      "RuleSummary",
+      "RulesConfig",
+      "Severity",
+      "ValidationOptions",
+      "describe",
+      "validate",
+      "validate_data",
+      "validate_live",
+      "validate_schema",
+      "validate_structural"
+    ],
+    "signatures": {
+      "CheckInfo": "(id: 'str', description: 'str', severity: 'Severity', spec_ids: 'tuple[str, ...]' = (), stage: 'PassName' = 'metadata', enables_pass: 'bool' = True, spec_note: 'str | None' = None) -> None",
+      "Finding": "(rule_id: 'str', severity: 'Severity', message: 'str', path: 'str', object_id: 'str | None' = None, json_pointer: 'str | None' = None, fix_hint: 'str | None' = None, expected: 'Any | None' = None, actual: 'Any | None' = None, data: 'dict[str, Any] | None' = None) -> None",
+      "Report": "(findings: 'list[Finding]' = <factory>, files_checked: 'int' = 0) -> None",
+      "RuleSummary": "(rule_id: 'str', severity: 'Severity', count: 'int', file_count: 'int', description: 'str' = '') -> None",
+      "RulesConfig": "(disabled: 'frozenset[str]' = frozenset(), severity_overrides: 'dict[str, Severity]' = <factory>) -> None",
+      "ValidationOptions": "(*, config: 'RulesConfig | None' = None, rules: 'Sequence[Rule] | None' = None, structural: 'bool' = True, structural_validator: '_Validator | None' = None, extensions: 'bool' = True, schema: 'bool' = False, schema_validator: '_Validator | None' = None, schema_allow_network: 'bool' = False, data: 'bool' = True, data_validator: 'DataValidator | None' = None, data_reader_factory: 'DataReaderFactory | None' = None, live: 'bool | None' = None, live_prober: 'LiveProber | None' = None, live_base_url: 'str | None' = None, fetcher: 'Fetcher | None' = None, max_documents: 'int' = 10000) -> None",
+      "describe": "(rule_id: 'str') -> 'str'",
+      "validate": "(catalog_path: 'Path | str', *, options: 'ValidationOptions | None' = None) -> 'Report'",
+      "validate_data": "(graph: 'CatalogGraph', validator: 'Validator | None' = None, *, reader_factory: 'ReaderFactory | None' = None) -> 'list[Finding]'",
+      "validate_live": "(graph: 'CatalogGraph', prober: 'Prober | None' = None, *, base_url: 'str | None' = None, known_statuses: 'Mapping[str, int] | None' = None) -> 'list[Finding]'",
+      "validate_schema": "(graph: 'CatalogGraph', validator: 'Validator | None' = None, schema_uri: 'str | None' = None, *, allow_network: 'bool' = False) -> 'list[Finding]'",
+      "validate_structural": "(graph: 'CatalogGraph', validator: 'Validator | None' = None) -> 'list[Finding]'"
+    }
+  }
+}

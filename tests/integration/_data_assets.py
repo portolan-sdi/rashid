@@ -107,7 +107,7 @@ def hilbert_sorted(points: list[tuple[float, float]]) -> list[tuple[float, float
     return sorted(points, key=key)
 
 
-def write_geoparquet(
+def write_geoparquet(  # noqa: PLR0913 - keyword-only fixture settings vary independent file properties
     path: Path,
     *,
     points: list[tuple[float, float]] | None = None,
@@ -178,7 +178,7 @@ def write_geoparquet(
     pq.write_table(table, path, row_group_size=row_group_size)
 
 
-def write_item_mirror(
+def write_item_mirror(  # noqa: PLR0913 - keyword-only fixture settings vary independent file properties
     path: Path,
     ids: list[str] | None,
     *,
@@ -224,7 +224,7 @@ def write_item_mirror(
     )
 
 
-def write_cog(
+def write_cog(  # noqa: PLR0913 - keyword-only fixture settings vary independent file properties
     path: Path,
     *,
     stats: bool = True,

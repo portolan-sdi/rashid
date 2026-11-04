@@ -1,280 +1,538 @@
-"""The single enumeration of every check rashid can emit.
+"""Check identity and pass membership.
 
-A finding carries a rule id and nothing else identifying the check behind it.
-Anything that reports on findings in aggregate — the CLI's per-rule summary,
-the JSON ``summary`` block, the spec-coverage gate — needs to turn that id back
-into a title and a severity. This module owns that join.
-
-Two id-spaces feed it. Metadata rules carry their own metadata as class
-variables and are enumerated by :data:`rashid.rules.DEFAULT_RULES`. The
-structural, schema, data, live, and runner passes predate the ``Rule``
-abstraction and emit findings directly; they declare only the spec IDs they
-enforce, in a module-level ``SPEC_IDS`` dict, so their titles and severities
-live in :data:`_PASS_CHECKS` below.
-
-Building the join enforces that the two halves stay honest: the id-spaces must
-stay disjoint, and every ``SPEC_IDS`` key must have an entry here. A new pass
-check that forgets its title raises :class:`RegistryError` at import rather
-than rendering a blank column.
+Metadata rules declare their identity on the Rule type; this module registers
+those implementations once. Other passes declare their IDs, citations, strongest
+severity, and skip-gate policy here. Runners and reporting read this owner.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Literal
 
-import rashid.data as _data_pass
-import rashid.extensions as _extension_pass
-import rashid.live as _live_pass
-import rashid.runner as _runner
-import rashid.schema as _schema_pass
-import rashid.structural as _structural_pass
 from rashid.model import Severity
-from rashid.rules import DEFAULT_RULES
+from rashid.rule import Rule
+from rashid.rules.assets import (
+    AssetFieldsRule,
+    AssetFileFieldsRule,
+    AssetHrefSchemeRule,
+    CatalogAssetsRule,
+    ChecksumMultihashRule,
+    CogMediaTypeRule,
+    CollectionDataRule,
+    ItemDataRule,
+    PMTilesDataRule,
+)
+from rashid.rules.bbox import BboxValidRule
+from rashid.rules.catalogs import SubcatalogFanoutRule
+from rashid.rules.collections import (
+    CollectionIdRule,
+    MissingItemTreeRule,
+    NestedCollectionRule,
+    RasterSceneItemRule,
+    SingleFileCollectionRule,
+)
+from rashid.rules.conformance import (
+    ExtensionVersionRule,
+    SchemaUriConsistencyRule,
+    SchemaUriDeclaredRule,
+    VersionExtensionRule,
+)
+from rashid.rules.files import (
+    AgentsLinkRule,
+    ReadmeContentRule,
+    ReadmeLinkRule,
+    ReadmeSectionsRule,
+    RequiredFilesRule,
+)
+from rashid.rules.item_mirror import ItemMirrorPresentRule, ItemMirrorRegistrationRule
+from rashid.rules.license import (
+    LicenseDeclaredRule,
+    NoProprietaryLicenseRule,
+    OtherLicenseLinkRule,
+)
+from rashid.rules.links import (
+    ChildLinkCompletenessRule,
+    ContainmentStaysInLanguageRule,
+    IconMediaTypeRule,
+    IconRelativeHrefRule,
+    IconTitleRule,
+    LinkResolutionRule,
+    RequiredLinksRule,
+    StructuralLinkTypeRule,
+)
+from rashid.rules.partitions import PartitionFieldsRule, PartitionGlobSchemeRule
+from rashid.rules.provenance import (
+    MirrorCanonicalLinkRule,
+    MirrorUpdatedRule,
+    MirrorViaLinkRule,
+    OfficialNoUpstreamLinksRule,
+)
+from rashid.rules.providers import HostContactRule, ProducerPresentRule, SingleHostRule
+from rashid.rules.temporal import DatetimePresentRule, DatetimeValidRule
+from rashid.rules.titles import HumanReadableTitleRule, LinkTitleRule, TitleDescriptionRule
+from rashid.rules.versions import VersionChainRule
+from rashid.rules.viz import (
+    DefaultStyleRoleRule,
+    LargeVectorWithoutVisualRule,
+    PMTilesRegistrationRule,
+    StyleMediaTypeRule,
+    StylesForDerivativeRule,
+    ThumbnailRule,
+)
 
 __all__ = ["CHECKS", "CheckInfo", "RegistryError", "describe"]
+
+PassName = Literal["metadata", "runner", "structural", "extensions", "schema", "data", "live"]
 
 
 @dataclass(frozen=True)
 class CheckInfo:
-    """What a rule id means, independent of any one finding.
+    """A check's identity and the pass that can emit it.
 
-    Attributes:
-        id: Stable check identifier, e.g. ``PTL-AST-003``.
-        description: One-line statement of what the check requires, phrased as
-            the passing condition.
-        severity: The strongest severity the check can emit. Most checks emit
-            exactly one; ``PTL-DAT-007`` and ``PTL-DAT-010`` emit a MUST
-            failure at ERROR and a companion SHOULD at WARNING, and
-            ``PTL-VIZ-001`` softens to WARNING when it cannot decide whether
-            its MUST applies. Each records the strongest it reaches.
-        spec_ids: Requirement IDs from the spec's manifest that this check
-            enforces. Empty for the checks that report a pass could not run,
-            which discharge no requirement of their own.
+    severity is the strongest finding the check can emit. spec_note explains
+    an intentional lack of manifest citations. enables_pass selects the checks
+    whose disabling skips the entire pass; diagnostics never enable it, and
+    extension information alone does not enable extension schema validation.
     """
 
     id: str
     description: str
     severity: Severity
     spec_ids: tuple[str, ...] = ()
-
-
-# Title and strongest severity for every check that does not subclass Rule.
-# Keys are the rule ids themselves rather than the modules' constants so this
-# table reads as the id-space it documents. The four ``-000`` entries and
-# ``PTL-GEN-002`` report that a check could not run: they cite no requirement
-# and always warn, because an unavailable pass is not a failed one.
-_PASS_CHECKS: dict[str, tuple[Severity, str]] = {
-    "PTL-GEN-000": (
-        Severity.ERROR,
-        "the catalog root has a readable catalog.json",
-    ),
-    "PTL-GEN-001": (
-        Severity.ERROR,
-        "every object file parses as JSON",
-    ),
-    "PTL-GEN-002": (
-        Severity.WARNING,
-        "the whole tree was read, so every check could see every file",
-    ),
-    "PTL-STR-000": (
-        Severity.WARNING,
-        "the STAC structural pass could run",
-    ),
-    "PTL-STR-001": (
-        Severity.ERROR,
-        "every object is valid STAC 1.1.0",
-    ),
-    "PTL-EXT-000": (
-        Severity.WARNING,
-        "the extension schema pass and each declared schema could load",
-    ),
-    "PTL-EXT-001": (
-        Severity.ERROR,
-        "every object satisfies the schemas of the extensions it declares",
-    ),
-    "PTL-EXT-002": (
-        Severity.INFO,
-        "every declared extension was validated against its schema",
-    ),
-    "PTL-SCH-000": (
-        Severity.WARNING,
-        "the Portolan profile schema pass could run",
-    ),
-    "PTL-SCH-001": (
-        Severity.ERROR,
-        "every object matches the Portolan profile schema it declares",
-    ),
-    "PTL-DAT-000": (
-        Severity.WARNING,
-        "the data pass could run",
-    ),
-    "PTL-DAT-001": (
-        Severity.ERROR,
-        "asset bytes hash to the declared file:checksum",
-    ),
-    "PTL-DAT-002": (
-        Severity.ERROR,
-        "asset byte count matches the declared file:size",
-    ),
-    "PTL-DAT-003": (
-        Severity.ERROR,
-        "asset bytes are in the format the declared media type names",
-    ),
-    "PTL-DAT-004": (
-        Severity.ERROR,
-        "every raster asset is a valid cloud-optimized GeoTIFF",
-    ),
-    "PTL-DAT-005": (
-        Severity.WARNING,
-        "asset footprint and CRS agree with the declaring metadata",
-    ),
-    "PTL-DAT-006": (
-        Severity.ERROR,
-        "GeoParquet rows are spatially ordered",
-    ),
-    "PTL-DAT-007": (
-        Severity.ERROR,
-        "GeoParquet row groups carry spatial statistics",
-    ),
-    "PTL-DAT-008": (
-        Severity.ERROR,
-        "GeoParquet row groups stay within the size ceiling",
-    ),
-    "PTL-DAT-009": (
-        Severity.ERROR,
-        "every COG band carries embedded min/max/mean/stddev statistics",
-    ),
-    "PTL-DAT-010": (
-        Severity.ERROR,
-        "a COG band with nodata declares its valid percent",
-    ),
-    "PTL-DAT-011": (
-        Severity.ERROR,
-        "a raster larger than one internal tile carries internal overviews",
-    ),
-    "PTL-DAT-012": (
-        Severity.ERROR,
-        "the geo metadata declares GeoParquet 1.1 or 2.x",
-    ),
-    "PTL-DAT-013": (
-        Severity.ERROR,
-        "internal tiles are square and no larger than 512x512",
-    ),
-    "PTL-DAT-014": (
-        Severity.ERROR,
-        "every partition file shares a single Parquet schema",
-    ),
-    "PTL-DAT-015": (
-        Severity.WARNING,
-        "a plain-Parquet data asset declares table:columns and temporal extent",
-    ),
-    "PTL-DAT-016": (
-        Severity.ERROR,
-        "an item mirror reproduces the collection's items",
-    ),
-    "PTL-DAT-017": (
-        Severity.WARNING,
-        "a GeoParquet data asset's columns are documented with table:columns",
-    ),
-    "PTL-LIV-000": (
-        Severity.WARNING,
-        "the live pass could reach a host to probe",
-    ),
-    "PTL-LIV-001": (
-        Severity.ERROR,
-        "the server honors ranged GET with 206 and Accept-Ranges: bytes",
-    ),
-    "PTL-LIV-002": (
-        Severity.ERROR,
-        "HEAD returns a Content-Length matching the declared file:size",
-    ),
-    "PTL-LIV-003": (
-        Severity.ERROR,
-        "the server allows the requesting CORS origin",
-    ),
-    "PTL-LIV-004": (
-        Severity.ERROR,
-        "the server exposes the headers a browser client reads",
-    ),
-    "PTL-LIV-005": (
-        Severity.ERROR,
-        "CORS preflight accepts GET and HEAD with Range",
-    ),
-    "PTL-LIV-006": (
-        Severity.ERROR,
-        "every link target under the publish base answers HEAD with 2xx",
-    ),
-    "PTL-LIV-007": (
-        Severity.WARNING,
-        "the root self link names the base the catalog is published under",
-    ),
-    "PTL-LIV-008": (
-        Severity.ERROR,
-        "no asset or link target on the probed hosts redirects off https",
-    ),
-}
-
-# The pass modules that declare a SPEC_IDS registry.
-_PASS_MODULES = (
-    _runner,
-    _structural_pass,
-    _extension_pass,
-    _schema_pass,
-    _data_pass,
-    _live_pass,
-)
+    stage: PassName = "metadata"
+    enables_pass: bool = True
+    spec_note: str | None = None
 
 
 class RegistryError(RuntimeError):
-    """The two id-spaces disagree: a duplicate, a collision, or a missing title.
-
-    Raised while building :data:`CHECKS`, so importing rashid at all fails
-    rather than leaving a check that renders without a description.
-    """
+    """A check identity is duplicated or incomplete."""
 
 
-def _build() -> dict[str, CheckInfo]:
-    """Join the two id-spaces into one id -> CheckInfo mapping."""
+GEN_MISSING_ROOT = "PTL-GEN-000"
+GEN_UNPARSEABLE = "PTL-GEN-001"
+GEN_PARTIAL_TREE = "PTL-GEN-002"
+STR_INVALID = "PTL-STR-001"
+STR_UNAVAILABLE = "PTL-STR-000"
+SCH_INVALID = "PTL-SCH-001"
+SCH_UNAVAILABLE = "PTL-SCH-000"
+EXT_INVALID = "PTL-EXT-001"
+EXT_UNAVAILABLE = "PTL-EXT-000"
+EXT_UNVALIDATED = "PTL-EXT-002"
+DAT_UNAVAILABLE = "PTL-DAT-000"
+DAT_CHECKSUM = "PTL-DAT-001"
+DAT_SIZE = "PTL-DAT-002"
+DAT_FORMAT = "PTL-DAT-003"
+DAT_COG = "PTL-DAT-004"
+DAT_CONSISTENCY = "PTL-DAT-005"
+DAT_ORDERING = "PTL-DAT-006"
+DAT_ROWGROUP_STATS = "PTL-DAT-007"
+DAT_ROWGROUP_SIZE = "PTL-DAT-008"
+DAT_COG_STATS = "PTL-DAT-009"
+DAT_VALID_PERCENT = "PTL-DAT-010"
+DAT_OVERVIEWS = "PTL-DAT-011"
+DAT_GEOPARQUET_VERSION = "PTL-DAT-012"
+DAT_TILE_SIZE = "PTL-DAT-013"
+DAT_PARTITION_SCHEMA = "PTL-DAT-014"
+DAT_TABULAR = "PTL-DAT-015"
+DAT_MIRROR = "PTL-DAT-016"
+DAT_VECTOR_COLUMNS = "PTL-DAT-017"
+LIV_UNAVAILABLE = "PTL-LIV-000"
+LIV_RANGE = "PTL-LIV-001"
+LIV_HEAD_LENGTH = "PTL-LIV-002"
+LIV_CORS_ORIGIN = "PTL-LIV-003"
+LIV_CORS_EXPOSE = "PTL-LIV-004"
+LIV_CORS_PREFLIGHT = "PTL-LIV-005"
+LIV_LINK_TARGET = "PTL-LIV-006"
+LIV_SELF_BASE = "PTL-LIV-007"
+LIV_OFF_HTTPS = "PTL-LIV-008"
+
+DEFAULT_RULES: tuple[Rule, ...] = (
+    RequiredFilesRule(),
+    AgentsLinkRule(),
+    ReadmeLinkRule(),
+    ReadmeContentRule(),
+    ReadmeSectionsRule(),
+    TitleDescriptionRule(),
+    HumanReadableTitleRule(),
+    LinkTitleRule(),
+    RequiredLinksRule(),
+    ChildLinkCompletenessRule(),
+    StructuralLinkTypeRule(),
+    LinkResolutionRule(),
+    IconMediaTypeRule(),
+    IconTitleRule(),
+    IconRelativeHrefRule(),
+    ContainmentStaysInLanguageRule(),
+    BboxValidRule(),
+    DatetimePresentRule(),
+    DatetimeValidRule(),
+    ProducerPresentRule(),
+    SingleHostRule(),
+    HostContactRule(),
+    LicenseDeclaredRule(),
+    OtherLicenseLinkRule(),
+    NoProprietaryLicenseRule(),
+    AssetFieldsRule(),
+    AssetHrefSchemeRule(),
+    CogMediaTypeRule(),
+    AssetFileFieldsRule(),
+    ChecksumMultihashRule(),
+    CatalogAssetsRule(),
+    CollectionDataRule(),
+    ItemDataRule(),
+    PMTilesDataRule(),
+    SchemaUriDeclaredRule(),
+    SchemaUriConsistencyRule(),
+    VersionExtensionRule(),
+    ExtensionVersionRule(),
+    VersionChainRule(),
+    MirrorViaLinkRule(),
+    MirrorCanonicalLinkRule(),
+    MirrorUpdatedRule(),
+    OfficialNoUpstreamLinksRule(),
+    ThumbnailRule(),
+    StylesForDerivativeRule(),
+    PMTilesRegistrationRule(),
+    StyleMediaTypeRule(),
+    DefaultStyleRoleRule(),
+    LargeVectorWithoutVisualRule(),
+    PartitionFieldsRule(),
+    PartitionGlobSchemeRule(),
+    SingleFileCollectionRule(),
+    RasterSceneItemRule(),
+    MissingItemTreeRule(),
+    NestedCollectionRule(),
+    CollectionIdRule(),
+    SubcatalogFanoutRule(),
+    ItemMirrorPresentRule(),
+    ItemMirrorRegistrationRule(),
+)
+
+
+_METADATA_SPEC_NOTES = {
+    "PTL-CNF-004": "The extension registry pin sentence has no manifest ID.",
+    "PTL-VER-001": "The delegated version extension navigation semantics have no manifest ID.",
+    "PTL-PRO-004": "The official-catalog upstream-link sentence has no RFC 2119 keyword.",
+}
+
+_PASS_CHECKS: tuple[CheckInfo, ...] = (
+    CheckInfo(
+        GEN_MISSING_ROOT,
+        "the catalog root has a readable catalog.json",
+        Severity.ERROR,
+        ("PORTO-CORE-001", "PORTO-CORE-013"),
+        stage="runner",
+    ),
+    CheckInfo(
+        GEN_UNPARSEABLE,
+        "every object file parses as JSON",
+        Severity.ERROR,
+        ("PORTO-CORE-001",),
+        stage="runner",
+    ),
+    CheckInfo(
+        GEN_PARTIAL_TREE,
+        "the whole tree was read, so every check could see every file",
+        Severity.WARNING,
+        (),
+        stage="runner",
+        enables_pass=False,
+        spec_note="An incomplete crawl reports pass availability, not a spec requirement.",
+    ),
+    CheckInfo(
+        STR_UNAVAILABLE,
+        "the STAC structural pass could run",
+        Severity.WARNING,
+        (),
+        stage="structural",
+        enables_pass=False,
+        spec_note="An unavailable structural pass enforces no requirement.",
+    ),
+    CheckInfo(
+        STR_INVALID,
+        "every object is valid STAC 1.1.0",
+        Severity.ERROR,
+        ("PORTO-CORE-001", "PORTO-CORE-013", "PORTO-CORE-019", "PORTO-FMT-036"),
+        stage="structural",
+    ),
+    CheckInfo(
+        EXT_UNAVAILABLE,
+        "the extension schema pass and each declared schema could load",
+        Severity.WARNING,
+        (),
+        stage="extensions",
+        enables_pass=False,
+        spec_note="An unavailable extension schema reports pass availability.",
+    ),
+    CheckInfo(
+        EXT_INVALID,
+        "every object satisfies the schemas of the extensions it declares",
+        Severity.ERROR,
+        (),
+        stage="extensions",
+        spec_note="The delegated extension-validation sentence has no manifest ID.",
+    ),
+    CheckInfo(
+        EXT_UNVALIDATED,
+        "every declared extension was validated against its schema",
+        Severity.INFO,
+        (),
+        stage="extensions",
+        enables_pass=False,
+        spec_note="An unvalidated extension is informational and has no manifest ID.",
+    ),
+    CheckInfo(
+        SCH_UNAVAILABLE,
+        "the Portolan profile schema pass could run",
+        Severity.WARNING,
+        (),
+        stage="schema",
+        enables_pass=False,
+        spec_note="An unavailable profile schema pass enforces no requirement.",
+    ),
+    CheckInfo(
+        SCH_INVALID,
+        "every object matches the Portolan profile schema it declares",
+        Severity.ERROR,
+        ("PORTO-CORE-006",),
+        stage="schema",
+    ),
+    CheckInfo(
+        DAT_UNAVAILABLE,
+        "the data pass could run",
+        Severity.WARNING,
+        (),
+        stage="data",
+        enables_pass=False,
+        spec_note="An unavailable data pass enforces no requirement.",
+    ),
+    CheckInfo(
+        DAT_CHECKSUM,
+        "asset bytes hash to the declared file:checksum",
+        Severity.ERROR,
+        ("PORTO-CORE-030",),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_SIZE,
+        "asset byte count matches the declared file:size",
+        Severity.ERROR,
+        ("PORTO-CORE-030",),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_FORMAT,
+        "asset bytes are in the format the declared media type names",
+        Severity.ERROR,
+        ("PORTO-CORE-026", "PORTO-FMT-001"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_COG,
+        "every raster asset is a valid cloud-optimized GeoTIFF",
+        Severity.ERROR,
+        ("PORTO-FMT-001", "PORTO-FMT-023", "PORTO-FMT-024", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_CONSISTENCY,
+        "asset footprint and CRS agree with the declaring metadata",
+        Severity.WARNING,
+        ("PORTO-FMT-036",),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_ORDERING,
+        "GeoParquet rows are spatially ordered",
+        Severity.ERROR,
+        ("PORTO-FMT-006", "PORTO-FMT-043", "PORTO-FMT-044", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_ROWGROUP_STATS,
+        "GeoParquet row groups carry spatial statistics",
+        Severity.ERROR,
+        ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_ROWGROUP_SIZE,
+        "GeoParquet row groups stay within the size ceiling",
+        Severity.ERROR,
+        ("PORTO-FMT-009", "PORTO-FMT-043", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_COG_STATS,
+        "every COG band carries embedded min/max/mean/stddev statistics",
+        Severity.ERROR,
+        ("PORTO-FMT-026", "PORTO-FMT-027", "PORTO-FMT-028", "PORTO-FMT-030", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_VALID_PERCENT,
+        "a COG band with nodata declares its valid percent",
+        Severity.ERROR,
+        ("PORTO-FMT-031", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_OVERVIEWS,
+        "a raster larger than one internal tile carries internal overviews",
+        Severity.ERROR,
+        ("PORTO-FMT-024", "PORTO-FMT-025", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_GEOPARQUET_VERSION,
+        "the geo metadata declares GeoParquet 1.1 or 2.x",
+        Severity.ERROR,
+        ("PORTO-FMT-004", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_TILE_SIZE,
+        "internal tiles are square and no larger than 512x512",
+        Severity.ERROR,
+        ("PORTO-FMT-024", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_PARTITION_SCHEMA,
+        "every partition file shares a single Parquet schema",
+        Severity.ERROR,
+        ("PORTO-FMT-021", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_TABULAR,
+        "a plain-Parquet data asset declares table:columns and temporal extent",
+        Severity.WARNING,
+        ("PORTO-FMT-037", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_MIRROR,
+        "an item mirror reproduces the collection's items",
+        Severity.ERROR,
+        ("PORTO-FMT-042",),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_VECTOR_COLUMNS,
+        "a GeoParquet data asset's columns are documented with table:columns",
+        Severity.WARNING,
+        ("PORTO-FMT-046", "PORTO-FMT-047", "PORTO-FMT-048", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        LIV_UNAVAILABLE,
+        "the live pass could reach a host to probe",
+        Severity.WARNING,
+        (),
+        stage="live",
+        enables_pass=False,
+        spec_note="An unavailable live host enforces no requirement.",
+    ),
+    CheckInfo(
+        LIV_RANGE,
+        "the server honors ranged GET with 206 and Accept-Ranges: bytes",
+        Severity.ERROR,
+        ("PORTO-CORE-043", "PORTO-CORE-073"),
+        stage="live",
+    ),
+    CheckInfo(
+        LIV_HEAD_LENGTH,
+        "HEAD returns a Content-Length matching the declared file:size",
+        Severity.ERROR,
+        ("PORTO-CORE-043", "PORTO-CORE-073"),
+        stage="live",
+    ),
+    CheckInfo(
+        LIV_CORS_ORIGIN,
+        "the server allows the requesting CORS origin",
+        Severity.ERROR,
+        ("PORTO-CORE-045", "PORTO-CORE-073"),
+        stage="live",
+    ),
+    CheckInfo(
+        LIV_CORS_EXPOSE,
+        "the server exposes the headers a browser client reads",
+        Severity.ERROR,
+        ("PORTO-CORE-045", "PORTO-CORE-073"),
+        stage="live",
+    ),
+    CheckInfo(
+        LIV_CORS_PREFLIGHT,
+        "CORS preflight accepts GET and HEAD with Range",
+        Severity.ERROR,
+        ("PORTO-CORE-045", "PORTO-CORE-073"),
+        stage="live",
+    ),
+    CheckInfo(
+        LIV_LINK_TARGET,
+        "every link target under the publish base answers HEAD with 2xx",
+        Severity.ERROR,
+        ("PORTO-CORE-035", "PORTO-CORE-036", "PORTO-CORE-073"),
+        stage="live",
+    ),
+    CheckInfo(
+        LIV_SELF_BASE,
+        "the root self link names the base the catalog is published under",
+        Severity.WARNING,
+        ("PORTO-CORE-081",),
+        stage="live",
+    ),
+    CheckInfo(
+        LIV_OFF_HTTPS,
+        "no asset or link target on the probed hosts redirects off https",
+        Severity.ERROR,
+        ("PORTO-CORE-023", "PORTO-CORE-035", "PORTO-CORE-073"),
+        stage="live",
+    ),
+)
+
+
+def _build(
+    rules: Sequence[Rule] = DEFAULT_RULES,
+    pass_checks: Sequence[CheckInfo] = _PASS_CHECKS,
+) -> dict[str, CheckInfo]:
+    """Build the registry without losing duplicate IDs to a dict literal."""
+    metadata = (
+        CheckInfo(
+            rule.id,
+            rule.description,
+            rule.default_severity,
+            rule.spec_ids,
+            spec_note=_METADATA_SPEC_NOTES.get(rule.id),
+        )
+        for rule in rules
+    )
     checks: dict[str, CheckInfo] = {}
-    for rule in DEFAULT_RULES:
-        if rule.id in checks:
-            raise RegistryError(f"duplicate rule id {rule.id}")
-        if not rule.description:
-            raise RegistryError(f"rule {rule.id} has no description")
-        checks[rule.id] = CheckInfo(
-            id=rule.id,
-            description=rule.description,
-            severity=rule.default_severity,
-            spec_ids=rule.spec_ids,
-        )
-
-    spec_ids: dict[str, tuple[str, ...]] = {}
-    for module in _PASS_MODULES:
-        for check_id, ids in module.SPEC_IDS.items():
-            if check_id in spec_ids:
-                raise RegistryError(f"duplicate check id {check_id}")
-            spec_ids[check_id] = ids
-
-    for check_id, (severity, description) in _PASS_CHECKS.items():
-        if check_id in checks:
-            raise RegistryError(f"pass check {check_id} collides with a rule")
-        checks[check_id] = CheckInfo(
-            id=check_id,
-            description=description,
-            severity=severity,
-            spec_ids=spec_ids.get(check_id, ()),
-        )
-
-    missing = sorted(set(spec_ids) - set(_PASS_CHECKS))
-    if missing:
-        raise RegistryError(f"pass checks missing from the registry: {missing}")
+    for info in (*metadata, *pass_checks):
+        if info.id in checks:
+            raise RegistryError(f"duplicate rule id {info.id}")
+        if not info.description:
+            raise RegistryError(f"rule {info.id} has no description")
+        if not info.spec_ids and not info.spec_note:
+            raise RegistryError(f"rule {info.id} has no spec metadata")
+        checks[info.id] = info
     return checks
 
 
-#: Every check rashid can emit, keyed by rule id.
 CHECKS: Mapping[str, CheckInfo] = MappingProxyType(_build())
+
+
+def check_ids(stage: PassName, *, enables_pass_only: bool = False) -> frozenset[str]:
+    """IDs a pass can emit, optionally limited to those that keep it enabled."""
+    return frozenset(
+        info.id
+        for info in CHECKS.values()
+        if info.stage == stage and (not enables_pass_only or info.enables_pass)
+    )
 
 
 def describe(rule_id: str) -> str:

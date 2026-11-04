@@ -12,9 +12,9 @@ from collections.abc import Iterable
 from typing import Literal
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import links_of, parse_rfc3339
+from rashid.rules._common import links_of, parse_rfc3339, roles_of
 from rashid.rules.providers import providers_of
 
 Provenance = Literal["official", "mirror"]
@@ -23,8 +23,8 @@ Provenance = Literal["official", "mirror"]
 def provenance_of(node: Node) -> Provenance | None:
     """Derive a collection's provenance, or None when underivable."""
     providers = providers_of(node)
-    producers = [p for p in providers if "producer" in _roles(p)]
-    hosts = [p for p in providers if "host" in _roles(p)]
+    producers = [p for p in providers if "producer" in roles_of(p)]
+    hosts = [p for p in providers if "host" in roles_of(p)]
     if not producers or len(hosts) != 1:
         return None
     host_name = _normalized_name(hosts[0])
@@ -34,13 +34,6 @@ def provenance_of(node: Node) -> Provenance | None:
         if _normalized_name(producer) == host_name:
             return "official"
     return "mirror"
-
-
-def _roles(provider: dict[str, object]) -> list[str]:
-    raw = provider.get("roles")
-    if not isinstance(raw, list):
-        return []
-    return [r for r in raw if isinstance(r, str)]
 
 
 def _normalized_name(provider: dict[str, object]) -> str | None:
@@ -69,7 +62,7 @@ class MirrorViaLinkRule(Rule):
         yield self.finding(
             node,
             "mirror collection has no rel:'via' link of type 'text/html' to its original source",
-            json_pointer="/links",
+            json_pointer=json_pointer("links"),
             fix_hint='add a via link to the upstream landing page with type "text/html";'
             " keep service links with the media types their services return",
         )
@@ -96,7 +89,7 @@ class MirrorCanonicalLinkRule(Rule):
                 node,
                 "mirror collection has no rel:'canonical' link; add one if the upstream"
                 " publishes its own STAC catalog",
-                json_pointer="/links",
+                json_pointer=json_pointer("links"),
                 fix_hint='add {"rel": "canonical", "href": <the upstream collection.json>,'
                 ' "type": "application/json"} to links when the upstream publishes STAC',
             )
@@ -134,7 +127,7 @@ class MirrorUpdatedRule(Rule):
                 message="mirror has no top-level 'updated' field recording the last sync",
                 path=str(node.path),
                 object_id=node.id,
-                json_pointer="/updated",
+                json_pointer=json_pointer("updated"),
                 fix_hint="add a top-level 'updated' field holding the last sync time as an"
                 " RFC 3339 date-time, e.g. '2024-01-01T00:00:00Z'",
             )
@@ -145,7 +138,7 @@ class MirrorUpdatedRule(Rule):
                 message=f"'updated' value {value!r} is not an RFC 3339 date-time",
                 path=str(node.path),
                 object_id=node.id,
-                json_pointer="/updated",
+                json_pointer=json_pointer("updated"),
                 fix_hint="rewrite 'updated' as an RFC 3339 date-time, e.g. '2024-01-01T00:00:00Z'",
                 actual=value,
             )
@@ -170,7 +163,7 @@ class OfficialNoUpstreamLinksRule(Rule):
                     node,
                     f"official collection carries a rel:'{rel}' link; it is the source,"
                     " not a mirror",
-                    json_pointer="/links",
+                    json_pointer=json_pointer("links"),
                     fix_hint=f"remove the rel:'{rel}' link, or, if this collection really"
                     " mirrors someone else's data, name the upstream as the producer in"
                     " providers",

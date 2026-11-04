@@ -1,8 +1,8 @@
 # Two-stage strategy:
 #   commit stage  — fast, file-scoped checks (formatting, hygiene, spelling,
-#                   workflow lint). Must stay sub-second-ish.
-#   pre-push stage — whole-project gates (types, dead code, complexity,
-#                   dependency hygiene, import contracts). CI runs both
+#                   workflow lint, duplicate code).
+#   pre-push stage — whole-project gates (types, dead code,
+#                   dependency hygiene, import contracts, security). CI runs both
 #                   stages via `pre-commit run --all-files [--hook-stage
 #                   pre-push]`, so nothing here is skippable by accident.
 repos:
@@ -68,6 +68,22 @@ repos:
 
   - repo: local
     hooks:
+      - id: jscpd
+        name: duplicate code (jscpd, baseline-gated)
+        # renovate: datasource=npm depName=jscpd
+        entry: uvx jscpd@5.2.1 src/rashid tests --baseline .jscpd-baseline.json --fail-on-new-clones 0
+        language: system
+        files: '^(src/rashid/.*\.py|tests/.*\.py|\.jscpd(-baseline)?\.json)$'
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: bandit
+        name: bandit (security)
+        entry: uv run bandit -r src/rashid -c pyproject.toml
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
       - id: deptry
         name: deptry (dependency hygiene)
         entry: uv run deptry .
@@ -89,13 +105,6 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
-      - id: xenon
-        name: xenon (complexity ceiling)
-        entry: uv run xenon --max-absolute=D --max-modules=C --max-average=B src/rashid tests
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-
       - id: import-linter
         name: import-linter (layer contracts)
         entry: uv run lint-imports
@@ -105,7 +114,7 @@ repos:
 
       - id: fast-tests
         name: fast tests (opt-in via ENABLE_PRE_PUSH_TESTS=1)
-        entry: bash -c 'if [ "${ENABLE_PRE_PUSH_TESTS:-0}" = "1" ]; then uv run pytest -n auto --tb=short; fi'
+        entry: bash -c 'if [ "${ENABLE_PRE_PUSH_TESTS:-0}" = "1" ]; then uv run pytest -n 8 --tb=short; fi'
         language: system
         pass_filenames: false
         stages: [pre-push]

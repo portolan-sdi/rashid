@@ -90,7 +90,7 @@ For transfer details and every rule ID, see [the rule reference](docs/rules.md).
 ## Use rashid from Python
 
 ```python
-from rashid import validate
+from rashid import ValidationOptions, validate
 
 report = validate("path/to/catalog")
 published = validate("https://data.example.org/my-catalog/catalog.json")
@@ -99,19 +99,19 @@ for finding in report.errors:
     print(finding.message)
 ```
 
-`validate()` uses the same default passes as the command-line interface. Set `schema=True` or `live=True` to add those passes. For a URL, `live` is on unless you pass `live=False`. Set `extensions=False` to skip the extension pass.
+`validate()` uses the same default passes as the command-line interface. Pass settings through the frozen, keyword-only `ValidationOptions` dataclass. Use `validate(path, options=ValidationOptions(schema=True))` to enable the profile schema pass. For a URL, `live` is on unless the options set `live=False`. Set `extensions=False` to skip the extension pass.
 
 Use `RulesConfig` to disable rules or change their severity.
 
 ```python
-from rashid import RulesConfig, Severity, validate
+from rashid import RulesConfig, Severity, ValidationOptions, validate
 
 config = RulesConfig(
     disabled=frozenset({"PTL-VIZ-004"}),
     severity_overrides={"PTL-TTL-002": Severity.ERROR},
 )
 
-report = validate("path/to/catalog", config=config)
+report = validate("path/to/catalog", options=ValidationOptions(config=config))
 ```
 
 The public `rashid.api` module also provides helpers for tools that repair catalogs. Names from this module remain available across 0.x releases. Other internal modules can change in a patch release.

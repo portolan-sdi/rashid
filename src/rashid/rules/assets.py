@@ -8,15 +8,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import Any
-from urllib.parse import urlparse
 
+from rashid._href import split_href
 from rashid._multihash import is_well_formed_multihash
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import (
     COG_MEDIA_TYPE,
     asset_refers_to_self,
+    assets_of,
     declares_geometry,
     is_cog_media_type,
     is_pmtiles_asset,
@@ -27,20 +28,8 @@ from rashid.rules._common import (
 
 def _has_data_asset(node: Node) -> bool:
     return any(
-        "data" in roles_of(asset) and not is_pmtiles_asset(asset)
-        for _, _, asset in _assets_of(node)
+        "data" in roles_of(asset) and not is_pmtiles_asset(asset) for _, _, asset in assets_of(node)
     )
-
-
-def _assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
-    """(pointer_prefix, asset_key, asset) triples for a node's assets."""
-    found: list[tuple[str, str, dict[str, Any]]] = []
-    assets = node.data.get("assets")
-    if isinstance(assets, dict):
-        for key, asset in assets.items():
-            if isinstance(asset, dict):
-                found.append((f"/assets/{key}", key, asset))
-    return found
 
 
 def _item_asset_templates(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
@@ -49,7 +38,7 @@ def _item_asset_templates(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
     if isinstance(templates, dict):
         for key, template in templates.items():
             if isinstance(template, dict):
-                found.append((f"/item_assets/{key}", key, template))
+                found.append((json_pointer("item_assets", key), key, template))
     return found
 
 
@@ -63,13 +52,13 @@ class AssetFieldsRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             href = asset.get("href")
             if not isinstance(href, str) or not href.strip():
                 yield self.finding(
                     node,
                     f"asset '{key}' has no href",
-                    json_pointer=f"{pointer}/href",
+                    json_pointer=json_pointer("href", prefix=pointer),
                     fix_hint="set href to the file's path relative to this object,"
                     " e.g. './data.parquet'",
                 )
@@ -87,7 +76,7 @@ class AssetFieldsRule(Rule):
             yield self.finding(
                 node,
                 f"asset '{key}' has no type (media type)",
-                json_pointer=f"{pointer}/type",
+                json_pointer=json_pointer("type", prefix=pointer),
                 fix_hint="add the file's IANA media type, e.g."
                 " 'application/vnd.apache.parquet' for GeoParquet",
             )
@@ -96,7 +85,7 @@ class AssetFieldsRule(Rule):
             yield self.finding(
                 node,
                 f"asset '{key}' has no roles",
-                json_pointer=f"{pointer}/roles",
+                json_pointer=json_pointer("roles", prefix=pointer),
                 fix_hint='add a roles array naming what the asset is for, e.g. ["data"],'
                 ' ["thumbnail"], or ["visual"]',
             )
@@ -112,18 +101,21 @@ class AssetHrefSchemeRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             href = asset.get("href")
             if not isinstance(href, str) or not href:
                 continue  # PTL-AST-001 reports missing hrefs
-            scheme = urlparse(href).scheme.lower()
+            parsed = split_href(href)
+            if parsed is None:
+                continue  # PTL-LNK-006 reports the malformed URI reference.
+            scheme = parsed.scheme.lower()
             if not scheme or scheme == "https":
                 continue
             if scheme == "s3":
                 yield self.finding(
                     node,
                     f"asset '{key}' href uses s3://; absolute hrefs must use https",
-                    json_pointer=f"{pointer}/href",
+                    json_pointer=json_pointer("href", prefix=pointer),
                     fix_hint="use the https endpoint; expose s3 URLs via the alternate extension",
                     expected="https",
                     actual=scheme,
@@ -132,7 +124,7 @@ class AssetHrefSchemeRule(Rule):
                 yield self.finding(
                     node,
                     f"asset '{key}' href uses scheme '{scheme}'; absolute hrefs must use https",
-                    json_pointer=f"{pointer}/href",
+                    json_pointer=json_pointer("href", prefix=pointer),
                     fix_hint="rewrite the href as the https URL that serves this file",
                     expected="https",
                     actual=scheme,
@@ -155,7 +147,7 @@ class CogMediaTypeRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, key, asset in [*_assets_of(node), *_item_asset_templates(node)]:
+        for pointer, key, asset in [*assets_of(node), *_item_asset_templates(node)]:
             if not is_raster_data_asset(asset):
                 continue
             media_type = asset.get("type")
@@ -166,7 +158,7 @@ class CogMediaTypeRule(Rule):
             yield self.finding(
                 node,
                 f"raster data asset '{key}' has type {media_type!r}, expected '{COG_MEDIA_TYPE}'",
-                json_pointer=f"{pointer}/type",
+                json_pointer=json_pointer("type", prefix=pointer),
                 fix_hint=f"set the asset's type to '{COG_MEDIA_TYPE}'",
                 expected=COG_MEDIA_TYPE,
                 actual=media_type,
@@ -191,7 +183,7 @@ class AssetFileFieldsRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             href = asset.get("href")
             if isinstance(href, str) and asset_refers_to_self(node, href, graph):
                 for field in ("file:size", "file:checksum"):
@@ -199,7 +191,7 @@ class AssetFileFieldsRule(Rule):
                         yield self.finding(
                             node,
                             f"self-referencing asset '{key}' must omit {field}",
-                            json_pointer=f"{pointer}/{field}",
+                            json_pointer=json_pointer(field, prefix=pointer),
                             fix_hint=f"remove {field} from the asset that refers to this STAC object",
                         )
                 continue
@@ -209,7 +201,7 @@ class AssetFileFieldsRule(Rule):
                     node,
                     f"asset '{key}' has no file:size",
                     severity=Severity.WARNING,
-                    json_pointer=f"{pointer}/file:size",
+                    json_pointer=json_pointer("file:size", prefix=pointer),
                     fix_hint="add file:size, the asset's size in bytes as an integer",
                 )
             elif isinstance(size, bool) or not isinstance(size, int) or size <= 0:
@@ -217,7 +209,7 @@ class AssetFileFieldsRule(Rule):
                     node,
                     f"asset '{key}' file:size must be a positive integer, got {size!r}",
                     severity=Severity.WARNING,
-                    json_pointer=f"{pointer}/file:size",
+                    json_pointer=json_pointer("file:size", prefix=pointer),
                     fix_hint="set file:size to the asset's byte count, unquoted and greater than 0",
                     actual=size,
                 )
@@ -226,7 +218,7 @@ class AssetFileFieldsRule(Rule):
                     node,
                     f"asset '{key}' has no file:checksum",
                     severity=Severity.WARNING,
-                    json_pointer=f"{pointer}/file:checksum",
+                    json_pointer=json_pointer("file:checksum", prefix=pointer),
                     fix_hint="add file:checksum, the multihash of the asset bytes:"
                     " '1220' followed by the sha256 hex digest",
                 )
@@ -252,7 +244,7 @@ class CatalogAssetsRule(Rule):
             yield self.finding(
                 node,
                 "catalog declares assets; assets (data files) must sit at collection or item level",
-                json_pointer="/assets",
+                json_pointer=json_pointer("assets"),
                 fix_hint="move the assets onto the collection (or item) that owns the data",
             )
 
@@ -287,7 +279,7 @@ class CollectionDataRule(Rule):
             node,
             "collection refers to no primary data: no asset with the data role on the"
             " collection or its items, and no partition:glob",
-            json_pointer="/assets",
+            json_pointer=json_pointer("assets"),
             fix_hint='add the data file as an asset with roles ["data"], on the collection'
             " for a single file or on each item for several",
         )
@@ -313,7 +305,7 @@ class ItemDataRule(Rule):
         yield self.finding(
             node,
             "item carries no asset with the data role",
-            json_pointer="/assets",
+            json_pointer=json_pointer("assets"),
             fix_hint='add the item\'s data file as an asset with roles ["data"]',
         )
 
@@ -328,7 +320,7 @@ class ChecksumMultihashRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             checksum = asset.get("file:checksum")
             if checksum is None:
                 continue  # PTL-AST-003 reports the absence
@@ -336,7 +328,7 @@ class ChecksumMultihashRule(Rule):
                 yield self.finding(
                     node,
                     f"asset '{key}' file:checksum is not a well-formed multihash",
-                    json_pointer=f"{pointer}/file:checksum",
+                    json_pointer=json_pointer("file:checksum", prefix=pointer),
                     fix_hint="prefix the digest with the multihash code and length, "
                     "e.g. '1220' + sha256 hex",
                     actual=checksum,
@@ -367,14 +359,14 @@ class PMTilesDataRule(Rule):
             yield from self._check_assets(owner, reference)
 
     def _check_assets(self, node: Node, reference: bool) -> Iterable[Finding]:
-        for pointer, key, asset in _assets_of(node):
+        for pointer, key, asset in assets_of(node):
             if not is_pmtiles_asset(asset):
                 continue
             if "visual" not in roles_of(asset):
                 yield self.finding(
                     node,
                     f"PMTiles asset '{key}' has no visual role",
-                    json_pointer=f"{pointer}/roles",
+                    json_pointer=json_pointer("roles", prefix=pointer),
                     fix_hint="add visual to the PMTiles asset's roles",
                 )
             if not reference:
@@ -406,5 +398,5 @@ def _has_geoparquet_reference(collection: Node, graph: CatalogGraph) -> bool:
         and not is_pmtiles_asset(asset)
         and _reference_has_geometry(owner, asset, collection)
         for owner in [collection, *graph.items_of(collection)]
-        for _, _, asset in _assets_of(owner)
+        for _, _, asset in assets_of(owner)
     )

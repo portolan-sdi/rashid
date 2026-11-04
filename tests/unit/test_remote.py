@@ -12,29 +12,32 @@ from __future__ import annotations
 import json
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 import pytest
 from click.testing import CliRunner
 
+from rashid import ValidationOptions, validate
 from rashid import remote as remote_mod
-from rashid import validate
+from rashid._href import is_catalog_url, split_catalog_url, wire_url
 from rashid.catalog import CatalogGraph
 from rashid.cli import main
 from rashid.data.reader import FilesystemHttpReader, LocalOnlyReader
-from rashid.live import LIV_LINK_TARGET, LIV_SELF_BASE, LIV_UNAVAILABLE
 from rashid.model import Severity
+from rashid.registry import (
+    GEN_MISSING_ROOT,
+    GEN_PARTIAL_TREE,
+    LIV_LINK_TARGET,
+    LIV_SELF_BASE,
+    LIV_UNAVAILABLE,
+)
 from rashid.remote import (
     Crawl,
     Fetched,
     FetchError,
     _StoreFetcher,
     crawl,
-    is_catalog_url,
-    split_catalog_url,
-    wire_url,
 )
-from rashid.runner import GEN_MISSING_ROOT, GEN_PARTIAL_TREE
 from tests._https import HttpsServer, Route
 from tests.conftest import CatalogBuilder, mutate_json
 from tests.unit.test_live import FakeProber, StatusProber
@@ -69,7 +72,7 @@ class DirFetcher:
     def get(self, url: str) -> Fetched:
         self.calls.append(url)
         assert url.startswith(self.base), url
-        rel = unquote(url[len(self.base) :])
+        rel = unquote(urlsplit(url[len(self.base) :]).path)
         if rel in self.broken:
             raise FetchError(f"GET {url}: connection refused")
         if rel in self.missing:
@@ -317,7 +320,7 @@ def test_crawl_normalizes_absolute_hrefs_like_relative_ones(
     fetcher = DirFetcher(root)
     dest = tmp_path / "dest"
     result = crawl(_BASE, dest, fetcher)
-    assert f"{_BASE}sector-1/catalog.json" in fetcher.calls
+    assert f"{_BASE}sector-1/catalog.json?v=2#top" in fetcher.calls
     assert (dest / "sector-1" / "catalog.json").exists()
     assert result.documents == 5
 
@@ -451,7 +454,7 @@ def test_directory_url_answering_200_does_not_break_the_crawl(
 
     class Index(DirFetcher):
         def get(self, url: str) -> Fetched:
-            if url.endswith("sector-1.json") or url.endswith("inner.json"):
+            if url.endswith(("sector-1.json", "inner.json")):
                 self.calls.append(url)
                 return Fetched(
                     status=200,
@@ -516,7 +519,7 @@ def _check_url(root: Path, fetcher: DirFetcher | None = None, **kwargs: Any):  #
     fetcher = fetcher or DirFetcher(root)
     kwargs.setdefault("live_prober", StatusProber())
     kwargs.setdefault("data", False)
-    return validate(_ROOT_URL, fetcher=fetcher, **kwargs)
+    return validate(_ROOT_URL, options=ValidationOptions(fetcher=fetcher, **kwargs))
 
 
 def test_url_mode_runs_the_metadata_pass_over_the_crawled_tree(catalog: CatalogBuilder) -> None:
@@ -525,7 +528,7 @@ def test_url_mode_runs_the_metadata_pass_over_the_crawled_tree(catalog: CatalogB
     assert report.files_checked == 5
     ids = {f.rule_id for f in report.findings}
     assert GEN_PARTIAL_TREE in ids
-    assert not {i for i in ids if i.startswith("PTL-LNK") or i.startswith("PTL-FIL")}
+    assert not {i for i in ids if i.startswith(("PTL-LNK", "PTL-FIL"))}
 
 
 def test_url_mode_reports_the_same_metadata_findings_as_the_directory(
@@ -533,7 +536,7 @@ def test_url_mode_reports_the_same_metadata_findings_as_the_directory(
 ) -> None:
     root = _nested(catalog)
     mutate_json(root / "sector-1" / "roads" / "collection.json", lambda d: d.pop("license"))
-    local = validate(root, data=False)
+    local = validate(root, options=ValidationOptions(data=False))
     remote = _check_url(root, live=False)
     skip = {GEN_PARTIAL_TREE}
     assert {(f.rule_id, f.path) for f in remote.findings if f.rule_id not in skip} == {
@@ -655,7 +658,10 @@ def test_url_mode_reports_a_capped_crawl(catalog: CatalogBuilder) -> None:
 
 def test_url_mode_accepts_the_directory_url(catalog: CatalogBuilder) -> None:
     root = _nested(catalog)
-    report = validate(_BASE.rstrip("/"), fetcher=DirFetcher(root), data=False, live=False)
+    report = validate(
+        _BASE.rstrip("/"),
+        options=ValidationOptions(fetcher=DirFetcher(root), data=False, live=False),
+    )
     assert report.files_checked == 5
 
 
@@ -680,7 +686,7 @@ def test_url_mode_does_not_report_a_missing_local_partition_or_scene(
     root = _nested(catalog)
     (root / "scenes" / "scene-a.tif").write_bytes(b"II*\x00")
     (root / "scenes" / "scene-b.tif").write_bytes(b"II*\x00")
-    local = validate(root, data=False)
+    local = validate(root, options=ValidationOptions(data=False))
     assert "PTL-COL-005" in {f.rule_id for f in local.findings}
     remote = _check_url(root, live=False)
     assert "PTL-COL-005" not in {f.rule_id for f in remote.findings}
@@ -757,10 +763,15 @@ def test_cli_accepts_a_catalog_url(
     root = _nested(catalog)
     seen: dict[str, Any] = {}
 
-    def fake_validate(location: Path | str, **kwargs: Any):  # type: ignore[no-untyped-def]
+    def fake_validate(location: Path | str, *, options: ValidationOptions):  # type: ignore[no-untyped-def]
         seen["location"] = location
-        seen.update(kwargs)
-        return validate(location, fetcher=DirFetcher(root), live_prober=FakeProber(), data=False)
+        seen.update(vars(options))
+        return validate(
+            location,
+            options=ValidationOptions(
+                fetcher=DirFetcher(root), live_prober=FakeProber(), data=False
+            ),
+        )
 
     monkeypatch.setattr("rashid.cli.validate", fake_validate)
     result = CliRunner().invoke(main, ["check", _ROOT_URL])
@@ -882,3 +893,50 @@ def test_default_fetcher_crawls_a_served_tree(
 def test_crawl_result_is_a_plain_record() -> None:
     result = Crawl(base=_BASE)
     assert result.statuses == {} and result.errors == {} and not result.capped
+
+
+def test_options_can_be_reused_without_resolving_the_callers_live_default(
+    catalog: CatalogBuilder,
+) -> None:
+    root = _nested(catalog)
+    prober = StatusProber()
+    options = ValidationOptions(data=False, fetcher=DirFetcher(root), live_prober=prober)
+
+    local = validate(root, options=options)
+    assert not any(f.rule_id.startswith("PTL-LIV") for f in local.findings)
+    remote = validate(_ROOT_URL, options=options)
+    assert remote.files_checked == local.files_checked
+    assert options.live is None
+    assert prober.range_calls  # URL mode still probes the host after a local validation.
+
+
+def test_signed_request_target_matches_crawl_status_and_data_reader(
+    catalog: CatalogBuilder, tmp_path: Path
+) -> None:
+    from rashid._href import live_host_href, request_target
+
+    asset_href = "./data%20file.parquet?token=x#piece"
+    catalog.collection("roads", assets={"data": {"href": asset_href}})
+    root = catalog.write()
+    child_href = "./roads/collection.json?token=x#one"
+    mutate_json(
+        root / "catalog.json",
+        lambda d: next(link for link in d["links"] if link.get("rel") == "child").update(
+            href=child_href
+        ),
+    )
+    dest = tmp_path / "download"
+    fetched = crawl(_BASE, dest, DirFetcher(root))
+    target = request_target(".", child_href)
+    assert target == "roads/collection.json?token=x#one"
+    assert fetched.statuses[wire_url(_BASE, target)] == 200
+    assert live_host_href(".", child_href, _BASE) == wire_url(_BASE, target)
+    graph = CatalogGraph.load(dest)
+    graph.base_url = _BASE
+    node = graph.nodes[PurePosixPath("roads/collection.json")]
+    asset_target = request_target("roads", asset_href)
+    assert asset_target == "roads/data%20file.parquet?token=x#piece"
+    located = FilesystemHttpReader(graph).locate(node, asset_href)
+    assert located is not None
+    assert located.source == wire_url(_BASE, asset_target)
+    assert live_host_href("roads", asset_href, _BASE) == located.source
