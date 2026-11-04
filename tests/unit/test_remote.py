@@ -19,7 +19,7 @@ from click.testing import CliRunner
 
 from rashid import ValidationOptions, validate
 from rashid import remote as remote_mod
-from rashid._href import is_catalog_url, split_catalog_url
+from rashid._href import is_catalog_url, split_catalog_url, wire_url
 from rashid.catalog import CatalogGraph
 from rashid.cli import main
 from rashid.data.reader import FilesystemHttpReader, LocalOnlyReader
@@ -37,7 +37,6 @@ from rashid.remote import (
     FetchError,
     _StoreFetcher,
     crawl,
-    wire_url,
 )
 from tests._https import HttpsServer, Route
 from tests.conftest import CatalogBuilder, mutate_json

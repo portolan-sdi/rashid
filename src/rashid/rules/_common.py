@@ -8,10 +8,16 @@ from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import quote
 
-from rashid._href import is_absolute_href, local_path, object_location, parse_href, split_href
+from rashid._href import (
+    is_absolute_href,
+    local_path,
+    object_location,
+    parse_href,
+    split_href,
+    wire_url,
+)
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import json_pointer
-from rashid.remote import wire_url
 
 # Rels that make the tree navigable; every one carries type requirements and
 # must be relative and resolvable.

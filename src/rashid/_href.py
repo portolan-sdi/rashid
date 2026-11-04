@@ -6,7 +6,7 @@ import posixpath
 import re
 from pathlib import PurePosixPath
 from typing import Any, Protocol
-from urllib.parse import ParseResult, SplitResult, unquote, urljoin, urlparse, urlsplit
+from urllib.parse import ParseResult, SplitResult, quote, unquote, urljoin, urlparse, urlsplit
 
 
 class _SelfLinked(Protocol):
@@ -228,7 +228,7 @@ def normalize_live_base(base_url: str) -> str:
 def live_host_href(directory: str, href: str, base: str | None) -> str | None:
     """Live policy: HTTPS on the publish authority, at any path on that host.
 
-    remote.wire_url encodes the resulting candidate's path for probing.
+    wire_url encodes the resulting candidate's path for probing.
     """
     parsed = parse_href(href)
     publish = parse_href(base) if base is not None else None
@@ -348,3 +348,19 @@ def object_location(url: str, *, base: str | None = None) -> tuple[str, str, str
         stored = store_path(parsed)
         path = parsed.path if stored is None else stored
     return parsed.scheme.lower(), url_authority(parsed), path, parsed.query
+
+
+def wire_url(base: str, rel: str) -> str:
+    """The URL for a path under the base: percent-encoded, existing escapes kept.
+
+    The one place an href becomes a request URL, shared with the live pass
+    and the data reader so the three agree on the URL for one href, and so a
+    status the crawl recorded is found under the URL the live pass asks for.
+    """
+    path = containment_href(str(rel))
+    parsed = split_href(path)
+    origin = ""
+    if parsed is not None and parsed.scheme and parsed.netloc:
+        origin = path[: len(path) - len(parsed.path)] if parsed.path else path
+        path = parsed.path
+    return f"{base}{origin}{quote(path, safe='/%')}{href_suffix(str(rel))}"

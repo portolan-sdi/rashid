@@ -28,9 +28,8 @@ from pathlib import Path
 from typing import Protocol
 
 from rashid import _store
-from rashid._href import is_absolute_href, is_https_href, request_target
+from rashid._href import is_absolute_href, is_https_href, request_target, wire_url
 from rashid.catalog import CatalogGraph, Node
-from rashid.remote import wire_url
 
 _CHUNK = 1 << 16  # 64 KiB
 

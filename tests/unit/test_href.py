@@ -178,8 +178,7 @@ def test_rebuilding_graph_indexes_from_source_is_order_independent(catalog: Cata
 
 @pytest.mark.parametrize("suffix", ["?token=x#piece", "#piece", "?token=%3F%23", "?#", "?"])
 def test_suffix_is_ignored_for_containment_and_retained_for_wire_and_live(suffix: str) -> None:
-    from rashid._href import containment_href, href_suffix
-    from rashid.remote import wire_url
+    from rashid._href import containment_href, href_suffix, wire_url
 
     href = "./a%20b.parquet" + suffix
     assert containment_href(href) == "./a%20b.parquet"

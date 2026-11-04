@@ -79,6 +79,7 @@ from rashid._href import (
     normalize_live_base,
     off_https_reference,
     resolve_live_base,
+    wire_url,
 )
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.model import Finding, Severity, json_pointer
@@ -93,7 +94,6 @@ from rashid.registry import (
     LIV_SELF_BASE,
     LIV_UNAVAILABLE,
 )
-from rashid.remote import wire_url
 from rashid.rules._common import assets_of, links_of
 
 log = logging.getLogger(__name__)

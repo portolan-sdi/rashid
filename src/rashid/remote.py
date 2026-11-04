@@ -34,10 +34,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import quote
 
-from rashid import _json, _store, _trace
-from rashid._href import containment_href, crawl_mirror_path, crawl_prefix, href_suffix, split_href
+from rashid import _href, _json, _store, _trace
+from rashid._href import containment_href, crawl_mirror_path, crawl_prefix
 from rashid.catalog import ROOT_CATALOG
 
 log = logging.getLogger(__name__)
@@ -153,12 +152,12 @@ def crawl(
         log.debug("crawl depth %d: fetching %d document(s) under %s", depth, len(level), base)
         with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
             outcomes = _trace.pool_map(
-                pool, lambda rel: _fetch_one(fetcher, wire_url(base, rel)), level
+                pool, lambda rel: _fetch_one(fetcher, _href.wire_url(base, rel)), level
             )
         depth += 1
         next_level: list[str] = []
         for rel, outcome in zip(level, outcomes, strict=True):
-            url = wire_url(base, rel)
+            url = _href.wire_url(base, rel)
             if isinstance(outcome, str):
                 result.errors[url] = outcome
                 if rel == root:
@@ -204,22 +203,6 @@ class _CrawlQueue:
                     continue
                 self.queued_documents += 1
             next_level.append(follow)
-
-
-def wire_url(base: str, rel: str) -> str:
-    """The URL for a path under the base: percent-encoded, existing escapes kept.
-
-    The one place an href becomes a request URL, shared with the live pass
-    and the data reader so the three agree on the URL for one href, and so a
-    status the crawl recorded is found under the URL the live pass asks for.
-    """
-    path = containment_href(str(rel))
-    parsed = split_href(path)
-    origin = ""
-    if parsed is not None and parsed.scheme and parsed.netloc:
-        origin = path[: len(path) - len(parsed.path)] if parsed.path else path
-        path = parsed.path
-    return f"{base}{origin}{quote(path, safe='/%')}{href_suffix(str(rel))}"
 
 
 def _fetch_one(fetcher: Fetcher, url: str) -> Fetched | str:
@@ -308,5 +291,4 @@ __all__ = [
     "Fetched",
     "Fetcher",
     "crawl",
-    "wire_url",
 ]
