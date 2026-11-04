@@ -138,3 +138,30 @@ def test_partition_open_failure_reports_unavailable_data(tmp_path: Path) -> None
     assert len(findings) == 1 and findings[0]["severity"] == "warning"
     assert "broken.parquet" in findings[0]["message"]
     assert findings[0]["json_pointer"] == "/partition:glob"
+
+
+@pytest.mark.parametrize("readable", [False, True])
+def test_declared_corrupt_partitions_use_the_full_population(
+    tmp_path: Path, readable: bool
+) -> None:
+    from click.testing import CliRunner
+
+    from rashid.cli import main
+
+    directory = _catalog(tmp_path, **{"partition:glob": "./*.parquet"})
+    names = ["first.parquet", "second.parquet"]
+    for name in names:
+        (directory / name).write_bytes(b"not a Parquet file")
+    if readable:
+        names.append("readable.parquet")
+        assets.write_geoparquet(directory / names[-1])
+    _declare(directory, names)
+    result = CliRunner().invoke(main, ["check", "--json", "--data-scope", "local", str(tmp_path)])
+    assert result.exit_code == 1, result.output
+    findings = [
+        finding
+        for finding in json.loads(result.output)["findings"]
+        if finding["rule_id"] == "PTL-DAT-000"
+    ]
+    assert len(findings) == 1
+    assert findings[0]["message"].startswith(f"2 of {len(names)} partition files fail this check;")

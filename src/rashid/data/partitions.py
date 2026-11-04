@@ -59,11 +59,8 @@ def _check_partitions(
     schemas: list[tuple[str, dict[str, str]]] = []
     already_read = _asset_paths(node, reader)
     found: list[DataDefect] = []
-    checked = 0
     for match, path in files:
         declared = str(path) in already_read
-        if not declared:
-            checked += 1
         with _AssetFiles(Locator(is_remote=False, source=str(path))) as opened:
             try:
                 parquet = opened.parquet()
@@ -80,7 +77,7 @@ def _check_partitions(
             schemas.append((match, {field.name: str(field.type) for field in parquet.schema_arrow}))
             if not declared:
                 found.extend(_check_geoparquet(match, opened, subject=f"partition file '{match}'"))
-    return _partition_schema_defects(schemas), found, checked
+    return _partition_schema_defects(schemas), found, len(files)
 
 
 def _partition_schema_defects(schemas: list[tuple[str, dict[str, str]]]) -> list[DataDefect]:
