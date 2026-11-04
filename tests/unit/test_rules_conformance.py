@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
 import pytest
+from click.testing import CliRunner
 
 from rashid import ValidationOptions, validate
+from rashid.cli import main
 from rashid.model import Severity
 from rashid.rules.conformance import _registry
 from tests.conftest import PORTOLAN_URI, CatalogBuilder, findings_for, mutate_json
@@ -247,3 +250,57 @@ def test_missing_stac_extensions_is_ignored(catalog: CatalogBuilder) -> None:
     root = catalog.write()
     mutate_json(root / "roads" / "collection.json", lambda d: d.pop("stac_extensions"))
     assert findings_for(validate(root), "PTL-CNF-004") == []
+
+
+@pytest.mark.parametrize("kind", ["catalog", "collection", "item"])
+def test_compatible_extension_versions_through_cli(catalog: CatalogBuilder, kind: str) -> None:
+    catalog.collection("roads").item("seg1")
+    root = catalog.write()
+    path = {
+        "catalog": root / "catalog.json",
+        "collection": root / "roads/collection.json",
+        "item": root / "roads/seg1/seg1.json",
+    }[kind]
+    versions = [
+        "projection/v2.1.0",  # The reported defect: compatible newer minor.
+        "projection/v2.0.1",  # Compatible newer patch.
+        "table/v1.10.0",  # Compare numerically against v1.2.0.
+        "table/v1.1.9",  # Older within the same major still warns.
+        "table/v9.0.0",  # A different major still warns.
+        "vector/v0.2.0",  # SemVer does not promise compatibility before 1.0.
+        "vector/v0.1.1",
+        "projection/v02.1.0",  # Leading zeroes are not valid SemVer.
+    ]
+    uris = [f"https://stac-extensions.github.io/{version}/schema.json" for version in versions]
+    mutate_json(path, lambda d: d.__setitem__("stac_extensions", uris))
+    result = CliRunner().invoke(
+        main, ["check", "--json", "--no-data", "--no-extensions", str(root)]
+    )
+    assert result.exit_code in (0, 1), result.output
+    findings = [f for f in json.loads(result.output)["findings"] if f["rule_id"] == "PTL-CNF-004"]
+    findings.sort(key=lambda f: f["json_pointer"])
+    assert [f["actual"] for f in findings] == uris[3:]
+    assert [f["json_pointer"] for f in findings] == [
+        f"/stac_extensions/{i}" for i in range(3, len(uris))
+    ]
+    assert all(f["severity"] == "warning" for f in findings)
+
+
+@pytest.mark.parametrize("component", [0, 1, 2])
+def test_oversized_extension_version_through_cli(catalog: CatalogBuilder, component: int) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    parts = ["2", "0", "0"]
+    parts[component] = "9" * 4301
+    uri = f"https://stac-extensions.github.io/projection/v{'.'.join(parts)}/schema.json"
+    mutate_json(root / "roads/collection.json", _with_extension(uri))
+    result = CliRunner().invoke(
+        main, ["check", "--json", "--no-data", "--no-extensions", str(root)]
+    )
+    assert result.exception is None, repr(result.exception)
+    assert result.exit_code == 0, result.output
+    findings = [f for f in json.loads(result.output)["findings"] if f["rule_id"] == "PTL-CNF-004"]
+    assert len(findings) == 1
+    assert findings[0]["actual"] == uri
+    assert findings[0]["json_pointer"] == "/stac_extensions/1"
+    assert findings[0]["severity"] == "warning"

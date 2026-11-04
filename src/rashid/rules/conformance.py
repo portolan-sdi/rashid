@@ -217,7 +217,7 @@ def registered_at_other_version(uri: str) -> tuple[str, str] | None:
 
 
 class ExtensionVersionRule(Rule):
-    """A registered extension is declared at the version the registry pins.
+    """A registered extension meets the registry pin or a compatible newer version.
 
     The profile's STAC extension registry (the spec's ``stac/README.md``) is
     the normative list of which extensions Portolan uses and which schema URI
@@ -229,7 +229,9 @@ class ExtensionVersionRule(Rule):
 
     The finding is a warning rather than an error. The registry advances after
     catalogs are published, and a catalog that pinned the then-current version
-    is not broken, only behind.
+    is not broken, only behind. For stable extensions, SemVer permits newer
+    minor and patch versions within the same major. Major zero promises no
+    compatibility, so those declarations must still match the pin exactly.
 
     Extensions absent from the registry are ignored: the registry governs what
     it lists, not what a publisher adds. The Portolan schema URI is ignored
@@ -241,7 +243,7 @@ class ExtensionVersionRule(Rule):
     id = "PTL-CNF-004"
     spec_ids = ()
     default_severity = Severity.WARNING
-    description = "declared extension URIs match the versions the profile registry pins"
+    description = "declared extensions meet the registry pin or a compatible newer version"
     kinds = ("catalog", "collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
@@ -261,6 +263,8 @@ class ExtensionVersionRule(Rule):
             name, pinned = entry
             if parsed["version"] == pinned:
                 continue
+            if _compatible_extension_version(parsed["version"], pinned):
+                continue
             expected = f"{parsed['base']}/{pinned}/schema.json"
             yield self.finding(
                 node,
@@ -271,3 +275,18 @@ class ExtensionVersionRule(Rule):
                 expected=expected,
                 actual=uri,
             )
+
+
+def _compatible_extension_version(declared: str, pinned: str) -> bool:
+    parts = declared[1:].split(".")
+    # Bound untrusted decimal conversion; oversized components retain the warning.
+    if any(len(part) > 18 for part in parts):
+        return False
+    version = tuple(int(part) for part in parts)
+    floor = tuple(int(part) for part in pinned[1:].split("."))
+    return (
+        declared == f"v{'.'.join(map(str, version))}"
+        and version[0] > 0
+        and version[0] == floor[0]
+        and version >= floor
+    )
