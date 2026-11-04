@@ -58,11 +58,6 @@ def _schema_uri_for(graph: CatalogGraph) -> str:
     return DEFAULT_SCHEMA_URI
 
 
-def _fetch_schema(schema_uri: str) -> dict[str, Any]:
-    """Fetch the profile schema over https. See :func:`_jsonschema.fetch_schema`."""
-    return fetch_schema(schema_uri)
-
-
 @lru_cache(maxsize=1)
 def _bundled_schemas() -> dict[str, dict[str, Any]]:
     """Every profile schema shipped in the wheel, keyed by its ``$id`` sans ``#``.
@@ -130,7 +125,7 @@ def default_validator(
     if schema is not None:
         return validator_from_schema(schema)
     if allow_network:
-        return validator_from_schema(_fetch_schema(schema_uri))
+        return validator_from_schema(fetch_schema(schema_uri))
     raise LookupError(
         f"no bundled schema for {schema_uri}; this build carries "
         f"{', '.join(bundled_schema_versions())} (pass allow_network=True to fetch)"

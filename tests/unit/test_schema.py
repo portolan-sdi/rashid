@@ -8,10 +8,12 @@ reachable.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from rashid import RulesConfig, ValidationOptions, validate, validate_schema
-from rashid._jsonschema import SchemaError
+from rashid import RulesConfig, ValidationOptions, _store, validate, validate_schema
+from rashid._jsonschema import SchemaError, fetch_schema
 from rashid.catalog import CatalogGraph
 from rashid.model import Severity
 from rashid.schema import DEFAULT_SCHEMA_URI, _schema_uri_for, default_validator
@@ -154,7 +156,6 @@ def test_schema_uri_falls_back_to_default(catalog: CatalogBuilder) -> None:
 
 
 def test_default_validator_formats_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -162,7 +163,7 @@ def test_default_validator_formats_errors(monkeypatch: pytest.MonkeyPatch) -> No
         "properties": {"links": {"type": "array"}},
         "required": ["id"],
     }
-    monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
+    monkeypatch.setattr(_store, "get", lambda uri: json.dumps(fake_schema).encode())
     validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     assert validate_object({"id": "ok", "links": []}) == []
@@ -173,7 +174,6 @@ def test_default_validator_formats_errors(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_oneof_reports_the_matched_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     """A type-discriminated oneOf failure names the real cause, not the wrong branch."""
-    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -182,7 +182,7 @@ def test_oneof_reports_the_matched_branch(monkeypatch: pytest.MonkeyPatch) -> No
             {"properties": {"type": {"const": "Collection"}}, "required": ["type", "providers"]},
         ],
     }
-    monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
+    monkeypatch.setattr(_store, "get", lambda uri: json.dumps(fake_schema).encode())
     validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     errors = validate_object({"type": "Collection"})
@@ -194,7 +194,6 @@ def test_oneof_reports_the_matched_branch(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_oneof_unknown_type_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     """A type matching no branch still yields a finding rather than crashing."""
-    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -203,7 +202,7 @@ def test_oneof_unknown_type_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
             {"properties": {"type": {"const": "Collection"}}},
         ],
     }
-    monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
+    monkeypatch.setattr(_store, "get", lambda uri: json.dumps(fake_schema).encode())
     validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     errors = validate_object({"type": "Feature"})
@@ -211,14 +210,13 @@ def test_oneof_unknown_type_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_long_messages_are_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
-    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {"x": {"const": "A" * 400}},
         "required": ["x"],
     }
-    monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
+    monkeypatch.setattr(_store, "get", lambda uri: json.dumps(fake_schema).encode())
     validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     (error,) = validate_object({"x": "B"})
@@ -228,10 +226,8 @@ def test_long_messages_are_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_non_https_schema_uri_is_rejected() -> None:
     """A file:// or other non-https schema URI must not be fetched (CWE-22 / SSRF)."""
-    from rashid.schema import _fetch_schema
-
     with pytest.raises(ValueError, match="https"):
-        _fetch_schema("file:///etc/passwd")
+        fetch_schema("file:///etc/passwd")
 
 
 def test_remote_schema_fetch_sends_a_named_user_agent(https_server: HttpsServer) -> None:
@@ -243,11 +239,9 @@ def test_remote_schema_fetch_sends_a_named_user_agent(https_server: HttpsServer)
     """
     from importlib.metadata import version
 
-    from rashid import schema as schema_mod
-
     https_server.routes["/portolan/v0.1.0/schema.json"] = Route(body=b'{"$id": "x"}')
 
-    fetched = schema_mod._fetch_schema(https_server.url("portolan/v0.1.0/schema.json"))
+    fetched = fetch_schema(https_server.url("portolan/v0.1.0/schema.json"))
 
     assert fetched == {"$id": "x"}
     (seen,) = https_server.seen
@@ -313,12 +307,11 @@ def test_real_schema_accepts_the_builder(catalog: CatalogBuilder) -> None:
 
 def test_bundled_schema_is_used_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """The default URI resolves against the wheel's bundled copy; no fetch happens."""
-    import rashid.schema as schema
 
-    def explode(uri: str) -> dict:
+    def explode(uri: str) -> bytes:
         raise AssertionError(f"network fetch attempted for {uri}")
 
-    monkeypatch.setattr(schema, "_fetch_schema", explode)
+    monkeypatch.setattr(_store, "get", explode)
     validate_object = default_validator(DEFAULT_SCHEMA_URI)
     assert validate_object({"type": "Catalog"}) != []  # real schema, real verdict
 
@@ -350,15 +343,14 @@ def test_unbundled_version_warns_offline(catalog: CatalogBuilder) -> None:
 def test_unbundled_version_fetches_when_allowed(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid.schema as schema
 
     fetched: list[str] = []
 
-    def fake_fetch(uri: str) -> dict:
+    def fake_fetch(uri: str) -> bytes:
         fetched.append(uri)
-        return {"$schema": "http://json-schema.org/draft-07/schema#", "type": "object"}
+        return b'{"$schema": "http://json-schema.org/draft-07/schema#", "type": "object"}'
 
-    monkeypatch.setattr(schema, "_fetch_schema", fake_fetch)
+    monkeypatch.setattr(_store, "get", fake_fetch)
     uri = "https://schemas.portolan-sdi.org/portolan/v99.0.0/schema.json"
     findings = validate_schema(_graph(catalog), schema_uri=uri, allow_network=True)
     assert fetched == [uri]

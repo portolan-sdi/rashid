@@ -57,8 +57,6 @@ from rashid.rules.conformance import (
 
 _PASS = SchemaPass("extension", EXT_INVALID, EXT_UNAVAILABLE)
 
-_fetch_schema = fetch_schema
-
 
 class SchemaUnavailable(Exception):
     """One declared schema could not be fetched or resolved.
@@ -118,7 +116,7 @@ def default_validator(*, allow_network: bool = False) -> ExtensionValidator:
                 if not allow_network and registered_at_other_version(schema_uri) is None:
                     raise LookupError(f"no vendored schema for {schema_uri}")
                 try:
-                    schema = _fetch_schema(schema_uri)
+                    schema = fetch_schema(schema_uri)
                 except (OSError, ValueError) as exc:
                     failed[schema_uri] = str(exc)
                     raise SchemaUnavailable(str(exc)) from exc
