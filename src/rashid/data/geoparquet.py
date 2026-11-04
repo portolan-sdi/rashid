@@ -81,7 +81,7 @@ def _check_geoparquet(
 
     geo = _geo_metadata(parquet)
     if isinstance(geo, _MalformedGeo):
-        return [_unreadable_spatial_metadata(key, geo.error, subject=subject)]
+        return [_unreadable_spatial_metadata(key, geo.message, subject=subject)]
     defects: list[DataDefect] = []
     if geo is None and (primary := _native_geometry(parquet)) is not None:
         defects.append(
@@ -158,7 +158,7 @@ def _native_geometry(parquet: Any) -> str | None:
 
 @dataclass(frozen=True)
 class _MalformedGeo:
-    error: Exception
+    message: str
 
 
 def _geo_metadata(parquet: Any) -> dict[str, Any] | _MalformedGeo | None:
@@ -169,11 +169,9 @@ def _geo_metadata(parquet: Any) -> dict[str, Any] | _MalformedGeo | None:
     try:
         geo = _json.loads(raw)
     except (ValueError, TypeError) as exc:
-        return _MalformedGeo(exc)
+        return _MalformedGeo(str(exc))
     if not isinstance(geo, dict):
-        return _MalformedGeo(
-            AttributeError(f"'{type(geo).__name__}' object has no attribute 'get'")
-        )
+        return _MalformedGeo(f"'{type(geo).__name__}' object has no attribute 'get'")
     return geo
 
 

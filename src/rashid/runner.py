@@ -164,13 +164,13 @@ def validate(
     assembled from links holds only what a link names, so the checks that
     look for unlinked files cannot see them; the report says so once, as a
     ``PTL-GEN-002`` warning. ``options.fetcher`` injects an alternate
-    document fetcher, chiefly for testing. ``max_documents`` caps the crawl.
+    document fetcher, chiefly for testing. ``options.max_documents`` caps the crawl.
 
     The metadata pass always runs. The STAC 1.1.0 structural pass runs by
     default too, against the core schemas shipped in the wheel (see
-    :mod:`rashid.structural`) — fully offline. ``structural=False`` skips it,
-    as does disabling ``PTL-STR-001`` via ``config``.
-    ``structural_validator`` injects an alternate validator, chiefly for
+    :mod:`rashid.structural`) — fully offline. ``options.structural=False`` skips it,
+    as does disabling ``PTL-STR-001`` via ``options.config``.
+    ``options.structural_validator`` injects an alternate validator, chiefly for
     testing.
 
     The extension pass runs by default too, validating every object against
@@ -179,32 +179,32 @@ def validate(
     registry pins, shipped in the wheel. A registered extension declared at
     another version is validated against that version's schema, fetched over
     https. An extension the registry does not list is reported once as
-    ``PTL-EXT-002`` rather than validated, unless ``schema_allow_network`` is
+    ``PTL-EXT-002`` rather than validated, unless ``options.schema_allow_network`` is
     set, which fetches it.
-    ``extensions=False`` skips the pass, as does disabling ``PTL-EXT-001``
-    via ``config``.
+    ``options.extensions=False`` skips the pass, as does disabling ``PTL-EXT-001``
+    via ``options.config``.
 
-    When ``schema`` is true the Portolan profile schema pass runs too, applying
+    When ``options.schema`` is true the Portolan profile schema pass runs too, applying
     the published JSON Schema to every object (see :mod:`rashid.schema`). The
     schema comes from the copies bundled in the wheel, so the pass is offline;
     it is off by default only because it overlaps the metadata pass by design.
     A schema version this build does not carry is fetched over the network when
-    ``schema_allow_network`` is set, and degrades to a ``PTL-SCH-000`` warning
-    otherwise. Disabling ``PTL-SCH-001`` via ``config`` skips the pass.
-    ``schema_validator`` injects an alternate validator, chiefly for testing.
+    ``options.schema_allow_network`` is set, and degrades to a ``PTL-SCH-000`` warning
+    otherwise. Disabling ``PTL-SCH-001`` via ``options.config`` skips the pass.
+    ``options.schema_validator`` injects an alternate validator, chiefly for testing.
 
     The data pass runs by default too, reading each asset's bytes (local
     files and remote ``https`` URLs) to verify checksum, size, format, and
     spatial metadata (see :mod:`rashid.data`) — byte verification is the core
-    of what a catalog validator is for. ``data=False`` skips it, worth doing
+    of what a catalog validator is for. ``options.data=False`` skips it, worth doing
     when the assets are huge or remote and only the metadata verdict is
-    needed. Disabling every ``PTL-DAT-00x`` rule via ``config`` also skips the
-    pass; disabling a subset just silences those findings. ``data_validator``
+    needed. Disabling every ``PTL-DAT-00x`` rule via ``options.config`` also skips the
+    pass; disabling a subset just silences those findings. ``options.data_validator``
     injects an alternate validator, chiefly for offline testing. If the
     geospatial stack cannot import (broken GDAL, wheel-less platform), the
     pass degrades to a single ``PTL-DAT-000`` warning.
 
-    ``data_reader_factory`` narrows what the pass may read without turning it
+    ``options.data_reader_factory`` narrows what the pass may read without turning it
     off: passing :class:`~rashid.data.reader.LocalOnlyReader` checks the assets
     that live in the tree and treats the rest as unfetchable, which is the
     difference between validating a metadata-only mirror and downloading the
@@ -213,23 +213,23 @@ def validate(
     for a catalog read over https resolves the tree's relative hrefs under
     the catalog URL.
 
-    When ``live`` is true the live-hosting pass runs too, probing the servers
+    When ``options.live`` is true the live-hosting pass runs too, probing the servers
     behind the catalog's assets for HTTP range support and CORS (see
     :mod:`rashid.live`) — absolute ``https`` hrefs as declared, relative hrefs
-    when the publish base is known. That base is ``live_base_url`` (the https
+    when the publish base is known. That base is ``options.live_base_url`` (the https
     URL the catalog root is published under), else the catalog URL when
     ``catalog_path`` is one, else the root catalog's absolute ``self`` link.
     Given a base the pass also HEADs every link target under it, so a
     published tree missing the documents its ``child`` and ``item`` links name
     is reported (``PTL-LIV-006``), and compares the root ``self`` link against
-    the base (``PTL-LIV-007``). With a catalog URL, ``live_base_url`` takes
+    the base (``PTL-LIV-007``). With a catalog URL, ``options.live_base_url`` takes
     precedence over the URL if both are given; the CLI refuses that pair,
-    since the URL is the base. ``live`` is off by default for a tree on disk
+    since the URL is the base. ``options.live`` is off by default for a tree on disk
     because it reaches the network, and on by default for a catalog URL: the
     hosting MUSTs are what a published catalog is checked for, and the
-    network is already in use. ``live=False`` turns it off either way.
-    Disabling every ``PTL-LIV-00x`` rule via ``config`` skips the pass;
-    disabling a subset just silences those findings. ``live_prober`` injects an
+    network is already in use. ``options.live=False`` turns it off either way.
+    Disabling every ``PTL-LIV-00x`` rule via ``options.config`` skips the pass;
+    disabling a subset just silences those findings. ``options.live_prober`` injects an
     alternate prober, chiefly for offline testing. Its ``head`` runs on several
     threads at once (see :class:`rashid.live.Prober`).
     """

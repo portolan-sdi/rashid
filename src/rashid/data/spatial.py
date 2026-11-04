@@ -77,7 +77,7 @@ class _Wgs84Bounds:
 
 
 def _unreadable_spatial_metadata(
-    key: str, error: Exception, *, subject: str | None = None
+    key: str, error: Exception | str, *, subject: str | None = None
 ) -> DataDefect:
     subject = subject or f"asset '{key}'"
     return DataDefect(

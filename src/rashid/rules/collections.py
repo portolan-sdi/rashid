@@ -359,11 +359,7 @@ def _undeclared_scene_files(node: Node, graph: CatalogGraph) -> list[str]:
 
 def _raster_asset_keys(node: Node) -> list[str]:
     """Keys of the node's primary raster assets, in declaration order."""
-    keys: list[str] = []
-    for _pointer, key, asset in assets_of(node):
-        if is_raster_data_asset(asset):
-            keys.append(key)
-    return keys
+    return [key for _pointer, key, asset in assets_of(node) if is_raster_data_asset(asset)]
 
 
 def _data_asset_state(node: Node) -> str:
