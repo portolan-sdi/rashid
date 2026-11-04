@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import glob as globmodule
 import math
+from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
@@ -126,3 +128,15 @@ class _FileCache:
 
     def __exit__(self, *_exc: object) -> None:
         self._stack.close()
+
+
+def _partition_files(base: Path, pattern: str) -> list[tuple[str, Path]]:
+    """List a locally scoped glob in stable order with POSIX message paths.
+
+    The caller owns href applicability and containment; this owner performs
+    filesystem enumeration only.
+    """
+    matches = sorted(
+        match.replace("\\", "/") for match in globmodule.glob(pattern, root_dir=str(base))
+    )
+    return [(match, base / match) for match in matches]

@@ -810,7 +810,9 @@ def test_partition_glob_matches_use_posix_names(
     assets.write_geoparquet(parts / "a.parquet")
     assets.write_geoparquet(parts / "b.parquet", version="1.0.0")
     monkeypatch.setattr(
-        checks.globmodule, "glob", lambda *args, **kwargs: [r"parts\b.parquet", r"parts\a.parquet"]
+        file_owner.globmodule,
+        "glob",
+        lambda *args, **kwargs: [r"parts\b.parquet", r"parts\a.parquet"],
     )
     result = CliRunner().invoke(main, ["check", "--json", str(tmp_path)])
     assert result.exit_code == 1, result.output

@@ -62,7 +62,6 @@ failure the way a wrong one is.
 from __future__ import annotations
 
 import contextlib
-import glob as globmodule
 import hashlib
 import logging
 import math
@@ -110,6 +109,7 @@ from rashid.data import (
     DAT_VECTOR_COLUMNS,
     DataDefect,
     _DataResults,
+    _files,
 )
 from rashid.data._files import _AssetFiles, _FileCache
 from rashid.data.reader import AssetReader, Locator
@@ -1856,10 +1856,7 @@ def _partition_files(node: Node) -> list[tuple[str, Path]]:
     if normalized.startswith(".."):
         return []  # escapes the catalog tree
     base = node.abs_path.parent
-    matches = sorted(
-        match.replace("\\", "/") for match in globmodule.glob(normalized, root_dir=str(base))
-    )
-    return [(match, base / match) for match in matches]
+    return _files._partition_files(base, normalized)
 
 
 def _check_partition_schemas(node: Node, cache: _FileCache) -> list[DataDefect]:
