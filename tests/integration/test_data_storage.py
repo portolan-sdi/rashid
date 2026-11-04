@@ -949,7 +949,7 @@ def test_many_failing_partitions_fold_into_one_defect(tmp_path: Path) -> None:
     assert "partition file 'parts/b.parquet'" in defects[0].message
 
 
-def test_partition_severities_fold_separately(tmp_path: Path) -> None:
+def test_partition_severities_fold_separately() -> None:
     """An ERROR and a WARNING of one rule stay two findings, not one."""
     defects = [
         checks.DataDefect(DAT_ROWGROUP_STATS, Severity.ERROR, "e", "x"),

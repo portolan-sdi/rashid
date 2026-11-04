@@ -480,7 +480,9 @@ def test_asset_files_open_once_and_repeat_a_failure(opener: str) -> None:
     raised = []
     with _trace.counting() as delta:
         for _ in range(3):
-            with pytest.raises(Exception) as caught:
+            with pytest.raises(
+                (OSError, pa.ArrowInvalid), match=r"[/\\]no[/\\]such[/\\]file"
+            ) as caught:
                 getattr(files, opener)()
             raised.append(caught.value)
     assert raised[0] is raised[1] is raised[2]

@@ -33,7 +33,7 @@ def test_severity_override_promotes_warning_to_error(catalog: CatalogBuilder) ->
     assert findings_for(report, "PTL-TTL-002")[0].severity is Severity.ERROR
 
 
-def test_config_from_dict(catalog: CatalogBuilder) -> None:
+def test_config_from_dict() -> None:
     config = RulesConfig.from_dict(
         {"disabled": ["PTL-TTL-002"], "severity": {"PTL-PRO-002": "warning"}}
     )

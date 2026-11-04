@@ -364,7 +364,7 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
     assert called is False
 
 
-def test_parse_error_nodes_are_skipped(catalog: CatalogBuilder, tmp_path: Path) -> None:
+def test_parse_error_nodes_are_skipped(catalog: CatalogBuilder) -> None:
     root = _graph(catalog).root_path
     # Corrupt the collection JSON so its node carries a parse_error.
     (root / "roads" / "collection.json").write_text("{ not json", encoding="utf-8")

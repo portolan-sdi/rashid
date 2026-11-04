@@ -39,7 +39,7 @@ def test_get_reports_the_status(https_server: HttpsServer, status: int) -> None:
 
 
 def test_a_failure_is_an_os_error(https_server: HttpsServer) -> None:
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="returned 404"):
         _store.get(https_server.url("missing.json"))
 
 

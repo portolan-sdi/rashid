@@ -66,9 +66,12 @@ def test_counting_yields_only_what_changed_inside() -> None:
 
 
 def test_counting_records_the_delta_when_the_block_raises() -> None:
-    with pytest.raises(RuntimeError), _trace.counting() as delta:
+    def count_then_raise() -> None:
         _trace.count("x")
-        raise RuntimeError
+        raise RuntimeError("counted x")
+
+    with pytest.raises(RuntimeError, match="counted x"), _trace.counting() as delta:
+        count_then_raise()
     assert delta == {"x": 1}
 
 
@@ -111,8 +114,8 @@ def test_span_records_times_thread_and_attrs() -> None:
 
 def test_span_is_recorded_when_the_block_raises() -> None:
     _trace.enable("on")
-    with pytest.raises(ValueError), _trace.span("boom"):
-        raise ValueError
+    with pytest.raises(ValueError, match="span failure"), _trace.span("boom"):
+        raise ValueError("span failure")
     assert [s.name for s in _trace.spans()] == ["boom"]
 
 
@@ -535,7 +538,7 @@ def test_stderr_handler_follows_a_swapped_stream(monkeypatch: pytest.MonkeyPatch
     assert swapped.getvalue().endswith("INFO rashid.example: late\n")
 
 
-def test_stderr_handler_ignores_an_assigned_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stderr_handler_ignores_an_assigned_stream() -> None:
     handler = _trace._Stderr()
     handler.setStream(io.StringIO())
     assert handler.stream is sys.stderr
