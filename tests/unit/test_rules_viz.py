@@ -247,6 +247,43 @@ def test_visual_asset_with_style_passes(catalog: CatalogBuilder) -> None:
     assert findings_for(report, "PTL-VIZ-003") == []
 
 
+def test_cog_visual_derivative_needs_no_style(catalog: CatalogBuilder) -> None:
+    catalog.collection(
+        "rasters",
+        assets={
+            "data": default_asset(),
+            "thumbnail": thumbnail_asset(),
+            "overview": {
+                "href": "./overview.tif",
+                "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+                "roles": ["visual", "overview"],
+            },
+        },
+    ).item("rasters-2024")
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-002") == []
+
+
+def test_cog_and_non_cog_visual_derivatives_need_a_style(catalog: CatalogBuilder) -> None:
+    catalog.collection(
+        "rasters",
+        assets={
+            "data": default_asset(),
+            "thumbnail": thumbnail_asset(),
+            "overview": {
+                "href": "./overview.tif",
+                "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+                "roles": ["visual"],
+            },
+            "outlines": {
+                "href": "./outlines.fgb",
+                "type": "application/vnd.flatgeobuf",
+                "roles": ["visual"],
+            },
+        },
+    ).item("rasters-2024")
+    assert len(findings_for(validate(catalog.write()), "PTL-VIZ-002")) == 1
+
+
 def test_pmtiles_asset_without_link(catalog: CatalogBuilder) -> None:
     collection = catalog.collection(
         "roads",
