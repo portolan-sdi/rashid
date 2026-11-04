@@ -1,0 +1,16 @@
+# Production API ownership; the root config also bans imperative pytest.xfail in tests.
+extend = "../pyproject.toml"
+
+[lint.flake8-tidy-imports.extend-banned-api]
+"urllib.parse.urljoin" = { msg = "Use rashid._href for URL interpretation." }
+"urllib.parse.urlsplit" = { msg = "Use rashid._href.split_href." }
+"urllib.parse.urlparse" = { msg = "Use rashid._href.parse_href." }
+"urllib.request.Request" = { msg = "Use rashid._store.request for the shared HTTPS and User-Agent policy." }
+"urllib.request.urlopen" = { msg = "Use rashid._store for HTTP transport." }
+"json.loads" = { msg = "Use rashid._json.loads for counted JSON parsing." }
+"json.load" = { msg = "Read bytes and use rashid._json.loads." }
+"orjson.loads" = { msg = "Use rashid._json.loads for counted JSON parsing." }
+"obstore.store.HTTPStore" = { msg = "Use rashid._store for shared object stores." }
+"glob.glob" = { msg = "Use rashid.data._files for partition enumeration." }
+"pyarrow.parquet.ParquetFile" = { msg = "Use rashid.data._files for shared, counted readers." }
+"rasterio.open" = { msg = "Use rashid.data._files for shared, counted readers." }

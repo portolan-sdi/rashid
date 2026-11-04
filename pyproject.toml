@@ -119,6 +119,14 @@ known-first-party = ["rashid"]
 "src/rashid/rules/*.py" = ["ARG002"]
 # Test doubles retain protocol method and callback signatures. Keep ARG001 on for fixtures.
 "tests/**" = ["ARG002", "ARG005"]
+# Dedicated owners; reasons and live matches are checked in guardrail_exemptions.json.
+"src/rashid/_href.py" = ["TID251"]
+"src/rashid/_store.py" = ["TID251"]
+"src/rashid/_json.py" = ["TID251"]
+"src/rashid/data/_files.py" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"pytest.xfail" = { msg = "use @pytest.mark.xfail(strict=True) keyed to an open issue and listed in the ledger" }
 
 [tool.mypy]
 strict = true
@@ -207,6 +215,35 @@ source_modules = [
 ]
 forbidden_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"]
 ignore_imports = ["rashid.data -> rashid.data.checks"]
+
+[[tool.importlinter.contracts]]
+id = "rules-no-network"
+name = "metadata rules must not import network passes or transport"
+type = "forbidden"
+source_modules = ["rashid.rules"]
+forbidden_modules = ["rashid.live", "rashid.remote", "rashid._store"]
+
+[[tool.importlinter.contracts]]
+id = "rules-no-data"
+name = "metadata rules must not import data checks"
+type = "forbidden"
+source_modules = ["rashid.rules"]
+forbidden_modules = ["rashid.data"]
+
+[[tool.importlinter.contracts]]
+id = "data-files-owner"
+name = "only data checks may import the file-handle owner"
+type = "protected"
+protected_modules = ["rashid.data._files"]
+as_packages = false
+# T9 split data/checks.py into these concern modules. No package-wide wildcard.
+allowed_importers = [
+    "rashid.data.checks",
+    "rashid.data.geoparquet",
+    "rashid.data.raster",
+    "rashid.data.mirror",
+    "rashid.data.partitions",
+]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
