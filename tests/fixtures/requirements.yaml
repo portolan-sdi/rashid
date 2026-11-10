@@ -11,9 +11,9 @@
 #   process   - not machine-checkable from the catalog or its bytes
 #               (publish-time behavior, upstream knowledge, guidance).
 #
-# test is optional and comes after quote. It is the abstract test for the
-# requirement: the procedure and the numbers a validator runs, which the spec
-# prose names but does not spell out. check_requirements.py does not read it.
+# The optional test field follows quote and defines the abstract test for a
+# requirement. It gives the procedure and thresholds that the spec references.
+# check_requirements.py does not check the test field.
 #
 # Run `uv run specs/tools/check_requirements.py` after editing the spec or this
 # file; it fails when a quote no longer anchors or a keyword occurrence is
@@ -301,12 +301,21 @@ requirements:
       `thumbnail` for the preview image; `metadata` for sidecar metadata,
       with `iso-19115` used specifically for an ISO 19115 file.
 
+  - id: PORTO-CORE-085
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/core.md
+    quote: >-
+      If an asset's `href` points to the STAC object that contains it, the
+      publisher MUST omit `file:size` and `file:checksum` from that asset's
+      metadata.
+
   - id: PORTO-CORE-028
     severity: SHOULD
     enforcement: validator
     file: specs/portolan/core.md
     quote: >-
-      Assets SHOULD carry `file:size` and `file:checksum` from the [file
+      Other assets SHOULD include `file:size` and `file:checksum` from the [file
       extension](https://github.com/stac-extensions/file).
 
   - id: PORTO-CORE-029
@@ -574,44 +583,50 @@ requirements:
     enforcement: validator
     file: specs/portolan/core.md
     quote: >-
-      A mirror MUST include a `via` link (type `text/html`) pointing to the
-      original source.
+      A mirror MUST include at least one `via` link to the original source's
+      HTML page, with `type` set to `text/html`.
+
+  - id: PORTO-CORE-084
+    severity: MAY
+    enforcement: validator
+    file: specs/portolan/core.md
+    quote: >-
+      Additional `via` links MAY reference upstream services that supply the
+      data, with `type` set to the media type returned by each service.
 
   - id: PORTO-CORE-054
     severity: MUST
     enforcement: process
     file: specs/portolan/core.md
     quote: >-
-      When that source publishes its own STAC catalog, the mirror MUST also
-      include a `canonical` link pointing to the source's STAC, so consumers
-      and agents can follow the chain to the authoritative metadata, not just
-      a landing page.
+      If the original source publishes a STAC catalog, the mirror MUST also
+      include a `canonical` link to that catalog.
 
   - id: PORTO-CORE-055
     severity: MAY
     enforcement: validator
     file: specs/portolan/core.md
     quote: >-
-      Whether the source publishes a STAC catalog cannot be determined from
-      the mirror's metadata alone, so a validator MAY surface a mirror
-      without a `canonical` link as informational, never as a failure.
+      A validator MAY report a missing `canonical` link as informational,
+      but never as a failure.
 
   - id: PORTO-CORE-056
     severity: MAY
     enforcement: validator
     file: specs/portolan/core.md
     quote: >-
-      The `via` and `canonical` links MAY both be present and point at
-      different targets (a human page and a STAC root).
+      The `via` and `canonical` links MAY both be present and point to
+      different targets, such as a human-readable page and a STAC root.
 
   - id: PORTO-CORE-057
     severity: MUST
     enforcement: validator
     file: specs/portolan/core.md
     quote: >-
-      A mirror MUST record when it was last synced from its source by setting
-      the top-level `updated` field (RFC 3339) at each synced catalog and
-      collection to the time of the sync.
+      During a mirror sync, the tool MUST set the top-level `updated` field
+      on every catalog and collection it checks. Use the sync time in RFC
+      3339 format. Set the value even if the source has not changed. Leave
+      `updated` unchanged on catalogs and collections outside that sync.
 
   - id: PORTO-CORE-058
     severity: MUST
@@ -668,7 +683,8 @@ requirements:
     enforcement: process
     file: specs/portolan/core.md
     quote: >-
-      The root catalog MAY publish a logo as a link with `rel: "icon"`.
+      A catalog, collection, or item MAY include a logo link with `rel:
+      "icon"`.
 
   - id: PORTO-CORE-075
     severity: MUST
@@ -815,10 +831,10 @@ requirements:
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      Data MUST be provided in GeoParquet 1.1 or 2.0, following the [Best
-      Practices for Distributing
-      GeoParquet](https://guide.cloudnativegeo.org/geoparquet/) so it can be
-      queried without a server.
+      Publishers MUST provide data as [GeoParquet 1.1](https://geoparquet.org/releases/v1.1.0/),
+      [GeoParquet 2.0](https://geoparquet.org/releases/v2.0.0-rc.1/), or Parquet with native
+      [`GEOMETRY` or `GEOGRAPHY`](https://github.com/apache/parquet-format/blob/master/Geospatial.md)
+      logical types.
 
   - id: PORTO-FMT-005
     severity: SHOULD
@@ -827,25 +843,22 @@ requirements:
     quote: >-
       Files SHOULD be compressed to stay small, with `zstd` RECOMMENDED.
 
-  # The next three entries are vendored ahead of the nightly sync, from
-  # portolan-spec PR #226 (accept native-geo Parquet): the sync replaces this
-  # file wholesale once that PR merges.
   - id: PORTO-FMT-055
     severity: MUST
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      A file with a native geospatial column is vector data even when it
-      carries no `geo` metadata key. A validator MUST apply every requirement
-      in this section to such a file rather than treat it as tabular Parquet.
+      A file with a native geospatial column is vector data, even without a `geo`
+      metadata key. A validator MUST apply every requirement in this section to the
+      file.
 
   - id: PORTO-FMT-056
     severity: MUST
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      When the native logical type's `crs` field is the only CRS a geometry
-      column declares, the value MUST be one the [Parquet geospatial
+      When a geometry column declares its CRS only through the native logical type's
+      `crs` field, the value MUST be one that the [Parquet geospatial
       specification](https://github.com/apache/parquet-format/blob/master/Geospatial.md)
       defines.
 
@@ -854,37 +867,122 @@ requirements:
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      The value SHOULD be inline PROJJSON or a `projjson:<key>` reference,
-      which a reader resolves from the file alone. An `<authority>:<code>` or
-      `srid:<n>` value needs a CRS registry, so a validator reports it as a
-      warning.
+      The value SHOULD be inline PROJJSON or a `projjson:<key>` reference. Readers
+      can resolve either from the file alone. Values in `<authority>:<code>` or
+      `srid:<n>` form require a CRS registry. A validator reports these values as
+      warnings.
 
-  - id: PORTO-FMT-058
+  - id: PORTO-FMT-006
     severity: MUST
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      A validator MUST NOT judge the order of a file whose row groups total
-      fewer than 5,000,000 compressed bytes, and MUST report that the file is
-      too small for order to matter.
+      Rows MUST follow a spatial order that places nearby features near each
+      other in the file.
+    # The validator runs this abstract row test when the footer check gives
+    # no verdict. The spec states the rule and references this procedure.
+    test: >-
+      The validator takes the N rows in file order and splits them into ten
+      chunks. Chunk k, for k from 0 to 9, contains rows with zero-based
+      index i such that floor(k * N / 10) <= i < floor((k + 1) * N / 10). A
+      chunk's box is the union of its rows' bounding boxes. A row with a
+      null bbox covering keeps its position in its file-order chunk. It does
+      not extend the chunk's box. The validator omits any chunk with no
+      boxed rows from the layout. The number of chunks with a box is n. The
+      validator computes the pruning efficiency from formats.md on these
+      chunk boxes. Each chunk's row count r_i is its count of boxed rows.
+      Its byte count s_i equals that row count. With all ten chunks present,
+      the reference grid divides their extent into 4 + 4 + 2 cells. The rows
+      pass at the same bar as any layout. The validator runs the row check
+      only at or above the 5 MB size floor. The row floor in formats.md
+      requires ten chunks of twenty rows. Below that floor, the validator
+      reports that the file has too few rows to judge and gives no verdict.
+
+  - id: PORTO-FMT-053
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      The reference layout MUST use the following near-square grid of `n`
+      cells with uniform `r_i` and `s_i`.
+    test: >-
+      The layouts in
+      specs/portolan/abstract-tests/spatial-metric-vectors.json use this
+      reference grid. five-strips-n5 distinguishes the grid from a strip
+      tiling. three-boxes-old-vs-new-reference distinguishes it from a grid
+      with empty cells.
+
+  - id: PORTO-FMT-054
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      A validator MUST reproduce the expected values in the abstract test
+      vectors in
+      [`abstract-tests/spatial-metric-vectors.json`](abstract-tests/spatial-metric-vectors.json).
+    test: >-
+      The validator checks every entry under layouts and rows in that file.
+      It reproduces count, achieved, achievable, efficiency and area_sum to
+      six decimals. It reports efficiency, area_sum and below_bar as absent
+      where the file specifies null. line-n8 tests an extent with zero width
+      on one axis, with efficiency 1.0 and area_sum null. single-box tests
+      undefined efficiency at n = 1. outlier-sorted-n20 and
+      outlier-shuffled-n20 test window placement.
+      whole-extent-box-heavy-bytes-n8 tests byte weights. crowded-tile-n4
+      tests row weights.
+
+  - id: PORTO-FMT-050
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      A file at least as large as the size floor with eight or more row
+      groups MUST reach the pass bar on its row-group boxes.
+
+  - id: PORTO-FMT-044
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      A validator MUST NOT report a pass from fewer than eight row groups.
+      It MAY report their statistics.
 
   - id: PORTO-FMT-059
     severity: MUST
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      Below eight row groups the footer check MUST still fail a file whose
-      efficiency is under 0.25 at two or more row groups: boxes that each
-      cover most of the extent are plain at any count.
+      Below eight row groups, the footer check MUST fail a file when its
+      efficiency is under 0.25 and it has three or more row groups.
+
+  - id: PORTO-FMT-051
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      Wherever it reports a verdict, a validator MUST also report the
+      efficiency, the achievable skip rate, and the area sum as statistics.
+      These statistics do not give separate verdicts. The achievable skip
+      rate is the reference grid's skip rate. When the extent has no area,
+      the area sum is undefined. A validator MUST report an undefined area
+      sum as absent rather than as 0.
+
+  - id: PORTO-FMT-058
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      A validator MUST NOT judge spatial order when the row groups total
+      fewer than 5,000,000 compressed bytes. It MUST report that the file is
+      too small for order to matter.
 
   - id: PORTO-FMT-060
     severity: MUST
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      A validator MUST lead its verdict with the absolute cost: the share of
-      the file's bytes the query window is expected to read, as in "a
-      typical query reads 23% of the file".
+      A validator MUST start its verdict with the expected share of the
+      file's bytes that the query window reads.
 
   - id: PORTO-FMT-061
     severity: SHOULD
@@ -892,108 +990,35 @@ requirements:
     file: specs/portolan/formats.md
     quote: >-
       On a failure, a validator SHOULD identify the row groups whose boxes
-      are largest against the extent, so a publisher can see whether one
-      outlier or the whole file is at fault. A validator SHOULD also report
-      the read share for windows at 1% and at 25% of each dimension beside
-      the 10% figure.
+      are largest relative to the extent. This helps a publisher see whether
+      one outlier or the whole file causes the failure. A validator SHOULD
+      also report the read share for windows at 1% and at 25% of each
+      dimension beside the 10% figure.
 
-  - id: PORTO-FMT-006
-    severity: MUST
-    enforcement: validator
+  - id: PORTO-FMT-073
+    severity: MAY
+    enforcement: process
     file: specs/portolan/formats.md
     quote: >-
-      Rows MUST be spatially ordered so nearby features are nearby in the
-      file.
-    # The abstract test for the row check. The requirement above is the rule;
-    # this is the procedure a validator runs where the footer check is not
-    # judged, and its numbers live here, not in the spec prose.
-    test: >-
-      Take the N rows in file order and split them into ten chunks: chunk k,
-      for k from 0 to 9, holds the rows with index i, counted from 0, such
-      that floor(k * N / 10) <= i < floor((k + 1) * N / 10). A chunk's box is
-      the union of the bounding boxes of its rows. A row whose bbox covering
-      is null stays in its file-order chunk and does not extend the chunk's
-      box. A chunk with no boxed rows contributes no box: it is left out of
-      the mean, and n is the number of chunks that have a box. Compute the
-      pruning efficiency defined in formats.md with the chunk boxes as the
-      layout, so with all ten present the reference is the near-square grid
-      of the chunks' extent into 4 + 4 + 2 cells. The rows pass at the same
-      bar as any layout. Below the row floor formats.md names, ten chunks of
-      twenty rows, the validator reports that the file has too few rows to
-      judge and gives no verdict.
-
-  - id: PORTO-FMT-053
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      The reference layout MUST be the near-square grid of `n` cells that
-      this construction gives, and no other tiling:
-    test: >-
-      specs/portolan/abstract-tests/spatial-metric-vectors.json scores eight
-      layouts against this grid. five-strips-n5 and
-      three-boxes-old-vs-new-reference separate it from a strip tiling and
-      from the grid with empty cells.
-
-  - id: PORTO-FMT-054
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      The abstract test vectors in
-      [`abstract-tests/spatial-metric-vectors.json`](abstract-tests/spatial-metric-vectors.json)
-      give the expected numbers for these definitions, and a validator MUST
-      reproduce them.
-    test: >-
-      Every entry under layouts and rows in that file. A validator
-      reproduces count, achieved, achievable, efficiency and area_sum to six
-      decimals, and reports efficiency, area_sum and below_bar as absent
-      where the file holds null. line-n8 pins the one-axis guard, with
-      efficiency 1.0 and area_sum null. single-box pins the undefined
-      efficiency at n = 1.
-
-  - id: PORTO-FMT-050
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      A file with eight or more row groups MUST pass on its row-group boxes,
-      read from the per-row-group spatial statistics.
-
-  - id: PORTO-FMT-044
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      Below that floor the footer check does not decide. A validator MUST
-      NOT report a pass or a fail from the row groups, and MAY report the
-      numbers.
-
-  - id: PORTO-FMT-051
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      Wherever it reports a verdict, a validator MUST also report the area
-      sum, as a statistic and not as a verdict. When the extent has no area,
-      the area sum is undefined, and a validator MUST report it as absent
-      rather than as 0.
+      A validator MAY use page-level statistics to refine the read share it
+      reports.
 
   - id: PORTO-FMT-052
     severity: MUST
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      That test needs 200 rows. Below that a validator MUST report that the
-      file has too few rows to judge, and MUST NOT withhold that message.
+      Below that count, a validator MUST report that the file has too few
+      rows to judge. It MUST NOT withhold that message.
 
   - id: PORTO-FMT-049
     severity: MUST
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      The fraction of consecutive row-group pairs whose boxes overlap MAY be
-      reported as a statistic, but MUST NOT decide the verdict.
+      A validator MAY report the fraction of consecutive row-group pairs
+      whose boxes overlap as a statistic. It MUST NOT base its verdict on
+      that fraction.
 
   - id: PORTO-FMT-007
     severity: MUST
@@ -1060,6 +1085,16 @@ requirements:
       format of the data, it MAY additionally be registered as a
       collection-level asset, and the link and the asset then coexist.
 
+  - id: PORTO-FMT-062
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      A PMTiles asset MUST meet both conditions: - The asset has the
+      `visual` role. - The asset belongs to a collection that references the
+      GeoParquet data used to create the PMTiles file. Use an asset with the
+      `data` role or `partition:glob` for the GeoParquet reference.
+
   - id: PORTO-FMT-014
     severity: MUST
     enforcement: validator
@@ -1103,28 +1138,31 @@ requirements:
     enforcement: process
     file: specs/portolan/formats.md
     quote: >-
-      The scheme's path structure MUST reflect spatial extent so readers can
-      prune files without reading metadata.
+      For a spatial scheme (`kdtree`, `h3`, `s2`, `quadkey`, or `a5`), file
+      paths MUST indicate each file's geographic extent.
 
   - id: PORTO-FMT-019
     severity: SHOULD
     enforcement: process
     file: specs/portolan/formats.md
     quote: >-
-      `partition:glob` is the normative bulk-access path; the collection
-      description SHOULD also mention the glob for human readers, but
-      validators read only the field.
+      The collection description SHOULD also include the glob for human
+      readers.
 
   - id: PORTO-FMT-020
     severity: MAY
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      The https-only rule for absolute asset hrefs does not extend to the
-      glob: globs are consumed by partition-aware readers rather than
-      browsers, and bucket-native schemes (`s3://`, `gs://`) MAY be used
-      where those readers need them (glob expansion requires listing, which
-      plain https does not provide).
+      Bucket-native schemes (`s3://`, `gs://`) MAY be used when
+      partition-aware readers need them.
+
+  - id: PORTO-FMT-064
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      `partition:glob` MUST NOT use `http://` or `https://`.
 
   - id: PORTO-FMT-021
     severity: MUST
@@ -1180,32 +1218,38 @@ requirements:
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      COGs MUST carry pixel statistics for rendering.
+      COGs MUST include pixel statistics for rendering.
 
   - id: PORTO-FMT-027
     severity: MUST
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      Every band MUST carry an embedded minimum, maximum, mean, and standard
-      deviation so a renderer can scale any data type without reading pixels.
+      For each band, the file MUST include an embedded minimum, maximum,
+      mean, and standard deviation.
 
   - id: PORTO-FMT-028
     severity: MUST
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      Statistics MUST be embedded in the file — an external `.aux.xml` (PAM)
-      sidecar does not satisfy this —
+      Publishers MUST embed these statistics in the COG file.
 
   - id: PORTO-FMT-029
     severity: MUST
     enforcement: process
     file: specs/portolan/formats.md
     quote: >-
-      and MUST be written at creation time (e.g. `gdal_translate -of COG
-      -stats`), residing in the file's leading header block so they arrive in
-      a reader's first range request.
+      Publishers MUST write the statistics at creation time, in the file's
+      leading header block.
+
+  - id: PORTO-FMT-063
+    severity: MUST
+    enforcement: process
+    file: specs/portolan/formats.md
+    quote: >-
+      Embedded statistics MUST describe the full-resolution pixels stored in
+      each band.
 
   - id: PORTO-FMT-030
     severity: MUST
@@ -1265,10 +1309,10 @@ requirements:
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      STAC requires `extent.spatial.bbox` on every collection, so a tabular
-      collection MUST still carry one, but it represents the area of interest
-      the data pertains to, not a geometry footprint, and validators MUST
-      treat it as informational.
+      A tabular collection MUST include `extent.spatial.bbox`, as required
+      by STAC. Use the bounds of the geographic area the table is about. The
+      bounding box does not describe a geometry footprint. Validators MUST
+      treat the bounding box as informational.
 
   - id: PORTO-FMT-037
     severity: SHOULD

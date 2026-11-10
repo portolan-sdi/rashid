@@ -132,7 +132,7 @@ def test_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
     message = defects[0].message
     assert "rows are not spatially ordered across its 8 row groups" in message
     assert "reads 100% of the bytes against 14% for an ideal tiling" in message
-    assert "(efficiency 0.00, under the 0.70 bar)" in message
+    assert "(efficiency 0.00, under the 0.65 bar)" in message
     assert "windows at 1% and 25% read 100% and 100%" in message
     assert "the boxes sum to 8.00 of the extent" in message
     assert "the largest boxes are row groups" in message
@@ -172,9 +172,11 @@ def test_seven_middling_row_groups_withhold_the_pass(tmp_path: Path) -> None:
 def test_row_ordering_is_judged_below_the_row_group_floor(tmp_path: Path, groups: int) -> None:
     """Row ordering binds every file, so the eight-group floor does not save it.
 
-    Globally scattered rows fail at every count: at one group through the row
-    check's file-order chunks, and at two to seven through the footer's clear
-    failure (PORTO-FMT-059), since every box spans the extent.
+    Globally scattered rows fail at every count: at one and two groups through
+    the row check's file-order chunks (the clear-fail rule starts at three,
+    PORTO-FMT-059: sorted two-group files can score 0.18), and at three to
+    seven through the footer's clear failure, since every box spans the
+    extent.
     """
     rows = 6300  # divisible by 1, 2, 4, and 7
     path = tmp_path / f"scattered_{groups}.parquet"
@@ -185,10 +187,10 @@ def test_row_ordering_is_judged_below_the_row_group_floor(tmp_path: Path, groups
     errors = _errors(defects)
     assert [d.rule_id for d in errors] == [DAT_ORDERING]
     message = errors[0].message
-    if groups == 1:
-        assert f"{rows} rows in 1 row group" in message
+    if groups in (1, 2):
+        assert f"{rows} rows in {groups} row group" in message
         assert "split into 10 chunks in file order" in message
-        assert "under the 0.70 bar" in message
+        assert "under the 0.65 bar" in message
     else:
         assert "plainly not spatially ordered" in message
         assert "under the 0.25 bar" in message
@@ -254,7 +256,7 @@ def test_eight_row_groups_ordered_is_clean(tmp_path: Path) -> None:
 def test_the_row_group_floor_is_one_constant(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Floor 8 against bar 0.70 is the open decision; flipping it is one line."""
+    """Floor 8 against bar 0.65 is the open decision; flipping it is one line."""
     monkeypatch.setattr(checks, "_MIN_ORDERING_ROW_GROUPS", 5)
     path = tmp_path / "five_groups.parquet"
     assets.write_geoparquet(path, points=assets.interleaved_points(10))
@@ -322,7 +324,7 @@ def test_footer_verdict_settles_a_file_the_row_check_would_fail(tmp_path: Path) 
 
     rows = checks._row_ordering_defects("data", parquet, geo, len(points), groups)
     assert [d.severity for d in rows] == [Severity.ERROR]
-    assert ", under the 0.70 bar)" in rows[0].message
+    assert ", under the 0.65 bar)" in rows[0].message
 
     assert _gpq(path) == []
 

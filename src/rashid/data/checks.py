@@ -164,13 +164,12 @@ _QUERY_FRACTION = 0.10
 # names the absolute cost at the query window; PORTO-FMT-061 adds the 1% and
 # 25% windows beside it).
 _REPORT_FRACTIONS = (0.01, _QUERY_FRACTION, 0.25)
-# 0.70 is placed from real data: across 206 files with five or more row groups from
-# every catalog in the Portolan registry, one genuinely unsorted file scored 0.00,
-# eight under-sorted files fell between 0.53 and 0.70, and the remaining 197 ran
-# from 0.72 up with a median of 0.98. Every file in that band reached 0.87-0.97
-# after a spatial sort, so the bar separates files a re-sort would measurably
-# improve from files already as good as their row-group count allows.
-_MIN_SKIP_EFFICIENCY = 0.70
+# 0.65 comes from the 2026-11 registry survey and its Hilbert-sort control
+# (the spec's calibration directory): the 32 sorted copies eligible for a
+# footer pass scored 0.696 to 0.944, so a 0.70 bar rejected an already-sorted
+# file (Manitoba buildings, 0.696 before and after a re-sort) while 0.65
+# accepts every tested sorted copy and still fails the shuffled band.
+_MIN_SKIP_EFFICIENCY = 0.65
 # A reference skip rate at or under this is zero: one row group, a window as
 # large as the extent, or an extent with no area. Float noise, not a layout.
 _NO_SKIP = 1e-9
@@ -179,10 +178,12 @@ _NO_SKIP = 1e-9
 # than the bar unreachable: a grid of so few cells is a poor model of what a curve
 # sort achieves, so well-sorted files from several catalogs score 0.60 to 0.88 at
 # five row groups and 0.76 to 0.94 at eight (rashid#174 review, spec point 3).
-# PORTO-FMT-044 withholds only the pass there: a clear failure is plain at any
-# count, so efficiency under _OBVIOUS_FAIL_EFFICIENCY fails from two row groups
-# (PORTO-FMT-059). The worst sorted file in the calibration data measured 0.53;
-# 0.25 sits well under it and well over the shuffled band's 0.00 to 0.17.
+# PORTO-FMT-044 withholds only the pass there: a clear failure is plain from
+# three row groups up, where efficiency under _OBVIOUS_FAIL_EFFICIENCY fails
+# (PORTO-FMT-059). Two groups are exempt: the 2026-11 sort control measured
+# sorted two-group copies as low as 0.18, so a clear-fail there would reject
+# files a re-sort cannot improve. No tested sorted copy with three or more
+# groups fell below 0.34.
 _MIN_ORDERING_ROW_GROUPS = 8
 _OBVIOUS_FAIL_EFFICIENCY = 0.25
 
@@ -1094,8 +1095,9 @@ def _ordering_defects(
             )
         ]
     efficiency = score.efficiency
-    if groups > 1 and efficiency is not None and efficiency < _OBVIOUS_FAIL_EFFICIENCY:
-        # PORTO-FMT-059: the clear failure does not wait for eight row groups.
+    if groups >= 3 and efficiency is not None and efficiency < _OBVIOUS_FAIL_EFFICIENCY:
+        # PORTO-FMT-059: the clear failure does not wait for eight row groups,
+        # but it does wait for three -- sorted two-group files can score 0.18.
         summary = _pruning_summary(score, "row group", judged=True, bar=_OBVIOUS_FAIL_EFFICIENCY)
         return [
             DataDefect(
@@ -2102,7 +2104,7 @@ def _ideal_grid_boxes(
     "as good as this row-group count allows" rather than a fixed figure that only
     holds at one count. A grid is what a perfect space-filling-curve sort
     converges to, and it is generous towards clustered data, which cannot tile
-    evenly -- hence a bar of 0.70 of the achievable rate rather than all of it.
+    evenly -- hence a bar of 0.65 of the achievable rate rather than all of it.
 
     ``ceil(sqrt(count))`` columns, ``ceil(count / cols)`` rows, laid row by row,
     with the last row's cells stretched so it spans the full width. Every cell

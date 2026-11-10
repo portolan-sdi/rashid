@@ -87,7 +87,7 @@ SPEC_IDS: dict[str, tuple[str, ...]] = {
     # vector data, so the checks that enforce them carry it too.
     # FMT-050 is the footer check: at eight or more row groups the row-group
     # boxes decide. FMT-058 is the 5 MB size floor under which nothing is
-    # judged, FMT-059 fails the clear case (efficiency under 0.25) from two
+    # judged, FMT-059 fails the clear case (efficiency under 0.25) from three
     # row groups, and FMT-044 withholds only the pass below eight; the rows
     # are measured in file-order chunks (FMT-006's abstract test) where the
     # footer gives no verdict. FMT-051 and FMT-060 define the statistics and
