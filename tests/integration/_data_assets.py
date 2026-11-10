@@ -8,6 +8,7 @@ with checksums computed from the bytes so nothing is committed and nothing drift
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import struct
@@ -203,10 +204,9 @@ class _WkbGeometryType(pa.ExtensionType):
 
 
 def _wkb_geometry_type() -> _WkbGeometryType:
-    try:
+    # One process runs many tests; the name registers once.
+    with contextlib.suppress(pa.ArrowKeyError):
         pa.register_extension_type(_WkbGeometryType())
-    except pa.ArrowKeyError:
-        pass  # one process runs many tests; the name registers once
     return _WkbGeometryType()
 
 
