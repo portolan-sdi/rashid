@@ -30,7 +30,7 @@ A :class:`StoreError` with ``refused`` set means the server answered but the
 answer was not one rashid accepts: a redirect off https, or a HEAD with no
 ``Content-Length``. urllib cannot do better with either, so neither is sent
 again here; the live prober, which reads such an answer anyway, sends it again
-itself through :func:`probe_opener`. That opener does not follow a redirect
+itself through :func:`probe`. That request does not follow a redirect
 off https either. It returns the redirect as the answer, so the prober can
 report where it points.
 
@@ -63,13 +63,14 @@ from datetime import timedelta
 from functools import cache
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote
 
 from rashid import _trace
+from rashid._href import is_https_href, object_location
 from rashid._http import user_agent
 
 if TYPE_CHECKING:
-    from urllib.request import OpenerDirector
+    from urllib.request import OpenerDirector, Request
 
     from obstore.store import HTTPStore
 
@@ -85,8 +86,6 @@ _STATUS = re.compile(r"status code: (\d{3})\b")
 # it would not follow.
 _NO_LENGTH = "MissingContentLength"
 _REDIRECT = "error following redirect"
-
-_ENCODED_SLASH = re.compile(r"%2f", re.IGNORECASE)
 
 #: Client options for every store. Tests add ``allow_invalid_certificates``
 #: here to reach a local server with a self-signed certificate; the urllib
@@ -134,24 +133,18 @@ def reset() -> None:
     """Drop every cached client, so the next request reads ``CLIENT_OPTIONS`` again."""
     _store.cache_clear()
     _opener.cache_clear()
-    probe_opener.cache_clear()
+    _probe_opener.cache_clear()
 
 
 def _locate(url: str) -> tuple[HTTPStore, str] | None:
-    """The store for ``url``'s host and its object path; None if obstore cannot request it.
-
-    ``urlsplit``, not ``urlparse``: the latter moves a ``;…`` suffix of the last
-    segment out of the path, and the object requested would lose it.
-    """
-    parsed = urlsplit(url)
-    if parsed.scheme.lower() != "https" or not parsed.netloc:
+    """The store and path from the shared object identity; None for urllib-only paths."""
+    location = object_location(url)
+    if location is None or location[0] != "https" or not location[1]:
         raise ValueError(f"refusing to fetch non-https URL: {url!r}")
-    if parsed.query or _ENCODED_SLASH.search(parsed.path):
+    scheme, authority, path, query = location
+    if not path or path.startswith("/") or query:
         return None
-    path = unquote(parsed.path).lstrip("/")
-    if not path or any(part in ("", ".", "..") for part in path.split("/")):
-        return None
-    return _store(f"https://{parsed.netloc.lower()}"), path
+    return _store(f"{scheme}://{authority}"), path
 
 
 def _error(method: str, url: str, exc: Exception) -> StoreError:
@@ -195,13 +188,13 @@ def _build_opener(*, refuse: bool) -> OpenerDirector:
     here too.
     """
     import ssl
-    from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
+    from urllib.request import HTTPRedirectHandler, HTTPSHandler, build_opener
 
     class _HttpsRedirects(HTTPRedirectHandler):
-        def redirect_request(
+        def redirect_request(  # noqa: PLR0913, PLR0917 - stdlib HTTPRedirectHandler override keeps its signature
             self, req: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str
         ) -> Request | None:
-            if urlsplit(newurl).scheme.lower() != "https":
+            if not is_https_href(newurl):
                 if refuse:
                     raise StoreError(f"redirect to a non-https URL refused: {newurl}", refused=True)
                 return None
@@ -220,7 +213,7 @@ def _opener() -> OpenerDirector:
 
 
 @cache
-def probe_opener() -> OpenerDirector:
+def _probe_opener() -> OpenerDirector:
     """The live prober's urllib opener: the same TLS options, and no step off https.
 
     A redirect to another https URL is followed. A redirect off https is the
@@ -230,11 +223,29 @@ def probe_opener() -> OpenerDirector:
     return _build_opener(refuse=False)
 
 
-def _send(url: str, method: str, headers: dict[str, str] | None) -> Any:
-    """Open ``url`` over urllib, retrying a 5xx or a failed connection as obstore does."""
+def _request(url: str, method: str, headers: dict[str, str] | None) -> Request:
+    """Build every urllib request with the shared agent and HTTPS policy."""
     from urllib.request import Request
 
-    request = Request(url, method=method, headers={"User-Agent": user_agent(), **(headers or {})})
+    located = _locate(url)
+    if located is not None:
+        store, path = located
+        # Match obstore's path-segment encoding, including literal sub-delimiters.
+        url = store.url + quote(path, safe="/!$&'()*+,-.:;=@_~[]^|")
+    return Request(url, method=method, headers={"User-Agent": user_agent(), **(headers or {})})
+
+
+def probe(url: str, method: str, headers: dict[str, str]) -> Any:
+    """Open one probe, preserving HTTP errors and off-HTTPS redirects for the caller.
+
+    Unlike object reads, probes inspect denied responses and do not retry them.
+    """
+    return _probe_opener().open(_request(url, method, headers), timeout=_IDLE.total_seconds())
+
+
+def _send(url: str, method: str, headers: dict[str, str] | None) -> Any:
+    """Open ``url`` over urllib, retrying a 5xx or a failed connection as obstore does."""
+    request = _request(url, method, headers)
     idle = CLIENT_OPTIONS["read_timeout"].total_seconds()
     deadline = time.monotonic() + _RETRY["retry_timeout"].total_seconds()
     attempt = 0
@@ -248,7 +259,7 @@ def _send(url: str, method: str, headers: dict[str, str] | None) -> Any:
             retry, cause = exc.code >= 500, exc
         except StoreError:
             raise
-        except Exception as exc:  # noqa: BLE001 - urllib raises many types; the message is what matters
+        except Exception as exc:  # urllib raises many types; the message is what matters
             error = StoreError(f"{method} {url}: {exc}")
             retry, cause = True, exc
         delay = _BACKOFF * 2**attempt
@@ -269,7 +280,7 @@ def _urlopen(url: str, method: str, headers: dict[str, str] | None = None) -> It
             yield response
     except StoreError:
         raise
-    except Exception as exc:  # noqa: BLE001 - urllib raises many types; the message is what matters
+    except Exception as exc:  # urllib raises many types; the message is what matters
         raise StoreError(f"{method} {url}: {exc}") from exc
 
 
@@ -303,7 +314,7 @@ def get(url: str, *, max_bytes: int | None = None) -> bytes:
             return body
         except StoreError:
             raise
-        except Exception as exc:  # noqa: BLE001 - obstore raises several types; the text has the status
+        except Exception as exc:  # obstore raises several types; the text has the status
             if not _urllib_can_read(exc):
                 error = _error("GET", url, exc)
                 log.debug("%s", error)
@@ -335,7 +346,7 @@ def head_size(url: str) -> int:
                 size = int(obstore.head(*located)["size"])
                 log.debug("HEAD %s: %d bytes", url, size)
                 return size
-            except Exception as exc:  # noqa: BLE001 - obstore raises several types; the text has the status
+            except Exception as exc:  # obstore raises several types; the text has the status
                 if not isinstance(exc, InvalidPathError):
                     error = _error("HEAD", url, exc)
                     log.debug("%s", error)
@@ -367,7 +378,7 @@ def get_range(url: str, start: int, end: int) -> bytes:
             except NotSupportedError:
                 log.debug("GET %s: range ignored; reading the whole object", url)
                 return get(url)[start:end]
-            except Exception as exc:  # noqa: BLE001 - obstore raises several types; the text has the status
+            except Exception as exc:  # obstore raises several types; the text has the status
                 if not _urllib_can_read(exc):
                     raise _error("GET", url, exc) from exc
                 _fallback("GET", url, exc)
@@ -389,7 +400,7 @@ def stream(url: str, chunk_size: int) -> Iterator[bytes]:
 
         try:
             result = obstore.get(*located)
-        except Exception as exc:  # noqa: BLE001 - obstore raises several types; the text has the status
+        except Exception as exc:  # obstore raises several types; the text has the status
             if not _urllib_can_read(exc):
                 raise _error("GET", url, exc) from exc
             _fallback("GET", url, exc)
@@ -397,11 +408,12 @@ def stream(url: str, chunk_size: int) -> Iterator[bytes]:
             try:
                 for chunk in result.stream(min_chunk_size=chunk_size):
                     yield bytes(chunk)
-            except Exception as exc:  # noqa: BLE001 - obstore raises several types; the text has the status
+            except Exception as exc:  # obstore raises several types; the text has the status
                 raise _error("GET", url, exc) from exc
             return
     else:
         _fallback("GET", url, "obstore cannot request this path")
     with _urlopen(url, "GET") as response:
-        while chunk := response.read(chunk_size):
+        # A filling read can consume EOF with a short chunk, then read TLS past EOF on Windows.
+        while chunk := response.read1(chunk_size):
             yield chunk

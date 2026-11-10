@@ -8,7 +8,6 @@ __pycache__/
 .serena/
 .code-review-graph/
 .claude/
-mutants/
 coverage.xml
 # Seeded scenarios and profiler output (scripts/profile.py)
 .cache/

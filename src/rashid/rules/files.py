@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 
-from rashid.catalog import CatalogGraph, Node, is_absolute_href
-from rashid.model import Finding, Severity
+from rashid._href import is_absolute_href
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import links_of
+from rashid.rules._common import indexed_links_of
 
 _REQUIRED = ("AGENTS.md", "README.md")
 _MARKDOWN = "text/markdown"
@@ -43,24 +45,32 @@ def _readme_text(node: Node, graph: CatalogGraph) -> str | None:
         return None
 
 
+@dataclass(frozen=True)
+class _LinkCandidate:
+    """A required Markdown link and its location in the document."""
+
+    rel: str
+    target: str
+    index: int
+    link: dict[str, object]
+
+
 def _link_findings(
     rule: Rule,
+    *,
     node: Node,
     graph: CatalogGraph,
-    *,
-    rel: str,
-    target: str,
-    index: int,
-    link: dict[str, object],
+    candidate: _LinkCandidate,
 ) -> list[Finding]:
     """Everything wrong with one candidate link, empty when it conforms."""
+    rel, target, index, link = candidate.rel, candidate.target, candidate.index, candidate.link
     findings: list[Finding] = []
     if link.get("type") != _MARKDOWN:
         findings.append(
             rule.finding(
                 node,
                 f"rel:{rel!r} link has type {link.get('type')!r}, expected 'text/markdown'",
-                json_pointer=f"/links/{index}/type",
+                json_pointer=json_pointer("links", index, "type"),
                 fix_hint=f"set the rel:{rel!r} link type to 'text/markdown'",
                 expected=_MARKDOWN,
                 actual=link.get("type"),
@@ -72,7 +82,7 @@ def _link_findings(
             rule.finding(
                 node,
                 f"rel:{rel!r} link href must be a relative path, got {href!r}",
-                json_pointer=f"/links/{index}/href",
+                json_pointer=json_pointer("links", index, "href"),
                 fix_hint=f'set the href to "./{target}"',
                 expected=f"./{target}",
                 actual=href,
@@ -80,12 +90,12 @@ def _link_findings(
         )
         return findings
     expected = node.path.parent / target
-    if graph.resolve_path(node, href) != expected or not graph.file_exists(expected):
+    if graph.local_path(node, href) != expected or not graph.file_exists(expected):
         findings.append(
             rule.finding(
                 node,
                 f"rel:{rel!r} link href {href!r} does not resolve to the sibling {target}",
-                json_pointer=f"/links/{index}/href",
+                json_pointer=json_pointer("links", index, "href"),
                 fix_hint=f'set the href to "./{target}" and make sure that file exists next to'
                 " this object",
                 expected=f"./{target}",
@@ -102,7 +112,7 @@ def _points_at_sibling(
     href = link.get("href")
     if not isinstance(href, str) or not href or is_absolute_href(href):
         return False
-    return graph.resolve_path(node, href) == node.path.parent / target
+    return graph.local_path(node, href) == node.path.parent / target
 
 
 def _check_markdown_link(
@@ -121,18 +131,20 @@ def _check_markdown_link(
     closest to being the required one. Blaming every candidate would report a
     foreign link a fixer must not rewrite.
     """
-    matches = [(index, link) for index, link in enumerate(links_of(node)) if link.get("rel") == rel]
+    matches = [(index, link) for index, link in indexed_links_of(node) if link.get("rel") == rel]
     if not matches:
         yield rule.finding(
             node,
             f"missing rel:{rel!r} link to {target}",
-            json_pointer="/links",
+            json_pointer=json_pointer("links"),
             fix_hint=f'add {{"rel": "{rel}", "href": "./{target}", "type": "text/markdown"}}',
         )
         return
     candidates: list[tuple[tuple[bool, bool, int], list[Finding]]] = []
     for index, link in matches:
-        findings = _link_findings(rule, node, graph, rel=rel, target=target, index=index, link=link)
+        findings = _link_findings(
+            rule, node=node, graph=graph, candidate=_LinkCandidate(rel, target, index, link)
+        )
         if not findings:
             return
         rank = (

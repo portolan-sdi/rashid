@@ -20,23 +20,19 @@ from typing import Any
 
 import pytest
 
+from rashid import ValidationOptions
+
 pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
-from rashid import validate  # noqa: E402
-from rashid.catalog import CatalogGraph  # noqa: E402
-from rashid.data import (  # noqa: E402
-    DAT_CHECKSUM,
-    DAT_CONSISTENCY,
-    DAT_FORMAT,
-    DAT_ORDERING,
-    DAT_SIZE,
-    validate_data,
-)
-from rashid.model import Severity  # noqa: E402
-from tests.conftest import CatalogBuilder, mutate_json, thumbnail_asset  # noqa: E402
-from tests.integration import _data_assets as assets  # noqa: E402
+from rashid import validate
+from rashid.catalog import CatalogGraph
+from rashid.data import validate_data
+from rashid.model import Severity
+from rashid.registry import DAT_CHECKSUM, DAT_CONSISTENCY, DAT_FORMAT, DAT_ORDERING, DAT_SIZE
+from tests.conftest import CatalogBuilder, mutate_json, thumbnail_asset
+from tests.integration import _data_assets as assets
 
 pytestmark = pytest.mark.integration
 
@@ -142,7 +138,7 @@ def test_pristine_catalog_is_clean(catalog_root: Path) -> None:
 
 
 def test_pristine_passes_full_validate(catalog_root: Path) -> None:
-    report = validate(catalog_root, data=True)
+    report = validate(catalog_root, options=ValidationOptions(data=True))
     assert report.passed
     assert (
         _too_small_to_judge([f for f in report.findings if f.rule_id.startswith("PTL-DAT")]) == []
@@ -185,7 +181,7 @@ def test_valid_cog_bytes_with_plain_geotiff_type_flags_ast_006(
         _item(catalog_root, "raster"),
         lambda d: d["assets"]["data"].__setitem__("type", "image/tiff; application=geotiff"),
     )
-    report = validate(catalog_root, data=True)
+    report = validate(catalog_root, options=ValidationOptions(data=True))
     findings = [f for f in report.findings if f.rule_id == "PTL-AST-006"]
     assert len(findings) == 1
     assert findings[0].path == "layers/raster/raster.json"

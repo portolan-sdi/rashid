@@ -10,7 +10,8 @@ authoritative oracle that catches any drift between rashid's hand rules and the
 canonical schema, and any requirement the hand rules do not yet cover.
 
 Because it overlaps the hand rules by design, the pass is opt-in (CLI
-``--schema``; ``validate(..., schema=True)``). When it runs, a defect may be
+``--schema``; ``validate(path, options=ValidationOptions(schema=True))``).
+When it runs, a defect may be
 reported twice — once by a hand rule with a fix hint, once here with the schema's
 own message; the second is the canonical verdict.
 
@@ -25,38 +26,21 @@ substitute their own.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from functools import lru_cache
 from importlib import resources
 from typing import Any
 
 from rashid import _json
-from rashid._jsonschema import SchemaError, fetch_schema
-from rashid.catalog import CatalogGraph, Kind
-from rashid.model import Finding, Severity
+from rashid._jsonschema import SchemaPass, Validator, fetch_schema, schema_targets
+from rashid.catalog import CatalogGraph
+from rashid.model import Finding
+from rashid.registry import SCH_INVALID, SCH_UNAVAILABLE
 from rashid.rules.conformance import declared_schema_uris
-
-SCH_INVALID = "PTL-SCH-001"
-SCH_UNAVAILABLE = "PTL-SCH-000"
-
-# Requirement IDs from the spec's requirements manifest
-# (specs/portolan/requirements.yaml) enforced by each check;
-# gated by tests/unit/test_spec_coverage.py.
-SPEC_IDS: dict[str, tuple[str, ...]] = {
-    # The published profile schema is the machine-checkable aggregate of
-    # the same requirements the metadata rules cite individually; the
-    # declared-URI MUST is the one it enforces beyond that overlap.
-    SCH_INVALID: ("PORTO-CORE-006",),
-}
 
 # The pinned v0.1 profile schema, used when the root declares no single URI.
 DEFAULT_SCHEMA_URI = "https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"
 
-# A validator maps one object's raw JSON to a list of schema errors;
-# an empty list means the object satisfies the Portolan profile schema.
-Validator = Callable[[dict[str, Any]], list[SchemaError]]
-
-_SCHEMA_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
+_PASS = SchemaPass("schema", SCH_INVALID, SCH_UNAVAILABLE, initialization_errors=(Exception,))
 
 
 def _schema_uri_for(graph: CatalogGraph) -> str:
@@ -72,11 +56,6 @@ def _schema_uri_for(graph: CatalogGraph) -> str:
         if len(uris) == 1:
             return uris[0]
     return DEFAULT_SCHEMA_URI
-
-
-def _fetch_schema(schema_uri: str) -> dict[str, Any]:
-    """Fetch the profile schema over https. See :func:`_jsonschema.fetch_schema`."""
-    return fetch_schema(schema_uri)
 
 
 @lru_cache(maxsize=1)
@@ -146,7 +125,7 @@ def default_validator(
     if schema is not None:
         return validator_from_schema(schema)
     if allow_network:
-        return validator_from_schema(_fetch_schema(schema_uri))
+        return validator_from_schema(fetch_schema(schema_uri))
     raise LookupError(
         f"no bundled schema for {schema_uri}; this build carries "
         f"{', '.join(bundled_schema_versions())} (pass allow_network=True to fetch)"
@@ -169,56 +148,11 @@ def validate_schema(
     failed fetch), returns a single ``PTL-SCH-000`` warning instead of failing
     the run — a systemic failure is reported once, not once per object.
     """
+    uri = DEFAULT_SCHEMA_URI
     if validator is None:
         uri = schema_uri if schema_uri is not None else _schema_uri_for(graph)
-        try:
-            validator = default_validator(uri, allow_network=allow_network)
-        except ImportError:
-            return [
-                Finding(
-                    rule_id=SCH_UNAVAILABLE,
-                    severity=Severity.WARNING,
-                    message=(
-                        "schema validation skipped: the 'jsonschema' package is not installed"
-                    ),
-                    path=".",
-                )
-            ]
-        except Exception as exc:  # noqa: BLE001 - schema fetch/compile failure is systemic
-            return [
-                Finding(
-                    rule_id=SCH_UNAVAILABLE,
-                    severity=Severity.WARNING,
-                    message=f"schema validation could not run: {exc}",
-                    path=".",
-                )
-            ]
-
-    findings: list[Finding] = []
-    for node in graph.iter(*_SCHEMA_KINDS):
-        if node.parse_error is not None:
-            continue
-        try:
-            errors = validator(node.data)
-        except Exception as exc:  # noqa: BLE001 - any validator failure is systemic
-            findings.append(
-                Finding(
-                    rule_id=SCH_UNAVAILABLE,
-                    severity=Severity.WARNING,
-                    message=f"schema validation could not run: {exc}",
-                    path=".",
-                )
-            )
-            return findings
-        for error in errors:
-            findings.append(
-                Finding(
-                    rule_id=SCH_INVALID,
-                    severity=Severity.ERROR,
-                    message=f"Portolan profile schema validation failed: {error.message}",
-                    path=str(node.path),
-                    object_id=node.id,
-                    json_pointer=error.json_pointer,
-                )
-            )
-    return findings
+    return _PASS.run(
+        validator,
+        lambda: default_validator(uri, allow_network=allow_network),
+        schema_targets(graph, "Portolan profile schema"),
+    ).findings

@@ -171,7 +171,7 @@ def test_report_to_dict_carries_a_summary_block() -> None:
         "severity": "error",
         "count": 2,
         "file_count": 2,
-        "description": "every asset should carry file:size and file:checksum",
+        "description": "assets should carry file metadata; self-references must omit it",
     }
 
 

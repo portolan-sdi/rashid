@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from rashid import ValidationOptions
 from tests.conftest import CatalogBuilder, mutate_json
 
 GENERATOR_VERSION = 1
@@ -75,14 +76,14 @@ _TABLE_COLUMNS = [
 
 @dataclass(frozen=True)
 class Target:
-    """What to validate: a path or URL, and the keyword arguments for ``validate``.
+    """What to validate: a path or URL, and the options for ``validate``.
 
     ``server`` is the local HTTPS server of a remote scenario, whose ``seen``
     and ``peak_in_flight`` a test reads after the run.
     """
 
     location: Path | str
-    options: dict[str, Any] = field(default_factory=dict)
+    options: ValidationOptions = field(default_factory=ValidationOptions)
     server: Any = None
 
 
@@ -229,10 +230,10 @@ def target(name: str, size: str, seed: int = 0, cache_dir: Path | None = None) -
     """
     root = cached(name, size, seed, cache_dir)
     if name == "metadata":
-        yield Target(root, {"data": False})
+        yield Target(root, ValidationOptions(data=False))
         return
     if name == "data":
-        yield Target(root, {"data": True})
+        yield Target(root, ValidationOptions(data=True))
         return
     if name == "remote-data":
         with _remote_data(root) as found:
@@ -243,7 +244,7 @@ def target(name: str, size: str, seed: int = 0, cache_dir: Path | None = None) -
     with serving() as server:
         for path in sorted(p for p in root.rglob("*") if p.is_file()):
             server.routes["/" + path.relative_to(root).as_posix()] = Route(body=path.read_bytes())
-        yield Target(server.url("catalog.json"), {"data": False, "live": True}, server)
+        yield Target(server.url("catalog.json"), ValidationOptions(data=False, live=True), server)
 
 
 @contextmanager
@@ -262,7 +263,9 @@ def _remote_data(root: Path) -> Iterator[Target]:
         bundle = Path(scratch) / "ca.pem"
         bundle.write_bytes(server.ca_pem)
         with mock.patch.dict(os.environ, {"GDAL_CURL_CA_BUNDLE": str(bundle)}):
-            yield Target(server.url("catalog.json"), {"data": True, "live": False}, server)
+            yield Target(
+                server.url("catalog.json"), ValidationOptions(data=True, live=False), server
+            )
 
 
 def describe() -> str:

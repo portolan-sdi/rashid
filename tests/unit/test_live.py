@@ -19,10 +19,13 @@ from urllib.request import Request
 
 import pytest
 
-from rashid import RulesConfig, _store, validate, validate_live
+from rashid import RulesConfig, ValidationOptions, _store, validate, validate_live
 from rashid import live as live_mod
+from rashid._href import resolve_live_base
 from rashid.catalog import CatalogGraph
-from rashid.live import (
+from rashid.live import ProbeResponse, _DefaultProber
+from rashid.model import Severity
+from rashid.registry import (
     LIV_CORS_EXPOSE,
     LIV_CORS_ORIGIN,
     LIV_CORS_PREFLIGHT,
@@ -32,10 +35,7 @@ from rashid.live import (
     LIV_RANGE,
     LIV_SELF_BASE,
     LIV_UNAVAILABLE,
-    ProbeResponse,
-    _DefaultProber,
 )
-from rashid.model import Severity
 from tests._https import HttpsServer, Route
 from tests.conftest import VALID_MULTIHASH, CatalogBuilder, mutate_json
 
@@ -459,7 +459,7 @@ def test_runner_wires_live_pass(catalog: CatalogBuilder) -> None:
     catalog.collection("roads", assets={"data": _remote_asset()})
     root = catalog.write()
     prober = FakeProber(range_response=ProbeResponse(status=200, headers={}))
-    report = validate(root, live=True, live_prober=prober)
+    report = validate(root, options=ValidationOptions(live=True, live_prober=prober))
     assert any(f.rule_id == LIV_RANGE for f in report.findings)
 
 
@@ -467,7 +467,7 @@ def test_live_off_by_default(catalog: CatalogBuilder) -> None:
     catalog.collection("roads", assets={"data": _remote_asset()})
     root = catalog.write()
     prober = FakeProber()
-    validate(root, live_prober=prober)
+    validate(root, options=ValidationOptions(live_prober=prober))
     assert prober.range_calls == []
 
 
@@ -489,7 +489,7 @@ def test_disabling_all_liv_rules_skips_pass(catalog: CatalogBuilder) -> None:
             }
         )
     )
-    report = validate(root, config=config, live=True, live_prober=prober)
+    report = validate(root, options=ValidationOptions(config=config, live=True, live_prober=prober))
     assert prober.range_calls == []
     assert all(not f.rule_id.startswith("PTL-LIV") for f in report.findings)
 
@@ -502,7 +502,10 @@ def test_disabling_one_liv_rule_silences_only_it(catalog: CatalogBuilder) -> Non
         preflight_response=ProbeResponse(status=403, headers={}),
     )
     report = validate(
-        root, config=RulesConfig(disabled=frozenset({LIV_RANGE})), live=True, live_prober=prober
+        root,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=frozenset({LIV_RANGE})), live=True, live_prober=prober
+        ),
     )
     ids = {f.rule_id for f in report.findings}
     assert LIV_RANGE not in ids
@@ -595,10 +598,12 @@ def test_runner_threads_live_base_url(catalog: CatalogBuilder) -> None:
     prober = FakeProber()
     validate(
         root,
-        structural=False,
-        live=True,
-        live_prober=prober,
-        live_base_url="https://data.example.org/cat",
+        options=ValidationOptions(
+            structural=False,
+            live=True,
+            live_prober=prober,
+            live_base_url="https://data.example.org/cat",
+        ),
     )
     assert "https://data.example.org/cat/roads/data.parquet" in prober.head_calls
 
@@ -772,7 +777,8 @@ def test_link_findings_follow_sorted_url_order(catalog: CatalogBuilder) -> None:
     asset_urls = {
         t.url for targets in live_mod._targets_by_host(graph, _BASE).values() for t in targets
     }
-    base, _named = live_mod._resolve_base(graph, _BASE)
+    base, _named = resolve_live_base(_BASE, graph.base_url, graph.published_base())
+    assert base is not None
     link_urls = [t.url for t in live_mod._link_targets(graph, base)]
     assert link_urls == sorted(link_urls) and len(link_urls) > 2
     prober = StatusProber(dict.fromkeys(link_urls, 404))
@@ -866,7 +872,12 @@ def test_runner_reports_missing_link_targets(catalog: CatalogBuilder) -> None:
     catalog.subcatalog("sector-1").collection("roads")
     root = catalog.write()
     prober = StatusProber({f"{_BASE}/sector-1/catalog.json": 404})
-    report = validate(root, structural=False, live=True, live_prober=prober, live_base_url=_BASE)
+    report = validate(
+        root,
+        options=ValidationOptions(
+            structural=False, live=True, live_prober=prober, live_base_url=_BASE
+        ),
+    )
     assert [f.rule_id for f in report.findings if f.rule_id == LIV_LINK_TARGET] == [LIV_LINK_TARGET]
     assert not report.passed
 
@@ -877,11 +888,13 @@ def test_disabling_link_target_rule_silences_it(catalog: CatalogBuilder) -> None
     prober = StatusProber({f"{_BASE}/sector-1/catalog.json": 404})
     report = validate(
         root,
-        structural=False,
-        config=RulesConfig(disabled=frozenset({LIV_LINK_TARGET})),
-        live=True,
-        live_prober=prober,
-        live_base_url=_BASE,
+        options=ValidationOptions(
+            structural=False,
+            config=RulesConfig(disabled=frozenset({LIV_LINK_TARGET})),
+            live=True,
+            live_prober=prober,
+            live_base_url=_BASE,
+        ),
     )
     assert LIV_LINK_TARGET not in {f.rule_id for f in report.findings}
 
@@ -1079,16 +1092,23 @@ def test_known_status_does_not_stand_in_for_an_asset_head(catalog: CatalogBuilde
 def test_runner_reports_self_base_and_it_can_be_disabled(catalog: CatalogBuilder) -> None:
     root = _self_linked_tree(catalog)
     other = "https://mirror.example.net/copy"
-    report = validate(root, live=True, live_prober=StatusProber(), live_base_url=other, data=False)
+    report = validate(
+        root,
+        options=ValidationOptions(
+            live=True, live_prober=StatusProber(), live_base_url=other, data=False
+        ),
+    )
     [finding] = [f for f in report.findings if f.rule_id == LIV_SELF_BASE]
     assert finding.severity is Severity.WARNING  # a SHOULD: warns, does not fail the run
     report = validate(
         root,
-        config=RulesConfig(disabled=frozenset({LIV_SELF_BASE})),
-        live=True,
-        live_prober=StatusProber(),
-        live_base_url=other,
-        data=False,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=frozenset({LIV_SELF_BASE})),
+            live=True,
+            live_prober=StatusProber(),
+            live_base_url=other,
+            data=False,
+        ),
     )
     assert LIV_SELF_BASE not in {f.rule_id for f in report.findings}
 
@@ -1115,7 +1135,7 @@ class _RecordedResponse:
 
 
 def _recorder(requests: list[Request]) -> Any:
-    def fake_open(request: Request) -> _RecordedResponse:
+    def fake_open(request: Request, *, timeout: float) -> _RecordedResponse:  # noqa: ARG001 - network opener signature
         requests.append(request)
         return _RecordedResponse()
 
@@ -1129,7 +1149,7 @@ def _store_fails(url: str) -> int:
 def _record(monkeypatch: pytest.MonkeyPatch, probe: str) -> Request:
     """Run one probe kind against a recording opener and return its Request."""
     requests: list[Request] = []
-    monkeypatch.setattr(live_mod, "_open", _recorder(requests))
+    monkeypatch.setattr(_store._probe_opener(), "open", _recorder(requests))
     monkeypatch.setattr(live_mod._store, "head_size", _store_fails)
     getattr(_DefaultProber(), probe)(_URL)
     (request,) = requests
@@ -1196,12 +1216,12 @@ def test_default_head_falls_back_to_urllib(
 ) -> None:
     """An answer obstore drops is asked again over urllib, which keeps the headers."""
 
-    def fail(url: str) -> int:
+    def fail(url: str) -> int:  # noqa: ARG001 - replacement HEAD probe accepts a URL
         raise failure
 
     requests: list[Request] = []
     monkeypatch.setattr(live_mod._store, "head_size", fail)
-    monkeypatch.setattr(live_mod, "_open", _recorder(requests))
+    monkeypatch.setattr(_store._probe_opener(), "open", _recorder(requests))
 
     response = _DefaultProber().head(_URL)
 
@@ -1214,12 +1234,12 @@ def test_default_head_does_not_ask_a_dead_host_twice(monkeypatch: pytest.MonkeyP
     """A transport failure has no answer to read again; urllib would only wait again."""
     dead = _store.StoreError("HEAD https://data.example.org/x: error sending request")
 
-    def fail(url: str) -> int:
+    def fail(url: str) -> int:  # noqa: ARG001 - replacement HEAD probe accepts a URL
         raise dead
 
     requests: list[Request] = []
     monkeypatch.setattr(live_mod._store, "head_size", fail)
-    monkeypatch.setattr(live_mod, "_open", _recorder(requests))
+    monkeypatch.setattr(_store._probe_opener(), "open", _recorder(requests))
 
     with pytest.raises(_store.StoreError) as raised:
         _DefaultProber().head(_URL)

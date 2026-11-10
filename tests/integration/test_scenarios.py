@@ -49,7 +49,8 @@ def test_remote_data_target_serves_every_file_over_https(tmp_path: Path) -> None
 
     root = scenarios.cached("data", "small", cache_dir=tmp_path)
     with scenarios.target("remote-data", "small", cache_dir=tmp_path) as target:
-        assert target.options == {"data": True, "live": False}
+        assert target.options.data is True
+        assert target.options.live is False
         tif = root / "layers" / "raster-000" / "data.tif"
         assert _store.get(target.server.url("layers/raster-000/data.tif")) == tif.read_bytes()
         assert [(s.method, s.path) for s in target.server.seen()] == [

@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 
 # Version-tolerant prefix of the partition extension's schema URI, matching
@@ -44,14 +44,14 @@ class PartitionFieldsRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        if not _is_partitioned(node):
+        if not is_partitioned(node):
             return
         scheme = node.data.get("partition:scheme")
         if not isinstance(scheme, str) or not scheme.strip():
             yield self.finding(
                 node,
                 "partitioned collection declares no partition:scheme",
-                json_pointer="/partition:scheme",
+                json_pointer=json_pointer("partition:scheme"),
                 fix_hint="add partition:scheme naming the directory layout, e.g. 'hive'",
             )
         keys = node.data.get("partition:keys")
@@ -59,7 +59,7 @@ class PartitionFieldsRule(Rule):
             yield self.finding(
                 node,
                 "partitioned collection declares no partition:keys",
-                json_pointer="/partition:keys",
+                json_pointer=json_pointer("partition:keys"),
                 fix_hint='add partition:keys listing the partition columns, e.g. ["year"]',
             )
         glob = node.data.get("partition:glob")
@@ -68,7 +68,7 @@ class PartitionFieldsRule(Rule):
                 node,
                 "partitioned collection declares no partition:glob, the normative"
                 " bulk-access path for its partitions",
-                json_pointer="/partition:glob",
+                json_pointer=json_pointer("partition:glob"),
                 fix_hint="add partition:glob, e.g. 's3://bucket/data/*.parquet'",
             )
         if not _declares_extension(node):
@@ -76,13 +76,13 @@ class PartitionFieldsRule(Rule):
                 node,
                 "partition:* fields used without declaring the partition extension"
                 " schema in stac_extensions",
-                json_pointer="/stac_extensions",
+                json_pointer=json_pointer("stac_extensions"),
                 fix_hint=f"add '{_PARTITION_EXTENSION_PREFIX}v1.0.0/schema.json'"
                 " to stac_extensions",
             )
 
 
-def _is_partitioned(node: Node) -> bool:
+def is_partitioned(node: Node) -> bool:
     return any(key.startswith("partition:") for key in node.data) or _declares_extension(node)
 
 
@@ -93,3 +93,24 @@ def _declares_extension(node: Node) -> bool:
     return any(
         isinstance(uri, str) and uri.startswith(_PARTITION_EXTENSION_PREFIX) for uri in extensions
     )
+
+
+class PartitionGlobSchemeRule(Rule):
+    """HTTP cannot list objects for partition glob expansion."""
+
+    id = "PTL-PRT-002"
+    spec_ids = ("PORTO-FMT-064",)
+    default_severity = Severity.ERROR
+    description = "partition:glob must not use HTTP or HTTPS"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        glob = node.data.get("partition:glob")
+        if isinstance(glob, str) and glob.lstrip().lower().startswith(("http://", "https://")):
+            yield self.finding(
+                node,
+                "partition:glob uses HTTP or HTTPS, which cannot list partition objects",
+                json_pointer=json_pointer("partition:glob"),
+                fix_hint="use a relative glob or a bucket-native scheme such as s3:// or gs://",
+                actual=glob,
+            )

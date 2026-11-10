@@ -8,6 +8,7 @@ with checksums computed from the bytes so nothing is committed and nothing drift
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import struct
@@ -110,7 +111,7 @@ def hilbert_sorted(points: list[tuple[float, float]]) -> list[tuple[float, float
     return sorted(points, key=key)
 
 
-def write_geoparquet(
+def write_geoparquet(  # noqa: PLR0913 - keyword-only fixture settings vary independent file properties
     path: Path,
     *,
     points: list[tuple[float, float]] | None = None,
@@ -200,16 +201,15 @@ class _WkbGeometryType(pa.ExtensionType):
     @classmethod
     def __arrow_ext_deserialize__(
         cls, storage_type: pa.DataType, serialized: bytes
-    ) -> _WkbGeometryType:  # noqa: ARG003, E501
+    ) -> _WkbGeometryType:
         del storage_type, serialized  # pyarrow's hook signature; nothing varies
         return cls()
 
 
 def _wkb_geometry_type() -> _WkbGeometryType:
-    try:
+    # One process runs many tests; the name registers once.
+    with contextlib.suppress(pa.ArrowKeyError):
         pa.register_extension_type(_WkbGeometryType())
-    except pa.ArrowKeyError:
-        pass  # one process runs many tests; the name registers once
     return _WkbGeometryType()
 
 
@@ -235,7 +235,7 @@ def write_native_geoparquet(
     pq.write_table(pa.table(cols), path, row_group_size=row_group_size)
 
 
-def write_item_mirror(
+def write_item_mirror(  # noqa: PLR0913 - keyword-only fixture settings vary independent file properties
     path: Path,
     ids: list[str] | None,
     *,
@@ -281,7 +281,7 @@ def write_item_mirror(
     )
 
 
-def write_cog(
+def write_cog(  # noqa: PLR0913 - keyword-only fixture settings vary independent file properties
     path: Path,
     *,
     stats: bool = True,
@@ -367,3 +367,11 @@ def write_plain_tiff(path: Path, *, size: int = 1024) -> None:
         transform=from_bounds(*BBOX, size, size),
     ) as dst:
         dst.write(arr)
+
+
+def zero_ordering_size_floor(monkeypatch) -> None:
+    """Disable the spec's 5 MB ordering floor (PORTO-FMT-058) for a module
+    whose kilobyte fixtures pin judged ordering verdicts."""
+    from rashid.data import geoparquet
+
+    monkeypatch.setattr(geoparquet, "_MIN_ORDERING_FILE_BYTES", 0)
