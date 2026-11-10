@@ -14,8 +14,9 @@ class Rule(ABC):
     """A single validation rule.
 
     A rule visits nodes of the kinds in ``kinds`` and yields zero or more
-    findings per node; no findings means the node passes. A rule with
-    ``kinds = ()`` is graph-level: it runs once via ``check_graph``.
+    findings per node; no findings means the node passes. The shared
+    ``check(node, graph)`` contract supplies graph context that a rule may
+    ignore. A rule with ``kinds = ()`` runs once via ``check_graph``.
     """
 
     id: ClassVar[str]
@@ -30,13 +31,13 @@ class Rule(ABC):
     #: carries no RFC 2119 keyword.
     spec_ids: ClassVar[tuple[str, ...]] = ()
 
-    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:  # noqa: ARG002 - default hook preserves the shared node and graph contract
         return ()
 
-    def check_graph(self, graph: CatalogGraph) -> Iterable[Finding]:
+    def check_graph(self, graph: CatalogGraph) -> Iterable[Finding]:  # noqa: ARG002 - default hook preserves the graph-level rule contract
         return ()
 
-    def finding(
+    def finding(  # noqa: PLR0913 - keyword-only diagnostic fields mirror Finding
         self,
         node: Node,
         message: str,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import validate
+from rashid import ValidationOptions, validate
 from tests.conftest import CatalogBuilder, mutate_json, rule_ids
 
 pytestmark = pytest.mark.integration
@@ -45,7 +45,7 @@ def test_kitchen_sink(catalog: CatalogBuilder) -> None:
 
     # Metadata-pass fixture: structural off so the expected set stays exactly
     # the hand rules (the same mutations legitimately trip STAC core too).
-    report = validate(root, structural=False)
+    report = validate(root, options=ValidationOptions(structural=False))
     assert not report.passed
     assert rule_ids(report) == {
         "PTL-TTL-002",

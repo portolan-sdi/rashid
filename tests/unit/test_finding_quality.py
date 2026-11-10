@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from rashid import validate
+from rashid import ValidationOptions, validate
 from rashid.model import Finding, Severity
 from tests.conftest import (
     CatalogBuilder,
@@ -380,10 +380,12 @@ def error_findings(tmp_path: Path) -> list[Finding]:
     Two trees, because a catalog cannot be both present and absent: the broken
     tree for the rules, and an empty directory for the missing-root report.
     """
-    findings = list(validate(broken_tree(tmp_path), structural=False).findings)
+    findings = list(
+        validate(broken_tree(tmp_path), options=ValidationOptions(structural=False)).findings
+    )
     empty = tmp_path / "empty"
     empty.mkdir()
-    findings.extend(validate(empty, structural=False).findings)
+    findings.extend(validate(empty, options=ValidationOptions(structural=False)).findings)
     return [f for f in findings if f.severity is Severity.ERROR]
 
 

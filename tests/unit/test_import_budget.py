@@ -10,6 +10,7 @@ everything, so each case runs in a subprocess.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -42,13 +43,18 @@ _REPORT = "import sys, json; print(json.dumps(sorted(sys.modules)))"
 
 
 def _loaded(code: str) -> set[str]:
+    # Retain the OS environment (especially Windows' SYSTEMROOT for SSL),
+    # while excluding Python startup and rashid options that affect imports.
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "RASHID_"))}
+    env["PATH"] = ""
     result = subprocess.run(
         [sys.executable, "-c", f"{code}\n{_REPORT}"],
         capture_output=True,
         text=True,
-        check=True,
-        env={"PATH": "", "SYSTEMROOT": ""} if sys.platform == "win32" else {"PATH": ""},
+        check=False,
+        env=env,
     )
+    assert result.returncode == 0, result.stderr
     names = json.loads(result.stdout.splitlines()[-1])
     # Each module by its full name and by its package, so a budget can name
     # ``urllib.request`` without naming all of ``urllib``.
@@ -59,6 +65,26 @@ def test_import_rashid_loads_no_heavy_module_and_no_cli_framework() -> None:
     loaded = _loaded("import rashid")
     assert "rashid" in loaded
     assert loaded & (_HEAVY | _PROFILERS | _NETWORK | _METADATA | {"click"}) == set()
+
+
+def test_import_probe_reports_child_stderr() -> None:
+    with pytest.raises(AssertionError, match="RuntimeError: import-probe-failure"):
+        _loaded("raise RuntimeError('import-probe-failure')")
+
+
+def test_import_probe_preserves_platform_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    system_root = os.environ.get("SYSTEMROOT", "platform-system-root")
+    monkeypatch.setenv("SYSTEMROOT", system_root)
+    monkeypatch.setenv("PYTHONPATH", "must-not-reach-child")
+    monkeypatch.setenv("RASHID_TIMINGS", "mem")
+    code = (
+        "import os\n"
+        f"assert os.environ.get('SYSTEMROOT') == {system_root!r}\n"
+        "assert os.environ['PATH'] == ''\n"
+        "assert 'PYTHONPATH' not in os.environ\n"
+        "assert 'RASHID_TIMINGS' not in os.environ\n"
+    )
+    assert "os" in _loaded(code)
 
 
 def test_cli_help_loads_no_heavy_module() -> None:

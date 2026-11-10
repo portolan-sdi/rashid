@@ -6,7 +6,7 @@ from collections.abc import Iterable
 
 from rashid._spdx import SPDX_LICENSE_IDS, canonical_spdx_id
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import links_of
 
@@ -26,7 +26,7 @@ class LicenseDeclaredRule(Rule):
             yield self.finding(
                 node,
                 "collection declares no license",
-                json_pointer="/license",
+                json_pointer=json_pointer("license"),
                 fix_hint="add a license with an SPDX identifier, e.g. 'CC-BY-4.0', or 'other'"
                 " plus a rel:'license' link to the license text",
             )
@@ -46,7 +46,7 @@ class LicenseDeclaredRule(Rule):
         yield self.finding(
             node,
             f"license '{value}' is not an SPDX identifier or 'other'",
-            json_pointer="/license",
+            json_pointer=json_pointer("license"),
             fix_hint=hint,
             expected=canonical,
             actual=value,
@@ -69,7 +69,7 @@ class OtherLicenseLinkRule(Rule):
             yield self.finding(
                 node,
                 "license is 'other' but no rel:'license' link points to the license text",
-                json_pointer="/links",
+                json_pointer=json_pointer("links"),
                 fix_hint='add {"rel": "license", "href": <the license text or landing page>}'
                 " to links, or replace 'other' with an SPDX identifier",
             )
@@ -89,6 +89,6 @@ class NoProprietaryLicenseRule(Rule):
             yield self.finding(
                 node,
                 "license 'proprietary' is deprecated and must not be used",
-                json_pointer="/license",
+                json_pointer=json_pointer("license"),
                 fix_hint="use 'other' with a rel:'license' link, or an SPDX identifier",
             )

@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from rashid import RulesConfig, validate
+from rashid import RulesConfig, ValidationOptions, _store, validate
 from rashid._jsonschema import SchemaError, vendored_extension_schemas
 from rashid.catalog import CatalogGraph
 from rashid.extensions import SchemaUnavailable, default_validator, validate_extensions
@@ -52,7 +52,7 @@ def test_all_valid_yields_no_findings(catalog: CatalogBuilder) -> None:
 def test_violation_becomes_an_error_carrying_the_pointer(catalog: CatalogBuilder) -> None:
     catalog.collection("roads", stac_extensions=[PROJECTION_URI])
 
-    def check(data: dict, uri: str) -> list[SchemaError]:
+    def check(data: dict, uri: str) -> list[SchemaError]:  # noqa: ARG001 - extension validator callback accepts data and schema URI
         if data.get("type") == "Collection":
             return [SchemaError(message="4326 is not of type 'string'", json_pointer="/x")]
         return []
@@ -72,7 +72,7 @@ def test_the_portolan_profile_uri_is_not_validated_here(catalog: CatalogBuilder)
     catalog.collection("roads")
     calls: list[str] = []
 
-    def check(data: dict, uri: str) -> list[SchemaError]:
+    def check(data: dict, uri: str) -> list[SchemaError]:  # noqa: ARG001 - extension validator callback accepts data and schema URI
         calls.append(uri)
         return []
 
@@ -84,7 +84,7 @@ def test_a_systemic_validator_failure_reports_once(catalog: CatalogBuilder) -> N
     catalog.collection("roads", stac_extensions=[PROJECTION_URI])
     catalog.collection("rails", stac_extensions=[PROJECTION_URI])
 
-    def explode(data: dict, uri: str) -> list[SchemaError]:
+    def explode(data: dict, uri: str) -> list[SchemaError]:  # noqa: ARG001 - failing extension validator retains its callback signature
         raise RuntimeError("registry is broken")
 
     findings = validate_extensions(_graph(catalog), explode)
@@ -127,13 +127,13 @@ def test_a_registered_extension_at_an_unpinned_version_is_validated_against_its_
     catalog.collection("roads", stac_extensions=[RASTER_UNPINNED_URI])
     fetched: list[str] = []
 
-    def fetch(uri: str) -> dict[str, Any]:
+    def fetch(uri: str) -> bytes:
         fetched.append(uri)
-        return {"$schema": "http://json-schema.org/draft-07/schema#", "required": ["raster:proof"]}
+        return (
+            b'{"$schema": "http://json-schema.org/draft-07/schema#", "required": ["raster:proof"]}'
+        )
 
-    from rashid import extensions as extensions_module
-
-    monkeypatch.setattr(extensions_module, "_fetch_schema", fetch)
+    monkeypatch.setattr(_store, "get", fetch)
     findings = validate_extensions(_graph(catalog))
     assert fetched == [RASTER_UNPINNED_URI]
     assert _ids(findings) == ["PTL-EXT-001"]
@@ -149,18 +149,21 @@ def test_an_older_version_does_not_downgrade_an_error_to_a_warning(
     collection.overrides["assets"] = {
         "data": {"href": "./roads.tif", "type": "image/tiff", "roles": ["data"], "raster:x": 1}
     }
-    from rashid import extensions as extensions_module
 
     monkeypatch.setattr(
-        extensions_module,
-        "_fetch_schema",
-        lambda uri: {
-            "properties": {
-                "assets": {"additionalProperties": {"properties": {"raster:x": {"type": "string"}}}}
+        _store,
+        "get",
+        lambda uri: json.dumps(
+            {
+                "properties": {
+                    "assets": {
+                        "additionalProperties": {"properties": {"raster:x": {"type": "string"}}}
+                    }
+                }
             }
-        },
+        ).encode(),
     )
-    report = validate(catalog.write(), data=False)
+    report = validate(catalog.write(), options=ValidationOptions(data=False))
     assert "PTL-CNF-004" in _ids(report.findings)
     assert "PTL-EXT-001" in _ids(report.findings)
     assert not report.passed
@@ -175,9 +178,8 @@ def test_an_unregistered_extension_is_fetched_when_network_is_allowed(
         "type": "object",
         "required": ["eo:proof"],
     }
-    from rashid import extensions as extensions_module
 
-    monkeypatch.setattr(extensions_module, "_fetch_schema", lambda uri: eo_schema)
+    monkeypatch.setattr(_store, "get", lambda uri: json.dumps(eo_schema).encode())
     findings = validate_extensions(_graph(catalog), allow_network=True)
     assert _ids(findings) == ["PTL-EXT-001"]
     assert "'eo:proof' is a required property" in findings[0].message
@@ -308,13 +310,11 @@ def test_a_failed_fetch_affects_only_the_uri_that_failed(
         }
     fetched: list[str] = []
 
-    def fetch(uri: str) -> dict[str, Any]:
+    def fetch(uri: str) -> bytes:
         fetched.append(uri)
         raise OSError("Name or service not known")
 
-    from rashid import extensions as extensions_module
-
-    monkeypatch.setattr(extensions_module, "_fetch_schema", fetch)
+    monkeypatch.setattr(_store, "get", fetch)
     findings = validate_extensions(_graph(catalog), allow_network=True)
     assert sorted(_ids(findings)) == ["PTL-EXT-000", "PTL-EXT-001", "PTL-EXT-001"]
     warning = next(f for f in findings if f.rule_id == "PTL-EXT-000")
@@ -330,12 +330,11 @@ def test_an_unresolvable_ref_affects_only_its_uri(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     catalog.collection("roads", stac_extensions=[EO_URI])
-    from rashid import extensions as extensions_module
 
     monkeypatch.setattr(
-        extensions_module,
-        "_fetch_schema",
-        lambda uri: {"$ref": "https://example.invalid/missing.json"},
+        _store,
+        "get",
+        lambda uri: b'{"$ref": "https://example.invalid/missing.json"}',
     )
     findings = validate_extensions(_graph(catalog), allow_network=True)
     assert _ids(findings) == ["PTL-EXT-000"]
@@ -356,7 +355,7 @@ def test_the_pass_runs_by_default(catalog: CatalogBuilder) -> None:
             "proj:code": 4326,
         }
     }
-    report = validate(catalog.write(), data=False)
+    report = validate(catalog.write(), options=ValidationOptions(data=False))
     assert "PTL-EXT-001" in _ids(report.findings)
 
 
@@ -370,7 +369,7 @@ def test_extensions_false_skips_the_pass(catalog: CatalogBuilder) -> None:
             "proj:code": 4326,
         }
     }
-    report = validate(catalog.write(), data=False, extensions=False)
+    report = validate(catalog.write(), options=ValidationOptions(data=False, extensions=False))
     assert "PTL-EXT-001" not in _ids(report.findings)
 
 
@@ -385,7 +384,10 @@ def test_disabling_the_rule_skips_the_pass(catalog: CatalogBuilder) -> None:
         }
     }
     report = validate(
-        catalog.write(), config=RulesConfig(disabled=frozenset({"PTL-EXT-001"})), data=False
+        catalog.write(),
+        options=ValidationOptions(
+            config=RulesConfig(disabled=frozenset({"PTL-EXT-001"})), data=False
+        ),
     )
     assert "PTL-EXT-001" not in _ids(report.findings)
 
@@ -530,3 +532,20 @@ def test_a_malformed_language_code_is_an_error(catalog: CatalogBuilder) -> None:
     findings = validate_extensions(CatalogGraph.load(root))
     assert _ids(findings) == ["PTL-EXT-001"]
     assert findings[0].json_pointer == "/language/code"
+
+
+@pytest.mark.parametrize("version", ["v0.1.1", "v1.0.0"])
+@pytest.mark.parametrize("valid", [True, False])
+def test_contacts_versions_validate_offline(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch, version: str, valid: bool
+) -> None:
+
+    def no_fetch(uri: str) -> bytes:
+        pytest.fail(f"Contacts schema must be bundled: {uri}")
+
+    monkeypatch.setattr(_store, "get", no_fetch)
+    uri = f"https://stac-extensions.github.io/contacts/{version}/schema.json"
+    collection = catalog.collection("roads", stac_extensions=[uri])
+    collection.overrides["contacts"] = [{"name": "Data team"}] if valid else [{"name": 42}]
+    findings = validate_extensions(_graph(catalog))
+    assert _ids(findings) == ([] if valid else ["PTL-EXT-001"])
