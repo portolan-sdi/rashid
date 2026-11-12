@@ -264,7 +264,7 @@ def _native_crs(parquet: Any, name: str) -> str | None:
 
 
 # A CRS registry identifier: `<authority>:<code>`, which also matches
-# `srid:<n>`. Resolving one needs a registry, which is why PORTO-FMT-057
+# `srid:<identifier>`. Resolving one needs a registry, which is why PORTO-FMT-057
 # prefers inline PROJJSON and keeps this form a warning rather than an error.
 _AUTHORITY_CODE = re.compile(r"[A-Za-z][A-Za-z0-9_]*:[A-Za-z0-9_.]+\Z")
 
@@ -274,10 +274,11 @@ def _check_native_crs(
 ) -> list[DataDefect]:
     """The CRS of each native geospatial column resolves from the file alone.
 
-    formats.md: the native ``crs`` value MUST be one the Parquet geospatial
-    specification defines, and an absent value is OGC:CRS84 (PORTO-FMT-056).
+    formats.md: the native ``crs`` value MUST use one of the four formats the
+    Parquet geospatial specification suggests, and an absent value is
+    OGC:CRS84 (PORTO-FMT-056).
     Inline PROJJSON and a ``projjson:<key>`` reference into the file metadata
-    resolve from the file alone; an ``<authority>:<code>`` or ``srid:<n>``
+    resolve from the file alone; an ``<authority>:<code>`` or ``srid:<identifier>``
     value needs a CRS registry, so it is a warning (PORTO-FMT-057). Anything
     else is an error. These rules only reach a file with no ``geo`` key —
     with one, the key's own ``crs`` field governs and the consistency check
@@ -302,8 +303,8 @@ def _check_native_crs(
                         DAT_NATIVE_CRS,
                         Severity.ERROR,
                         f"{subject} geometry column '{name}' carries a crs that opens "
-                        "like JSON but does not parse; it must be a form the Parquet "
-                        "geospatial specification defines",
+                        "like JSON but does not parse; it must use one of the four "
+                        "formats the Parquet geospatial specification suggests",
                         key,
                     )
                 )
@@ -327,8 +328,8 @@ def _check_native_crs(
             DataDefect(
                 DAT_NATIVE_CRS,
                 Severity.ERROR,
-                f"{subject} geometry column '{name}' crs '{value}' is not a form the "
-                "Parquet geospatial specification defines",
+                f"{subject} geometry column '{name}' crs '{value}' is not one of the four "
+                "formats the Parquet geospatial specification suggests",
                 key,
             )
         )
