@@ -785,10 +785,13 @@ def test_asset_without_title_or_description_warns(
     ]
 
 
-def test_item_asset_templates_need_a_title_and_description(catalog: CatalogBuilder) -> None:
+def test_item_asset_templates_need_no_title_or_description(catalog: CatalogBuilder) -> None:
+    # PORTO-CORE-088 names assets; a template is not an asset.
     template = {"type": "application/vnd.apache.parquet", "roles": ["data"], "title": "Data"}
     catalog.collection("roads", item_assets={"data": template})
-    findings = findings_for(validate(catalog.write()), "PTL-AST-010")
-    assert [(f.severity, f.json_pointer) for f in findings] == [
-        (Severity.WARNING, "/item_assets/data/description")
+    templates = [
+        f
+        for f in findings_for(validate(catalog.write()), "PTL-AST-010")
+        if (f.json_pointer or "").startswith("/item_assets")
     ]
+    assert templates == []

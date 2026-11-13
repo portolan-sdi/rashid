@@ -198,7 +198,7 @@ def _is_https_url(href: object) -> bool:
 
 
 class AssetTitleDescriptionRule(Rule):
-    """Every asset and ``item_assets`` template has a non-empty title and description."""
+    """Every asset has a non-empty title and description."""
 
     id = "PTL-AST-010"
     spec_ids = ("PORTO-CORE-088",)
@@ -207,7 +207,7 @@ class AssetTitleDescriptionRule(Rule):
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, key, asset in [*assets_of(node), *_item_asset_templates(node)]:
+        for pointer, key, asset in assets_of(node):
             for field in ("title", "description"):
                 value = asset.get(field)
                 if not isinstance(value, str) or not value.strip():
