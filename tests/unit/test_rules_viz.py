@@ -590,6 +590,29 @@ def test_non_mosaic_raster_is_silent(
     assert findings_for(validate(catalog.write()), "PTL-VIZ-007") == []
 
 
+_TILE_A, _TILE_B, _TILE_C = [4.0, 50.0, 5.0, 51.0], [5.0, 51.0, 6.0, 52.0], [4.0, 51.0, 5.0, 52.0]
+
+
+@pytest.mark.parametrize(
+    ("footprints", "warns"),
+    [
+        ([_TILE_A, _TILE_A, _TILE_A, _TILE_B], False),
+        ([_TILE_A, _TILE_B] * 3, False),
+        ([_TILE_A, _TILE_A, _TILE_B, _TILE_C], True),
+    ],
+    ids=["one-site-revisited-plus-one", "two-sites-revisited", "three-sites"],
+)
+def test_mosaic_needs_three_distinct_footprints(
+    catalog: CatalogBuilder, footprints: list[list[float]], warns: bool
+) -> None:
+    collection = catalog.collection("ortho", assets={"thumbnail": thumbnail_asset()})
+    for index, bbox in enumerate(footprints):
+        collection.item(
+            f"ortho-{index}", bbox=bbox, assets={"data": _cog(f"./ortho-{index}.tif", "data")}
+        )
+    assert len(findings_for(validate(catalog.write()), "PTL-VIZ-007")) == int(warns)
+
+
 def test_single_raster_collection_is_silent(catalog: CatalogBuilder) -> None:
     catalog.collection(
         "dem",

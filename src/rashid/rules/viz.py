@@ -45,8 +45,8 @@ _WEB_MAP_LINKS_PREFIX = "https://stac-extensions.github.io/web-map-links/"
 # Render-from-source is plausible for small files; above this, a missing
 # visual derivative is worth a nudge. Deliberately conservative.
 _LARGE_VECTOR_BYTES = 100_000_000
-# formats.md leaves "much larger" open: a mosaic here is this many raster items,
-# each covering at most 1/ratio of the collection's extent. Deliberately conservative.
+# formats.md leaves "much larger" open: a mosaic here is raster items at this many distinct
+# bboxes, each covering at most 1/ratio of the collection's extent. Deliberately conservative.
 _MOSAIC_MIN_ITEMS, _MOSAIC_AREA_RATIO = 3, 2.0
 
 
@@ -428,22 +428,25 @@ def _mosaic_items(node: Node, graph: CatalogGraph) -> int:
     """How many raster items tile the collection's extent, or 0 if not a mosaic.
 
     Bands and time periods are not compared, so the footprint test alone must
-    rule out a time series: every item has to be much smaller than the extent.
+    rule out a time series: every item has to be much smaller than the extent,
+    and the items must sit at enough distinct places.
     """
-    boxes = bboxes_of(node)
-    extent = _bbox_area(boxes[0][1]) if boxes else None
+    extents = bboxes_of(node)
+    extent = _bbox_area(extents[0][1]) if extents else None
     if extent is None:
         return 0
-    areas = [
-        _bbox_area(item.data.get("bbox"))
+    boxes: list[Any] = [
+        item.data.get("bbox")
         for item in graph.items_of(node)
         if any(is_raster_data_asset(asset) for _p, _k, asset in assets_of(item))
     ]
-    if len(areas) < _MOSAIC_MIN_ITEMS or any(
-        area is None or area * _MOSAIC_AREA_RATIO > extent for area in areas
-    ):
+    areas = [_bbox_area(box) for box in boxes]
+    if any(area is None or area * _MOSAIC_AREA_RATIO > extent for area in areas):
         return 0
-    return len(areas)
+    # Places, not items: a site revisited on many dates is a time series.
+    if len({tuple(box) for box in boxes}) < _MOSAIC_MIN_ITEMS:
+        return 0
+    return len(boxes)
 
 
 class MosaicOverviewRule(Rule):
