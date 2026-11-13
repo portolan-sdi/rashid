@@ -750,7 +750,7 @@ def _row_ordering_defects(
     # Rows without geometry have no position; a file can hold enough rows and
     # still leave too few boxes for a chunk's box to describe anything.
     if row_boxes is None:
-        why = " with no bbox covering column to read"
+        why = " whose row boxes cannot be read from a covering or a WKB geometry"
         return [_unevaluated(key, subject, rows, groups, why)]
     boxed = sum(1 for b in row_boxes if b is not None)
     chunks, weights = _chunked_bboxes(row_boxes)
@@ -758,7 +758,7 @@ def _row_ordering_defects(
     verdict = _row_verdict(score, boxed)
     if verdict == "too-few-rows":
         verb = "carries" if boxed == 1 else "carry"
-        why = f" of which {boxed} {verb} a covering box{_floors_not_reached()}"
+        why = f" of which {boxed} {verb} a bounding box{_floors_not_reached()}"
         return [_unevaluated(key, subject, rows, groups, why)]
     if verdict == "none":
         return [_unevaluated(key, subject, rows, groups, _undefined_efficiency())]
@@ -805,7 +805,7 @@ def _row_verdict(score: _PruningScore, boxed_rows: int) -> str:
 def _floors_not_reached() -> str:
     return (
         f", too few rows to judge: the row check needs {_MIN_ORDERING_ROWS} rows "
-        "with a bbox covering column"
+        "with a bounding box"
     )
 
 
@@ -860,34 +860,49 @@ def _chunked_bboxes(
 def _row_bboxes(
     parquet: Any, geo: dict[str, Any]
 ) -> list[tuple[float, float, float, float] | None] | None:
-    """Per-row [minx, miny, maxx, maxy] from the bbox covering column's values.
+    """Per-row [minx, miny, maxx, maxy] in file order, PORTO-FMT-006's row boxes.
 
-    Reads the four covering leaves and not the geometry, so the cost is four
-    float64 columns. Returns None when the file has no 1.1 covering column, or
-    when its leaves sit deeper than the single struct level the spec uses.
+    A row's box is its bbox covering when the file declares one. Otherwise it
+    is the min and max of the row's coordinates in the primary geometry column
+    (formats.md, Row check), which lets the row check judge a native file
+    without a covering.
 
-    Rows whose covering values are null are kept in place as ``None`` rather
-    than abandoning the file. GeoParquet permits a null geometry, writers give
-    those rows a null covering box, and a row with no geometry has no position
-    — so it cannot be out of spatial order, and one of them must not cost the
-    whole file its ordering check. Keeping its slot keeps the chunk boundaries
-    where PORTO-FMT-006's test puts them. Returns None only when no row has a
-    box at all.
+    A row with a null covering, or a null or empty geometry, has no position,
+    so it cannot be out of spatial order. It stays in place as ``None``, which
+    keeps the chunk boundaries where the test puts them. Returns None when the
+    boxes cannot be read, or when no row has a box at all.
     """
+    if _declares_covering(geo):
+        boxes = _covering_row_bboxes(parquet, geo)
+    else:
+        boxes = _geometry_row_bboxes(parquet, geo)
+    if boxes is None or all(b is None for b in boxes):
+        return None
+    return boxes
+
+
+def _declares_covering(geo: dict[str, Any]) -> bool:
     columns = geo.get("columns")
-    if not isinstance(columns, dict):
-        return None
-    covering = columns.get(geo.get("primary_column"), {}).get("covering", {}).get("bbox")
-    if not isinstance(covering, dict):
-        return None
+    entry = columns.get(geo.get("primary_column")) if isinstance(columns, dict) else None
+    covering = entry.get("covering") if isinstance(entry, dict) else None
+    return isinstance(covering, dict) and isinstance(covering.get("bbox"), dict)
+
+
+def _covering_row_bboxes(
+    parquet: Any, geo: dict[str, Any]
+) -> list[tuple[float, float, float, float] | None] | None:
+    """Row boxes from the covering's four leaves, not the geometry: four float64
+    columns. None when the leaves sit deeper than the single struct level the
+    spec uses, or cannot be read."""
+    covering = geo["columns"][geo.get("primary_column")]["covering"]["bbox"]
     paths = [covering.get(corner) for corner in ("xmin", "ymin", "xmax", "ymax")]
     if not all(isinstance(p, list) and len(p) == 2 for p in paths):
         return None
-    if len({p[0] for p in paths}) != 1:  # type: ignore[index]
+    if len({p[0] for p in paths}) != 1:
         return None
     try:
-        flat = parquet.read(columns=[paths[0][0]]).flatten()  # type: ignore[index]
-        corners = [flat.column(f"{p[0]}.{p[1]}").to_pylist() for p in paths]  # type: ignore[index]
+        flat = parquet.read(columns=[paths[0][0]]).flatten()
+        corners = [flat.column(f"{p[0]}.{p[1]}").to_pylist() for p in paths]
     except Exception:
         return None
     boxes: list[tuple[float, float, float, float] | None] = []
@@ -903,7 +918,42 @@ def _row_bboxes(
                 float(corner_values[3]),
             )
         )
-    return boxes if any(b is not None for b in boxes) else None
+    return boxes
+
+
+def _geometry_row_bboxes(
+    parquet: Any, geo: dict[str, Any]
+) -> list[tuple[float, float, float, float] | None] | None:
+    """Row boxes from the primary geometry column's WKB, for a file with no covering.
+
+    The box is the min and max of the row's coordinates. For ``GEOGRAPHY``
+    that is an approximation, since geodesic edges can extend past their
+    vertices; the spec accepts it. The antimeridian is out of scope
+    (rashid#288). A null or empty geometry has no box. None when the column
+    is missing, is not WKB, or does not decode.
+    """
+    import shapely
+
+    primary = geo.get("primary_column")
+    if not isinstance(primary, str):
+        return None
+    try:
+        column = parquet.read(columns=[primary]).column(0).combine_chunks()
+        if isinstance(column, pa.ExtensionArray):
+            column = column.storage
+        if not (pa.types.is_binary(column.type) or pa.types.is_large_binary(column.type)):
+            return None  # a GeoArrow native encoding, not WKB
+        geometries = shapely.from_wkb(column.to_numpy(zero_copy_only=False), on_invalid="ignore")
+    except Exception:
+        return None
+    bounds = shapely.bounds(geometries)
+    boxes: list[tuple[float, float, float, float] | None] = []
+    for row in bounds.tolist():
+        if any(math.isnan(value) for value in row):
+            boxes.append(None)  # null, empty or undecodable geometry: no position
+            continue
+        boxes.append((row[0], row[1], row[2], row[3]))
+    return boxes
 
 
 def _ideal_grid_boxes(

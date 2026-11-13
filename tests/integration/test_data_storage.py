@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import struct
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -20,6 +21,7 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 from click.testing import CliRunner
 from pyproj import CRS
@@ -395,7 +397,7 @@ def test_compliant_geoparquet_is_clean(tmp_path: Path) -> None:
     assert [(d.rule_id, d.severity) for d in defects] == [(DAT_ORDERING, Severity.INFO)]
     assert "6 rows in 3 row groups" in defects[0].message
     assert "too few rows to judge" in defects[0].message
-    assert "needs 200 rows with a bbox covering column" in defects[0].message
+    assert "needs 200 rows with a bounding box" in defects[0].message
     assert "could not be evaluated" in defects[0].message
 
 
@@ -509,7 +511,7 @@ def test_small_single_row_group_collection_is_not_judged(tmp_path: Path) -> None
     defects = _gpq(path)
     assert [(d.rule_id, d.severity) for d in defects] == [(DAT_ORDERING, Severity.INFO)]
     assert "20 rows in 1 row group" in defects[0].message
-    assert "the row check needs 200 rows with a bbox covering column" in defects[0].message
+    assert "the row check needs 200 rows with a bounding box" in defects[0].message
     assert "could not be evaluated" in defects[0].message
 
 
@@ -566,7 +568,7 @@ def test_one_surviving_box_is_unevaluated_not_a_crash(tmp_path: Path) -> None:
     defects = _gpq(path)
     ordering = [d for d in defects if d.rule_id == DAT_ORDERING]
     assert [d.severity for d in ordering] == [Severity.INFO]
-    assert "1 carries a covering box" in ordering[0].message
+    assert "1 carries a bounding box" in ordering[0].message
     assert "could not be evaluated" in ordering[0].message
 
 
@@ -590,7 +592,7 @@ def test_a_handful_of_boxes_is_unevaluated_not_an_error(tmp_path: Path) -> None:
     defects = _gpq(path)
     ordering = [d for d in defects if d.rule_id == DAT_ORDERING]
     assert [d.severity for d in ordering] == [Severity.INFO]
-    assert "6 carry a covering box" in ordering[0].message
+    assert "6 carry a bounding box" in ordering[0].message
 
 
 def test_all_null_geometry_is_never_faulted_as_disorder(tmp_path: Path) -> None:
@@ -615,16 +617,15 @@ def test_all_null_geometry_is_never_faulted_as_disorder(tmp_path: Path) -> None:
 
 
 def test_single_row_group_without_readable_row_boxes_reports_unevaluated() -> None:
-    """Honest silence, not a false pass, when the boxes cannot be read.
+    """Honest silence, not a false pass, when the row boxes cannot be read.
 
-    A file whose per-row-group boxes come from native GeospatialStatistics has
-    no covering column to read row by row, so ordering stays unmeasured and
-    the check says so rather than reporting success.
+    Neither a covering nor a WKB geometry gives a box, so ordering stays
+    unmeasured and the check says so rather than reporting success.
     """
     defects = geoparquet._row_ordering_defects("data", object(), {}, (5000, 1))
     assert [d.rule_id for d in defects] == [DAT_ORDERING]
     assert defects[0].severity is Severity.INFO
-    assert "with no bbox covering column to read" in defects[0].message
+    assert "cannot be read from a covering or a WKB geometry" in defects[0].message
     assert "could not be evaluated" in defects[0].message
 
 
@@ -863,16 +864,81 @@ def test_native_geo_missing_geo_key_is_not_a_version_error(tmp_path: Path) -> No
     assert DAT_GEOPARQUET_VERSION not in [d.rule_id for d in _gpq(path)]
 
 
-def test_native_geo_single_row_group_reports_unevaluated_ordering(tmp_path: Path) -> None:
-    # Parity with a geo-key file that has native statistics and no covering
-    # column: the row check has no covering column to read, and it says so
-    # instead of staying silent.
+@pytest.mark.parametrize(("sort", "errors"), [(True, []), (False, [DAT_ORDERING])])
+def test_native_geometry_without_a_covering_is_judged_from_its_geometry(
+    tmp_path: Path, sort: bool, errors: list[str]
+) -> None:
+    """No geo key and no covering: the row check boxes each row from its WKB.
+
+    Four row groups send the file to the row check (PORTO-FMT-006), and the
+    geometry gives every row a box, so the file gets a verdict
+    (rashid#200, spec #226).
+    """
+    points = assets.scattered_points(400)
+    if sort:
+        points = assets.hilbert_sorted(points)
     path = tmp_path / "native.parquet"
-    assets.write_native_geoparquet(path, points=assets.ordered_points(200), row_group_size=200)
+    assets.write_native_geoparquet(path, points=points, row_group_size=100)
+    parquet = pq.ParquetFile(path)
+    assert parquet.metadata.num_row_groups == 4
+    assert geoparquet.geo_metadata(parquet) is None
     defects = _gpq(path)
-    ordering = [d for d in defects if d.rule_id == DAT_ORDERING]
+    assert [d.rule_id for d in _errors(defects)] == errors
+    if errors:
+        assert "split into 10 chunks in file order" in _errors(defects)[0].message
+
+
+@pytest.mark.parametrize(("sort", "errors"), [(True, []), (False, [DAT_ORDERING])])
+def test_a_geo_key_without_a_covering_is_judged_from_its_geometry(
+    tmp_path: Path, sort: bool, errors: list[str]
+) -> None:
+    """A GeoParquet file with a geo key and no covering column also takes its
+    row boxes from the geometry. PTL-DAT-007 still faults the missing stats."""
+    points = assets.scattered_points(400)
+    if sort:
+        points = assets.hilbert_sorted(points)
+    path = tmp_path / "no_covering.parquet"
+    assets.write_geoparquet(path, points=points, covering=False, row_group_size=len(points))
+    defects = _gpq(path)
+    assert [d.rule_id for d in _errors(defects)] == [DAT_ROWGROUP_STATS, *errors]
+
+
+def test_null_and_empty_geometries_keep_their_place_and_miss_the_floor(tmp_path: Path) -> None:
+    """A null or empty geometry has no box. It keeps its chunk position and
+    does not count toward the 200 boxed-row floor."""
+    points = assets.hilbert_sorted(assets.scattered_points(210))
+    path = tmp_path / "null_and_empty.parquet"
+    assets.write_geoparquet(
+        path, points=points, covering=False, row_group_size=len(points), null_rows={0, 1, 2, 3, 4}
+    )
+    table = pq.read_table(path)
+    empty = struct.pack("<BIdd", 1, 1, float("nan"), float("nan"))  # POINT EMPTY
+    wkb = table.column("geometry").to_pylist()
+    for i in range(200, 210):
+        wkb[i] = empty
+    table = table.set_column(0, "geometry", pa.array(wkb, type=pa.binary()))
+    pq.write_table(table, path)
+    parquet = pq.ParquetFile(path)
+    boxes = geoparquet._row_bboxes(parquet, geoparquet.geo_metadata(parquet) or {})
+    assert boxes is not None
+    assert len(boxes) == 210
+    assert [i for i, b in enumerate(boxes) if b is None] == [*range(5), *range(200, 210)]
+    assert boxes[5] == (points[5][0], points[5][1], points[5][0], points[5][1])
+    ordering = _ordering(_gpq(path))
     assert [d.severity for d in ordering] == [Severity.INFO]
-    assert "could not be evaluated" in ordering[0].message
+    assert "210 rows in 1 row group of which 195 carry a bounding box" in ordering[0].message
+    assert "too few rows to judge" in ordering[0].message
+
+
+def test_geometry_that_is_not_wkb_gives_no_row_boxes(tmp_path: Path) -> None:
+    """A GeoArrow native encoding is not decoded: the row check says so."""
+    path = tmp_path / "native_encoding.parquet"
+    table = pa.table({"geometry": pa.array([{"x": 1.0, "y": 2.0}] * 3)})
+    pq.write_table(table, path)
+    parquet = pq.ParquetFile(path)
+    assert geoparquet._row_bboxes(parquet, {"primary_column": "geometry"}) is None
+    assert geoparquet._row_bboxes(parquet, {"primary_column": "missing"}) is None
+    assert geoparquet._row_bboxes(parquet, {}) is None
 
 
 def test_native_geo_footprint_reaches_the_consistency_check(tmp_path: Path) -> None:
