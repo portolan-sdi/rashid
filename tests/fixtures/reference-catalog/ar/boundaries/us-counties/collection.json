@@ -141,7 +141,6 @@
       "href": "../../../boundaries/us-counties/us-counties.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "البيانات",
-      "description": "ملف البيانات الأساسي لهذه المجموعة.",
       "roles": [
         "data"
       ],
@@ -153,7 +152,6 @@
       "href": "https://www2.census.gov/geo/tiger/GENZ2023/shp/cb_2023_us_county_500k.zip",
       "type": "application/zip",
       "title": "ملف المصدر الأصلي",
-      "description": "الملف الأصلي الذي حُوّلت منه هذه المجموعة.",
       "roles": [
         "source"
       ],
@@ -164,7 +162,6 @@
       "href": "../../../boundaries/us-counties/us-counties.pmtiles",
       "type": "application/vnd.pmtiles",
       "title": "بلاطات خريطة الويب",
-      "description": "بلاطات متجهة من البيانات لخرائط الويب.",
       "roles": [
         "visual"
       ],
@@ -231,7 +228,6 @@
       "href": "../../../boundaries/us-counties/thumbnail.png",
       "type": "image/png",
       "title": "صورة مصغرة",
-      "description": "صورة معاينة للبيانات.",
       "roles": [
         "thumbnail"
       ],

@@ -232,7 +232,6 @@
       "href": "./san-francisco-addresses.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "San Francisco Addresses (EAS) (GeoParquet)",
-      "description": "The primary data file for this collection.",
       "roles": [
         "data"
       ],
@@ -244,7 +243,6 @@
       "href": "./san-francisco-addresses.pmtiles",
       "type": "application/vnd.pmtiles",
       "title": "San Francisco Addresses (EAS) (PMTiles)",
-      "description": "Vector tiles of the data for web maps.",
       "roles": [
         "visual"
       ],
@@ -311,7 +309,6 @@
       "href": "./thumbnail.png",
       "type": "image/png",
       "title": "Preview thumbnail over a light basemap. © OpenStreetMap contributors © CARTO.",
-      "description": "A preview image of the data.",
       "roles": [
         "thumbnail"
       ],

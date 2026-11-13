@@ -232,7 +232,6 @@
       "href": "../../../mirror/san-francisco-addresses/san-francisco-addresses.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "البيانات",
-      "description": "ملف البيانات الأساسي لهذه المجموعة.",
       "roles": [
         "data"
       ],
@@ -244,7 +243,6 @@
       "href": "../../../mirror/san-francisco-addresses/san-francisco-addresses.pmtiles",
       "type": "application/vnd.pmtiles",
       "title": "بلاطات خريطة الويب",
-      "description": "بلاطات متجهة من البيانات لخرائط الويب.",
       "roles": [
         "visual"
       ],
@@ -311,7 +309,6 @@
       "href": "../../../mirror/san-francisco-addresses/thumbnail.png",
       "type": "image/png",
       "title": "صورة مصغرة",
-      "description": "صورة معاينة للبيانات.",
       "roles": [
         "thumbnail"
       ],

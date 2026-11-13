@@ -114,7 +114,6 @@
       "href": "../../../boundaries/netherlands-provinces/netherlands-provinces.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "البيانات",
-      "description": "ملف البيانات الأساسي لهذه المجموعة.",
       "roles": [
         "data"
       ],
@@ -126,7 +125,6 @@
       "href": "https://service.pdok.nl/kadaster/brk-bestuurlijke-gebieden/atom/downloads/BestuurlijkeGebieden_2026.gpkg",
       "type": "application/geopackage+sqlite3",
       "title": "ملف المصدر الأصلي",
-      "description": "الملف الأصلي الذي حُوّلت منه هذه المجموعة.",
       "roles": [
         "source"
       ],
@@ -137,7 +135,6 @@
       "href": "../../../boundaries/netherlands-provinces/netherlands-provinces.pmtiles",
       "type": "application/vnd.pmtiles",
       "title": "بلاطات خريطة الويب",
-      "description": "بلاطات متجهة من البيانات لخرائط الويب.",
       "roles": [
         "visual"
       ],
@@ -193,7 +190,6 @@
       "href": "../../../boundaries/netherlands-provinces/thumbnail.png",
       "type": "image/png",
       "title": "صورة مصغرة",
-      "description": "صورة معاينة للبيانات.",
       "roles": [
         "thumbnail"
       ],
@@ -204,7 +200,6 @@
       "href": "../../../boundaries/netherlands-provinces/iso19115.xml",
       "type": "application/vnd.iso.19139+xml",
       "title": "البيانات الوصفية الأصلية",
-      "description": "سجل البيانات الوصفية الأصلي بمعيار ISO 19115.",
       "roles": [
         "metadata",
         "iso-19115"

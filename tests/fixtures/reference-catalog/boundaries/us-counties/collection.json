@@ -141,7 +141,6 @@
       "href": "./us-counties.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "United States Counties (2023, 1:500k) (GeoParquet)",
-      "description": "The primary data file for this collection.",
       "roles": [
         "data"
       ],
@@ -153,7 +152,6 @@
       "href": "https://www2.census.gov/geo/tiger/GENZ2023/shp/cb_2023_us_county_500k.zip",
       "type": "application/zip",
       "title": "US Census cartographic boundary counties 2023 500k (zipped Shapefile)",
-      "description": "The original upstream file this collection was converted from.",
       "roles": [
         "source"
       ],
@@ -164,7 +162,6 @@
       "href": "./us-counties.pmtiles",
       "type": "application/vnd.pmtiles",
       "title": "United States Counties (2023, 1:500k) (PMTiles)",
-      "description": "Vector tiles of the data for web maps.",
       "roles": [
         "visual"
       ],
@@ -231,7 +228,6 @@
       "href": "./thumbnail.png",
       "type": "image/png",
       "title": "Preview thumbnail over a light basemap. © OpenStreetMap contributors © CARTO.",
-      "description": "A preview image of the data.",
       "roles": [
         "thumbnail"
       ],

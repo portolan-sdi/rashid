@@ -170,7 +170,6 @@
       "href": "../../../boundaries/boston-open-space/boston-open-space.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "البيانات",
-      "description": "ملف البيانات الأساسي لهذه المجموعة.",
       "roles": [
         "data"
       ],
@@ -182,7 +181,6 @@
       "href": "../../../boundaries/boston-open-space/boston-open-space.pmtiles",
       "type": "application/vnd.pmtiles",
       "title": "بلاطات خريطة الويب",
-      "description": "بلاطات متجهة من البيانات لخرائط الويب.",
       "roles": [
         "visual"
       ],
@@ -249,7 +247,6 @@
       "href": "../../../boundaries/boston-open-space/thumbnail.png",
       "type": "image/png",
       "title": "صورة مصغرة",
-      "description": "صورة معاينة للبيانات.",
       "roles": [
         "thumbnail"
       ],
