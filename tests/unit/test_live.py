@@ -1741,3 +1741,61 @@ def test_a_denied_head_on_a_non_partial_asset_still_warns(catalog: CatalogBuilde
     assert _ids(findings) == [LIV_UNAVAILABLE]
     assert "asset 'thumbnail'" in findings[0].message
     assert "403" in findings[0].message
+
+
+def test_a_whole_file_carries_cors_when_no_partial_read_asset_stays_on_https(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.collection("roads", assets={"data": _remote_asset(), "thumbnail": _png_asset()})
+    graph = CatalogGraph.load(catalog.write())
+    no_cors = ProbeResponse(status=200, headers={})
+    prober = _PerUrlProber({_URL}, range_response=no_cors)
+
+    findings = validate_live(graph, prober)
+
+    assert prober.range_calls == [_URL, _PNG]
+    assert prober.preflight_calls == [_URL]
+    assert _ids(findings) == [LIV_OFF_HTTPS, LIV_CORS_ORIGIN, LIV_UNAVAILABLE]
+    assert findings[1].json_pointer == "/assets/thumbnail/href"
+    assert findings[2].message.startswith("range probes against host 'data.example.com'")
+    assert "every partial-read asset on it redirects off https" in findings[2].message
+
+
+def test_a_whole_file_stand_in_off_https_skips_range_and_cors(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"data": _remote_asset(), "thumbnail": _png_asset()})
+    graph = CatalogGraph.load(catalog.write())
+    prober = _PerUrlProber({_URL}, range_moved={_PNG})
+
+    findings = validate_live(graph, prober)
+
+    assert _ids(findings) == [LIV_OFF_HTTPS, LIV_OFF_HTTPS, LIV_UNAVAILABLE]
+    assert findings[2].message.startswith("range and CORS probes")
+
+
+def test_a_dead_host_after_an_off_https_redirect_tries_no_stand_in(
+    catalog: CatalogBuilder,
+) -> None:
+    graph, first, _second = _two_assets(catalog)
+
+    class DeadHeads(_PerUrlProber):
+        def head(self, url: str) -> ProbeResponse:
+            raise OSError("connection refused")
+
+    prober = DeadHeads({first})
+    findings = validate_live(graph, prober)
+    assert prober.range_calls == [first]
+    assert _ids(findings) == [LIV_OFF_HTTPS, LIV_UNAVAILABLE]
+
+
+def test_a_stand_in_probe_failure_is_a_warning(catalog: CatalogBuilder) -> None:
+    graph, first, second = _two_assets(catalog)
+
+    class StandInFails(_PerUrlProber):
+        def get_range(self, url: str) -> ProbeResponse:
+            if url == second:
+                raise OSError("connection reset")
+            return super().get_range(url)
+
+    findings = validate_live(graph, StandInFails({first}))
+    assert _ids(findings) == [LIV_OFF_HTTPS, LIV_UNAVAILABLE]
+    assert "connection reset" in findings[1].message

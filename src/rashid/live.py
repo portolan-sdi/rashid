@@ -712,9 +712,9 @@ def _check_host(
     asset when it has none. When its ranged GET redirects off https, the 3xx
     says nothing about range or CORS support, so the redirect is reported and
     the HEADs pick the next representative of the same kind: the first at
-    another URL whose HEAD stays on https. When none qualifies, or its ranged
-    GET redirects off https too, ``PTL-LIV-000`` says the host-level checks
-    did not run.
+    another URL whose HEAD stays on https. When no partial-read asset
+    qualifies, the first other asset that does still gets the CORS check.
+    ``PTL-LIV-000`` names the checks that did not run.
     """
     candidates = [t for t in targets if t.partial_read] or targets
     first = candidates[0]
@@ -732,24 +732,31 @@ def _check_host(
     head_findings = _check_heads(host, targets, heads, reported=first)
     if host in heads.failed:
         return findings + head_findings
-    rep = next(
-        (t for t in candidates if t.url != first.url and _stays_on_https(heads, t.url)), None
-    )
-    skipped = "every asset on it redirects off https"
-    if rep is not None:
+    # Without a partial-read stand-in, a file read whole still carries the CORS check.
+    whole = [t for t in targets if not t.partial_read] if first.partial_read else []
+    skipped = f"every {'partial-read ' if whole else ''}asset on it redirects off https"
+    what = "range and CORS probes"
+    for pool in (candidates, whole):
+        rep = next((t for t in pool if t.url != first.url and _stays_on_https(heads, t.url)), None)
+        if rep is None:
+            continue
         probed = _probe_host(host, rep, prober, heads)
         if isinstance(probed, Finding):
             return [*findings, probed, *head_findings]
         ranged, preflighted = probed
         location = ranged.off_https()
-        if location is None:
-            findings.extend(_check_server(rep, ranged, preflighted))
+        if location is not None:
+            findings.append(_ranged_off_https(rep, location))
+            skipped = "the ranged GET of every asset tried redirects off https"
+            continue
+        findings.extend(_check_server(rep, ranged, preflighted))
+        if rep.partial_read == first.partial_read:
             return findings + head_findings
-        findings.append(_ranged_off_https(rep, location))
-        skipped = "the ranged GET of every asset tried redirects off https"
+        what = "range probes"
+        break
     findings.append(
         _unavailable(
-            f"range and CORS probes against host '{host}' did not run: {skipped}",
+            f"{what} against host '{host}' did not run: {skipped}",
             str(first.node.path),
         )
     )
