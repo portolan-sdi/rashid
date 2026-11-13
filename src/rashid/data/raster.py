@@ -393,7 +393,7 @@ def _check_nodata_classes(key: str, asset: dict[str, Any], files: AssetFiles) ->
         return []
     try:
         src = files.raster()
-        count, nodatavals = src.count, src.nodatavals
+        count, nodatavals, masks = src.count, src.nodatavals, src.mask_flag_enums
     except Exception:  # unreadable raster: the COG check owns reporting it
         return []
     defects: list[DataDefect] = []
@@ -401,20 +401,27 @@ def _check_nodata_classes(key: str, asset: dict[str, Any], files: AssetFiles) ->
         band = 1 if found.band_index is None and count == 1 else None
         if found.band_index is not None and found.band_index < count:
             band = found.band_index + 1
-        nodata = nodatavals[band - 1] if band is not None else None
-        if nodata is not None and nodata != value:
-            defects.append(
-                DataDefect(
-                    DAT_CLASS_COLORS,
-                    Severity.WARNING,
-                    f"asset '{key}' class value {value} is marked nodata, but band {band}'s"
-                    f" nodata in the file is {nodata:g}, so readers draw it",
-                    key,
-                    json_pointer=json_pointer("nodata", prefix=pointer),
-                    expected=nodata,
-                    actual=value,
-                )
+        if band is None:
+            continue  # PTL-DAT-021's placement check reports a band the file lacks
+        nodata = nodatavals[band - 1]
+        if nodata is None and masks[band - 1] == [MaskFlags.all_valid]:
+            reason = "the file declares no nodata or mask for it"
+        elif nodata is not None and nodata != value:
+            reason = f"band {band}'s nodata in the file is {nodata:g}"
+        else:
+            continue
+        defects.append(
+            DataDefect(
+                DAT_CLASS_COLORS,
+                Severity.WARNING,
+                f"asset '{key}' class value {value} is marked nodata, but {reason},"
+                " so readers draw it",
+                key,
+                json_pointer=json_pointer("nodata", prefix=pointer),
+                expected=nodata,
+                actual=value,
             )
+        )
     return defects
 
 
