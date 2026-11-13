@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from rashid import validate
-from rashid.model import Severity
+from rashid.model import Finding, Severity
 from tests.conftest import (
     VALID_MULTIHASH,
     CatalogBuilder,
@@ -52,15 +52,84 @@ def test_s3_href_is_rejected_with_dedicated_message(catalog: CatalogBuilder) -> 
     catalog.collection("roads", assets={"data": _asset(href="s3://bucket/roads/data.parquet")})
     findings = findings_for(validate(catalog.write()), "PTL-AST-002")
     assert len(findings) == 1
-    assert "s3://" in findings[0].message
+    assert (
+        findings[0].message == "asset 'data' href uses the 's3' scheme and has no https alternate"
+    )
     assert findings[0].fix_hint is not None
+
+
+def test_s3_href_without_https_alternate_is_an_error(catalog: CatalogBuilder) -> None:
+    s3_alternate = {"s3": {"href": "s3://bucket/roads/data.parquet"}}
+    catalog.collection(
+        "roads",
+        assets={"data": _asset(href="s3://bucket/roads/data.parquet", alternate=s3_alternate)},
+    )
+    findings = findings_for(validate(catalog.write()), "PTL-AST-002")
+    assert [f.severity for f in findings] == [Severity.ERROR]
+    assert "alternate" in findings[0].message
+
+
+_OK = "https://bucket.example.org/roads/data.parquet"
+
+
+def _s3_findings(catalog: CatalogBuilder, alternate: object) -> list[Finding]:
+    """PTL-AST-002 findings for an s3 data asset with this ``alternate``."""
+    asset = _asset(href="s3://bucket/roads/data.parquet", alternate=alternate)
+    catalog.collection("roads", assets={"data": asset})
+    return findings_for(validate(catalog.write()), "PTL-AST-002")
+
+
+@pytest.mark.parametrize(
+    "alternate",
+    [
+        *(
+            {"https": {"href": href}}
+            for href in (
+                "https:",
+                "https:///data.parquet",
+                "https://exa mple.org/x",
+                "https://example.org:99999/x",
+            )
+        ),
+        [{"href": _OK}],
+        {"a": _OK},
+        {"a": {"href": "http://h/x"}},
+    ],
+)
+def test_unusable_https_alternate_keeps_the_error(
+    catalog: CatalogBuilder, alternate: object
+) -> None:
+    findings = _s3_findings(catalog, alternate)
+    assert [f.severity for f in findings] == [Severity.ERROR]
+
+
+def test_s3_href_with_https_alternate_is_a_warning(catalog: CatalogBuilder) -> None:
+    alternate = {"https": {"href": _OK}}
+    findings = _s3_findings(catalog, alternate)
+    assert [f.severity for f in findings] == [Severity.WARNING]
+    assert findings[0].message == (
+        "asset 'data' href uses the 's3' scheme; absolute hrefs should use https"
+    )
+    assert (
+        findings[0].fix_hint == "make the https alternate the href and move the s3 URL to alternate"
+    )
 
 
 def test_plain_http_href_is_rejected(catalog: CatalogBuilder) -> None:
     catalog.collection("roads", assets={"data": _asset(href="http://example.org/data.parquet")})
     findings = findings_for(validate(catalog.write()), "PTL-AST-002")
     assert len(findings) == 1
-    assert "'http'" in findings[0].message
+    assert findings[0].message == (
+        "asset 'data' href uses the 'http' scheme and has no https alternate"
+    )
+
+
+def test_scheme_without_slashes_is_named_plainly(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"data": _asset(href="mailto:data@example.org")})
+    findings = findings_for(validate(catalog.write()), "PTL-AST-002")
+    assert [f.message for f in findings] == [
+        "asset 'data' href uses the 'mailto' scheme and has no https alternate"
+    ]
 
 
 def test_https_and_relative_hrefs_pass(catalog: CatalogBuilder) -> None:
@@ -696,3 +765,33 @@ def test_glob_href_on_a_non_data_asset_passes(catalog: CatalogBuilder) -> None:
     thumbnail["href"] = "./thumb-*.png"
     catalog.collection("roads", assets={"data": _asset(), "thumbnail": thumbnail})
     assert findings_for(validate(catalog.write()), "PTL-AST-012") == []
+
+
+@pytest.mark.parametrize("field", ["title", "description"])
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_asset_without_title_or_description_warns(
+    catalog: CatalogBuilder, field: str, value: str | None
+) -> None:
+    asset = default_asset()
+    if value is None:
+        del asset[field]
+    else:
+        asset[field] = value
+    catalog.collection("roads", assets={"data": asset})
+    report = validate(catalog.write())
+    findings = findings_for(report, "PTL-AST-010")
+    assert [(f.severity, f.json_pointer) for f in findings] == [
+        (Severity.WARNING, f"/assets/data/{field}")
+    ]
+
+
+def test_item_asset_templates_need_no_title_or_description(catalog: CatalogBuilder) -> None:
+    # PORTO-CORE-088 names assets; a template is not an asset.
+    template = {"type": "application/vnd.apache.parquet", "roles": ["data"], "title": "Data"}
+    catalog.collection("roads", item_assets={"data": template})
+    templates = [
+        f
+        for f in findings_for(validate(catalog.write()), "PTL-AST-010")
+        if (f.json_pointer or "").startswith("/item_assets")
+    ]
+    assert templates == []
