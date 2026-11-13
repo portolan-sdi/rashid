@@ -225,4 +225,6 @@ Use a pull request for releases. Branch protection blocks direct pushes to `main
 uv run python scripts/vendor_spec_fixtures.py --spec ../portolan-spec
 ```
 
+Released schemas come from final `vX.Y.Z` tags. The test-only draft lives in `tests/fixtures/draft-profile-schema.json`. The vendor reads the single schema on spec main, or the newest version folder in the old layout. The reference-catalog test maps an unreleased URI to this fixture. The wheel contains only tagged profile schemas.
+
 `spec-sync.yml` checks for spec changes nightly and opens a pull request when it finds them. Review the test results before merging. If `test_schema_uri_invariant` fails, rashid needs a code change as well as a fixture refresh.

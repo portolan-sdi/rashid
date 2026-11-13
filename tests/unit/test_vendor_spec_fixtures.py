@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -50,7 +51,7 @@ def test_vendor_reads_both_tag_layouts_without_changing_bytes(spec: Path) -> Non
         relative = "schema.json" if tag == "v0.3.0" else f"{tag}/schema.json"
         path = spec / "stac/json-schema" / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        contents = f'{{ "release": "{tag}" }}\r\n'.encode()
+        contents = f'{{ "$id": "https://schemas.portolan-sdi.org/portolan/{tag}/schema.json#" }}\r\n'.encode()
         path.write_bytes(contents)
         expected[tag] = contents
         _git(spec, "add", ".")
@@ -74,7 +75,7 @@ def test_single_file_schema_takes_precedence_at_a_tag(spec: Path) -> None:
     schema_dir = spec / "stac/json-schema"
     (schema_dir / "v0.3.0").mkdir(parents=True)
     (schema_dir / "v0.3.0/schema.json").write_bytes(b'{"legacy": true}\n')
-    current = b'{"current": true}\n'
+    current = b'{"$id": "https://schemas.portolan-sdi.org/portolan/v0.3.0/schema.json#"}\n'
     (schema_dir / "schema.json").write_bytes(current)
     _git(spec, "add", ".")
     _git(spec, "commit", "-m", "test: add both layouts")
@@ -101,3 +102,44 @@ def test_missing_tagged_schemas_fail_before_reset(spec: Path, with_tag: bool) ->
         vendor._vendor_schemas(spec)
 
     assert existing.read_bytes() == b"preserve"
+
+
+def test_only_final_release_tags_are_vendored_in_version_order(spec: Path) -> None:
+    schema = spec / "stac/json-schema/schema.json"
+    schema.parent.mkdir(parents=True)
+    for tag in ("v0.10.0", "v0.2.0", "v0.3.0-rc.1", "v1", "v2.0.0+build"):
+        schema.write_text(
+            json.dumps({"$id": f"https://schemas.portolan-sdi.org/portolan/{tag}/schema.json#"})
+        )
+        _git(spec, "add", ".")
+        _git(spec, "commit", "-m", f"test: add {tag}")
+        _git(spec, "tag", tag)
+
+    assert vendor._vendor_schemas(spec) == ["v0.2.0", "v0.10.0"]
+    assert sorted(path.name for path in vendor.BUNDLED_SCHEMAS.iterdir()) == ["v0.10.0", "v0.2.0"]
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [b'{"$id": "https://example.org/portolan/v0.1.0/schema.json"}', b"{}", b"[]", b"{bad"],
+)
+def test_wrong_schema_id_fails_before_reset(spec: Path, contents: bytes) -> None:
+    schema = spec / "stac/json-schema/schema.json"
+    schema.parent.mkdir(parents=True)
+    schema.write_bytes(contents)
+    _git(spec, "add", ".")
+    _git(spec, "commit", "-m", "test: add invalid tagged schema")
+    _git(spec, "tag", "v0.2.0")
+    vendor.BUNDLED_SCHEMAS.mkdir()
+    previous = vendor.BUNDLED_SCHEMAS / "previous.json"
+    previous.write_bytes(b"preserve")
+
+    with pytest.raises(SystemExit, match="(?:at tag v0.2.0|tag v0.2.0 must contain)"):
+        vendor._vendor_schemas(spec)
+
+    assert previous.read_bytes() == b"preserve"
+
+
+def test_missing_draft_fails_with_its_source_path(spec: Path) -> None:
+    with pytest.raises(SystemExit, match="no draft profile schema found under"):
+        vendor._vendor_draft_schema(spec)
