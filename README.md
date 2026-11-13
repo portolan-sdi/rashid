@@ -1,7 +1,7 @@
 # rashid
 
 [![PyPI](https://img.shields.io/pypi/v/rashid.svg)](https://pypi.org/project/rashid/)
-[![Python versions](https://img.shields.io/pypi/pyversions/rashid.svg)](https://pypi.org/project/rashid/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml/badge.svg)](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -17,7 +17,7 @@ The name comes from the Arabic root ر ش د. Its participles رَاشِدٌ and
 uv tool install rashid
 ```
 
-rashid requires Python 3.10 or later.
+rashid requires Python 3.11 or later.
 
 ## Check a Catalog
 
@@ -47,7 +47,7 @@ Give `rashid check` the URL of the root `catalog.json`, or of the directory that
 rashid check https://data.example.org/my-catalog/catalog.json
 ```
 
-rashid fetches the root catalog and follows its `child`, `item`, and JSON `alternate` links. It fetches `AGENTS.md` and `README.md` beside each catalog and collection. It then runs the same passes as for a directory. The URL is the publish base, so the hosting checks run by default: HTTP range support and CORS on the assets, and one HEAD for each link target that the crawl did not fetch. A `child` or `item` link that answers `404` on the host is a `PTL-LIV-006` error. A root `self` link that points to a different location is a `PTL-LIV-007` warning.
+rashid fetches the root catalog and follows its `child`, `item`, and JSON `alternate` links. It fetches `AGENTS.md` and `README.md` beside each catalog and collection. It then runs the same passes as for a directory. The URL is the publish base, so the hosting checks run by default: HTTP range support on COG, Parquet, PMTiles, and COPC assets, CORS on every host, and one HEAD for each link target that the crawl did not fetch. A `child` or `item` link that answers `404` on the host is a `PTL-LIV-006` error. A root `self` link that points to a different location is a `PTL-LIV-007` warning.
 
 A crawl reads only the documents that links point to. rashid reports this limit once as `PTL-GEN-002`. The checks that depend on a full directory listing do not run: `PTL-LNK-002`, for an object without an inbound link, and `PTL-COL-005`, for scene files beside a collection. Sync the tree to disk and check the directory for the full view.
 
@@ -77,7 +77,7 @@ rashid provides six separate validation passes:
 - **Extension** checks each object against the schemas of the STAC extensions it declares, offline.
 - **Schema** checks each object against the packaged Portolan profile schema.
 - **Data** reads asset bytes and verifies checksums, sizes, formats, and extents.
-- **Live hosting** checks HTTP range support and CORS on remote servers.
+- **Live hosting** checks HTTP range support and CORS on the publisher's servers.
 
 Metadata, structural, extension, and data checks run by default. The live hosting pass also runs by default for a catalog URL. Use `--schema` as a cross-check against the published profile schema. Use `--live` to run the hosting checks on a directory.
 
@@ -90,7 +90,7 @@ For transfer details and every rule ID, see [the rule reference](docs/rules.md).
 ## Use rashid from Python
 
 ```python
-from rashid import validate
+from rashid import ValidationOptions, validate
 
 report = validate("path/to/catalog")
 published = validate("https://data.example.org/my-catalog/catalog.json")
@@ -99,19 +99,19 @@ for finding in report.errors:
     print(finding.message)
 ```
 
-`validate()` uses the same default passes as the command-line interface. Set `schema=True` or `live=True` to add those passes. For a URL, `live` is on unless you pass `live=False`. Set `extensions=False` to skip the extension pass.
+`validate()` uses the same default passes as the command-line interface. Pass settings through the frozen, keyword-only `ValidationOptions` dataclass. Use `validate(path, options=ValidationOptions(schema=True))` to enable the profile schema pass. For a URL, `live` is on unless the options set `live=False`. Set `extensions=False` to skip the extension pass.
 
 Use `RulesConfig` to disable rules or change their severity.
 
 ```python
-from rashid import RulesConfig, Severity, validate
+from rashid import RulesConfig, Severity, ValidationOptions, validate
 
 config = RulesConfig(
     disabled=frozenset({"PTL-VIZ-004"}),
     severity_overrides={"PTL-TTL-002": Severity.ERROR},
 )
 
-report = validate("path/to/catalog", config=config)
+report = validate("path/to/catalog", options=ValidationOptions(config=config))
 ```
 
 The public `rashid.api` module also provides helpers for tools that repair catalogs. Names from this module remain available across 0.x releases. Other internal modules can change in a patch release.

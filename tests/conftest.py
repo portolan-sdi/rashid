@@ -133,15 +133,15 @@ class CollectionBuilder:
             {"rel": "agents", "href": "./AGENTS.md", "type": "text/markdown"},
             {"rel": "describedby", "href": "./README.md", "type": "text/markdown"},
         ]
-        for item in self.items:
-            links.append(
-                {
-                    "rel": "item",
-                    "href": f"./{item.item_id}/{item.item_id}.json",
-                    "type": "application/geo+json",
-                    "title": f"Item {item.item_id}",
-                }
-            )
+        links.extend(
+            {
+                "rel": "item",
+                "href": f"./{item.item_id}/{item.item_id}.json",
+                "type": "application/geo+json",
+                "title": f"Item {item.item_id}",
+            }
+            for item in self.items
+        )
         data: dict[str, Any] = {
             "type": "Collection",
             "stac_version": "1.1.0",
@@ -228,24 +228,24 @@ class CatalogBuilder:
             links.insert(
                 1, {"rel": "parent", "href": "../catalog.json", "type": "application/json"}
             )
-        for collection in self.collections:
-            links.append(
-                {
-                    "rel": "child",
-                    "href": f"./{collection.collection_id}/collection.json",
-                    "type": "application/json",
-                    "title": collection.title,
-                }
-            )
-        for subcatalog in self.subcatalogs:
-            links.append(
-                {
-                    "rel": "child",
-                    "href": f"./{subcatalog.catalog_id}/catalog.json",
-                    "type": "application/json",
-                    "title": subcatalog.title,
-                }
-            )
+        links.extend(
+            {
+                "rel": "child",
+                "href": f"./{collection.collection_id}/collection.json",
+                "type": "application/json",
+                "title": collection.title,
+            }
+            for collection in self.collections
+        )
+        links.extend(
+            {
+                "rel": "child",
+                "href": f"./{subcatalog.catalog_id}/catalog.json",
+                "type": "application/json",
+                "title": subcatalog.title,
+            }
+            for subcatalog in self.subcatalogs
+        )
         data: dict[str, Any] = {
             "type": "Catalog",
             "stac_version": "1.1.0",

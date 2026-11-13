@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from rashid.catalog import CatalogGraph, Node, is_absolute_href, self_link_base
-from rashid.model import Finding, Severity
+from rashid._href import is_absolute_href, is_uri_reference
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import STRUCTURAL_RELS, links_of
+from rashid.rules._common import STRUCTURAL_RELS, assets_of, indexed_links_of, links_of
 
 # What each required structural link points at, for the fix hints.
 _REQUIRED_LINK_TARGETS = {
@@ -41,41 +42,9 @@ def _icon_links(node: Node) -> Iterable[tuple[int, dict[str, Any]]]:
     collection and item cards. So the rules below constrain any icon link they
     find rather than only the root's.
     """
-    for index, link in enumerate(links_of(node)):
+    for index, link in indexed_links_of(node):
         if link.get("rel") == "icon":
             yield index, link
-
-
-def _published_base(node: Node, graph: CatalogGraph) -> str | None:
-    """The URL prefix the tree ``node`` sits in is published under.
-
-    Read from the root ``self`` link of ``node``'s own language tree (see
-    :func:`rashid.catalog.self_link_base`), so a translated tree with its own
-    absolute ``self`` link resolves its own absolute hrefs.
-    """
-    return self_link_base(graph.language_root_of(node))
-
-
-def _resolve_structural_href(
-    node: Node, graph: CatalogGraph, href: str
-) -> tuple[bool, Node | None]:
-    """Resolve a structural href to ``(judgeable, target)``.
-
-    A relative href resolves against the file tree (core.md, Links). An
-    absolute href is judgeable only when the root self link names the
-    published base and the href sits under it; the remainder then resolves
-    from the root. Without that base the pass cannot say what the URL points
-    at, and the caller reports nothing rather than guess.
-    """
-    if not is_absolute_href(href):
-        return True, graph.resolve_link(node, href)
-    base = _published_base(node, graph)
-    if base is None or not href.startswith(base):
-        return False, None
-    root = graph.language_root_of(node)
-    if root is None:  # unreachable: _published_base read a self link off it
-        return False, None
-    return True, graph.resolve_link(root, href[len(base) :])
 
 
 class RequiredLinksRule(Rule):
@@ -103,7 +72,7 @@ class RequiredLinksRule(Rule):
                 yield self.finding(
                     node,
                     f"missing required structural link rel:'{rel}'",
-                    json_pointer="/links",
+                    json_pointer=json_pointer("links"),
                     fix_hint=f"add a rel:'{rel}' link to links, with a relative href to"
                     f" {_REQUIRED_LINK_TARGETS[rel]} and type application/json",
                 )
@@ -134,7 +103,7 @@ class ChildLinkCompletenessRule(Rule):
                 continue
             href = link.get("href")
             if isinstance(href, str) and href:
-                judgeable, target = _resolve_structural_href(node, graph, href)
+                judgeable, target = graph.resolve_structural_link(node, href)
                 if not judgeable:
                     unjudged = True
                 elif target is not None:
@@ -152,7 +121,7 @@ class ChildLinkCompletenessRule(Rule):
             yield self.finding(
                 node,
                 f"contained object '{contained.path}' has no {expected} link",
-                json_pointer="/links",
+                json_pointer=json_pointer("links"),
                 fix_hint=f"add a rel:'{expected}' link pointing to {contained.path}",
             )
 
@@ -167,7 +136,7 @@ class StructuralLinkTypeRule(Rule):
     kinds = ("catalog", "collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for index, link in enumerate(links_of(node)):
+        for index, link in indexed_links_of(node):
             rel = link.get("rel")
             if rel not in STRUCTURAL_RELS:
                 continue
@@ -177,15 +146,61 @@ class StructuralLinkTypeRule(Rule):
                 yield self.finding(
                     node,
                     f"link rel:'{rel}' has type {actual!r}, expected '{expected}'",
-                    json_pointer=f"/links/{index}/type",
+                    json_pointer=json_pointer("links", index, "type"),
                     fix_hint=f"set the link's type to '{expected}'",
                     expected=expected,
                     actual=actual,
                 )
 
 
+def _unresolved_message(node: Node, graph: CatalogGraph, rel: str, href: str) -> tuple[str, str]:
+    """Distinguish missing files from files that are not STAC objects."""
+    resolved = graph.local_path(node, href)
+    if resolved is not None and graph.file_exists(resolved):
+        message = (
+            f"link rel:'{rel}' href '{href}' resolves to a file"
+            " that is not a recognizable STAC object"
+        )
+        hint = "point the href at the target's catalog.json, collection.json, or item JSON"
+    else:
+        message = f"link rel:'{rel}' href '{href}' does not resolve to any file"
+        hint = (
+            "correct the href to the target's path relative to this file,"
+            " or restore the missing file"
+        )
+    return message, hint
+
+
+def _wrong_target(node: Node, graph: CatalogGraph, rel: str, target: Node) -> str | None:
+    """Explain which structural relationship the target violates."""
+    parent = graph.parent_of(node) if rel == "parent" else None
+    enclosing = (
+        graph.enclosing_collection_of(node) if rel == "collection" and node.kind == "item" else None
+    )
+    if rel == "root" and target is not graph.language_root_of(node):
+        return "must point to the root catalog"
+    if rel == "parent" and target is not parent:
+        return "must point to the containing object" + (
+            f" ({parent.path})" if parent is not None else ""
+        )
+    if rel == "collection" and (target.kind != "collection" or target is not enclosing):
+        return "must point to the item's enclosing collection" + (
+            f" ({enclosing.path})" if enclosing is not None else ""
+        )
+    if rel == "child" and (
+        target.kind not in ("catalog", "collection") or graph.parent_of(target) is not node
+    ):
+        return "must point to a catalog or collection contained by this object"
+    if rel == "item" and (target.kind != "item" or graph.parent_of(target) is not node):
+        return "must point to an item contained by this object"
+    return None
+
+
 class LinkResolutionRule(Rule):
-    """Every structural link the pass can place resolves to the correct object.
+    """Link and asset hrefs use URI-reference syntax; structural links resolve.
+
+    Syntax is checked before resolving targets, including hrefs on links
+    whose targets this pass cannot judge.
 
     A relative href resolves against the file tree directly. An absolute
     href resolves through the published base the root self link names
@@ -213,15 +228,33 @@ class LinkResolutionRule(Rule):
     description = "structural links must resolve against the file tree to the correct object"
     kinds = ("catalog", "collection", "item")
 
+    def _invalid_hrefs(self, node: Node) -> Iterable[Finding]:
+        locations = [
+            (json_pointer("links", index, "href"), link.get("href"))
+            for index, link in indexed_links_of(node)
+        ]
+        locations.extend(
+            (json_pointer("href", prefix=pointer), asset.get("href"))
+            for pointer, _key, asset in assets_of(node)
+        )
+        for pointer, href in locations:
+            if isinstance(href, str) and href and not is_uri_reference(href):
+                yield self.finding(
+                    node,
+                    f"href {href!r} is not a valid URI reference",
+                    json_pointer=pointer,
+                    fix_hint="percent-encode characters that RFC 3986 does not permit in a URI reference",
+                    actual=href,
+                )
+
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        parent = graph.parent_of(node)
-        enclosing = graph.enclosing_collection_of(node) if node.kind == "item" else None
-        for index, link in enumerate(links_of(node)):
+        yield from self._invalid_hrefs(node)
+        for index, link in indexed_links_of(node):
             rel = link.get("rel")
             if rel not in STRUCTURAL_RELS:
                 continue
             href = link.get("href")
-            pointer = f"/links/{index}/href"
+            pointer = json_pointer("links", index, "href")
             if not isinstance(href, str) or not href:
                 yield self.finding(
                     node,
@@ -230,28 +263,16 @@ class LinkResolutionRule(Rule):
                     fix_hint="set the link's href to the target's path, e.g. '../catalog.json'",
                 )
                 continue
-            judgeable, target = _resolve_structural_href(node, graph, href)
+            if not is_uri_reference(href):
+                continue  # The syntax finding above names this exact href.
+            judgeable, target = graph.resolve_structural_link(node, href)
             if not judgeable:
                 # The spec permits absolute structural links, and without a
                 # published base from a root self link this pass cannot say
                 # what the URL points at. It leaves the link unreported.
                 continue
             if target is None:
-                resolved = graph.resolve_path(node, href)
-                if resolved is not None and graph.file_exists(resolved):
-                    message = (
-                        f"link rel:'{rel}' href '{href}' resolves to a file"
-                        " that is not a recognizable STAC object"
-                    )
-                    hint = (
-                        "point the href at the target's catalog.json, collection.json, or item JSON"
-                    )
-                else:
-                    message = f"link rel:'{rel}' href '{href}' does not resolve to any file"
-                    hint = (
-                        "correct the href to the target's path relative to this file,"
-                        " or restore the missing file"
-                    )
+                message, hint = _unresolved_message(node, graph, rel, href)
                 yield self.finding(node, message, json_pointer=pointer, fix_hint=hint, actual=href)
                 continue
             if target.parse_error is not None:
@@ -263,23 +284,7 @@ class LinkResolutionRule(Rule):
                     actual=href,
                 )
                 continue
-            wrong: str | None = None
-            if rel == "root" and target is not graph.language_root_of(node):
-                wrong = "must point to the root catalog"
-            elif rel == "parent" and target is not parent:
-                wrong = "must point to the containing object" + (
-                    f" ({parent.path})" if parent is not None else ""
-                )
-            elif rel == "collection" and (target.kind != "collection" or target is not enclosing):
-                wrong = "must point to the item's enclosing collection" + (
-                    f" ({enclosing.path})" if enclosing is not None else ""
-                )
-            elif rel == "child" and (
-                target.kind not in ("catalog", "collection") or graph.parent_of(target) is not node
-            ):
-                wrong = "must point to a catalog or collection contained by this object"
-            elif rel == "item" and (target.kind != "item" or graph.parent_of(target) is not node):
-                wrong = "must point to an item contained by this object"
+            wrong = _wrong_target(node, graph, rel, target)
             if wrong is not None:
                 yield self.finding(
                     node,
@@ -307,10 +312,10 @@ class IconMediaTypeRule(Rule):
                 continue
             if actual is None:
                 message = "logo link rel:'icon' declares no type"
-                pointer = f"/links/{index}"
+                pointer = json_pointer("links", index)
             else:
                 message = f"logo link rel:'icon' has type {actual!r}, which no browser renders"
-                pointer = f"/links/{index}/type"
+                pointer = json_pointer("links", index, "type")
             yield self.finding(
                 node,
                 message,
@@ -337,7 +342,7 @@ class IconTitleRule(Rule):
             yield self.finding(
                 node,
                 "logo link rel:'icon' has no title",
-                json_pointer=f"/links/{index}",
+                json_pointer=json_pointer("links", index),
                 fix_hint="add a title naming what the logo shows; a page that renders"
                 " the logo uses it as the image's accessible label",
             )
@@ -359,7 +364,7 @@ class IconRelativeHrefRule(Rule):
                 yield self.finding(
                     node,
                     "logo link rel:'icon' has no href",
-                    json_pointer=f"/links/{index}/href",
+                    json_pointer=json_pointer("links", index, "href"),
                     fix_hint="set the href to the image's path relative to this file,"
                     " e.g. './_assets/logo.png'",
                 )
@@ -367,7 +372,7 @@ class IconRelativeHrefRule(Rule):
                 yield self.finding(
                     node,
                     f"logo link rel:'icon' should be relative, got '{href}'",
-                    json_pointer=f"/links/{index}/href",
+                    json_pointer=json_pointer("links", index, "href"),
                     fix_hint="copy the image into the catalog and point the href at it,"
                     " e.g. './_assets/logo.png'",
                     actual=href,
@@ -399,7 +404,7 @@ class ContainmentStaysInLanguageRule(Rule):
         if not translations:
             return
         here = graph.language_root_of(node)
-        for index, link in enumerate(links_of(node)):
+        for index, link in indexed_links_of(node):
             rel = link.get("rel")
             if rel not in ("child", "item"):
                 continue
@@ -419,7 +424,7 @@ class ContainmentStaysInLanguageRule(Rule):
                 node,
                 f"link rel:'{rel}' reaches into the alternate-language tree at"
                 f" '{there.path}'{named}",
-                json_pointer=f"/links/{index}",
+                json_pointer=json_pointer("links", index),
                 fix_hint="change the link to rel:'alternate' with type 'application/json'"
                 " and an hreflang naming the target's language",
                 actual=href,

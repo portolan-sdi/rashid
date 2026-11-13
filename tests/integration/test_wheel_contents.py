@@ -24,13 +24,7 @@ def test_wheel_ships_marker_and_schemas(tmp_path: Path) -> None:
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("uv not on PATH")
-    # mutmut copies pyproject.toml, src, and tests into mutants/ and runs the
-    # suite from there. REPO_ROOT then resolves to that copy, which carries no
-    # README.md, so hatchling refuses to build and the nightly sweep fails on a
-    # packaging question the copied tree cannot answer.
-    if not (REPO_ROOT / "README.md").is_file():
-        pytest.skip(f"{REPO_ROOT} is a partial tree, not a checkout")
-    build = subprocess.run(  # noqa: S603
+    build = subprocess.run(
         [uv, "build", "--wheel", "--out-dir", str(tmp_path)],
         cwd=REPO_ROOT,
         check=False,

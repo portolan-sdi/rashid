@@ -6,8 +6,8 @@ vendored to ``tests/fixtures/requirements.yaml`` by
 stable ID, an RFC 2119 severity, and an enforcement class: ``validator``
 (rashid must cite it) or ``process`` (not machine-checkable). Each rashid check
 declares the manifest IDs it enforces — ``Rule.spec_ids`` for metadata rules,
-a module-level ``SPEC_IDS`` registry for the structural, schema, runner, data,
-and live checks — and ``rashid.registry.CHECKS`` joins both into one id-space,
+``rashid.registry`` for other passes — and ``rashid.registry.CHECKS`` registers
+both in one id-space,
 carrying the strongest severity each check can emit.
 
 This module gates the join in both directions:
@@ -31,11 +31,7 @@ from pathlib import Path
 
 import pytest
 
-import rashid.data as data_pass
-import rashid.live as live_pass
-import rashid.runner as runner
-import rashid.schema as schema_pass
-import rashid.structural as structural_pass
+import rashid.registry as registry
 import tests.unit.test_may_permissions as may_permissions
 from rashid.model import Severity
 from rashid.registry import CHECKS
@@ -80,12 +76,12 @@ _SEVERITY_EXCEPTIONS: dict[str, str] = {
     # equal the red, green, and blue components of the color table entry for
     # that class value. Tools that read both SHOULD warn when they differ."
     # The table is authoritative for rendering, so the spec pins a mismatch
-    # to a warning (PTL-DAT-018).
+    # to a warning (PTL-DAT-021).
     "PORTO-FMT-054": "spec pins a color_hint and color table mismatch to a warning",
     # formats.md, Raster, Classified rasters: "A class whose value is the
     # band's nodata MUST be marked nodata: true." Rashid compares the class
     # with the nodata the file declares, and warns rather than errs while
-    # catalogs adopt classes (PTL-DAT-018). Raise it to an error once they do.
+    # catalogs adopt classes (PTL-DAT-021). Raise it to an error once they do.
     "PORTO-FMT-060": "a class at the file's nodata is warned about during adoption",
 }
 
@@ -116,6 +112,22 @@ def _citations() -> dict[str, list[tuple[str, Severity]]]:
 def test_manifest_ids_are_unique() -> None:
     ids = [entry[0] for entry in _manifest_entries()]
     assert len(ids) == len(set(ids))
+
+
+def test_documented_rule_groups_match_the_registry() -> None:
+    rules_doc = _TESTS_DIR.parent / "docs" / "rules.md"
+    groups = re.findall(
+        r"\| `(PTL-[A-Z]{3})` \| ([\d–, ]+) \|",
+        rules_doc.read_text(encoding="utf-8"),
+    )
+    documented = {
+        f"{prefix}-{number:03d}"
+        for prefix, ranges in groups
+        for segment in ranges.split(", ")
+        for bounds in [segment.split("–")]
+        for number in range(int(bounds[0]), int(bounds[-1]) + 1)
+    }
+    assert documented == set(CHECKS)
 
 
 def test_every_validator_must_and_should_is_cited() -> None:
@@ -207,10 +219,9 @@ def test_severity_mapping() -> None:
 def _constant_aliases() -> dict[str, set[str]]:
     """Check id -> the module-constant names tests may reference it by."""
     aliases: dict[str, set[str]] = {}
-    for module in (runner, structural_pass, schema_pass, data_pass, live_pass):
-        for name, value in vars(module).items():
-            if isinstance(value, str) and re.fullmatch(r"PTL-[A-Z]{3}-\d{3}", value):
-                aliases.setdefault(value, set()).add(name)
+    for name, value in vars(registry).items():
+        if isinstance(value, str) and re.fullmatch(r"PTL-[A-Z]{3}-\d{3}", value):
+            aliases.setdefault(value, set()).add(name)
     return aliases
 
 

@@ -109,3 +109,72 @@ def test_empty_field_values_are_flagged(catalog: CatalogBuilder) -> None:
     mutate_json(_collection(root), mutate)
     findings = findings_for(validate(root), "PTL-PRT-001")
     assert {f.json_pointer for f in findings} == {"/partition:scheme", "/partition:keys"}
+
+
+@pytest.mark.parametrize(
+    "glob",
+    [
+        "http://example.org/*.parquet",
+        "https://example.org/*.parquet",
+        "HTTPS://example.org/*.parquet",
+        "https://[invalid",
+        "./parts/*.parquet",
+        "parts/*.parquet",
+        "/data/parts/*.parquet",
+        "C:/data/*.parquet",
+        "s3://",
+        "gs:///data/*.parquet",
+        "az:container/*.parquet",
+        "year:2024/*.parquet",
+        "abfs:container/*.parquet",
+        "s3://user@/data/*.parquet",
+        "s3://:80/data/*.parquet",
+        "s3://bucket:bad/data/*.parquet",
+        "s3://bucket:99999/data/*.parquet",
+        "file:parts/*.parquet",
+        "file:",
+    ],
+)
+def test_unlistable_glob_is_rejected(catalog: CatalogBuilder, glob: str) -> None:
+    root = _built(catalog)
+    mutate_json(
+        _collection(root),
+        lambda d: d.__setitem__("partition:glob", glob),
+    )
+    findings = findings_for(validate(root), "PTL-PRT-002")
+    assert len(findings) == 1
+    assert findings[0].severity.value == "error"
+    assert findings[0].json_pointer == "/partition:glob"
+    assert findings[0].fix_hint == "use the absolute bucket URL, e.g. 's3://bucket/data/*.parquet'"
+
+
+@pytest.mark.parametrize(
+    "glob",
+    [
+        "s3://bucket/*.parquet",
+        "S3://bucket/*.parquet",
+        "gs://bucket/*.parquet",
+        "az://container/*.parquet",
+        " s3://bucket/*.parquet",
+        None,
+        123,
+        "  ",
+    ],
+)
+def test_recommended_or_missing_glob_is_permitted(catalog: CatalogBuilder, glob: object) -> None:
+    root = _built(catalog)
+    mutate_json(_collection(root), lambda d: d.__setitem__("partition:glob", glob))
+    assert findings_for(validate(root), "PTL-PRT-002") == []
+
+
+@pytest.mark.parametrize(
+    "glob", ["hf://datasets/org/data/*.parquet", "file:///data/*.parquet", "abfs://c@a/*.parquet"]
+)
+def test_other_absolute_scheme_is_a_warning(catalog: CatalogBuilder, glob: str) -> None:
+    root = _built(catalog)
+    mutate_json(_collection(root), lambda d: d.__setitem__("partition:glob", glob))
+    findings = findings_for(validate(root), "PTL-PRT-002")
+    assert len(findings) == 1
+    assert findings[0].severity.value == "warning"
+    assert findings[0].json_pointer == "/partition:glob"
+    assert findings[0].actual == glob

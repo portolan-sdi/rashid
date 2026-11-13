@@ -7,6 +7,10 @@ name: Spec Sync
 # verdict: a pure-data change stays green and is mergeable, while a schema-URI or
 # rule change trips the keystone guard (tests/unit/test_schema_uri_invariant.py)
 # and lands as a red PR that forces a matching code fix in rashid.
+#
+# The PR comes from the org sync app, not GITHUB_TOKEN. GitHub starts no
+# workflow for a PR that GITHUB_TOKEN opens, so the verdict run never ran.
+# Auto-merge is armed, so a green PR lands on its own and a red one waits.
 
 on:
   schedule:
@@ -14,8 +18,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: spec-sync
@@ -39,7 +42,7 @@ jobs:
             https://github.com/portolan-sdi/portolan-spec.git \
             "$RUNNER_TEMP/portolan-spec"
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
@@ -79,10 +82,21 @@ jobs:
             git --no-pager diff --stat -- tests/fixtures src/rashid/_schemas SPEC_REF
           fi
 
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app-token
+        if: steps.drift.outputs.changed == 'true'
+        with:
+          client-id: ${{ secrets.OPS_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OPS_SYNC_APP_KEY }}
+          owner: portolan-sdi
+          repositories: rashid
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Open or update sync PR
         if: steps.drift.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           BRANCH="chore/spec-sync"
           REF="$(sed -n '3p' SPEC_REF)"
@@ -106,7 +120,7 @@ jobs:
           The test run on this PR is the verdict:
 
           - **Green** — a data-only change (new or edited catalog objects, newly
-            pinned extension schemas). Review and merge.
+            pinned extension schemas). Auto-merge lands it.
           - **Red on `test_schema_uri_invariant`** — the spec changed its schema URI or shape.
             rashid needs a matching code change (e.g. `SCHEMA_URI_PATTERN`, `DEFAULT_SCHEMA_URI`)
             on this branch before it can merge.
@@ -122,3 +136,5 @@ jobs:
               --title "chore: sync spec fixtures to ${SHORT}" \
               --body-file "$RUNNER_TEMP/pr-body.md"
           fi
+          # The required checks gate the merge. A red run holds the PR open.
+          gh pr merge --auto --squash "$BRANCH"

@@ -156,14 +156,18 @@ def test_the_corpus_holds_valid_and_invalid_objects() -> None:
     assert verdicts == {True, False}
 
 
-@pytest.mark.parametrize(("label", "python", "rust"), _PAIRS, ids=[p[0] for p in _PAIRS])
-def test_every_bundled_schema_compiles_offline_in_rust(label: str, python: Any, rust: Any) -> None:
+@pytest.mark.parametrize(
+    ("label", "rust"), [(label, rust) for label, _, rust in _PAIRS], ids=[p[0] for p in _PAIRS]
+)
+def test_every_bundled_schema_compiles_offline_in_rust(label: str, rust: Any) -> None:
     """A schema Rust cannot compile falls back to Python alone: correct, but slow."""
     assert rust is not None, f"jsonschema-rs could not compile {label}"
 
 
-@pytest.mark.parametrize(("label", "python", "rust"), _PAIRS, ids=[p[0] for p in _PAIRS])
-def test_rust_and_python_agree_on_every_fixture_object(label: str, python: Any, rust: Any) -> None:
+@pytest.mark.parametrize(
+    ("python", "rust"), [(python, rust) for _, python, rust in _PAIRS], ids=[p[0] for p in _PAIRS]
+)
+def test_rust_and_python_agree_on_every_fixture_object(python: Any, rust: Any) -> None:
     disagreements = [
         name for name, data in _OBJECTS if rust.is_valid(data) != python.is_valid(data)
     ]

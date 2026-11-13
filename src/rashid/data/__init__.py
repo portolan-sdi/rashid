@@ -9,10 +9,10 @@ contradict and still pass. core.md makes several of these a hard MUST:
 always match what is in the bucket", and each format carries a required media
 type.
 
-This opt-in pass reads the bytes — local files and remote ``https`` assets — and
-reports where they diverge from the claim. Like the structural and schema passes
-it is off by default (CLI ``--data``; ``validate(..., data=True)``), reaches the
-network, and downgrades to a single WARNING when it cannot run.
+This pass reads the bytes — local files and remote ``https`` assets — and
+reports where they diverge from the claim. It runs by default; CLI ``--no-data``
+or ``ValidationOptions(data=False)`` skips it. It reaches the network for remote
+assets and downgrades to a single WARNING when it cannot run.
 
 Which bytes it may read is the caller's choice. ``reader_factory`` supplies the
 :class:`~rashid.data.reader.AssetReader`, defaulting to
@@ -43,93 +43,9 @@ from typing import Any
 from rashid import _trace
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.data.reader import AssetReader, FilesystemHttpReader, Locator
-from rashid.model import Finding, Severity
-
-DAT_UNAVAILABLE = "PTL-DAT-000"
-DAT_CHECKSUM = "PTL-DAT-001"
-DAT_SIZE = "PTL-DAT-002"
-DAT_FORMAT = "PTL-DAT-003"
-DAT_COG = "PTL-DAT-004"
-DAT_CONSISTENCY = "PTL-DAT-005"
-DAT_ORDERING = "PTL-DAT-006"
-DAT_ROWGROUP_STATS = "PTL-DAT-007"
-DAT_ROWGROUP_SIZE = "PTL-DAT-008"
-DAT_COG_STATS = "PTL-DAT-009"
-DAT_VALID_PERCENT = "PTL-DAT-010"
-DAT_OVERVIEWS = "PTL-DAT-011"
-DAT_GEOPARQUET_VERSION = "PTL-DAT-012"
-DAT_TILE_SIZE = "PTL-DAT-013"
-DAT_PARTITION_SCHEMA = "PTL-DAT-014"
-DAT_TABULAR = "PTL-DAT-015"
-DAT_MIRROR = "PTL-DAT-016"
-DAT_VECTOR_COLUMNS = "PTL-DAT-017"
-DAT_CLASS_COLORS = "PTL-DAT-018"
-DAT_PALETTE_CLASSES = "PTL-DAT-019"
-
-# Requirement IDs from the spec's requirements manifest
-# (specs/portolan/requirements.yaml) enforced by each check;
-# gated by tests/unit/test_spec_coverage.py.
-SPEC_IDS: dict[str, tuple[str, ...]] = {
-    # PORTO-CORE-030 requires any file:size and file:checksum an asset carries
-    # to match the bytes its href resolves to. These two checks are how that is
-    # observed, which is why the requirement is enforcement: validator.
-    DAT_CHECKSUM: ("PORTO-CORE-030",),
-    DAT_SIZE: ("PORTO-CORE-030",),
-    DAT_FORMAT: ("PORTO-CORE-026", "PORTO-FMT-001"),
-    # FMT-045 scopes every format check below to the catalog's own cloud-native
-    # assets. It is enforced once, at the dispatch in checks.py that returns
-    # early for a source asset, so each check the early return suppresses
-    # carries the ID.
-    DAT_COG: ("PORTO-FMT-001", "PORTO-FMT-023", "PORTO-FMT-024", "PORTO-FMT-045"),
-    # The footprint comparison is scoped to geospatial data only, which is
-    # how a tabular bbox stays informational (PORTO-FMT-036).
-    DAT_CONSISTENCY: ("PORTO-FMT-036",),
-    # FMT-043 binds an item mirror to the same three GeoParquet MUSTs as
-    # vector data, so the checks that enforce them carry it too.
-    # FMT-044 is the applicability guard on FMT-006: the two row-group criteria
-    # run at five or more groups, a single group is measured over its rows, and
-    # two to four are left alone rather than faulted on a threshold they cannot
-    # express.
-    DAT_ORDERING: ("PORTO-FMT-006", "PORTO-FMT-043", "PORTO-FMT-044", "PORTO-FMT-045"),
-    # ERROR when neither statistics source exists; WARNING when a 2.x file
-    # relies on native statistics without the RECOMMENDED covering column.
-    DAT_ROWGROUP_STATS: ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043", "PORTO-FMT-045"),
-    DAT_ROWGROUP_SIZE: ("PORTO-FMT-009", "PORTO-FMT-043", "PORTO-FMT-045"),
-    DAT_COG_STATS: (
-        "PORTO-FMT-026",
-        "PORTO-FMT-027",
-        "PORTO-FMT-028",
-        "PORTO-FMT-030",
-        "PORTO-FMT-045",
-    ),
-    DAT_VALID_PERCENT: ("PORTO-FMT-031", "PORTO-FMT-045"),
-    DAT_OVERVIEWS: ("PORTO-FMT-024", "PORTO-FMT-025", "PORTO-FMT-045"),
-    DAT_GEOPARQUET_VERSION: ("PORTO-FMT-004", "PORTO-FMT-045"),
-    DAT_TILE_SIZE: ("PORTO-FMT-024", "PORTO-FMT-045"),
-    DAT_PARTITION_SCHEMA: ("PORTO-FMT-021", "PORTO-FMT-045"),
-    DAT_TABULAR: ("PORTO-FMT-037", "PORTO-FMT-045"),
-    # The collection SHOULD carries the field, an item carries it in
-    # properties, and a collection whose assets differ MAY declare it per
-    # asset instead — which is why an asset-level declaration satisfies both.
-    DAT_VECTOR_COLUMNS: (
-        "PORTO-FMT-046",
-        "PORTO-FMT-047",
-        "PORTO-FMT-048",
-        "PORTO-FMT-045",
-    ),
-    # A mirror must reproduce the collection's items (PORTO-FMT-042).
-    DAT_MIRROR: ("PORTO-FMT-042",),
-    # A class color_hint must equal the embedded color table entry, and tools
-    # warn when they differ (PORTO-FMT-055 pins the finding to a warning).
-    # A class at the file's nodata value must be marked nodata
-    # (PORTO-FMT-060), warned about for now while catalogs adopt classes.
-    DAT_CLASS_COLORS: ("PORTO-FMT-054", "PORTO-FMT-060"),
-    # A palette band only hints at classes. Continuous rasters ship color
-    # tables too, so whether a raster is classified is the producer's
-    # declaration (PORTO-FMT-049 is enforcement: process) and this INFO hint
-    # cites nothing.
-    DAT_PALETTE_CLASSES: (),
-}
+from rashid.model import Finding, Severity, json_pointer
+from rashid.registry import DAT_UNAVAILABLE
+from rashid.rules._common import assets_of
 
 # Assets are declared on collections and items; catalogs carry none.
 _DATA_KINDS: tuple[Kind, ...] = ("collection", "item")
@@ -171,6 +87,52 @@ class DataDefect:
     json_pointer: str | None = None
     expected: Any | None = None
     actual: Any | None = None
+
+
+class DataResults:
+    """Finding sources; each build derives shared-field and partition results anew."""
+
+    def __init__(self) -> None:
+        self._sources: list[tuple[DataDefect, int | None]] = []
+
+    def extend(self, defects: list[DataDefect], *, partition_total: int | None = None) -> None:
+        self._sources.extend((defect, partition_total) for defect in defects)
+
+    def build(self) -> list[DataDefect]:
+        groups: dict[tuple[object, ...], list[DataDefect]] = {}
+        totals: dict[tuple[object, ...], int] = {}
+        signature: tuple[object, ...]
+        for index, (defect, total) in enumerate(self._sources):
+            if total is not None:
+                signature = ("partition", defect.rule_id, defect.severity)
+                totals[signature] = total
+            elif defect.json_pointer is not None:
+                signature = ("field", defect.rule_id, defect.json_pointer, defect.message)
+            else:
+                signature = ("asset", index)
+            groups.setdefault(signature, []).append(defect)
+        results: list[DataDefect] = []
+        for signature, members in groups.items():
+            first = members[0]
+            if signature[0] != "partition":
+                results.append(first)
+                continue
+            message = first.message
+            if len(members) > 1:
+                message = (
+                    f"{len(members)} of {totals[signature]} partition files fail this check; "
+                    f"e.g. {first.message}"
+                )
+            results.append(
+                DataDefect(
+                    first.rule_id,
+                    first.severity,
+                    message,
+                    "",
+                    json_pointer=json_pointer("partition:glob"),
+                )
+            )
+        return results
 
 
 # A validator inspects one object's assets, given a reader for their bytes, and
@@ -262,7 +224,7 @@ def validate_data(
         for node, future in zip(nodes, futures, strict=True):
             try:
                 defects = future.result()
-            except Exception as exc:  # noqa: BLE001 - any validator failure is systemic
+            except Exception as exc:  # any validator failure is systemic
                 findings.append(
                     Finding(
                         rule_id=DAT_UNAVAILABLE,
@@ -334,15 +296,12 @@ def _reads_remote(node: Node, reader: AssetReader) -> bool:
     too, where the validator meets the same failure and the pass reports it
     as a systemic one.
     """
-    assets = node.data.get("assets")
-    if not isinstance(assets, dict):
-        return False
-    for asset in assets.values():
-        href = asset.get("href") if isinstance(asset, dict) else None
+    for _pointer, _key, asset in assets_of(node):
+        href = asset.get("href")
         if isinstance(href, str) and href:
             try:
                 located = reader.locate(node, href)
-            except Exception:  # noqa: BLE001 - the validator reports it
+            except Exception:  # the validator reports it
                 return False
             if located is not None and located.is_remote:
                 return True
@@ -354,9 +313,9 @@ def _to_findings(node: Node, defects: list[DataDefect]) -> list[Finding]:
     for defect in defects:
         pointer = defect.json_pointer
         if pointer is None:
-            pointer = f"/assets/{defect.asset_key}"
+            pointer = json_pointer("assets", defect.asset_key)
             if defect.field is not None:
-                pointer = f"{pointer}/{defect.field}"
+                pointer = json_pointer(defect.field, prefix=pointer)
         findings.append(
             Finding(
                 rule_id=defect.rule_id,

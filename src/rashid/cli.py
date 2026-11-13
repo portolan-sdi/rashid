@@ -12,10 +12,10 @@ from pathlib import Path
 
 import click
 
-from rashid import _trace
+from rashid import ValidationOptions, _trace
+from rashid._href import is_catalog_url
 from rashid.data.reader import LocalOnlyReader
 from rashid.model import Report, Severity
-from rashid.remote import is_catalog_url
 from rashid.runner import validate
 
 _SEVERITY_TAGS = {
@@ -179,7 +179,7 @@ def main(
     is_flag=True,
     help="Count findings per rule instead of listing them.",
 )
-def check(
+def check(  # noqa: PLR0913, PLR0917 - Click passes one argument per CLI option
     catalog: Path | str,
     as_json: bool,
     structural: bool,
@@ -214,14 +214,16 @@ def check(
     with _trace.span("check"):
         report = validate(
             catalog,
-            structural=structural,
-            extensions=extensions,
-            schema=schema,
-            schema_allow_network=schema_allow_network,
-            data=data,
-            data_reader_factory=LocalOnlyReader if data_scope == "local" else None,
-            live=live,
-            live_base_url=live_base_url,
+            options=ValidationOptions(
+                structural=structural,
+                extensions=extensions,
+                schema=schema,
+                schema_allow_network=schema_allow_network,
+                data=data,
+                data_reader_factory=LocalOnlyReader if data_scope == "local" else None,
+                live=live,
+                live_base_url=live_base_url,
+            ),
         )
     root = click.get_current_context().find_root().obj or {}
     show_timings = root.get("timings", False)

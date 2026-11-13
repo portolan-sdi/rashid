@@ -24,8 +24,8 @@ included:
   in ``item_assets``.
 
 Whether a ``color_hint`` agrees with the colour table embedded in the COG
-(``PTL-DAT-018``), and whether a palette band has classes at all
-(``PTL-DAT-019``, an INFO hint), are bytes questions, so they live in the data pass, which
+(``PTL-DAT-021``), and whether a palette band has classes at all
+(``PTL-DAT-022``, an INFO hint), are bytes questions, so they live in the data pass, which
 reads the lists through :func:`asset_class_lists`.
 """
 
@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from typing import Any, TypeGuard
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 
 CLASSES_FIELD = "classification:classes"
@@ -93,7 +93,7 @@ class ClassList:
             return
         for index, entry in enumerate(self.classes):
             if isinstance(entry, dict):
-                yield f"{self.pointer}/{index}", entry
+                yield json_pointer(index, prefix=self.pointer), entry
 
 
 def asset_class_lists(pointer: str, asset: dict[str, Any]) -> list[ClassList]:
@@ -103,7 +103,12 @@ def asset_class_lists(pointer: str, asset: dict[str, Any]) -> list[ClassList]:
     found: list[ClassList] = []
     if CLASSES_FIELD in asset:
         found.append(
-            ClassList(f"{pointer}/{CLASSES_FIELD}", asset[CLASSES_FIELD], nodata, data_type)
+            ClassList(
+                json_pointer(CLASSES_FIELD, prefix=pointer),
+                asset[CLASSES_FIELD],
+                nodata,
+                data_type,
+            )
         )
     for field in BAND_FIELDS:
         bands = asset.get(field)
@@ -113,7 +118,7 @@ def asset_class_lists(pointer: str, asset: dict[str, Any]) -> list[ClassList]:
             if isinstance(band, dict) and CLASSES_FIELD in band:
                 found.append(
                     ClassList(
-                        f"{pointer}/{field}/{index}/{CLASSES_FIELD}",
+                        json_pointer(field, index, CLASSES_FIELD, prefix=pointer),
                         band[CLASSES_FIELD],
                         band.get("nodata", nodata),
                         band.get("data_type", data_type),
@@ -140,7 +145,7 @@ def _containers(node: Node) -> Iterator[tuple[str, dict[str, Any]]]:
             continue
         for key, asset in assets.items():
             if isinstance(asset, dict):
-                yield f"/{field}/{key}", asset
+                yield json_pointer(field, key), asset
 
 
 def class_lists(node: Node) -> list[ClassList]:
@@ -218,7 +223,7 @@ class ClassListRule(Rule):
         values: dict[int, str] = {}
         names: dict[str, str] = {}
         for index, entry in enumerate(found.classes):
-            pointer = f"{found.pointer}/{index}"
+            pointer = json_pointer(index, prefix=found.pointer)
             if not isinstance(entry, dict):
                 yield self.finding(
                     node,
@@ -233,7 +238,7 @@ class ClassListRule(Rule):
                 yield self.finding(
                     node,
                     f"class {pointer} has no title",
-                    json_pointer=f"{pointer}/title",
+                    json_pointer=json_pointer("title", prefix=pointer),
                     fix_hint="set title to the class's human-readable label, e.g. 'Permanent water'",
                 )
             yield from self._check_color_hint(node, pointer, entry)
@@ -241,7 +246,7 @@ class ClassListRule(Rule):
                 yield self.finding(
                     node,
                     f"class {pointer} has a nodata flag that is not a boolean",
-                    json_pointer=f"{pointer}/nodata",
+                    json_pointer=json_pointer("nodata", prefix=pointer),
                     fix_hint="set nodata to true or false",
                 )
 
@@ -253,7 +258,7 @@ class ClassListRule(Rule):
             yield self.finding(
                 node,
                 f"class {pointer} has no integer value",
-                json_pointer=f"{pointer}/value",
+                json_pointer=json_pointer("value", prefix=pointer),
                 fix_hint="set value to the integer pixel value the class covers",
                 actual=value,
             )
@@ -262,7 +267,7 @@ class ClassListRule(Rule):
             yield self.finding(
                 node,
                 f"class {pointer} repeats value {value} of class {seen[value]}",
-                json_pointer=f"{pointer}/value",
+                json_pointer=json_pointer("value", prefix=pointer),
                 fix_hint="give each class its own pixel value, or merge the two classes",
                 actual=value,
             )
@@ -277,7 +282,7 @@ class ClassListRule(Rule):
             yield self.finding(
                 node,
                 f"class {pointer} has no name of letters, digits, '-' and '_'",
-                json_pointer=f"{pointer}/name",
+                json_pointer=json_pointer("name", prefix=pointer),
                 fix_hint="set name to a short machine-readable id such as 'permanent-water',"
                 " and put the readable label in title",
                 actual=name,
@@ -287,7 +292,7 @@ class ClassListRule(Rule):
             yield self.finding(
                 node,
                 f"class {pointer} repeats name '{name}' of class {seen[name]}",
-                json_pointer=f"{pointer}/name",
+                json_pointer=json_pointer("name", prefix=pointer),
                 fix_hint="give each class its own name",
                 actual=name,
             )
@@ -308,7 +313,7 @@ class ClassListRule(Rule):
         yield self.finding(
             node,
             f"class {pointer} has a color_hint that is not six hex digits",
-            json_pointer=f"{pointer}/color_hint",
+            json_pointer=json_pointer("color_hint", prefix=pointer),
             fix_hint=fix,
             actual=hint,
         )
@@ -346,7 +351,7 @@ class NodataClassRule(Rule):
                     yield self.finding(
                         node,
                         f"class {pointer} is marked nodata, but its band declares no nodata value",
-                        json_pointer=f"{pointer}/nodata",
+                        json_pointer=json_pointer("nodata", prefix=pointer),
                         fix_hint=f"set the band's nodata to {value}, or drop the class's"
                         " nodata flag",
                         expected=value,
@@ -356,7 +361,7 @@ class NodataClassRule(Rule):
                         node,
                         f"class {pointer} is marked nodata with value {value}, but its band's"
                         f" nodata is {found.nodata!r}",
-                        json_pointer=f"{pointer}/value",
+                        json_pointer=json_pointer("value", prefix=pointer),
                         fix_hint="make the nodata class's value equal the band's nodata, or"
                         " drop the class's nodata flag",
                         expected=found.nodata,
@@ -394,7 +399,7 @@ class ClassValueRangeRule(Rule):
                         node,
                         f"class {pointer} has value {value}, outside the {found.data_type}"
                         f" range {low}..{high}",
-                        json_pointer=f"{pointer}/value",
+                        json_pointer=json_pointer("value", prefix=pointer),
                         fix_hint=f"use a value between {low} and {high}, or correct the"
                         " band's data_type",
                         expected=[low, high],
@@ -483,7 +488,7 @@ class ItemAssetClassesRule(Rule):
                 node,
                 f"items such as {example} carry classes on asset '{key}' band {index},"
                 f" but item_assets/{key} does not",
-                json_pointer=f"/item_assets/{key}",
+                json_pointer=json_pointer("item_assets", key),
                 fix_hint=f"copy the class list into item_assets/{key}/bands/{index}"
                 f"/{CLASSES_FIELD}",
             )

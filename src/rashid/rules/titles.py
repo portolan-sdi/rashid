@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import links_of
 
 # A "raw slug": word characters chained with _ or . and no spaces at all,
 # e.g. road_centerlines_2024. Single words without separators are allowed.
@@ -39,7 +39,7 @@ class TitleDescriptionRule(Rule):
                 yield self.finding(
                     node,
                     f"missing or empty '{field}'",
-                    json_pointer=f"/{field}",
+                    json_pointer=json_pointer(field),
                     fix_hint=f"add a '{field}': {_FIELD_HINTS[field]}",
                 )
 
@@ -56,27 +56,41 @@ class HumanReadableTitleRule(Rule):
     spec_ids = ("PORTO-CORE-038", "PORTO-CORE-040")
     default_severity = Severity.WARNING
     description = "titles must be human-readable, not raw slugs or ns:LayerName identifiers"
-    kinds = ("catalog", "collection")
+    kinds = ()  # One pass over all title positions, including optional Item titles.
 
-    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        title = node.data.get("title")
-        if not isinstance(title, str) or not title.strip():
-            return  # PTL-TTL-001 reports the absence
-        stripped = title.strip()
-        if _SLUG.match(stripped):
-            yield self.finding(
-                node,
-                f"title '{stripped}' looks like a raw slug, not a human-readable title",
-                json_pointer="/title",
-                fix_hint="use natural language, e.g. 'Road Centerlines 2024'",
-            )
-        elif _NAMESPACE.match(stripped):
-            yield self.finding(
-                node,
-                f"title '{stripped}' carries a technical namespace prefix",
-                json_pointer="/title",
-                fix_hint="drop the namespace and use natural language",
-            )
+    def check_graph(self, graph: CatalogGraph) -> Iterable[Finding]:
+        for node in graph.iter("catalog", "collection", "item"):
+            if node.parse_error is not None:
+                continue
+            for pointer, title in _title_positions(node):
+                if not isinstance(title, str) or not title.strip():
+                    continue  # PTL-TTL-001/003 own required-title presence.
+                stripped = title.strip()
+                if _SLUG.match(stripped):
+                    yield self.finding(
+                        node,
+                        f"title '{stripped}' looks like a raw slug, not a human-readable title",
+                        json_pointer=pointer,
+                        fix_hint="use natural language, e.g. 'Road Centerlines 2024'",
+                    )
+                elif _NAMESPACE.match(stripped):
+                    yield self.finding(
+                        node,
+                        f"title '{stripped}' carries a technical namespace prefix",
+                        json_pointer=pointer,
+                        fix_hint="drop the namespace and use natural language",
+                    )
+
+
+def _title_positions(node: Node) -> Iterable[tuple[str, Any]]:
+    if node.kind == "item":
+        properties = node.data.get("properties")
+        if isinstance(properties, dict):
+            yield json_pointer("properties", "title"), properties.get("title")
+    else:
+        yield json_pointer("title"), node.data.get("title")
+        for index, link in _child_item_links(node):
+            yield json_pointer("links", index, "title"), link.get("title")
 
 
 class LinkTitleRule(Rule):
@@ -89,16 +103,23 @@ class LinkTitleRule(Rule):
     kinds = ("catalog", "collection")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for index, link in enumerate(links_of(node)):
+        for index, link in _child_item_links(node):
             rel = link.get("rel")
-            if rel not in ("child", "item"):
-                continue
             title = link.get("title")
             if not isinstance(title, str) or not title.strip():
                 yield self.finding(
                     node,
                     f"link rel:'{rel}' href '{link.get('href')}' has no title",
-                    json_pointer=f"/links/{index}/title",
+                    json_pointer=json_pointer("links", index, "title"),
                     fix_hint="add a title to the link, matching the title of the object it"
                     " points at",
                 )
+
+
+def _child_item_links(node: Node) -> Iterable[tuple[int, dict[str, Any]]]:
+    links = node.data.get("links")
+    if not isinstance(links, list):
+        return
+    for index, link in enumerate(links):
+        if isinstance(link, dict) and link.get("rel") in ("child", "item"):
+            yield index, link

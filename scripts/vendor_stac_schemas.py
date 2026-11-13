@@ -62,6 +62,9 @@ _ROOTS = (
 # nobody approved it.
 _FIXED_HOSTS = ("schemas.stacspec.org", "geojson.org", "proj.org")
 
+# Keep previously supported Contacts catalogs valid without a network fetch.
+_COMPATIBILITY_ROOTS = ("https://stac-extensions.github.io/contacts/v0.1.1/schema.json",)
+
 # The Portolan profile schema is vendored under _schemas/portolan/ by
 # scripts/vendor_spec_fixtures.py, and validated by the --schema pass. Skip it
 # here so it is not vendored twice under two different paths.
@@ -123,15 +126,15 @@ def _refs(node: object) -> list[str]:
 
 
 def _fetch(url: str) -> dict[str, object]:
-    request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})  # noqa: S310
-    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+    request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    with urllib.request.urlopen(request, timeout=30) as response:
         schema: dict[str, object] = json.loads(response.read().decode("utf-8"))
     return schema
 
 
 def crawl() -> dict[str, dict[str, object]]:
     """Fetch the transitive $ref closure of every root, keyed by URL."""
-    roots = _ROOTS + extension_roots()
+    roots = _ROOTS + extension_roots() + _COMPATIBILITY_ROOTS
     allowed = _allowed_hosts(roots)
     fetched: dict[str, dict[str, object]] = {}
     queue: collections.deque[str] = collections.deque(roots)
@@ -192,9 +195,8 @@ def check(fetched: dict[str, dict[str, object]]) -> int:
 def prune(fetched: dict[str, dict[str, object]]) -> list[Path]:
     """Vendored extension files no longer in the closure.
 
-    Repinning an extension to a new version leaves the old version's schema on
-    disk. Nothing reads it, but it would be vendored evidence of a version
-    Portolan no longer approves, so the write path removes it.
+    Keep the current registry closure and explicit compatibility roots.
+    Remove other schema versions when the profile no longer pins them.
     """
     keep = {_dest(url) for url in fetched}
     if not _EXTENSION_VENDOR_DIR.exists():
