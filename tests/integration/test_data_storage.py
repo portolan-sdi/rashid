@@ -1666,6 +1666,13 @@ def test_palette_band_described_by_bitfields_is_clean(tmp_path: Path) -> None:
     assert _raster(path, {"bands": [{"classification:bitfields": bitfields}]}) == []
 
 
+def test_palette_band_described_by_asset_bitfields_is_clean(tmp_path: Path) -> None:
+    path = tmp_path / "qa.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    bitfields = [{"offset": 0, "length": 1, "classes": [{"value": 1, "name": "cloud"}]}]
+    assert _raster(path, {"classification:bitfields": bitfields}) == []
+
+
 def test_asset_level_classes_describe_a_palette_band(tmp_path: Path) -> None:
     path = tmp_path / "flood.tif"
     assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)

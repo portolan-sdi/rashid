@@ -289,6 +289,8 @@ def _check_palette_classes(key: str, asset: dict[str, Any], files: AssetFiles) -
         for found in asset_class_lists("", asset)
     }
     # A bit-packed band names its values with classification:bitfields.
+    if _BITFIELDS in asset:
+        described.add(0)  # the asset's own bitfields describe its only band
     for field in BAND_FIELDS:
         bands = asset.get(field)
         if isinstance(bands, list):
