@@ -26,6 +26,8 @@ fixtures, and records the spec commit they came from in ``SPEC_REF``:
   per-requirement ID/severity/enforcement register that
   ``tests/unit/test_spec_coverage.py`` gates every check's ``spec_ids``
   against.
+- ``tests/fixtures/spatial-metric-vectors.json`` — the test vectors of the
+  incubating spatial-order method, which ``PTL-DAT-006`` reproduces.
 
 Nothing here assumes a single schema version: the schema set is enumerated from
 the spec checkout's release tags. Only the test fixture includes the draft on main.
@@ -62,6 +64,7 @@ SCHEMA_SRC = "stac/json-schema/schema.json"
 RELEASE_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 PROFILE_EXAMPLES_SRC = Path("stac/examples")
 REQUIREMENTS_SRC = Path("specs/portolan/requirements.yaml")
+SPATIAL_VECTORS_SRC = Path("specs/incubating/spatial-order/spatial-metric-vectors.json")
 EXTENSION_REGISTRY_SRC = Path("stac/README.md")
 
 # One row of the profile's extension registry table: a reference-style link
@@ -240,6 +243,13 @@ def _vendor_requirements(spec: Path) -> int:
     return sum(1 for line in src.read_text(encoding="utf-8").splitlines() if "- id:" in line)
 
 
+def _vendor_spatial_vectors(spec: Path) -> None:
+    src = spec / SPATIAL_VECTORS_SRC
+    if not src.is_file():
+        sys.exit(f"spatial-order vectors not found at {src}")
+    shutil.copyfile(src, FIXTURES / "spatial-metric-vectors.json")
+
+
 def _spec_ref(spec: Path) -> str:
     return subprocess.run(
         ["git", "-C", str(spec), "rev-parse", "HEAD"],
@@ -261,6 +271,7 @@ def main() -> None:
     examples = _vendor_profile_examples(spec)
     registered = _vendor_extension_registry(spec)
     requirements = _vendor_requirements(spec)
+    _vendor_spatial_vectors(spec)
     ref = _spec_ref(spec)
 
     (REPO_ROOT / "SPEC_REF").write_text(
@@ -277,6 +288,7 @@ def main() -> None:
     print(f"  profile-examples:  {examples} objects")
     print(f"  extension registry: {registered} extensions")
     print(f"  requirements:      {requirements} manifest entries")
+    print("  spatial vectors:   tests/fixtures/spatial-metric-vectors.json")
 
 
 if __name__ == "__main__":

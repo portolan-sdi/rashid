@@ -8,6 +8,7 @@ with checksums computed from the bytes so nothing is committed and nothing drift
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import struct
@@ -36,20 +37,23 @@ def ordered_points(n: int = 6) -> list[tuple[float, float]]:
     ]
 
 
-def interleaved_points(n: int = 10) -> list[tuple[float, float]]:
-    """Each consecutive pair spans the whole extent, so row groups overlap.
+def interleaved_points(n: int = 16) -> list[tuple[float, float]]:
+    """Each consecutive pair spans the whole extent, so no row group can be skipped.
 
-    Ten points at the default ``row_group_size`` of 2 give five row groups,
-    which is where PORTO-FMT-006's tests start applying (formats.md:41). A
-    shorter file is exempt, so a test that wants an ordering finding needs at
-    least this many rows.
+    Sixteen points at the default ``row_group_size`` of 2 give eight row
+    groups, which is where PORTO-FMT-006's row-group check starts judging
+    (formats.md:41). A shorter file is reported and not judged, so a test that
+    wants an ordering finding needs at least this many rows.
+
+    Every pair is corner-to-corner, so every row-group box IS the file extent —
+    which is what an unsorted file looks like, and leaves a reader nothing to
+    prune. An earlier version inset each pair by a growing margin, which made the
+    boxes concentric rather than co-extensive: nested boxes still let a reader
+    skip the inner ones, so that shape prunes at about half the achievable rate
+    and no longer reads as unordered under formats.md:38.
     """
     minx, miny, maxx, maxy = BBOX
-    points = []
-    for i in range(n):
-        inset = 0.2 * (i // 2)
-        points.append((minx + inset, miny + inset) if i % 2 == 0 else (maxx - inset, maxy - inset))
-    return points
+    return [(minx, miny) if i % 2 == 0 else (maxx, maxy) for i in range(n)]
 
 
 def scattered_points(n: int, seed: int = 0) -> list[tuple[float, float]]:
@@ -177,6 +181,59 @@ def write_geoparquet(  # noqa: PLR0913 - keyword-only fixture settings vary inde
     if geo:
         table = table.replace_schema_metadata({b"geo": json.dumps(meta).encode()})
     pq.write_table(table, path, row_group_size=row_group_size)
+
+
+class _WkbGeometryType(pa.ExtensionType):
+    """A minimal ``geoarrow.wkb`` extension type.
+
+    pyarrow's Parquet writer maps a ``geoarrow.wkb`` column to the native
+    ``GEOMETRY`` logical type and writes per-row-group GeospatialStatistics —
+    the same file shape DuckDB's Iceberg writer produces. pyarrow 25 drops the
+    extension's crs on write, so files written here carry an absent crs
+    (OGC:CRS84 by definition); CRS variants are driven over fakes instead.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(pa.binary(), "geoarrow.wkb")
+
+    def __arrow_ext_serialize__(self) -> bytes:
+        return b"{}"
+
+    @classmethod
+    def __arrow_ext_deserialize__(
+        cls, storage_type: pa.DataType, serialized: bytes
+    ) -> _WkbGeometryType:
+        del storage_type, serialized  # pyarrow's hook signature; nothing varies
+        return cls()
+
+
+def _wkb_geometry_type() -> _WkbGeometryType:
+    # One process runs many tests; the name registers once.
+    with contextlib.suppress(pa.ArrowKeyError):
+        pa.register_extension_type(_WkbGeometryType())
+    return _WkbGeometryType()
+
+
+def write_native_geoparquet(
+    path: Path,
+    *,
+    points: list[tuple[float, float]] | None = None,
+    row_group_size: int = 2,
+    columns: dict[str, list[object]] | None = None,
+) -> None:
+    """A Parquet file whose geometry is the native ``GEOMETRY`` logical type.
+
+    No ``geo`` key — the file DuckDB writes with ``GEOPARQUET_VERSION 'NONE'``
+    and the file Iceberg engines publish. The writer computes native
+    GeospatialStatistics per row group on its own.
+    """
+    pts = points if points is not None else ordered_points()
+    wkb = [struct.pack("<BIdd", 1, 1, x, y) for x, y in pts]
+    geometry = pa.ExtensionArray.from_storage(_wkb_geometry_type(), pa.array(wkb, type=pa.binary()))
+    cols: dict[str, object] = {"geometry": geometry, "value": list(range(len(pts)))}
+    if columns:
+        cols.update(columns)
+    pq.write_table(pa.table(cols), path, row_group_size=row_group_size)
 
 
 def write_item_mirror(  # noqa: PLR0913 - keyword-only fixture settings vary independent file properties

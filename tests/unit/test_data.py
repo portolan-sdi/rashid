@@ -33,6 +33,7 @@ from rashid.registry import (
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
     DAT_MIRROR,
+    DAT_NATIVE_CRS,
     DAT_ORDERING,
     DAT_OVERVIEW_FORMAT,
     DAT_OVERVIEWS,
@@ -368,6 +369,7 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
             DAT_OVERVIEW_FORMAT,
             DAT_SCENE_MASK,
             DAT_COLUMN_DESCRIPTIONS,
+            DAT_NATIVE_CRS,
         }
     )
     validate(

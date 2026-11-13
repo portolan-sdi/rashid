@@ -15,8 +15,8 @@ import yaml
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
-JSCPD_BASELINE_FINGERPRINTS = 30
-JSCPD_BASELINE_CLONES = 30
+JSCPD_BASELINE_FINGERPRINTS = 29
+JSCPD_BASELINE_CLONES = 29
 
 
 def test_tid251_bans_the_owner_apis() -> None:

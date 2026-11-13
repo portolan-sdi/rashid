@@ -31,10 +31,15 @@ class _WKB(pa.ExtensionType):
 
 
 @pytest.mark.parametrize("spherical", [False, True])
-def test_native_geometry_requires_geo_and_still_checks_groups(
+def test_native_geometry_is_accepted_and_still_checks_groups(
     tmp_path: Path, spherical: bool
 ) -> None:
-    """#200: native geometry is spatial even when the GeoParquet key is absent."""
+    """#200: native geometry is spatial even when the GeoParquet key is absent.
+
+    PORTO-FMT-004 makes the native-geo file without a ``geo`` key the spec's
+    third accepted form, so the missing key is no longer faulted (the native
+    ``crs`` recommendation takes its place); the storage rules still run on the file.
+    """
     directory = _catalog(tmp_path)
     path = directory / "native.parquet"
     assets.write_geoparquet(path, points=assets.interleaved_points(), covering=False)
@@ -50,12 +55,10 @@ def test_native_geometry_requires_geo_and_still_checks_groups(
         "GEOGRAPHY" if spherical else "GEOMETRY"
     )
     _declare(directory, [path.name])
-    errors = _findings(tmp_path, "PTL-DAT-012")
-    assert len(errors) == 1 and errors[0]["severity"] == "error"
-    assert "geo" in errors[0]["message"] and "not conformant GeoParquet 2.0" in errors[0]["message"]
-    assert "native.parquet" in errors[0]["message"]
+    assert not _findings(tmp_path, "PTL-DAT-012"), "the missing geo key is not a version error"
+    assert not _findings(tmp_path, "PTL-DAT-023"), "an absent native crs is OGC:CRS84"
     if not spherical:
-        assert any(f["severity"] == "error" for f in _findings(tmp_path, "PTL-DAT-006"))
+        assert any(f["severity"] == "warning" for f in _findings(tmp_path, "PTL-DAT-006"))
     assert [f["severity"] for f in _findings(tmp_path, "PTL-DAT-007")] == (
         ["error"] if spherical else ["warning"]
     )

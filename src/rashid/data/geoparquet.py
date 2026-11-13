@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -17,6 +19,7 @@ from rashid.model import Severity, json_pointer
 from rashid.registry import (
     DAT_COLUMN_DESCRIPTIONS,
     DAT_GEOPARQUET_VERSION,
+    DAT_NATIVE_CRS,
     DAT_ORDERING,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
@@ -33,30 +36,52 @@ from rashid.rules._common import (
 # formats.md:75 — a GeoParquet row group MUST hold no more than this many rows.
 _MAX_ROW_GROUP_ROWS = 150_000
 
-# formats.md:38 — spatial ordering passes on either criterion.
-_MAX_OVERLAP_FRACTION = 0.30  # < 30% of consecutive row-group pairs may overlap
-# Row-group boxes average < 30% of the file extent. formats.md sets the figure from
-# what a Hilbert sort achieves: boxes land near 27% of the extent at five row groups
-# and fall away as groups are added. A flat 25% rejected well-sorted five- and
-# six-group files for their row-group count rather than their ordering.
-_MAX_LOCALITY_RATIO = 0.30
 
-# formats.md:55 — both checks measure a percentage across the row groups, and with
-# fewer than five groups that percentage cannot land on a useful value. Three groups
-# can only produce an overlap of 0%, 50%, or 100%, and two or three boxes cannot
-# average less than 30% of the extent however well the rows are sorted. PORTO-FMT-044
-# forbids failing a file on a threshold its row-group count puts out of reach, so
-# below five groups neither check runs.
-_MIN_ORDERING_ROW_GROUPS = 5
+# formats.md:75 — a GeoParquet row group MUST hold no more than this many rows.
+_MAX_ROW_GROUP_ROWS = 150_000
+
+# spatial-order.md (incubating) — the row-group check computes the expected share of the file's
+# bytes a query window lets a reader skip, and compares that against an ideal
+# tiling of the extent into the same number of row groups. The window's centre
+# falls in a box with probability proportional to its rows and the window spans
+# _QUERY_FRACTION of each dimension of that box, so empty extent cannot decide
+# the verdict (spatial-order.md, Method; the outlier vectors pin it). It is an
+# expectation, not a sample: the closed form is O(n^2), reads the footer only
+# and has no seed, so another implementation reaches the same number.
+_QUERY_FRACTION = 0.10
+# The windows a verdict's message reports the read share for. The reporting
+# rules of spatial-order.md name the absolute cost at the query window and add
+# the 1% and 25% windows beside it.
+_REPORT_FRACTIONS = (0.01, _QUERY_FRACTION, 0.25)
+# 0.65 comes from the 2026-11 registry survey and its Hilbert-sort control
+# (the spec's calibration directory): the 32 sorted copies eligible for a
+# footer pass scored 0.696 to 0.944, so a 0.70 bar rejected an already-sorted
+# file (Manitoba buildings, 0.696 before and after a re-sort) while 0.65
+# accepts every tested sorted copy and still fails the shuffled band.
+_MIN_SKIP_EFFICIENCY = 0.65
+# A reference skip rate at or under this is zero: one row group, a window as
+# large as the extent, or an extent with no area. Float noise, not a layout.
+_NO_SKIP = 1e-9
+
+# spatial-order.md, the two paths: a file with eight or more row groups takes the
+# footer check on its row-group boxes. Below eight the grid
+# reference is a poor model of a curve sort, so well-sorted files from several
+# catalogs score 0.60 to 0.88 at five row groups and 0.76 to 0.94 at eight
+# (rashid#174 review, spec point 3). The method forbids judging such a file by
+# its row-group boxes, so it takes the row check instead.
+_MIN_ORDERING_ROW_GROUPS = 8
 
 # Row ordering is a separate rule that applies to every file, whatever its row-group
 # layout (formats.md:30). It is checked by splitting the rows into the groups a
-# conforming writer would have produced, which works at any row-group count and is
-# the only check available below five. Ten chunks is comfortably above
-# _MIN_ORDERING_ROW_GROUPS, so the 30% limit means something; below the row floor a
-# chunk covers too few points to say anything. Neither number is a spec threshold.
+# conforming writer would have produced and applying the same skip-rate metric
+# to those chunks against a reference of the same count, which works at any
+# row-group count and judges every file below eight row groups. Ten chunks
+# keeps the reference above the row-group floor; under _MIN_CHUNK_ROWS rows a chunk's box
+# describes too few points to say anything, so a file needs _MIN_ORDERING_ROWS
+# rows before the row check judges it. Neither number is a spec threshold.
 _ORDERING_CHUNKS = 10
 _MIN_CHUNK_ROWS = 20
+_MIN_ORDERING_ROWS = _ORDERING_CHUNKS * _MIN_CHUNK_ROWS
 
 # --- GeoParquet cloud-native structure -------------------------------------
 
@@ -68,9 +93,12 @@ def check_geoparquet(
     statistics, and spatial ordering (formats.md:30,64,75).
 
     Parquet and GeoParquet share the ``application/vnd.apache.parquet`` media
-    type. Native GEOMETRY/GEOGRAPHY columns are spatial even without the
-    required ``geo`` key. Such files fail the GeoParquet declaration check and
-    still run the row-group checks; other files without the key are tabular.
+    type. A file is geospatial when it carries a ``geo`` metadata key or a
+    column of the native Parquet ``GEOMETRY``/``GEOGRAPHY`` logical type
+    (PORTO-FMT-004); only a file with neither is plain tabular Parquet. A
+    native-geo file with no ``geo`` key is the spec's third accepted form, so
+    the missing key is not faulted. Its CRS recommendation applies instead
+    (PORTO-FMT-081), and Iceberg writers produce exactly that file (#200).
 
     ``subject`` names the file in the message. It defaults to the asset the key
     belongs to; the partition pass passes the matched path instead, since a
@@ -86,19 +114,17 @@ def check_geoparquet(
     if isinstance(geo, _MalformedGeo):
         return [unreadable_spatial_metadata(key, geo.message, subject=subject)]
     defects: list[DataDefect] = []
-    if geo is None and (primary := _native_geometry(parquet)) is not None:
-        defects.append(
-            DataDefect(
-                DAT_GEOPARQUET_VERSION,
-                Severity.ERROR,
-                f"{subject} is not conformant GeoParquet 2.0: native geometry needs a 'geo' metadata key",
-                key,
-            )
-        )
-        geo = {"version": "2.0", "primary_column": primary}
+    native = _native_geo_columns(parquet)
+    if geo is None and native:
+        # PORTO-FMT-004: the spec's third accepted form. The missing key is
+        # not faulted. The native crs field is held to PORTO-FMT-081 instead,
+        # and the version rule applies only to a ``geo`` key.
+        defects.extend(_check_native_crs(key, parquet, native, subject=subject))
+        geo = {"primary_column": _primary_geometry_column(parquet, {})}
+    elif isinstance(geo, dict):
+        defects.extend(_check_geoparquet_version(key, geo, subject=subject))
     if not isinstance(geo, dict):
         return []  # plain Parquet
-    defects.extend(_check_geoparquet_version(key, geo, subject=subject))
     meta = parquet.metadata
     row_counts = [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
     if any(n > _MAX_ROW_GROUP_ROWS for n in row_counts):
@@ -114,12 +140,15 @@ def check_geoparquet(
 
     bboxes, stat_defects = _rowgroup_stat_defects(key, parquet, geo, subject=subject)
     defects.extend(stat_defects)
+    shape = (sum(row_counts), len(row_counts))
     if bboxes is None:
-        return defects  # without per-row-group boxes, ordering cannot be judged
+        # Without per-row-group boxes the footer check cannot run, so the
+        # row check judges the file (formats.md, Row check).
+        defects.extend(_row_ordering_defects(key, parquet, geo, shape, subject=subject))
+        return defects
 
-    ordering = _ordering_defect(key, parquet, geo, bboxes, subject=subject)
-    if ordering is not None:
-        defects.append(ordering)
+    layout = _RowGroupLayout(bboxes, row_counts, _rowgroup_compressed_sizes(meta))
+    defects.extend(_ordering_defects(key, parquet, geo, layout, subject=subject))
     return defects
 
 
@@ -148,15 +177,172 @@ def _check_geoparquet_version(
 
 
 def _native_geometry(parquet: Any) -> str | None:
-    """The first native GEOMETRY or GEOGRAPHY leaf, without guessing by name."""
-    return next(
-        (
-            parquet.schema.column(i).path
-            for i in range(len(parquet.schema))
-            if parquet.schema.column(i).logical_type.type in {"GEOMETRY", "GEOGRAPHY"}
-        ),
-        None,
-    )
+    """The primary native GEOMETRY/GEOGRAPHY column, None when the file has none."""
+    return _primary_geometry_column(parquet, {})
+
+
+def _native_geo_columns(parquet: Any) -> list[str]:
+    """Columns whose Parquet logical type is ``GEOMETRY`` or ``GEOGRAPHY``.
+
+    Read from the Parquet schema, not the Arrow one, so detection needs no
+    registered geoarrow extension. pyarrow >= 21 names the type through
+    ``logical_type``; an older pyarrow reports it as unknown and the file
+    falls back to the ``geo``-key path.
+    """
+    schema = getattr(parquet.metadata, "schema", None)
+    if schema is None:
+        return []
+    names: list[str] = []
+    for i in range(len(schema)):
+        column = schema.column(i)
+        logical = getattr(column, "logical_type", None)
+        if logical is None:
+            continue
+        try:
+            kind = _json.loads(logical.to_json()).get("Type")
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if kind in ("Geometry", "Geography"):
+            names.append(column.name)
+    return names
+
+
+def _primary_geometry_column(parquet: Any, geo: dict[str, Any]) -> str | None:
+    """The column the per-row-group statistics are read from.
+
+    The ``geo`` key names it; a native-geo file without one defaults to the
+    column named ``geometry``, else the first native geospatial column.
+    """
+    primary = geo.get("primary_column")
+    if isinstance(primary, str):
+        return primary
+    native = _native_geo_columns(parquet)
+    if not native:
+        return None
+    return "geometry" if "geometry" in native else native[0]
+
+
+def _native_crs(parquet: Any, name: str) -> str | None:
+    """The ``crs`` string of a native geospatial column, None when absent."""
+    schema = getattr(parquet.metadata, "schema", None)
+    if schema is None:
+        return None
+    for i in range(len(schema)):
+        column = schema.column(i)
+        if column.name != name:
+            continue
+        logical = getattr(column, "logical_type", None)
+        if logical is None:
+            return None
+        try:
+            crs = _json.loads(logical.to_json()).get("crs")
+        except (ValueError, TypeError, AttributeError):
+            return None
+        return crs if isinstance(crs, str) else None
+    return None
+
+
+# A CRS registry identifier: `<authority>:<code>`, which also matches
+# `srid:<identifier>`. Resolving one needs a registry, which is why PORTO-FMT-081
+# recommends inline PROJJSON or a `projjson:<key>` reference instead.
+_AUTHORITY_CODE = re.compile(r"[A-Za-z][A-Za-z0-9_]*:[A-Za-z0-9_.]+\Z")
+
+
+def _check_native_crs(
+    key: str, parquet: Any, columns: list[str], *, subject: str | None = None
+) -> list[DataDefect]:
+    """The CRS of each native geospatial column resolves from the file alone.
+
+    formats.md: a file without a ``geo`` key SHOULD give the CRS of each
+    geometry column as inline PROJJSON or a ``projjson:<key>`` reference in the
+    native ``crs`` field (PORTO-FMT-081). An absent value is OGC:CRS84, as the
+    Parquet geospatial specification defines. Any other value, or a reference
+    that does not resolve, is a warning, because the requirement is a SHOULD.
+    These rules only reach a file with no ``geo`` key. With one, the key's own
+    ``crs`` field governs and the consistency check reads that.
+    """
+    subject = subject or f"asset '{key}'"
+    defects: list[DataDefect] = []
+    for name in columns:
+        crs = _native_crs(parquet, name)
+        if crs is None:
+            continue  # absent: OGC:CRS84 by definition
+        value = crs.strip()
+        if not value or value == "OGC:CRS84":
+            continue
+        if value.startswith("{"):
+            try:
+                _json.loads(value)
+                continue  # inline PROJJSON
+            except ValueError:
+                defects.append(
+                    DataDefect(
+                        DAT_NATIVE_CRS,
+                        Severity.WARNING,
+                        f"{subject} geometry column '{name}' carries a crs that opens "
+                        "like JSON but does not parse; use inline PROJJSON or a "
+                        "projjson:<key> reference",
+                        key,
+                    )
+                )
+                continue
+        if value.startswith("projjson:"):
+            defects.extend(_projjson_reference_defects(key, parquet, name, value, subject=subject))
+            continue
+        if _AUTHORITY_CODE.match(value):
+            defects.append(
+                DataDefect(
+                    DAT_NATIVE_CRS,
+                    Severity.WARNING,
+                    f"{subject} geometry column '{name}' declares its CRS as '{value}', "
+                    "which needs a CRS registry to resolve; inline PROJJSON lets a "
+                    "reader resolve it from the file alone",
+                    key,
+                )
+            )
+            continue
+        defects.append(
+            DataDefect(
+                DAT_NATIVE_CRS,
+                Severity.WARNING,
+                f"{subject} geometry column '{name}' crs '{value}' is not inline PROJJSON "
+                "or a projjson:<key> reference, so a reader cannot resolve it from the file",
+                key,
+            )
+        )
+    return defects
+
+
+def _projjson_reference_defects(
+    key: str, parquet: Any, name: str, value: str, *, subject: str
+) -> list[DataDefect]:
+    """A ``projjson:<key>`` crs resolves against the file's key-value metadata."""
+    meta_key = value[len("projjson:") :]
+    kv = getattr(parquet.metadata, "metadata", None) or {}
+    raw = kv.get(meta_key.encode())
+    if raw is None:
+        return [
+            DataDefect(
+                DAT_NATIVE_CRS,
+                Severity.WARNING,
+                f"{subject} geometry column '{name}' crs names file metadata key "
+                f"'{meta_key}', which the file does not carry",
+                key,
+            )
+        ]
+    try:
+        _json.loads(raw)
+    except (ValueError, TypeError):
+        return [
+            DataDefect(
+                DAT_NATIVE_CRS,
+                Severity.WARNING,
+                f"{subject} geometry column '{name}' crs names file metadata key "
+                f"'{meta_key}', which does not hold PROJJSON",
+                key,
+            )
+        ]
+    return []
 
 
 @dataclass(frozen=True)
@@ -510,125 +696,198 @@ def _column_index(meta: Any) -> dict[str, int]:
     return {group.column(j).path_in_schema: j for j in range(group.num_columns)}
 
 
-def _ordering_defect(
+def _rowgroup_compressed_sizes(meta: Any) -> list[float]:
+    """Each row group's compressed bytes, the footer check's byte weights.
+
+    The sum over each group's column chunks, so the number is footer-only and
+    a remote validator reads the same value as a local one.
+    """
+    sizes: list[float] = []
+    for i in range(meta.num_row_groups):
+        group = meta.row_group(i)
+        sizes.append(
+            float(sum(group.column(j).total_compressed_size for j in range(group.num_columns)))
+        )
+    return sizes
+
+
+@dataclass(frozen=True)
+class _RowGroupLayout:
+    """The footer facts the ordering verdict reads: boxes, rows, bytes."""
+
+    bboxes: list[tuple[float, float, float, float]]
+    row_counts: list[int]
+    sizes: list[float]
+
+
+def _ordering_defects(
     key: str,
     parquet: Any,
     geo: dict[str, Any],
-    bboxes: list[tuple[float, float, float, float]],
+    layout: _RowGroupLayout,
     *,
     subject: str,
-) -> DataDefect | None:
-    """One verdict from footer criteria, a footer proof, or row chunks."""
-    metrics_apply = len(bboxes) >= _MIN_ORDERING_ROW_GROUPS
-    if metrics_apply and not _is_spatially_ordered(bboxes):
-        return DataDefect(
-            DAT_ORDERING,
-            Severity.ERROR,
-            f"{subject} rows are not spatially ordered: row groups overlap heavily "
-            "and lack locality, so a reader cannot skip them",
-            key,
+) -> list[DataDefect]:
+    """Spatial ordering, judged on one of the spec's two paths
+    (formats.md, PORTO-FMT-006; measured with the incubating spatial-order.md).
+
+    The method is not part of conformance, so a failure is a WARNING.
+
+    At eight or more row groups the footer check decides from the row-group
+    boxes and no row is read. Where those boxes give an undefined efficiency,
+    as with a point extent, the row check decides instead. Below eight row
+    groups the boxes give no verdict: their statistics are reported at INFO,
+    which the method allows, and the row check judges the rows in
+    file-order chunks by the same metric and bar. One file, one verdict: the
+    footer verdict and the row check never both run, so they cannot disagree.
+    """
+    groups = len(layout.bboxes)
+    rows = sum(layout.row_counts)
+    weights = [float(n) for n in layout.row_counts]
+    score = _pruning_score(layout.bboxes, weights, layout.sizes)
+    verdict = _footer_verdict(score)
+    if verdict == "pass":
+        return []
+    if verdict == "fail":
+        summary = _pruning_summary(score, "row group", judged=True)
+        return [
+            DataDefect(
+                DAT_ORDERING,
+                Severity.WARNING,
+                f"{subject} rows are not spatially ordered across its "
+                f"{_plural(groups, 'row group')}: {summary}",
+                key,
+            )
+        ]
+    defects: list[DataDefect] = []
+    if 1 < groups < _MIN_ORDERING_ROW_GROUPS and rows >= _MIN_ORDERING_ROWS:
+        # One box is the extent itself and has no layout to describe; under the
+        # row floor the row check's own INFO says why there is no verdict.
+        summary = _pruning_summary(score, "row group", judged=False)
+        defects.append(
+            DataDefect(
+                DAT_ORDERING,
+                Severity.INFO,
+                f"{subject} has {_plural(groups, 'row group')}, under the "
+                f"{_MIN_ORDERING_ROW_GROUPS} the footer check needs, so its rows are "
+                f"judged instead and its layout is only reported: {summary}",
+                key,
+            )
         )
-    rows = parquet.metadata.num_rows
-    groups = parquet.metadata.num_row_groups
-    row_counts = [parquet.metadata.row_group(i).num_rows for i in range(groups)]
-    if rows < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS or (
-        metrics_apply and _footer_proves_row_ordering(parquet, geo, bboxes, row_counts)
-    ):
-        return None
+    defects.extend(_row_ordering_defects(key, parquet, geo, (rows, groups), subject=subject))
+    return defects
+
+
+def _row_ordering_defects(
+    key: str,
+    parquet: Any,
+    geo: dict[str, Any],
+    shape: tuple[int, int],
+    *,
+    subject: str | None = None,
+) -> list[DataDefect]:
+    """The row check of spatial-order.md: the path for a file with fewer
+    than eight row groups, or without per-row-group spatial statistics.
+
+    formats.md:30 requires spatially ordered rows in every file, and the row
+    check judges them by splitting them into the ten chunks a conforming
+    writer would have produced. The reference stac-geoparquet
+    writer shows why that matters. With no schema passed,
+    ``parse_stac_items_to_arrow`` returns one contiguous record batch at any
+    item count and ``to_parquet`` writes one row group per batch, leaving the
+    row-group check a single box, which passes on any row order.
+
+    The chunks are scored by the same metric as the row groups, against a
+    reference of the same count (spec point 5). The retired flat 30%-of-extent
+    limit assumed unsorted rows reach the whole extent, which a sparse extent
+    defeats, and it disagreed with the row-group check about real files.
+
+    Every reason the check cannot run is an INFO rather than silence
+    (the row floor of spatial-order.md): a validator's silence reads as a pass. Under 200 rows
+    the file has too few rows to judge, and an undefined efficiency, as with
+    rows all at one point, gives no verdict either.
+    """
+    rows, groups = shape
+    subject = subject or f"asset '{key}'"
+    if rows < _MIN_ORDERING_ROWS:
+        return [_unevaluated(key, subject, rows, groups, _floors_not_reached())]
     row_boxes = _row_bboxes(parquet, geo)
-    # Re-apply the floor to the boxes that survived, not to the row count. Rows
-    # without geometry carry no covering box, so a file can hold enough rows and
-    # still leave too few boxes for a chunk's box to describe anything. Below the
-    # floor the chunks hold at most one box each, which measures nothing: one box
-    # leaves ``_is_spatially_ordered`` no consecutive pair to divide by, and a
-    # handful yields a verdict drawn from a sample far under the floor.
-    if row_boxes is None or len(row_boxes) < _ORDERING_CHUNKS * _MIN_CHUNK_ROWS:
-        if metrics_apply:
-            return None
-        if row_boxes is None:
-            why = "with no bbox covering column to read"
-        else:
-            measured = len(row_boxes)
-            verb = "carries" if measured == 1 else "carry"
-            why = f"of which {measured} {verb} a covering box"
-        return DataDefect(
+    # Re-apply the floor to the rows that carry a box, not to the row count.
+    # Rows without geometry have no position; a file can hold enough rows and
+    # still leave too few boxes for a chunk's box to describe anything.
+    if row_boxes is None:
+        why = " whose row boxes cannot be read from a covering or a WKB geometry"
+        return [_unevaluated(key, subject, rows, groups, why)]
+    boxed = sum(1 for b in row_boxes if b is not None)
+    chunks, weights = _chunked_bboxes(row_boxes)
+    score = _pruning_score(chunks, weights, weights)
+    verdict = _row_verdict(score, boxed)
+    if verdict == "too-few-rows":
+        verb = "carries" if boxed == 1 else "carry"
+        why = f" of which {boxed} {verb} a bounding box{_floors_not_reached()}"
+        return [_unevaluated(key, subject, rows, groups, why)]
+    if verdict == "none":
+        return [_unevaluated(key, subject, rows, groups, _undefined_efficiency())]
+    if verdict == "pass":
+        return []
+    # n is the number of chunks that carry a box (the row check of spatial-order.md), so the
+    # reference shrinks with them rather than staying at ten cells.
+    split = f"split into {_ORDERING_CHUNKS} chunks in file order"
+    if len(chunks) < _ORDERING_CHUNKS:
+        split += f", {len(chunks)} of which carry a box"
+    summary = _pruning_summary(score, "chunk", judged=True)
+    return [
+        DataDefect(
             DAT_ORDERING,
-            Severity.INFO,
-            f"{subject} holds {rows} rows in {_plural(groups, 'row group')} "
-            f"{why}, so spatial ordering could not be evaluated",
+            Severity.WARNING,
+            f"{subject} rows are not spatially ordered: {rows} rows in "
+            f"{_plural(groups, 'row group')}, {split}, {summary}",
             key,
         )
-    if _is_spatially_ordered(_chunked_bboxes(row_boxes)):
-        return None
-    return DataDefect(
-        DAT_ORDERING,
-        Severity.ERROR,
-        f"{subject} rows are not spatially ordered: {rows} rows in "
-        f"{_plural(groups, 'row group')} do not cluster spatially, so a reader "
-        "cannot skip any part of the file",
-        key,
+    ]
+
+
+def _footer_verdict(score: _PruningScore) -> str:
+    """The footer check's verdict on row-group boxes, as the spatial-order vectors'
+    vectors name it: ``pass`` or ``fail`` from eight boxes with a defined
+    efficiency, otherwise ``row-check`` (spatial-order.md, Footer check)."""
+    if score.count < _MIN_ORDERING_ROW_GROUPS or score.below_bar is None:
+        return "row-check"
+    return "fail" if score.below_bar else "pass"
+
+
+def _row_verdict(score: _PruningScore, boxed_rows: int) -> str:
+    """The row check's verdict on file-order chunks, as the spatial-order vectors'
+    vectors name it: ``too-few-rows`` under the 200-row floor
+    (the row floor of spatial-order.md), ``none`` for an undefined efficiency, otherwise ``pass``
+    or ``fail``. The floor counts the rows that carry a box."""
+    if boxed_rows < _MIN_ORDERING_ROWS:
+        return "too-few-rows"
+    if score.below_bar is None:
+        return "none"
+    return "fail" if score.below_bar else "pass"
+
+
+def _floors_not_reached() -> str:
+    return (
+        f", too few rows to judge: the row check needs {_MIN_ORDERING_ROWS} rows "
+        "with a bounding box"
     )
 
 
-def _footer_proves_row_ordering(
-    parquet: Any,
-    geo: dict[str, Any],
-    bboxes: list[tuple[float, float, float, float]],
-    row_counts: list[int],
-) -> bool:
-    """Can row-group bounds prove that the synthetic row chunks pass?
-
-    Each synthetic chunk gets the union of every row group it intersects. That
-    box can be larger than the chunk's exact box, but never smaller. Passing
-    with these conservative boxes therefore proves that the exact boxes pass.
-
-    This shortcut requires a complete covering column. Native statistics do
-    not expose per-row null counts, and null rows change the synthetic chunk
-    boundaries after :func:`_row_bboxes` removes them.
-    """
-    covering_boxes = _covering_bboxes(parquet, geo)
-    if covering_boxes != bboxes or not _covering_has_no_nulls(parquet, geo):
-        return False
-    chunk_boxes = _conservative_chunk_bboxes(bboxes, row_counts)
-    return len(chunk_boxes) >= _MIN_ORDERING_ROW_GROUPS and _is_spatially_ordered(chunk_boxes)
+def _undefined_efficiency() -> str:
+    return ", whose chunk boxes leave the pruning efficiency undefined"
 
 
-def _covering_has_no_nulls(parquet: Any, geo: dict[str, Any]) -> bool:
-    """Do all four covering leaves have known zero null counts?"""
-    leaves = _covering_leaf_indices(parquet, geo)
-    if leaves is None:
-        return False
-    meta = parquet.metadata
-    for i in range(meta.num_row_groups):
-        group = meta.row_group(i)
-        try:
-            if any(group.column(index).statistics.null_count != 0 for index in leaves.values()):
-                return False
-        except AttributeError:
-            return False
-    return True
-
-
-def _conservative_chunk_bboxes(
-    bboxes: list[tuple[float, float, float, float]], row_counts: list[int]
-) -> list[tuple[float, float, float, float]]:
-    """Bound each synthetic row chunk with the row groups it intersects."""
-    rows = sum(row_counts)
-    if rows == 0:
-        return []
-    size = -(-rows // _ORDERING_CHUNKS)
-    group_ranges: list[tuple[int, int, tuple[float, float, float, float]]] = []
-    group_start = 0
-    for count, bbox in zip(row_counts, bboxes, strict=True):
-        group_ranges.append((group_start, group_start + count, bbox))
-        group_start += count
-    chunks = []
-    for start in range(0, rows, size):
-        end = min(start + size, rows)
-        intersecting = [bbox for left, right, bbox in group_ranges if left < end and right > start]
-        if intersecting:
-            chunks.append(bbox_union(intersecting))
-    return chunks
+def _unevaluated(key: str, subject: str, rows: int, groups: int, why: str) -> DataDefect:
+    """The row check could not run, and says why rather than staying silent."""
+    return DataDefect(
+        DAT_ORDERING,
+        Severity.INFO,
+        f"{subject} holds {rows} rows in {_plural(groups, 'row group')}{why}, so spatial "
+        "ordering could not be evaluated",
+        key,
+    )
 
 
 def _plural(n: int, noun: str) -> str:
@@ -636,47 +895,87 @@ def _plural(n: int, noun: str) -> str:
 
 
 def _chunked_bboxes(
-    row_boxes: list[tuple[float, float, float, float]],
-) -> list[tuple[float, float, float, float]]:
-    """Box each contiguous chunk of rows, as row groups would have been.
+    row_boxes: list[tuple[float, float, float, float] | None],
+) -> tuple[list[tuple[float, float, float, float]], list[float]]:
+    """Box each of the ten file-order chunks, as row groups would have been.
 
-    Partitioning reads FMT-006's row-group criteria as a measurement method
-    rather than as the requirement, which the spec implies but does not say.
-    portolan-spec#100 records the ambiguity: both tests compare row groups, so
-    a file with one group has no stated evaluation.
+    Chunk ``k`` holds the rows with index ``floor(k * N / 10) <= i <
+    floor((k + 1) * N / 10)``, the boundaries the row check of spatial-order.md pins, so
+    every implementation splits an ``N`` not divisible by ten the same way
+    (``numpy.array_split`` does not). A row without a box stays in its chunk
+    and does not extend the box. A chunk with no boxed row at all contributes
+    no box and is left out: ``n`` is then the number of chunks that carry a
+    box, and the reference shrinks to match. Each chunk weighs its count of
+    boxed rows, which is the test's ``r_i``, and its bytes equal its rows.
     """
-    size = -(-len(row_boxes) // _ORDERING_CHUNKS)
-    return [bbox_union(row_boxes[i : i + size]) for i in range(0, len(row_boxes), size)]
+    total = len(row_boxes)
+    chunks: list[tuple[float, float, float, float]] = []
+    weights: list[float] = []
+    for k in range(_ORDERING_CHUNKS):
+        boxed = [
+            b
+            for b in row_boxes[k * total // _ORDERING_CHUNKS : (k + 1) * total // _ORDERING_CHUNKS]
+            if b is not None
+        ]
+        if boxed:
+            chunks.append(bbox_union(boxed))
+            weights.append(float(len(boxed)))
+    return chunks, weights
 
 
 def _row_bboxes(
     parquet: Any, geo: dict[str, Any]
-) -> list[tuple[float, float, float, float]] | None:
-    """Per-row [minx, miny, maxx, maxy] from the bbox covering column's values.
+) -> list[tuple[float, float, float, float] | None] | None:
+    """Per-row [minx, miny, maxx, maxy] in file order, the row boxes of spatial-order.md.
 
-    Reads the four covering leaves and not the geometry, so the cost is four
-    float64 columns. Returns None when the file has no 1.1 covering column, or
-    when its leaves sit deeper than the single struct level the spec uses.
+    A row's box is its bbox covering when the file declares one. Otherwise it
+    is the min and max of the row's coordinates in the primary geometry column
+    (formats.md, Row check), which lets the row check judge a native file
+    without a covering.
 
-    Rows whose covering values are null are skipped rather than abandoning the
-    file. GeoParquet permits a null geometry, writers give those rows a null
-    covering box, and a row with no geometry has no position — so it cannot be
-    out of spatial order, and one of them must not cost the whole file its
-    ordering check. Returns None only when no row has a box at all.
+    A row with a null covering, or a null or empty geometry, has no position,
+    so it cannot be out of spatial order. It stays in place as ``None``, which
+    keeps the chunk boundaries where the test puts them. Returns None when the
+    boxes cannot be read, or when no row has a box at all.
     """
-    covering = bbox_struct(parquet, geo)
-    if covering is None:
+    if _declares_covering(geo):
+        boxes = _covering_row_bboxes(parquet, geo)
+    else:
+        boxes = _geometry_row_bboxes(parquet, geo)
+    if boxes is None or all(b is None for b in boxes):
         return None
-    root, fields = covering
+    return boxes
+
+
+def _declares_covering(geo: dict[str, Any]) -> bool:
+    columns = geo.get("columns")
+    entry = columns.get(geo.get("primary_column")) if isinstance(columns, dict) else None
+    covering = entry.get("covering") if isinstance(entry, dict) else None
+    return isinstance(covering, dict) and isinstance(covering.get("bbox"), dict)
+
+
+def _covering_row_bboxes(
+    parquet: Any, geo: dict[str, Any]
+) -> list[tuple[float, float, float, float] | None] | None:
+    """Row boxes from the covering's four leaves, not the geometry: four float64
+    columns. None when the leaves sit deeper than the single struct level the
+    spec uses, or cannot be read."""
+    covering = geo["columns"][geo.get("primary_column")]["covering"]["bbox"]
+    paths = [covering.get(corner) for corner in ("xmin", "ymin", "xmax", "ymax")]
+    if not all(isinstance(p, list) and len(p) == 2 for p in paths):
+        return None
+    if len({p[0] for p in paths}) != 1:
+        return None
     try:
-        flat = parquet.read(columns=[root]).flatten()
-        corners = [flat.column(f"{root}.{field}").to_pylist() for field in fields]
-    except Exception:  # unreadable column: the checksum check owns bad bytes
+        flat = parquet.read(columns=[paths[0][0]]).flatten()
+        corners = [flat.column(f"{p[0]}.{p[1]}").to_pylist() for p in paths]
+    except Exception:
         return None
-    boxes: list[tuple[float, float, float, float]] = []
+    boxes: list[tuple[float, float, float, float] | None] = []
     for corner_values in zip(*corners, strict=True):
         if any(value is None for value in corner_values):
-            continue  # geometry-less row: no position, so nothing to order
+            boxes.append(None)  # geometry-less row: no position, so nothing to order
+            continue
         boxes.append(
             (
                 float(corner_values[0]),
@@ -685,28 +984,246 @@ def _row_bboxes(
                 float(corner_values[3]),
             )
         )
-    return boxes or None
+    return boxes
 
 
-def _is_spatially_ordered(bboxes: list[tuple[float, float, float, float]]) -> bool:
-    """True if row groups are spatially ordered by either spec criterion (formats.md:38).
+def _geometry_row_bboxes(
+    parquet: Any, geo: dict[str, Any]
+) -> list[tuple[float, float, float, float] | None] | None:
+    """Row boxes from the primary geometry column's WKB, for a file with no covering.
 
-    Callers must hold the applicability guard themselves. Below
-    ``_MIN_ORDERING_ROW_GROUPS`` the two criteria say nothing, so a file that
-    thin is either left alone or measured over its rows instead; see
-    :func:`check_geoparquet` and :func:`_ordering_defect`.
+    The box is the min and max of the row's coordinates. For ``GEOGRAPHY``
+    that is an approximation, since geodesic edges can extend past their
+    vertices; the spec accepts it. The antimeridian is out of scope
+    (rashid#288). A null or empty geometry has no box. None when the column
+    is missing, is not WKB, or does not decode.
     """
-    pairs = len(bboxes) - 1
-    overlaps = sum(_bbox_overlaps(bboxes[i], bboxes[i + 1]) for i in range(pairs))
-    if overlaps / pairs < _MAX_OVERLAP_FRACTION:
-        return True  # low overlap
+    import shapely
 
+    primary = geo.get("primary_column")
+    if not isinstance(primary, str):
+        return None
+    try:
+        column = parquet.read(columns=[primary]).column(0).combine_chunks()
+        if isinstance(column, pa.ExtensionArray):
+            column = column.storage
+        if not (pa.types.is_binary(column.type) or pa.types.is_large_binary(column.type)):
+            return None  # a GeoArrow native encoding, not WKB
+        geometries = shapely.from_wkb(column.to_numpy(zero_copy_only=False), on_invalid="ignore")
+    except Exception:
+        return None
+    bounds = shapely.bounds(geometries)
+    boxes: list[tuple[float, float, float, float] | None] = []
+    for row in bounds.tolist():
+        if any(math.isnan(value) for value in row):
+            boxes.append(None)  # null, empty or undecodable geometry: no position
+            continue
+        boxes.append((row[0], row[1], row[2], row[3]))
+    return boxes
+
+
+def _ideal_grid_boxes(
+    extent: tuple[float, float, float, float], count: int
+) -> list[tuple[float, float, float, float]]:
+    """The best layout this box count allows: a near-square tiling of the extent.
+
+    The reference the actual layout is judged against, so that "ordered" means
+    "as good as this row-group count allows" rather than a fixed figure that only
+    holds at one count. A grid is what a perfect space-filling-curve sort
+    converges to, and it is generous towards clustered data, which cannot tile
+    evenly -- hence a bar of 0.65 of the achievable rate rather than all of it.
+
+    ``ceil(sqrt(count))`` columns, ``ceil(count / cols)`` rows, laid row by row,
+    with the last row's cells stretched so it spans the full width. Every cell
+    of the extent is then covered. An earlier version emitted ``count`` cells of
+    a ``cols x rows`` grid and left ``cols * rows - count`` cells empty; a window
+    landing there skipped every reference box, which inflated the achievable
+    rate by 13% at three boxes and 4% at five (rashid#174 review, spec point 2).
+    """
+    if count <= 0:
+        return []
+    cols = math.ceil(math.sqrt(count))
+    rows = math.ceil(count / cols)
+    height = (extent[3] - extent[1]) / rows
+    boxes: list[tuple[float, float, float, float]] = []
+    for row in range(rows):
+        in_row = cols if row < rows - 1 else count - cols * (rows - 1)
+        width = (extent[2] - extent[0]) / in_row
+        boxes.extend(
+            (
+                extent[0] + col * width,
+                extent[1] + row * height,
+                extent[0] + (col + 1) * width,
+                extent[1] + (row + 1) * height,
+            )
+            for col in range(in_row)
+        )
+    return boxes
+
+
+def _axis_overlap_share(a0: float, a1: float, g0: float, g1: float, half: float) -> float:
+    """Chance a centre coordinate drawn uniformly on ``[a0, a1]`` lands in the
+    target ``[g0, g1]`` grown by ``half`` on each side.
+
+    A span with no width puts all its probability on ``a0`` (formats.md: the
+    single-coordinate rule), which is also what makes a zero-size axis judge
+    on the other axis alone.
+    """
+    g0, g1 = g0 - half, g1 + half
+    if a1 <= a0:
+        return 1.0 if g0 <= a0 <= g1 else 0.0
+    return min(1.0, max(0.0, (min(a1, g1) - max(a0, g0)) / (a1 - a0)))
+
+
+def _weighted_skip_rate(
+    boxes: list[tuple[float, float, float, float]],
+    rows: list[float],
+    sizes: list[float],
+    fraction: float = _QUERY_FRACTION,
+) -> float:
+    """Expected share of the file's bytes a query window skips (formats.md:38).
+
+    The window's centre falls in box ``i`` with probability ``rows_i / N``,
+    uniform within the box, and the window spans ``fraction`` of each dimension
+    of that box, so the query works where the data is and at its scale: one
+    far outlier can neither hide a shuffled file behind a stretched extent nor
+    fail a sorted one. Each box then counts by its share of the bytes, because
+    what a reader saves is bytes, not a count of row groups. The expectation is
+    a closed form over the boxes: O(n^2), footer only, no seed, and the same
+    number from every implementation. The retired 20-window sample estimated
+    it and moved the verdict with its seed on real files.
+    """
+    if not boxes:
+        return 0.0
+    total_rows = float(sum(rows))
+    total_size = float(sum(sizes))
+    read = 0.0
+    for j, target in enumerate(boxes):
+        hit = 0.0
+        for i, source in enumerate(boxes):
+            half_w = fraction * (source[2] - source[0]) / 2.0
+            half_h = fraction * (source[3] - source[1]) / 2.0
+            fx = _axis_overlap_share(source[0], source[2], target[0], target[2], half_w)
+            fy = _axis_overlap_share(source[1], source[3], target[1], target[3], half_h)
+            hit += rows[i] / total_rows * fx * fy
+        read += sizes[j] / total_size * hit
+    return max(0.0, 1.0 - read)
+
+
+@dataclass(frozen=True)
+class _PruningScore:
+    """How well a layout of boxes prunes, against the best its count allows.
+
+    ``achieved`` and ``achievable`` are expected skip rates, of the boxes as
+    laid out and of :func:`_ideal_grid_boxes` with the same count over the same
+    extent. ``area_sum`` is the boxes' areas over the extent's: it is reported
+    beside the verdict because at high counts the efficiency saturates, and an
+    oversized box barely moves it (a 94-group file scored 0.94 with an area sum
+    of 4.07; a re-sort brought that to 1.42). It is ``None`` when the extent
+    has no area. ``read_profile`` carries the expected read share at the 1%,
+    10% and 25% windows (spatial-order.md, Reporting), and ``largest`` the zero-based
+    indexes of the up-to-three boxes largest against the extent, so a failure
+    can say whether one outlier or the whole file is at fault.
+    """
+
+    count: int
+    achieved: float
+    achievable: float
+    area_sum: float | None
+    read_profile: tuple[float, ...] = ()
+    largest: tuple[int, ...] = ()
+
+    @property
+    def efficiency(self) -> float | None:
+        """``achieved / achievable``, clipped at 1.0 since clustered data can
+        beat the grid; ``None`` where no layout could skip anything.
+
+        The tolerance absorbs the ulp a box-equals-extent hit probability can
+        carry, so one row group is undefined here as it is in gpio.
+        """
+        if self.achievable <= _NO_SKIP:
+            return None
+        return min(1.0, self.achieved / self.achievable)
+
+    @property
+    def below_bar(self) -> bool | None:
+        """The verdict, or ``None`` where there is none.
+
+        An undefined efficiency is no verdict, not a failure and not a pass: a
+        reader that took ``False`` for "pass" would print one for a layout the
+        spec does not judge (the spatial-order vectors pin ``null``).
+        """
+        efficiency = self.efficiency
+        if efficiency is None:
+            return None
+        return efficiency < _MIN_SKIP_EFFICIENCY
+
+
+def _pruning_score(
+    bboxes: list[tuple[float, float, float, float]],
+    rows: list[float] | None = None,
+    sizes: list[float] | None = None,
+) -> _PruningScore:
+    """Score a layout of boxes by the share of its bytes a query window skips.
+
+    The extent is the union of the boxes, not the file's declared bbox. The
+    reference grid is scored with uniform rows and bytes (the reference grid of spatial-order.md).
+    ``rows`` weighs the window placement and ``sizes`` the cost of a hit; a
+    layout with no byte counts, such as the row check's chunks, weighs bytes
+    by rows (formats.md: ``s_i = r_i``). Callers hold the applicability floors
+    themselves; the numbers are defined at any count, and one box scores an
+    undefined efficiency because its reference is the extent itself.
+
+    Deliberately not the fraction of consecutive pairs that overlap
+    (the overlap statistic of spatial-order.md): row groups produced by a space-filling-curve sort are
+    spatially adjacent by construction, so their boxes touch. For perfectly tiled
+    data that fraction runs about 0.75 at thirteen boxes, 0.88 at fifty-nine and
+    0.96 at five hundred and eighty-nine -- it is near 1.0 for the best possible
+    file, and cannot separate boxes that each span the extent from boxes that
+    tile it.
+    """
+    rows = rows if rows is not None else [1.0] * len(bboxes)
+    sizes = sizes if sizes is not None else list(rows)
     extent = bbox_union(bboxes)
+    achieved = _weighted_skip_rate(bboxes, rows, sizes)
+    reference = _ideal_grid_boxes(extent, len(bboxes))
+    achievable = _weighted_skip_rate(reference, [1.0] * len(reference), [1.0] * len(reference))
     extent_area = _bbox_area(extent)
-    if extent_area == 0:
-        return True  # a single location — nothing to order
-    mean_ratio = sum(_bbox_area(b) for b in bboxes) / len(bboxes) / extent_area
-    return mean_ratio < _MAX_LOCALITY_RATIO
+    area_sum = sum(_bbox_area(b) for b in bboxes) / extent_area if extent_area > 0 else None
+    profile = tuple(
+        1.0 - _weighted_skip_rate(bboxes, rows, sizes, fraction) for fraction in _REPORT_FRACTIONS
+    )
+    ranked = sorted(range(len(bboxes)), key=lambda i: _bbox_area(bboxes[i]), reverse=True)
+    return _PruningScore(len(bboxes), achieved, achievable, area_sum, profile, tuple(ranked[:3]))
+
+
+def _pruning_summary(
+    score: _PruningScore, unit: str, *, judged: bool, bar: float = _MIN_SKIP_EFFICIENCY
+) -> str:
+    """The measured quantity, for a message, leading with the absolute cost.
+
+    spatial-order.md, Reporting: the share of the bytes a typical query reads comes first,
+    then the achievable rate and the efficiency (with the bar a verdict rests
+    on), the 1% and 25% window profile, the area sum, and on a failure the
+    largest boxes.
+    """
+    efficiency = "undefined" if score.efficiency is None else f"{score.efficiency:.2f}"
+    verdict = f", under the {bar:.2f} bar" if judged else ""
+    text = (
+        f"a typical query window, sized {_QUERY_FRACTION:.0%} of the {unit} it lands in, "
+        f"reads {1.0 - score.achieved:.0%} of the bytes against "
+        f"{1.0 - score.achievable:.0%} for an ideal tiling "
+        f"(efficiency {efficiency}{verdict})"
+    )
+    if len(score.read_profile) == len(_REPORT_FRACTIONS):
+        small, _, large = score.read_profile
+        text += f"; windows at 1% and 25% read {small:.0%} and {large:.0%}"
+    if score.area_sum is not None:
+        text += f"; the boxes sum to {score.area_sum:.2f} of the extent"
+    if judged and score.below_bar and score.largest:
+        named = ", ".join(str(i) for i in score.largest)
+        text += f"; the largest boxes are {unit}s {named}, counted from 0"
+    return text
 
 
 def _bbox_area(b: tuple[float, float, float, float]) -> float:
@@ -722,12 +1239,62 @@ def geo_from_parquet(files: AssetFiles) -> Geo | None:
     geo = geo_metadata(parquet)
     if geo is None and _native_geometry(parquet) is None:
         return None
-    if geo is None or isinstance(geo, _MalformedGeo):
-        # The GeoParquet checks report missing or malformed spatial metadata.
+    if isinstance(geo, _MalformedGeo):
+        # The GeoParquet checks report the malformed spatial metadata.
         return Geo(bbox=None, epsg=None, crs=None)
+    if geo is None:
+        # The spec's third accepted form: footprint and CRS from the file.
+        return _geo_from_native_parquet(parquet) or Geo(bbox=None, epsg=None, crs=None)
     primary = geo.get("primary_column")
     column = geo.get("columns", {}).get(primary, {})
     bbox = column.get("bbox")
     crs_obj = column.get("crs")
     crs = CRS.from_user_input(crs_obj) if crs_obj is not None else CRS.from_epsg(4326)
     return Geo(bbox=as_bbox(bbox), epsg=crs.to_epsg(), crs=crs)
+
+
+def _geo_from_native_parquet(parquet: Any) -> Geo | None:
+    """Footprint and CRS of a native-geo file without a ``geo`` key.
+
+    The bbox is the union of the per-row-group ``GeospatialStatistics`` and the
+    CRS comes off the logical type, so the consistency check covers the spec's
+    third accepted form too. A CRS this cannot resolve is the native-CRS
+    check's business, and the footprint comparison stands down rather than
+    assume a datum.
+    """
+    primary = _primary_geometry_column(parquet, {})
+    if primary is None:
+        return None
+    boxes = _native_bboxes(parquet, {"primary_column": primary})
+    if not boxes:
+        return None
+    bbox = [
+        min(box[0] for box in boxes),
+        min(box[1] for box in boxes),
+        max(box[2] for box in boxes),
+        max(box[3] for box in boxes),
+    ]
+    crs = _resolve_native_crs(parquet, primary)
+    if crs is None:
+        return None
+    return Geo(bbox=bbox, epsg=crs.to_epsg(), crs=crs)
+
+
+def _resolve_native_crs(parquet: Any, primary: str | None) -> CRS | None:
+    """The column's CRS as pyproj understands it, None when unresolvable."""
+    if primary is None:
+        return None
+    value = _native_crs(parquet, primary)
+    if value is None or not value.strip():
+        return CRS.from_epsg(4326)  # absent is OGC:CRS84 by definition
+    value = value.strip()
+    if value.startswith("projjson:"):
+        kv = getattr(parquet.metadata, "metadata", None) or {}
+        raw = kv.get(value[len("projjson:") :].encode())
+        if raw is None:
+            return None
+        value = raw.decode() if isinstance(raw, bytes) else str(raw)
+    try:
+        return CRS.from_user_input(value)
+    except Exception:
+        return None
