@@ -98,7 +98,8 @@ class PartitionGlobSchemeRule(Rule):
     """``partition:glob`` is an absolute URL that clients can list.
 
     An ERROR under PORTO-FMT-064: a relative path, an ``http(s)://`` URL, a
-    Windows drive path, or a URL with no host or bucket (except ``file``).
+    Windows drive path, a URL with no host or bucket, or a ``file`` URL
+    without an absolute path.
     A WARNING under PORTO-FMT-075: any other scheme than ``s3``, ``gs``, or
     ``az``.
     """
@@ -116,9 +117,11 @@ class PartitionGlobSchemeRule(Rule):
         parsed = split_href(glob)
         scheme = parsed.scheme.lower() if parsed is not None else ""
         bucket = parsed.hostname if parsed is not None else None
+        path = parsed.path if parsed is not None else ""
         # A one-letter scheme is a Windows drive letter, not a URL scheme.
         unlistable = len(scheme) < 2 or scheme in ("http", "https")
-        if unlistable or (scheme != "file" and not bucket):
+        located = path.startswith("/") if scheme == "file" else bool(bucket)
+        if unlistable or not located:
             yield self.finding(
                 node,
                 "partition:glob is not an absolute URL that clients can list, such as"
