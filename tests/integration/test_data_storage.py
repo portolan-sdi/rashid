@@ -1474,7 +1474,7 @@ def test_class_color_differing_from_the_color_table_is_a_warning(tmp_path: Path)
     defects = _raster(path, _classified_asset(**{"permanent-water": "1E90FF"}))
     assert [d.rule_id for d in defects] == [DAT_CLASS_COLORS]
     assert defects[0].severity is Severity.WARNING
-    assert defects[0].field == "bands/0/classification:classes/2/color_hint"
+    assert defects[0].json_pointer == "/assets/data/bands/0/classification:classes/2/color_hint"
     assert (defects[0].expected, defects[0].actual) == ("0000FF", "1E90FF")
 
 
@@ -1483,7 +1483,7 @@ def test_asset_level_classes_compare_against_a_single_band(tmp_path: Path) -> No
     assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
     classes = [{"value": 3, "name": "flood", "color_hint": "FF0000"}]
     defects = _raster(path, {"nodata": 0, "classification:classes": classes})
-    assert [d.field for d in defects] == ["classification:classes/0/color_hint"]
+    assert [d.json_pointer for d in defects] == ["/assets/data/classification:classes/0/color_hint"]
 
 
 def test_class_colors_without_a_color_table_have_nothing_to_compare(tmp_path: Path) -> None:
@@ -1516,8 +1516,8 @@ def test_class_drawn_transparent_must_be_marked_nodata(tmp_path: Path) -> None:
     asset = _classified_asset()
     del asset["bands"][0]["classification:classes"][0]["nodata"]
     defects = _raster(path, asset)
-    assert [(d.rule_id, d.severity, d.field) for d in defects] == [
-        (DAT_CLASS_COLORS, Severity.WARNING, "bands/0/classification:classes/0/nodata")
+    assert [(d.rule_id, d.severity, d.json_pointer) for d in defects] == [
+        (DAT_CLASS_COLORS, Severity.WARNING, "/assets/data/bands/0/classification:classes/0/nodata")
     ]
 
 
@@ -1527,8 +1527,8 @@ def test_class_equal_to_file_nodata_without_a_table_is_a_warning(tmp_path: Path)
     assets.write_cog(path, nodata=0)
     classes = [{"value": 0, "name": "no-data"}, {"value": 4, "name": "vegetation"}]
     defects = _raster(path, {"bands": [{"nodata": 0, "classification:classes": classes}]})
-    assert [(d.rule_id, d.field) for d in defects] == [
-        (DAT_CLASS_COLORS, "bands/0/classification:classes/0/nodata")
+    assert [(d.rule_id, d.json_pointer) for d in defects] == [
+        (DAT_CLASS_COLORS, "/assets/data/bands/0/classification:classes/0/nodata")
     ]
 
 
@@ -1540,8 +1540,8 @@ def test_classes_on_a_picture_channel_are_a_warning(tmp_path: Path) -> None:
     classes = [{"value": 1, "name": "a"}, {"value": 2, "name": "b"}]
     # Rewriting the header breaks the COG layout, which other rules report.
     defects = _raster(path, {"bands": [{"classification:classes": classes}]})
-    assert [(d.rule_id, d.field) for d in defects if d.rule_id == DAT_CLASS_COLORS] == [
-        (DAT_CLASS_COLORS, "bands/0/classification:classes")
+    assert [(d.rule_id, d.json_pointer) for d in defects if d.rule_id == DAT_CLASS_COLORS] == [
+        (DAT_CLASS_COLORS, "/assets/data/bands/0/classification:classes")
     ]
 
 
@@ -1565,8 +1565,8 @@ def test_class_past_a_short_color_table_is_a_warning() -> None:
     classes = [{"value": 3, "name": "flood"}, {"value": 20, "name": "beyond"}]
     asset = {"bands": [{"classification:classes": classes}]}
     defects = raster._check_class_colors("data", asset, _ShortTableFiles())  # type: ignore[arg-type]
-    assert [(d.rule_id, d.field) for d in defects] == [
-        (DAT_CLASS_COLORS, "bands/0/classification:classes/1/value")
+    assert [(d.rule_id, d.json_pointer) for d in defects] == [
+        (DAT_CLASS_COLORS, "/assets/data/bands/0/classification:classes/1/value")
     ]
 
 
@@ -1574,8 +1574,8 @@ def test_palette_band_without_classes_is_an_info_hint(tmp_path: Path) -> None:
     path = tmp_path / "flood.tif"
     assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
     defects = _raster(path, {"bands": [{"nodata": 0, "data_type": "uint8"}]})
-    assert [(d.rule_id, d.severity, d.field) for d in defects] == [
-        (DAT_PALETTE_CLASSES, Severity.INFO, "bands/0")
+    assert [(d.rule_id, d.severity, d.json_pointer) for d in defects] == [
+        (DAT_PALETTE_CLASSES, Severity.INFO, "/assets/data/bands/0")
     ]
 
 

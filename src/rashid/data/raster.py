@@ -18,7 +18,7 @@ from rashid.data import DataDefect
 from rashid.data._files import AssetFiles
 from rashid.data.reader import Locator
 from rashid.data.spatial import Geo
-from rashid.model import Severity
+from rashid.model import Severity, json_pointer
 from rashid.registry import (
     DAT_CLASS_COLORS,
     DAT_COG,
@@ -108,8 +108,10 @@ def classified_asset(
     return template if isinstance(template, dict) and asset_class_lists("", template) else asset
 
 
-def _drawn_classes(asset: dict[str, Any]) -> Iterator[tuple[int | None, int, str, str | None]]:
-    """(file band, class value, field pointer, hint) for each class a reader draws.
+def _drawn_classes(
+    key: str, asset: dict[str, Any]
+) -> Iterator[tuple[int | None, int, str, str | None]]:
+    """(file band, class value, JSON pointer, hint) for each class a reader draws.
 
     A band list's classes describe the file band at the same position. An
     asset-level list has no band (None) and describes the asset's only band,
@@ -118,14 +120,14 @@ def _drawn_classes(asset: dict[str, Any]) -> Iterator[tuple[int | None, int, str
     is a malformed value, which ``PTL-CLS-002`` reports. A malformed hint
     becomes None for the same reason.
     """
-    for found in asset_class_lists("", asset):
+    for found in asset_class_lists(json_pointer("assets", key), asset):
         band = None if found.band_index is None else found.band_index + 1
         for pointer, entry in found.entries():
             value, hint = entry.get("value"), entry.get("color_hint")
             if entry.get("nodata") is True or isinstance(value, bool) or not isinstance(value, int):
                 continue
             valid = hint.upper() if isinstance(hint, str) and _COLOR_HINT.match(hint) else None
-            yield band, value, pointer.lstrip("/"), valid
+            yield band, value, pointer, valid
 
 
 _COLOR_HINT = re.compile(r"^[0-9A-Fa-f]{6}$")
@@ -136,7 +138,7 @@ def _class_color_defect(  # noqa: PLR0913, PLR0917 - one drawn class against its
     key: str,
     band: int,
     value: int,
-    field: str,
+    pointer: str,
     hint: str | None,
     nodata: float | None,
     table: dict[int, tuple[int, ...]] | None,
@@ -149,7 +151,7 @@ def _class_color_defect(  # noqa: PLR0913, PLR0917 - one drawn class against its
             f"asset '{key}' class value {value} is band {band}'s nodata in the file,"
             " so readers hide it, but the class is not marked nodata",
             key,
-            f"{field}/nodata",
+            json_pointer=json_pointer("nodata", prefix=pointer),
             expected=True,
         )
     if table is None:
@@ -162,7 +164,7 @@ def _class_color_defect(  # noqa: PLR0913, PLR0917 - one drawn class against its
             f"asset '{key}' class value {value} has no entry in band {band}'s embedded"
             " color table, so readers cannot draw it",
             key,
-            f"{field}/value",
+            json_pointer=json_pointer("value", prefix=pointer),
         )
     if len(entry) > 3 and entry[3] == 0:
         return DataDefect(
@@ -171,7 +173,7 @@ def _class_color_defect(  # noqa: PLR0913, PLR0917 - one drawn class against its
             f"asset '{key}' class value {value} is fully transparent in band {band}'s"
             " embedded color table, so readers hide it like nodata",
             key,
-            f"{field}/nodata",
+            json_pointer=json_pointer("nodata", prefix=pointer),
             expected=True,
         )
     actual = "{:02X}{:02X}{:02X}".format(*entry[:3])
@@ -183,7 +185,7 @@ def _class_color_defect(  # noqa: PLR0913, PLR0917 - one drawn class against its
         f"asset '{key}' class value {value} has color_hint '{hint}', but band"
         f" {band}'s embedded color table draws it as '{actual}'",
         key,
-        f"{field}/color_hint",
+        json_pointer=json_pointer("color_hint", prefix=pointer),
         expected=actual,
         actual=hint,
     )
@@ -200,7 +202,7 @@ def _color_table(src: Any, band: int) -> dict[int, tuple[int, ...]] | None:
 _PICTURE = frozenset({ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.alpha})
 
 
-def _picture_defect(key: str, band: int, field: str) -> DataDefect:
+def _picture_defect(key: str, band: int, pointer: str) -> DataDefect:
     """The WARNING for a class list on one channel of an RGB(A) picture."""
     return DataDefect(
         DAT_CLASS_COLORS,
@@ -208,7 +210,7 @@ def _picture_defect(key: str, band: int, field: str) -> DataDefect:
         f"asset '{key}' band {band} is a color channel of a picture, so its pixels are"
         " intensities, not the classes it declares",
         key,
-        field,
+        json_pointer=pointer,
     )
 
 
@@ -229,7 +231,7 @@ def _check_class_colors(key: str, asset: dict[str, Any], files: AssetFiles) -> l
       the table entry. Alpha is compared only for full transparency, since a
       hint carries none.
     """
-    drawn = list(_drawn_classes(asset))
+    drawn = list(_drawn_classes(key, asset))
     if not drawn:
         return []
     try:
@@ -237,7 +239,7 @@ def _check_class_colors(key: str, asset: dict[str, Any], files: AssetFiles) -> l
         tables: dict[int, dict[int, tuple[int, ...]] | None] = {}
         pictures: dict[int, str] = {}
         defects: list[DataDefect] = []
-        for band, value, field, hint in drawn:
+        for band, value, pointer, hint in drawn:
             if band is None:
                 band = 1 if src.count == 1 else None
             if band is None or band > src.count:
@@ -246,14 +248,14 @@ def _check_class_colors(key: str, asset: dict[str, Any], files: AssetFiles) -> l
                 tables[band] = _color_table(src, band)
             if src.colorinterp[band - 1] in _PICTURE:
                 # One finding per picture band, at the first class list on it.
-                pictures.setdefault(band, field.rsplit("/", 1)[0])
+                pictures.setdefault(band, pointer.rsplit("/", 1)[0])
                 continue
             defect = _class_color_defect(
-                key, band, value, field, hint, src.nodatavals[band - 1], tables[band]
+                key, band, value, pointer, hint, src.nodatavals[band - 1], tables[band]
             )
             if defect is not None:
                 defects.append(defect)
-        defects.extend(_picture_defect(key, band, field) for band, field in pictures.items())
+        defects.extend(_picture_defect(key, band, pointer) for band, pointer in pictures.items())
     except Exception as exc:
         return [
             DataDefect(
@@ -304,7 +306,7 @@ def _check_palette_classes(key: str, asset: dict[str, Any], files: AssetFiles) -
             f"asset '{key}' band {index + 1} draws through an embedded color table but"
             " declares no classification:classes",
             key,
-            f"bands/{index}",
+            json_pointer=json_pointer("assets", key, "bands", index),
         )
         for index in palette
     ]
