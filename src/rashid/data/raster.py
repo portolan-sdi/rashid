@@ -34,7 +34,6 @@ from rashid.registry import (
 from rashid.rules._common import is_overview_asset, roles_of
 from rashid.rules.classification import (
     BAND_FIELDS,
-    CLASSES_FIELD,
     asset_class_lists,
     band_count,
     is_integer,
@@ -326,29 +325,41 @@ def _check_palette_classes(key: str, asset: dict[str, Any], files: AssetFiles) -
 
 
 def _check_class_placement(key: str, asset: dict[str, Any], files: AssetFiles) -> list[DataDefect]:
-    """A multi-band file MUST have its class list on a band in ``bands`` (PORTO-FMT-050).
+    """A class list MUST be placed for the file's band count (PORTO-FMT-050).
 
     ``PTL-CLS-005`` judges placement by the band count the metadata declares.
-    An asset that declares no band list but points at a multi-band file passes
-    it with the list on the asset, so the file's own band count decides here.
+    When that disagrees with the file, the file decides: a multi-band file
+    needs the list on a band in ``bands``, and a single-band file on the asset.
     """
-    on_asset = [found for found in asset_class_lists("", asset) if found.band_index is None]
-    if not on_asset or band_count(asset) > 1:
+    lists = [
+        found
+        for found in asset_class_lists(json_pointer("assets", key), asset)
+        if found.band_field != "raster:bands"
+    ]
+    declared = band_count(asset)
+    on_asset = [found for found in lists if found.band_index is None]
+    on_band = [found for found in lists if found.band_index is not None]
+    # Where the metadata already agrees, PTL-CLS-005 reports any misplacement.
+    if not (on_asset and declared <= 1) and not (on_band and declared > 1):
         return []
     try:
         count = files.raster().count
     except Exception:  # unreadable raster: the COG check owns reporting it
         return []
-    if count <= 1:
+    if count > 1 and on_asset and declared <= 1:
+        where, misplaced = "on the asset instead of on the band it describes in bands", on_asset
+    elif count == 1 and on_band and declared > 1:
+        where, misplaced = "on a band instead of on the asset", on_band
+    else:
         return []
     return [
         DataDefect(
             DAT_CLASS_COLORS,
             Severity.ERROR,
-            f"asset '{key}' file has {count} bands, but its class list is on the asset"
-            " instead of on the band it describes in bands",
+            f"asset '{key}' file has {count} band{'s' if count > 1 else ''},"
+            f" but its class list is {where}",
             key,
-            json_pointer=json_pointer("assets", key, CLASSES_FIELD),
+            json_pointer=misplaced[0].pointer,
         )
     ]
 

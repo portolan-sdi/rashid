@@ -1610,6 +1610,18 @@ def test_band_classes_on_a_multi_band_file_are_placed(tmp_path: Path) -> None:
     assert [d for d in _raster(path, {"bands": bands}) if d.rule_id == DAT_CLASS_COLORS] == []
 
 
+def test_band_classes_on_a_single_band_file_belong_on_the_asset(tmp_path: Path) -> None:
+    # The metadata declares two bands, but the file has one.
+    path = tmp_path / "one.tif"
+    assets.write_cog(path)
+    classes = [{"value": 1, "name": "urban", "title": "Urban"}]
+    bands = [{"classification:classes": classes}, {}]
+    defects = [d for d in _raster(path, {"bands": bands}) if d.rule_id == DAT_CLASS_COLORS]
+    assert [(d.severity, d.json_pointer) for d in defects] == [
+        (Severity.ERROR, "/assets/data/bands/0/classification:classes")
+    ]
+
+
 def test_inherited_class_findings_point_into_the_item(
     catalog: CatalogBuilder, tmp_path: Path
 ) -> None:

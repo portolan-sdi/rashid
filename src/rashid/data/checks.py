@@ -50,8 +50,9 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   table. The color table is authoritative for rendering and the hint only
   mirrors it, so a difference is a WARNING (PORTO-FMT-054). A class at the
   file's nodata that is not marked nodata is a WARNING too (PORTO-FMT-057).
-  A class list on the asset of a file with more than one band, when the
-  metadata lists no bands, is an ERROR (PORTO-FMT-050).
+  When the metadata's band count disagrees with the file, a class list on
+  the asset of a multi-band file, or on a band of a single-band file, is an
+  ERROR (PORTO-FMT-050).
 - ``PTL-DAT-022`` a COG band drawn through an embedded color table declares no
   ``classification:classes`` (INFO, uncited). A palette is only a hint, since
   continuous rasters ship one too. An item asset with no classes of its own is
