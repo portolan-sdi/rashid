@@ -65,9 +65,9 @@ The pass also carries one check of the incubating Zarr profile
 ``Origin`` header, to read the store's cross-origin policy. The store href
 names a key prefix rather than an object, so the asset probes above read a 404
 for it and settle nothing. That probe reaches whichever host serves the store,
-because the profile binds the store itself and carves out no other host. Like
-every Zarr check it reports a warning at most; see
-:func:`rashid.runner.cap_incubating`.
+because the profile applies the rule to the store of every ``data`` asset on
+any host, and exempts only a ``source`` asset. Like every Zarr check it
+reports a warning at most; see :func:`rashid.runner.cap_incubating`.
 """
 
 from __future__ import annotations
@@ -110,7 +110,7 @@ from rashid.rules._common import (
     assets_of,
     indexed_links_of,
     is_source_asset,
-    is_zarr_media_type,
+    is_zarr_store_asset,
 )
 
 log = logging.getLogger(__name__)
@@ -848,15 +848,17 @@ def _zarr_stores(graph: CatalogGraph, base: str | None) -> list[tuple[Node, str,
     host.
 
     The PORTO-CORE-073 scoping that keeps the asset probes on the publish host
-    does not apply. The Zarr profile binds the store itself and carves out no
-    other host, and a store a browser cannot read across origins is unusable
-    wherever it lives. A ``source`` asset is skipped, as it is in the data
-    pass: it names the upstream original rather than the published store.
+    does not apply, and the profile now says so: "This rule applies to the
+    store of every ``data`` asset, on any host. The store of a ``source``
+    asset is exempt." A store a browser cannot read across origins is unusable
+    wherever it lives. The exemption is read as the profile writes it, by
+    excluding a ``source`` asset rather than by requiring the ``data`` role,
+    so a store asset that declares no role is probed rather than passed over.
     """
     seen: set[str] = set()
     stores: list[tuple[Node, str, str]] = []
     for node, key, asset in _assets_with_hrefs(graph):
-        if not is_zarr_media_type(asset.get("type")) or is_source_asset(asset):
+        if not is_zarr_store_asset(asset) or is_source_asset(asset):
             continue
         url = _store_url(graph, node, str(asset["href"]), base)
         if url is None:

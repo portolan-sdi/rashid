@@ -45,6 +45,7 @@ from rashid.registry import (
     ZAR_VARIABLES,
     is_incubating,
 )
+from rashid.rules._common import COG_MEDIA_TYPE
 from tests.conftest import CatalogBuilder, default_asset, thumbnail_asset
 
 pytestmark = pytest.mark.unit
@@ -589,3 +590,130 @@ def test_a_signed_store_url_keeps_its_query_string() -> None:
     assert store_member_href("https://host/x.zarr/?sig=abc", "0/temp") == (
         "https://host/x.zarr/0/temp?sig=abc"
     )
+
+
+# --- the profile's 2026-11 revision -----------------------------------------
+
+
+def test_bare_shuffle_and_delta_no_longer_qualify(catalog: CatalogBuilder) -> None:
+    """The allow-list names the Zarr v3 spellings, numcodecs.shuffle and friends."""
+    message = zarr_findings(write_store(catalog, "v2-filter-names"))[ZAR_CODECS]
+    assert "delta, shuffle" in message
+
+
+def test_the_numcodecs_spellings_qualify(catalog: CatalogBuilder) -> None:
+    assert ZAR_CODECS not in zarr_findings(write_store(catalog, "numcodecs-filters"))
+
+
+def test_a_band_dimension_may_chunk_wider_than_one(catalog: CatalogBuilder) -> None:
+    """A band dimension holds the bands of one image, so chunking it is right."""
+    asset = zarr_asset(bands=[{"name": "rgba", "data_type": "uint8"}])
+    assert ZAR_NONSPATIAL_CHUNK not in zarr_findings(write_store(catalog, "rgba", asset=asset))
+
+
+def test_a_band_dimension_still_counts_toward_the_sample_bound(
+    catalog: CatalogBuilder,
+) -> None:
+    """The exemption is from the chunk-length SHOULD, not from the 8-sample MUST."""
+    asset = zarr_asset(bands=[{"name": "wide", "data_type": "uint8"}])
+    findings = zarr_findings(write_store(catalog, "wide-band", asset=asset))
+    assert ZAR_NONSPATIAL_CHUNK not in findings
+    assert "16 samples" in findings[ZAR_READ_AMPLIFICATION]
+
+
+def test_a_four_band_variable_carries_an_alpha_band(catalog: CatalogBuilder) -> None:
+    """The fourth band of a four-band variable is the alpha band."""
+    asset = zarr_asset(bands=[{"name": "rgba", "data_type": "uint8"}])
+    assert ZAR_NODATA not in zarr_findings(write_store(catalog, "rgba", asset=asset))
+
+
+def test_a_three_band_variable_carries_no_alpha_band(catalog: CatalogBuilder) -> None:
+    """Three bands are colour alone, so the no-data rule still binds."""
+    asset = zarr_asset(bands=[{"name": "rgb", "data_type": "uint8"}])
+    assert ZAR_NODATA in zarr_findings(write_store(catalog, "rgb", asset=asset))
+
+
+def test_four_bands_entries_carry_an_alpha_band(catalog: CatalogBuilder) -> None:
+    asset = zarr_asset(
+        bands=[{"name": "temp"}, {"name": "b"}, {"name": "c"}, {"name": "d"}],
+        **{"cube:variables": {"temp": {"dimensions": ["y", "x"], "type": "data"}}},
+    )
+    assert ZAR_NODATA not in zarr_findings(write_store(catalog, "flat", asset=asset))
+
+
+def test_an_axis_of_exactly_256_samples_keeps_the_chunk_floor(
+    catalog: CatalogBuilder,
+) -> None:
+    """The waiver is for an axis *shorter* than 256, so 256 itself is bound."""
+    message = zarr_findings(write_store(catalog, "axis-256"))[ZAR_CHUNK_SIZE]
+    assert "'y': 128" in message
+
+
+def test_a_convention_named_but_not_identified_does_not_count(
+    catalog: CatalogBuilder,
+) -> None:
+    """The profile says a convention is identified by its UUID."""
+    message = zarr_findings(write_store(catalog, "named-conventions"))[ZAR_CONVENTIONS]
+    assert "spatial, proj" in message
+
+
+@pytest.mark.parametrize(
+    "media_type",
+    ["application/vnd+zarr", "application/x-zarr", "application/zarr"],
+)
+def test_a_misspelled_zarr_media_type_still_triggers_the_checks(
+    catalog: CatalogBuilder, media_type: str
+) -> None:
+    """A variant type names a store, and the store is checked and the type named."""
+    asset = zarr_asset(type=media_type)
+    findings = zarr_findings(write_store(catalog, "no-pyramid", asset=asset))
+    assert ZAR_PYRAMID in findings
+    assert "application/vnd.zarr; version=3" in findings[ZAR_ASSET]
+
+
+def test_a_typeless_data_asset_with_a_zarr_href_triggers_the_checks(
+    catalog: CatalogBuilder,
+) -> None:
+    asset = {"href": "./data.zarr", "roles": ["data"], "bands": zarr_asset()["bands"]}
+    findings = zarr_findings(write_store(catalog, "no-pyramid", asset=asset))
+    assert ZAR_PYRAMID in findings
+    assert ZAR_ASSET in findings
+
+
+def test_an_icechunk_asset_is_not_a_zarr_store_asset(catalog: CatalogBuilder) -> None:
+    """Icechunk is its own format; the profile's media type does not name it."""
+    asset = zarr_asset(href="./data.icechunk", type="application/x-icechunk")
+    assert zarr_findings(write_store(catalog, "no-pyramid", asset=asset)) == {}
+
+
+@pytest.mark.parametrize(
+    "asset",
+    [
+        {"href": "./data.zarr.zip", "type": "application/zip", "roles": ["data"]},
+        {"href": "./scene.tif", "type": COG_MEDIA_TYPE, "roles": ["data"]},
+        {"href": "./data.parquet", "type": "application/vnd.apache.parquet", "roles": ["data"]},
+    ],
+)
+def test_a_non_zarr_asset_is_never_treated_as_a_store(
+    catalog: CatalogBuilder, asset: dict[str, Any]
+) -> None:
+    catalog.collection(
+        "temps",
+        title="Daily Temperatures",
+        assets={"data": asset, "thumbnail": thumbnail_asset()},
+    )
+    assert zarr_findings(catalog.write()) == {}
+
+
+def test_a_store_asset_needs_no_file_checksum(catalog: CatalogBuilder) -> None:
+    """The profile's Size and checksum section exempts a store from the recommendation."""
+    asset = zarr_asset(**{"file:size": 4096})
+    report = validate(write_store(catalog, "pyramid", asset=asset))
+    assert [f.message for f in report.findings if f.rule_id == "PTL-AST-003"] == []
+
+
+def test_a_store_asset_still_needs_a_file_size(catalog: CatalogBuilder) -> None:
+    """file:size is the total bytes of the store, so it is still asked for."""
+    report = validate(write_store(catalog, "pyramid"))
+    messages = [f.message for f in report.findings if f.rule_id == "PTL-AST-003"]
+    assert messages == ["asset 'data' has no file:size"]

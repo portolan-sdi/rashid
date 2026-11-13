@@ -63,7 +63,7 @@ from rashid.registry import (
     ZAR_TRANSFORM,
     ZAR_VARIABLES,
 )
-from rashid.rules._common import media_parameters
+from rashid.rules._common import ZARR_MEDIA_TYPE, media_base_type, media_parameters
 
 log = logging.getLogger(__name__)
 
@@ -88,8 +88,8 @@ JS_CODECS = frozenset(
         "zstd",
         "gzip",
         "zlib",
-        "shuffle",
-        "delta",
+        "numcodecs.shuffle",
+        "numcodecs.delta",
         "scale_offset",
         "transpose",
         "bytes",
@@ -129,6 +129,11 @@ _COORDINATE_NAMES = frozenset({"spatial_ref", "spatial_reference", "crs", "grid_
 
 #: Dimension names that mark a band axis, for the display-range exemption.
 _BAND_NAMES = frozenset({"band", "bands", "channel", "channels", "rgb", "rgba"})
+
+#: Bands that make an 8-bit array a set of display values, and the band count
+#: whose fourth position the profile reads as an alpha channel.
+_DISPLAY_BANDS = 3
+_ALPHA_BANDS = 4
 
 #: 8-bit sample types, for the same exemption.
 _EIGHT_BIT = frozenset({"uint8", "int8"})
@@ -811,17 +816,32 @@ def _collapse(key: str, faults: list[_Fault]) -> list[DataDefect]:
 
 
 def _check_media_type(key: str, asset: dict[str, Any]) -> list[DataDefect]:
-    """PTL-ZAR-004, from the STAC asset alone, so an unreadable store still gets it."""
-    version = media_parameters(str(asset.get("type", ""))).get("version")
-    if version == ZARR_VERSION_PARAMETER:
+    """PTL-ZAR-004, from the STAC asset alone, so an unreadable store still gets it.
+
+    The asset reached this check because something about it names a store, so
+    the message names what the declaration should have been rather than
+    repeating that a store was expected. A base type that is misspelled, a
+    missing ``version`` parameter, and a missing type altogether are the three
+    forms seen in the wild, and each is reported as the one difference it is.
+    """
+    declared = asset.get("type")
+    base = media_base_type(declared)
+    version = media_parameters(str(declared or "")).get("version")
+    if base == ZARR_MEDIA_TYPE and version == ZARR_VERSION_PARAMETER:
         return []
+    if not base:
+        problem = "the asset declares no media type"
+    elif base != ZARR_MEDIA_TYPE:
+        problem = f"the media type's base type is {base!r}, not {ZARR_MEDIA_TYPE!r}"
+    else:
+        problem = f"the media type declares version {version!r}"
     return [
         _defect(
             ZAR_ASSET,
             Severity.ERROR,
             key,
-            f"media type declares version {version!r}; the profile requires"
-            f" 'application/vnd.zarr; version={ZARR_VERSION_PARAMETER}'",
+            f"{problem}; the profile requires"
+            f" '{ZARR_MEDIA_TYPE}; version={ZARR_VERSION_PARAMETER}'",
             "type",
         )
     ]
@@ -881,13 +901,21 @@ def _check_missing_root(key: str, store: _Store) -> DataDefect:
 
 
 def _declares(root: _Meta, convention: tuple[str, str]) -> bool:
-    """Whether ``zarr_conventions`` names a convention, by UUID then by name."""
+    """Whether ``zarr_conventions`` declares a convention, by its UUID.
+
+    The profile says a convention is identified by its UUID, and the
+    conventions agree: the UUID "MUST NOT change across versions", while the
+    schema and spec URLs carry the version tag and get rewritten. Stores in
+    the wild bear that out. Real ones name the proj convention ``"proj:"``
+    with a trailing colon, or point its ``schema_url`` at a repository that
+    no longer holds it, or tag it ``v1`` where only ``v0.1`` was released,
+    and every one of them still carries the right UUID. The name is therefore
+    not read at all: it is the field that drifts.
+    """
+    uuid, _name = convention
     raw = root.attributes.get("zarr_conventions")
-    uuid, name = convention
     for entry in raw if isinstance(raw, list) else []:
-        if not isinstance(entry, dict):
-            continue
-        if str(entry.get("uuid", "")).lower() == uuid or entry.get("name") == name:
+        if isinstance(entry, dict) and str(entry.get("uuid", "")).lower() == uuid:
             return True
     return False
 
@@ -1181,7 +1209,11 @@ def _chunk_faults(
             f" dimensions {[name for name, _ in extra]}, so a client reads {factor} samples"
             f" for every sample it draws, more than {MAX_READ_FACTOR}",
         )
-    wide = [name for name, length in extra if length != 1]
+    # A band dimension holds the bands of one image, so chunking it whole is
+    # how a client draws that image in one read. The profile exempts it from
+    # the chunk-length SHOULD, and only from that: it still counts toward the
+    # 8-sample bound above, which is what keeps a 16-band image reported.
+    wide = [name for name, length in extra if length != 1 and not _is_band_axis(name)]
     if wide:
         yield _Fault(
             ZAR_NONSPATIAL_CHUNK,
@@ -1209,11 +1241,12 @@ def _chunk_size_faults(
     PORTO-ZARR-024 permits a shard to be larger, which is why only the inner
     chunk shape reaches this check.
 
-    An axis shorter than the floor is exempt from it. The coarsest level of a
-    pyramid MUST fit in 4 chunks (PORTO-ZARR-012), so a level a few hundred
-    samples wide cannot also chunk at 256 or more; reading the floor literally
-    would make the two requirements contradict each other on every pyramid
-    deep enough to satisfy the second.
+    The profile states the waiver the first draft had to infer: "The lower
+    bound does not apply to an axis shorter than 256 samples." Shorter is
+    strict, so an axis of exactly 256 keeps the floor. The waiver exists
+    because a pyramid's coarsest level MUST fit in 4 chunks
+    (PORTO-ZARR-012), and a level a few hundred samples wide cannot also
+    chunk at 256 or more.
     """
     shape = _shape(array)
     extents = {
@@ -1223,7 +1256,7 @@ def _chunk_size_faults(
     outside = {
         name: size
         for name, size in sizes.items()
-        if (size < MIN_CHUNK_SAMPLES and extents[name] > MIN_CHUNK_SAMPLES)
+        if (size < MIN_CHUNK_SAMPLES and extents[name] >= MIN_CHUNK_SAMPLES)
         or size > MAX_CHUNK_SAMPLES
     }
     if outside:
@@ -1247,31 +1280,58 @@ def _codec_faults(array: _Meta) -> Iterator[_Fault]:
         )
 
 
+def _is_band_axis(name: str) -> bool:
+    """Whether a dimension name marks the band dimension of one image."""
+    return name.lower() in _BAND_NAMES
+
+
 def _band_axis_length(array: _Meta) -> int:
-    """The length of the array's band axis, or 0 when it has none."""
+    """The number of positions on the array's band axis, or 0 when it has none."""
     shape = _shape(array)
     dimensions = array.dimensions
     if len(shape) != len(dimensions):
         return 0
-    lengths = [shape[i] for i, name in enumerate(dimensions) if name.lower() in _BAND_NAMES]
+    lengths = [shape[i] for i, name in enumerate(dimensions) if _is_band_axis(name)]
     return max(lengths, default=0)
+
+
+def _band_count(asset: dict[str, Any], array: _Meta) -> int:
+    """How many bands ``array`` carries.
+
+    The profile reads the count off the entries of ``bands`` or the positions
+    of a band dimension, so this prefers whichever one the catalog states.
+    """
+    return max(len(_bands(asset)), _band_axis_length(array))
+
+
+def _has_alpha_band(asset: dict[str, Any], array: _Meta) -> bool:
+    """Whether ``array`` carries an alpha band.
+
+    The profile names two forms: a band called ``alpha``, and the fourth band
+    of a four-band variable. The second is what an RGBA store writes, where
+    one variable spans a band dimension of four and the fourth position is the
+    alpha channel rather than a separate entry.
+    """
+    if any(band.get("name") == "alpha" for band in _bands(asset)):
+        return True
+    return _band_count(asset, array) == _ALPHA_BANDS
 
 
 def _display_exempt(asset: dict[str, Any], array: _Meta) -> bool:
     """Whether ``array`` is 8-bit with three or more bands.
 
     The profile exempts such an array because its samples are display values
-    already. "Three or more bands" is read from the STAC ``bands`` array
-    first, and from a band axis of three or more on the array otherwise, since
-    an RGB or RGBA store commonly declares one variable over a band dimension
-    rather than one band entry per channel.
+    already, and says where the count comes from: "The bands are the entries
+    of ``bands`` or the positions of a band dimension." An RGB or RGBA store
+    commonly declares one variable over a band dimension rather than one band
+    entry per channel, which is why the second source is needed.
 
     The test is per array, not per store: a store may hold an 8-bit RGBA array
     beside a float32 measurement, and only the first is a display value.
     """
     if str(array.data.get("data_type")) not in _EIGHT_BIT:
         return False
-    return len(_bands(asset)) >= 3 or _band_axis_length(array) >= 3
+    return _band_count(asset, array) >= _DISPLAY_BANDS
 
 
 def _band_faults(array: _Meta, asset: dict[str, Any], *, rescaled: bool) -> Iterator[_Fault]:
@@ -1291,13 +1351,12 @@ def _band_faults(array: _Meta, asset: dict[str, Any], *, rescaled: bool) -> Iter
             f"{array.subject} has no display range: its bands entry carries no"
             " statistics with minimum and maximum, and no renders entry carries a rescale",
         )
-    has_alpha = any(b.get("name") == "alpha" for b in _bands(asset))
-    if not has_alpha and (band is None or band.get("nodata") is None):
+    if not _has_alpha_band(asset, array) and (band is None or band.get("nodata") is None):
         yield _Fault(
             ZAR_NODATA,
             Severity.WARNING,
             f"{array.subject} declares no nodata on its bands entry,"
-            " and the asset declares no 'alpha' band instead",
+            " and carries no alpha band instead",
         )
 
 
