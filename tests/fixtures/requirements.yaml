@@ -826,6 +826,13 @@ requirements:
       catalog's own cloud-native assets and MUST NOT fail an asset for its
       format because it carries the `source` role.
 
+  - id: PORTO-FMT-065
+    severity: MUST
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      Its `href` MUST NOT contain `*` or `[`. It MAY include a query string.
+
   - id: PORTO-FMT-004
     severity: MUST
     enforcement: validator

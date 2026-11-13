@@ -46,7 +46,7 @@ def test_metadata_small_counts(cache_dir: Path) -> None:
     # 1 root + 2 collections + 100 items = 103 STAC documents.
     assert _steady_counts("metadata", "small", cache_dir) == {
         "json.parses": 103,
-        "rules.checks": 1928,
+        "rules.checks": 2030,
         "schema.rust_compiles": 3,
         "schema.rust_passes": 103,
     }
@@ -57,7 +57,7 @@ def test_metadata_large_counts(cache_dir: Path) -> None:
     # at 3: they depend on the schemas in use, not on the object count.
     assert _steady_counts("metadata", "large", cache_dir) == {
         "json.parses": 2021,
-        "rules.checks": 37064,
+        "rules.checks": 39084,
         "schema.rust_compiles": 3,
         "schema.rust_passes": 2021,
     }
