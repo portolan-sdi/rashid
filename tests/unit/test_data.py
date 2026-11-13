@@ -25,6 +25,7 @@ from rashid.data.reader import AssetReader, Locator
 from rashid.model import Severity
 from rashid.registry import (
     DAT_CHECKSUM,
+    DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
     DAT_COLUMN_DESCRIPTIONS,
@@ -347,6 +348,7 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
     all_ids = frozenset(
         {
             DAT_CHECKSUM,
+            DAT_CLASS_COLORS,
             DAT_SIZE,
             DAT_FORMAT,
             DAT_COG,
