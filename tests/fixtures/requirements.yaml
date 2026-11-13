@@ -1193,6 +1193,55 @@ requirements:
       Point cloud support is not yet implemented; when complete, data MUST be
       provided as Cloud-Optimized Point Cloud (COPC).
 
+  - id: PORTO-FMT-067
+    severity: SHOULD
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      To allow clients to show the whole mosaic without loading every item,
+      collections containing spatial mosaics SHOULD provide an
+      overview COG (subject to all the COG requirements in this section) as a
+      collection-level asset with the `visual` and `overview` roles.
+
+  - id: PORTO-FMT-069
+    severity: SHOULD
+    enforcement: process
+    file: specs/portolan/formats.md
+    quote: >-
+      It SHOULD use a projection that suits web maps, such as Web Mercator
+      (EPSG:3857).
+
+  - id: PORTO-FMT-070
+    severity: SHOULD
+    enforcement: process
+    file: specs/portolan/formats.md
+    quote: >-
+      Collections with mosaics for several time periods SHOULD provide an
+      overview for at least the most recent mosaic.
+
+  - id: PORTO-FMT-071
+    severity: MAY
+    enforcement: process
+    file: specs/portolan/formats.md
+    quote: >-
+      They MAY provide an overview for each of the other periods.
+
+  - id: PORTO-FMT-072
+    severity: SHOULD
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      Each overview asset SHOULD have a `datetime`, or a `start_datetime` and
+      `end_datetime`, so clients can match it to its items.
+
+  - id: PORTO-FMT-074
+    severity: SHOULD
+    enforcement: process
+    file: specs/portolan/formats.md
+    quote: >-
+      Publishers SHOULD also use each scene's valid-data footprint as its item
+      geometry.
+
   - id: PORTO-FMT-040
     severity: SHOULD
     enforcement: validator

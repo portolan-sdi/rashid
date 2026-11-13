@@ -1,4 +1,4 @@
-"""Visualization rules (spec: core.md, Visualization; formats.md, PMTiles).
+"""Visualization rules (spec: core.md, Visualization; formats.md, PMTiles and Raster).
 
 Metadata-checkable subset only: thumbnail presence, style assets when a
 visualization derivative exists, and PMTiles registration. Whether a
@@ -16,11 +16,13 @@ mistakes "could not tell" for "nothing to fix".
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import (
+    COG_MEDIA_TYPE,
     COPC_MEDIA_TYPE,
     PMTILES_MEDIA_TYPE,
     assets_of,
@@ -28,10 +30,13 @@ from rashid.rules._common import (
     indexed_links_of,
     is_cog_media_type,
     is_pmtiles_asset,
+    is_raster_data_asset,
     is_tiff_media_type,
     links_of,
     roles_of,
 )
+from rashid.rules.bbox import bboxes_of
+from rashid.rules.temporal import has_datetime
 
 STYLE_MEDIA_TYPE = "application/vnd.mapbox.style+json"
 _THUMBNAIL_TYPES = ("image/png", "image/jpeg", "image/webp")
@@ -39,6 +44,10 @@ _WEB_MAP_LINKS_PREFIX = "https://stac-extensions.github.io/web-map-links/"
 # Render-from-source is plausible for small files; above this, a missing
 # visual derivative is worth a nudge. Deliberately conservative.
 _LARGE_VECTOR_BYTES = 100_000_000
+# formats.md leaves "much larger" open: a mosaic here is this many raster items,
+# each covering at most 1/ratio of the collection's extent. Deliberately conservative.
+_MOSAIC_MIN_ITEMS, _MOSAIC_AREA_RATIO = 3, 2.0
+_OVERVIEW_ROLES = {"visual", "overview"}
 
 
 def _has_spatial_media_type(node: Node) -> bool:
@@ -397,3 +406,103 @@ class LargeVectorWithoutVisualRule(Rule):
                 json_pointer=json_pointer("assets"),
                 fix_hint="publish a PMTiles derivative with a MapLibre style",
             )
+
+
+def _bbox_area(box: Any) -> float | None:
+    """Area in squared degrees of a 2D or 3D bbox; None when malformed."""
+    if not isinstance(box, list) or len(box) not in (4, 6):
+        return None
+    if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in box):
+        return None
+    half = len(box) // 2
+    west, south, east, north = (float(box[i]) for i in (0, 1, half, half + 1))
+    # A west edge east of the east edge crosses the antimeridian.
+    return (east - west if east >= west else east - west + 360) * (north - south)
+
+
+def _mosaic_items(node: Node, graph: CatalogGraph) -> int:
+    """How many raster items tile the collection's extent, or 0 if not a mosaic.
+
+    Bands and time periods are not compared, so the footprint test alone must
+    rule out a time series: every item has to be much smaller than the extent.
+    """
+    boxes = bboxes_of(node)
+    extent = _bbox_area(boxes[0][1]) if boxes else None
+    if extent is None:
+        return 0
+    areas = [
+        _bbox_area(item.data.get("bbox"))
+        for item in graph.items_of(node)
+        if any(is_raster_data_asset(asset) for _p, _k, asset in assets_of(item))
+    ]
+    if len(areas) < _MOSAIC_MIN_ITEMS or any(
+        area is None or area * _MOSAIC_AREA_RATIO > extent for area in areas
+    ):
+        return 0
+    return len(areas)
+
+
+class MosaicOverviewRule(Rule):
+    """A spatial mosaic provides an overview COG with the visual and overview roles.
+
+    Mosaic detection is a footprint heuristic (see :func:`_mosaic_items`), so
+    this is a WARNING, the SHOULD's own severity, and stays silent when unsure.
+    """
+
+    id = "PTL-VIZ-007"
+    spec_ids = ("PORTO-FMT-067",)
+    default_severity = Severity.WARNING
+    description = (
+        "spatial mosaics should provide an overview COG with the visual and overview roles"
+    )
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        overviews = [
+            (pointer, key, asset)
+            for pointer, key, asset in assets_of(node)
+            if set(roles_of(asset)) >= _OVERVIEW_ROLES
+        ]
+        for pointer, key, asset in overviews:
+            if not is_cog_media_type(asset.get("type")):
+                yield self.finding(
+                    node,
+                    f"overview asset '{key}' has type {asset.get('type')!r}, not the COG"
+                    " media type",
+                    json_pointer=json_pointer("type", prefix=pointer),
+                    fix_hint=f"publish the overview as a COG and set its type to '{COG_MEDIA_TYPE}'",
+                    expected=COG_MEDIA_TYPE,
+                    actual=asset.get("type"),
+                )
+        tiles = 0 if overviews else _mosaic_items(node, graph)
+        if tiles:
+            yield self.finding(
+                node,
+                f"collection's {tiles} raster items tile an extent much larger than any one"
+                " of them, but no collection asset has the 'visual' and 'overview' roles",
+                json_pointer=json_pointer("assets"),
+                fix_hint="add an 8-bit RGB overview COG of the mosaic as a collection asset"
+                ' with roles ["visual", "overview"] and a datetime',
+            )
+
+
+class OverviewDatetimeRule(Rule):
+    """Each overview asset carries a datetime or a start/end interval."""
+
+    id = "PTL-VIZ-008"
+    spec_ids = ("PORTO-FMT-072",)
+    default_severity = Severity.WARNING
+    description = "overview assets should carry a datetime or a start/end interval"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in assets_of(node):
+            if "overview" in roles_of(asset) and not has_datetime(asset):
+                yield self.finding(
+                    node,
+                    f"overview asset '{key}' has no datetime and no complete"
+                    " start_datetime/end_datetime interval",
+                    json_pointer=pointer,
+                    fix_hint="add datetime, or both start_datetime and end_datetime, to the"
+                    " overview asset so clients can match it to its items",
+                )

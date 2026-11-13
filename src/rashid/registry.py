@@ -77,6 +77,8 @@ from rashid.rules.versions import VersionChainRule
 from rashid.rules.viz import (
     DefaultStyleRoleRule,
     LargeVectorWithoutVisualRule,
+    MosaicOverviewRule,
+    OverviewDatetimeRule,
     PMTilesRegistrationRule,
     StyleMediaTypeRule,
     StylesForDerivativeRule,
@@ -199,6 +201,8 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     StyleMediaTypeRule(),
     DefaultStyleRoleRule(),
     LargeVectorWithoutVisualRule(),
+    MosaicOverviewRule(),
+    OverviewDatetimeRule(),
     PartitionFieldsRule(),
     PartitionGlobSchemeRule(),
     SingleFileCollectionRule(),
