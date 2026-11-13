@@ -10,7 +10,14 @@ from rashid.catalog import Node
 from rashid.config import RulesConfig
 from rashid.data import DataDefect
 from rashid.data.reader import AssetReader
-from rashid.registry import CHECKS, DAT_MIRROR, DAT_UNAVAILABLE, LIV_UNAVAILABLE, check_ids
+from rashid.registry import (
+    CHECKS,
+    DAT_MIRROR,
+    DAT_UNAVAILABLE,
+    LIV_UNAVAILABLE,
+    check_ids,
+    is_incubating,
+)
 from rashid.runner import validate
 from tests.conftest import CatalogBuilder
 
@@ -24,12 +31,26 @@ def _rules_of(prefix: str) -> frozenset[str]:
     )
 
 
+def _incubating_in(stage: str) -> frozenset[str]:
+    """The incubating checks a pass runs beside its own family.
+
+    A pass's checks no longer share one id family. The Zarr profile's store
+    checks run in the data pass and its cross-origin probe in the live pass, so
+    each gate holds part of ``PTL-ZAR`` as well as all of its own family.
+    """
+    return frozenset(
+        info.id for info in CHECKS.values() if is_incubating(info.id) and info.stage == stage
+    )
+
+
 def test_data_gate_lists_every_data_rule() -> None:
-    assert _rules_of("PTL-DAT-") == check_ids("data", enables_pass_only=True)
+    expected = _rules_of("PTL-DAT-") | _incubating_in("data")
+    assert expected == check_ids("data", enables_pass_only=True)
 
 
 def test_live_gate_lists_every_live_rule() -> None:
-    assert _rules_of("PTL-LIV-") == check_ids("live", enables_pass_only=True)
+    expected = _rules_of("PTL-LIV-") | _incubating_in("live")
+    assert expected == check_ids("live", enables_pass_only=True)
 
 
 def test_degradation_reports_are_not_gate_members() -> None:

@@ -45,6 +45,24 @@ from rashid.registry import (
     DAT_UNAVAILABLE,
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
+    ZAR_ASSET,
+    ZAR_AXIS_ORDER,
+    ZAR_CHUNK_SIZE,
+    ZAR_CODECS,
+    ZAR_CONVENTIONS,
+    ZAR_CRS,
+    ZAR_DISPLAY_RANGE,
+    ZAR_LAYOUT_FIELDS,
+    ZAR_LEVEL_STEP,
+    ZAR_NODATA,
+    ZAR_NONSPATIAL_CHUNK,
+    ZAR_PYRAMID,
+    ZAR_READ_AMPLIFICATION,
+    ZAR_ROW_MAJOR,
+    ZAR_SHARD_SPAN,
+    ZAR_STORE_VERSION,
+    ZAR_TRANSFORM,
+    ZAR_VARIABLES,
 )
 from rashid.runner import validate
 from tests.conftest import CatalogBuilder
@@ -341,11 +359,34 @@ def test_disabling_one_rule_silences_only_it(catalog: CatalogBuilder) -> None:
 
 
 def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
+    """Every rule the pass can emit, named one by one, must skip it.
+
+    The data pass also runs the Zarr profile's store checks, which carry their
+    own id family, so the set below spans both families.
+    """
     graph_root = _graph(catalog).root_path
     validator = _NoOpValidator()
 
     all_ids = frozenset(
         {
+            ZAR_ASSET,
+            ZAR_AXIS_ORDER,
+            ZAR_CHUNK_SIZE,
+            ZAR_CODECS,
+            ZAR_CONVENTIONS,
+            ZAR_CRS,
+            ZAR_DISPLAY_RANGE,
+            ZAR_LAYOUT_FIELDS,
+            ZAR_LEVEL_STEP,
+            ZAR_NODATA,
+            ZAR_NONSPATIAL_CHUNK,
+            ZAR_PYRAMID,
+            ZAR_READ_AMPLIFICATION,
+            ZAR_ROW_MAJOR,
+            ZAR_SHARD_SPAN,
+            ZAR_STORE_VERSION,
+            ZAR_TRANSFORM,
+            ZAR_VARIABLES,
             DAT_CHECKSUM,
             DAT_SIZE,
             DAT_FORMAT,

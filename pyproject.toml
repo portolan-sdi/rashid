@@ -262,8 +262,10 @@ major_version_zero = true
 
 [tool.codespell]
 skip = ".git,uv.lock,.venv,.mypy_cache,.ruff_cache,.pytest_cache,.cache"
-# "unparseable" is a valid English variant used in rule messages
-ignore-words-list = "unparseable"
+# "unparseable" is a valid English variant used in rule messages, and "zar" is
+# the three-letter family of the Zarr checks (PTL-ZAR-00x), which the check id
+# format fixes at three letters.
+ignore-words-list = "unparseable,zar"
 check-filenames = true
 
 [tool.vulture]

@@ -1,0 +1,272 @@
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "attributes": {
+    "zarr_conventions": [
+      {
+        "uuid": "689b58e2-cf7b-45e0-9fff-9cfc0883d6b4",
+        "name": "spatial",
+        "schema_url": "https://raw.githubusercontent.com/zarr-conventions/spatial/refs/tags/v0.1/schema.json",
+        "spec_url": "https://github.com/zarr-conventions/spatial/blob/v0.1/README.md"
+      },
+      {
+        "uuid": "f17cb550-5864-4468-aeb7-f3180cfb622f",
+        "name": "proj",
+        "schema_url": "https://raw.githubusercontent.com/zarr-conventions/proj/refs/tags/v0.1/schema.json",
+        "spec_url": "https://github.com/zarr-conventions/proj/blob/v0.1/README.md"
+      },
+      {
+        "uuid": "d35379db-88df-4056-af3a-620245f8e347",
+        "name": "multiscales",
+        "schema_url": "https://raw.githubusercontent.com/zarr-conventions/multiscales/refs/tags/v0.1/schema.json",
+        "spec_url": "https://github.com/zarr-conventions/multiscales/blob/v0.1/README.md"
+      }
+    ],
+    "proj:code": "EPSG:3857",
+    "spatial:dimensions": [
+      "y",
+      "x"
+    ],
+    "spatial:bbox": [
+      500000.0,
+      4900000.0,
+      600000.0,
+      5000000.0
+    ],
+    "spatial:transform": [
+      10.0,
+      0.0,
+      500000.0,
+      0.0,
+      -10.0,
+      5000000.0
+    ],
+    "spatial:registration": "pixel",
+    "multiscales": {
+      "layout": [
+        {
+          "asset": "0",
+          "spatial:shape": [
+            2050,
+            2050
+          ],
+          "spatial:transform": [
+            10.0,
+            0.0,
+            500000.0,
+            0.0,
+            -10.0,
+            5000000.0
+          ],
+          "transform": {
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "translation": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "asset": "1",
+          "spatial:shape": [
+            1025,
+            1025
+          ],
+          "spatial:transform": [
+            20.0,
+            0.0,
+            500000.0,
+            0.0,
+            -20.0,
+            5000000.0
+          ],
+          "derived_from": "0",
+          "transform": {
+            "scale": [
+              2.0,
+              2.0
+            ],
+            "translation": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "asset": "2",
+          "spatial:shape": [
+            513,
+            513
+          ],
+          "spatial:transform": [
+            40.0,
+            0.0,
+            500000.0,
+            0.0,
+            -40.0,
+            5000000.0
+          ],
+          "derived_from": "1",
+          "transform": {
+            "scale": [
+              2.0,
+              2.0
+            ],
+            "translation": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      ],
+      "resampling_method": "average"
+    }
+  },
+  "consolidated_metadata": {
+    "kind": "inline",
+    "must_understand": false,
+    "metadata": {
+      "0": {
+        "zarr_format": 3,
+        "node_type": "group",
+        "attributes": {}
+      },
+      "1": {
+        "zarr_format": 3,
+        "node_type": "group",
+        "attributes": {}
+      },
+      "2": {
+        "zarr_format": 3,
+        "node_type": "group",
+        "attributes": {}
+      },
+      "0/temp": {
+        "zarr_format": 3,
+        "node_type": "array",
+        "shape": [
+          2050,
+          2050
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1024,
+              1024
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0,
+        "codecs": [
+          {
+            "name": "bytes"
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0
+            }
+          }
+        ],
+        "dimension_names": [
+          "y",
+          "x"
+        ],
+        "attributes": {}
+      },
+      "1/temp": {
+        "zarr_format": 3,
+        "node_type": "array",
+        "shape": [
+          1025,
+          1025
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1024,
+              1024
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0,
+        "codecs": [
+          {
+            "name": "bytes"
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0
+            }
+          }
+        ],
+        "dimension_names": [
+          "y",
+          "x"
+        ],
+        "attributes": {}
+      },
+      "2/temp": {
+        "zarr_format": 3,
+        "node_type": "array",
+        "shape": [
+          513,
+          513
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              513,
+              513
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0,
+        "codecs": [
+          {
+            "name": "bytes"
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0
+            }
+          }
+        ],
+        "dimension_names": [
+          "y",
+          "x"
+        ],
+        "attributes": {}
+      }
+    }
+  }
+}

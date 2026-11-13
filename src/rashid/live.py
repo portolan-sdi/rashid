@@ -72,12 +72,21 @@ link is reported as ``PTL-LIV-008``, with the URL the redirect names. When
 the host's first asset redirects that way, the range and CORS probes move to
 the next asset of the same kind whose HEAD stays on https; when none does,
 ``PTL-LIV-000`` says they did not run.
+
+The pass also carries one check of the incubating Zarr profile
+(``PTL-ZAR-003``): a ranged GET of each Zarr store's own ``zarr.json``, with an
+``Origin`` header, to read the store's cross-origin policy. The store href
+names a key prefix rather than an object, so the asset probes above read a 404
+for it and settle nothing. That probe reaches whichever host serves the store,
+because the profile applies the rule to the store of every ``data`` asset on
+any host, and exempts only a ``source`` asset. Like every Zarr check it
+reports a warning at most; see :func:`rashid.runner.cap_incubating`.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -87,11 +96,13 @@ from rashid import _store, _trace
 from rashid._href import (
     href_host,
     is_absolute_href,
+    is_https_href,
     live_host_href,
     location_key,
     normalize_live_base,
     off_https_reference,
     resolve_live_base,
+    store_member_href,
     wire_url,
 )
 from rashid.catalog import CatalogGraph, Kind, Node
@@ -106,8 +117,15 @@ from rashid.registry import (
     LIV_RANGE,
     LIV_SELF_BASE,
     LIV_UNAVAILABLE,
+    ZAR_CORS,
 )
-from rashid.rules._common import assets_of, indexed_links_of, is_partial_read_media_type
+from rashid.rules._common import (
+    assets_of,
+    indexed_links_of,
+    is_partial_read_media_type,
+    is_source_asset,
+    is_zarr_store_asset,
+)
 
 log = logging.getLogger(__name__)
 
@@ -120,6 +138,12 @@ _LINK_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
 
 # Concurrent HEADs against one host.
 _WORKERS = 32
+
+#: Zarr store metadata documents probed per run. A catalog may declare a store
+#: per item, and each probe is a request to somebody's host, so the incubating
+#: check is bounded the way the crawl is. The stores past the cap are reported
+#: as unchecked rather than passed over.
+_MAX_ZARR_PROBES = 64
 
 # An arbitrary origin: a read-permitting CORS policy answers any origin, and a
 # restrictive one will not match this, correctly failing the check.
@@ -306,6 +330,32 @@ class _DefaultProber:
         )
 
 
+def _assets_with_hrefs(graph: CatalogGraph) -> Iterator[tuple[Node, str, dict[str, Any]]]:
+    """Every readable object's assets that declare an href, in a fixed order.
+
+    Node iteration is path-sorted and asset keys are sorted here, so each
+    host's first target — the probe representative — is deterministic.
+    """
+    for node in graph.iter(*_LIVE_KINDS):
+        if node.parse_error is not None:
+            continue
+        for _pointer, key, asset in sorted(assets_of(node), key=lambda entry: entry[1]):
+            if isinstance(asset.get("href"), str):
+                yield node, key, asset
+
+
+def _probe_url(graph: CatalogGraph, node: Node, href: str, base: str | None) -> str | None:
+    """The URL to probe for ``href``, or None when it is not probeable.
+
+    An absolute href is probed as declared; a relative one is joined onto the
+    publish base and encoded for the wire.
+    """
+    url = live_host_href(str(graph.href_path(node).parent), href, base)
+    if url is None:
+        return None
+    return url if is_absolute_href(href) else wire_url("", url)
+
+
 def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[str, list[_Target]]:
     """Probeable assets grouped by host: absolute ``https`` hrefs as declared,
     plus — when ``base_url`` is given — relative hrefs resolved against it.
@@ -314,36 +364,25 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
     the catalog's own assets under PORTO-CORE-073: an absolute href on another
     host is a copy someone else serves, and dropping it here keeps every probe
     off upstream servers.
-
-    Node iteration is path-sorted and asset keys are sorted, so each host's
-    first target — the probe representative — is deterministic.
     """
     base = normalize_live_base(base_url) if base_url is not None else None
     by_host: dict[str, list[_Target]] = {}
-    for node in graph.iter(*_LIVE_KINDS):
-        if node.parse_error is not None:
+    for node, key, asset in _assets_with_hrefs(graph):
+        url = _probe_url(graph, node, str(asset["href"]), base)
+        if url is None:
             continue
-        for _pointer, key, asset in sorted(assets_of(node), key=lambda entry: entry[1]):
-            href = asset.get("href")
-            if not isinstance(href, str):
-                continue
-            url = live_host_href(str(graph.href_path(node).parent), href, base)
-            if url is None:
-                continue
-            if not is_absolute_href(href):
-                url = wire_url("", url)
-            size = asset.get("file:size")
-            by_host.setdefault(href_host(url), []).append(
-                _Target(
-                    node=node,
-                    key=key,
-                    url=url,
-                    declared_size=size if isinstance(size, int) else None,
-                    partial_read=is_partial_read_media_type(asset.get("type")),
-                    pointer=json_pointer("assets", key, "href"),
-                    subject=f"asset '{key}'",
-                )
+        size = asset.get("file:size")
+        by_host.setdefault(href_host(url), []).append(
+            _Target(
+                node=node,
+                key=key,
+                url=url,
+                declared_size=size if isinstance(size, int) else None,
+                partial_read=is_partial_read_media_type(asset.get("type")),
+                pointer=json_pointer("assets", key, "href"),
+                subject=f"asset '{key}'",
             )
+        )
     return by_host
 
 
@@ -853,6 +892,139 @@ def _check_metadata_host(
     return _check_server(rep, ranged, None)
 
 
+def _store_url(graph: CatalogGraph, node: Node, href: str, base: str | None) -> str | None:
+    """The https URL of a Zarr store, whichever host serves it.
+
+    An absolute href is taken as declared when it is https; ``PTL-AST-002``
+    owns any other scheme. A relative href resolves under the publish base,
+    and without a base it cannot be resolved at all.
+    """
+    if is_absolute_href(href):
+        return href if is_https_href(href) else None
+    return _probe_url(graph, node, href, base)
+
+
+def _zarr_stores(graph: CatalogGraph, base: str | None) -> list[tuple[Node, str, str]]:
+    """Every Zarr store asset's (node, key, metadata URL), one per distinct store.
+
+    The probed URL is the store's own ``zarr.json``. The store href names a key
+    prefix, which no server returns an object for, so the ranged GET that the
+    asset probes send would read a 404 and say nothing about the store's CORS
+    policy. CORS is set per bucket rather than per host, and one host serves
+    many publishers' stores, so each distinct store is probed rather than each
+    host.
+
+    The PORTO-CORE-073 scoping that keeps the asset probes on the publish host
+    does not apply, and the profile now says so: "This rule applies to the
+    store of every ``data`` asset, on any host. The store of a ``source``
+    asset is exempt." A store a browser cannot read across origins is unusable
+    wherever it lives. The exemption is read as the profile writes it, by
+    excluding a ``source`` asset rather than by requiring the ``data`` role,
+    so a store asset that declares no role is probed rather than passed over.
+    """
+    seen: set[str] = set()
+    stores: list[tuple[Node, str, str]] = []
+    for node, key, asset in _assets_with_hrefs(graph):
+        if not is_zarr_store_asset(asset) or is_source_asset(asset):
+            continue
+        url = _store_url(graph, node, str(asset["href"]), base)
+        if url is None:
+            continue
+        metadata = store_member_href(url, "zarr.json")
+        if metadata in seen:
+            continue
+        seen.add(metadata)
+        stores.append((node, key, metadata))
+    return stores
+
+
+def _zarr_unjudged(node: Node, key: str, detail: str) -> Finding:
+    """A store whose cross-origin policy the probe did not settle.
+
+    This is reported under the Zarr check rather than under ``PTL-LIV-000``.
+    The question that went unanswered is an incubating one, so saying so must
+    stay inside the incubating family, where the severity cap applies and
+    where a reader looking at the Zarr findings will see it.
+    """
+    return Finding(
+        rule_id=ZAR_CORS,
+        severity=Severity.INFO,
+        message=f"asset '{key}': {detail}",
+        path=str(node.path),
+        object_id=node.id,
+        json_pointer=json_pointer("assets", key, "href"),
+    )
+
+
+def _check_zarr_cors(graph: CatalogGraph, base: str | None, prober: Prober) -> list[Finding]:
+    """PTL-ZAR-003: each Zarr store's host permits a cross-origin metadata read.
+
+    The requirement is incubating, so a store that fails earns a warning and a
+    store the probe could not settle earns an INFO; both stay in the
+    ``PTL-ZAR`` family, and ``rashid.runner.cap_incubating`` guarantees the
+    ceiling however this builder changes.
+
+    The probes are bounded twice over. At most ``_MAX_ZARR_PROBES`` go out per
+    run, because a catalog may declare thousands of stores and each probe is a
+    request to somebody's host. A host that fails in transport is dropped after
+    its first failure, as :func:`_check_host` drops one, so a dead host costs
+    one wait rather than one per store on it.
+    """
+    findings: list[Finding] = []
+    stores = _zarr_stores(graph, base)
+    failed: dict[str, Exception] = {}
+    for node, key, url in stores[:_MAX_ZARR_PROBES]:
+        host = href_host(url)
+        if host in failed:
+            continue  # the host is dead; it was reported at its first store
+        _trace.count("live.zarr_probes")
+        try:
+            response = prober.get_range(url)
+        except Exception as exc:  # an unreachable host is reported once
+            failed[host] = exc
+            findings.append(
+                _zarr_unjudged(node, key, f"the Zarr CORS probe of {url} failed: {exc}")
+            )
+            continue
+        if response.status >= 400 or response.off_https() is not None:
+            findings.append(
+                _zarr_unjudged(
+                    node,
+                    key,
+                    f"the Zarr CORS probe of {url} returned {response.status},"
+                    " so the store's cross-origin policy was not checked",
+                )
+            )
+            continue
+        if response.header("access-control-allow-origin") is not None:
+            continue
+        findings.append(
+            Finding(
+                rule_id=ZAR_CORS,
+                severity=Severity.WARNING,
+                message=(
+                    f"asset '{key}': GET {url} carrying an Origin header returned no"
+                    " Access-Control-Allow-Origin, so a browser cannot read the store"
+                ),
+                path=str(node.path),
+                object_id=node.id,
+                json_pointer=json_pointer("assets", key, "href"),
+                fix_hint="enable a read-permitting CORS policy on the store's bucket",
+            )
+        )
+    if len(stores) > _MAX_ZARR_PROBES:
+        node, key, _url = stores[_MAX_ZARR_PROBES]
+        findings.append(
+            _zarr_unjudged(
+                node,
+                key,
+                f"the catalog declares {len(stores)} Zarr stores and the pass probes"
+                f" {_MAX_ZARR_PROBES}; the stores after this one were not checked",
+            )
+        )
+    return findings
+
+
 def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
     """The root ``self`` link, when present, names the base the caller named.
 
@@ -950,6 +1122,7 @@ def validate_live(
     heads = _HeadCache(prober, known_statuses)
     for host in sorted(by_host):
         findings.extend(_check_host(host, by_host[host], prober, heads))
+    findings.extend(_check_zarr_cors(graph, base, prober))
     if base is not None:
         base_host = href_host(base)
         links = _link_targets(graph, base)
