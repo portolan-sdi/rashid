@@ -47,7 +47,7 @@ Give `rashid check` the URL of the root `catalog.json`, or of the directory that
 rashid check https://data.example.org/my-catalog/catalog.json
 ```
 
-rashid fetches the root catalog and follows its `child`, `item`, and JSON `alternate` links. It fetches `AGENTS.md` and `README.md` beside each catalog and collection. It then runs the same passes as for a directory. The URL is the publish base, so the hosting checks run by default: HTTP range support and CORS on the assets, and one HEAD for each link target that the crawl did not fetch. A `child` or `item` link that answers `404` on the host is a `PTL-LIV-006` error. A root `self` link that points to a different location is a `PTL-LIV-007` warning.
+rashid fetches the root catalog and follows its `child`, `item`, and JSON `alternate` links. It fetches `AGENTS.md` and `README.md` beside each catalog and collection. It then runs the same passes as for a directory. The URL is the publish base, so the hosting checks run by default: HTTP range support on COG, Parquet, PMTiles, and COPC assets, CORS on every host, and one HEAD for each link target that the crawl did not fetch. A `child` or `item` link that answers `404` on the host is a `PTL-LIV-006` error. A root `self` link that points to a different location is a `PTL-LIV-007` warning.
 
 A crawl reads only the documents that links point to. rashid reports this limit once as `PTL-GEN-002`. The checks that depend on a full directory listing do not run: `PTL-LNK-002`, for an object without an inbound link, and `PTL-COL-005`, for scene files beside a collection. Sync the tree to disk and check the directory for the full view.
 
@@ -77,9 +77,18 @@ rashid provides six separate validation passes:
 - **Extension** checks each object against the schemas of the STAC extensions it declares, offline.
 - **Schema** checks each object against the packaged Portolan profile schema.
 - **Data** reads asset bytes and verifies checksums, sizes, formats, and extents.
-- **Live hosting** checks HTTP range support and CORS on remote servers.
+- **Live hosting** checks HTTP range support and CORS on the publisher's servers.
 
 Metadata, structural, extension, and data checks run by default. The live hosting pass also runs by default for a catalog URL. Use `--schema` as a cross-check against the published profile schema. Use `--live` to run the hosting checks on a directory.
+
+To validate a draft profile before its release, use `--schema-map URI=PATH` with `--schema`:
+
+```bash
+rashid check path/to/catalog --schema \
+  --schema-map https://schemas.portolan-sdi.org/portolan/v0.3.0/schema.json=path/to/schema.json
+```
+
+The URI must match the profile URI in the root catalog and must not contain `=`. The local JSON object overrides bundled and fetched schemas for that run. Repeat `--schema-map` for more URIs. Each later mapping for a URI replaces its earlier mapping. A malformed mapping, unreadable file, or invalid JSON produces a usage error. `--schema-map` also requires `--schema`. Each unused URI produces a `PTL-SCH-002` warning with the selected and declared profile URIs.
 
 The extension pass uses the versions that the profile's extension registry pins. rashid packages those schemas, so a catalog at the pinned versions needs no network. A catalog that declares an older version of a registered extension is checked against that version's schema, which rashid fetches over https. rashid reports an extension outside the registry as an info finding rather than validating it. Use `--schema-allow-network` to fetch and check such a schema.
 

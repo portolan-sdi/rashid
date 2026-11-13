@@ -16,7 +16,7 @@
       "roles_of"
     ],
     "signatures": {
-      "ValidationOptions": "(*, config: 'RulesConfig | None' = None, rules: 'Sequence[Rule] | None' = None, structural: 'bool' = True, structural_validator: '_Validator | None' = None, extensions: 'bool' = True, schema: 'bool' = False, schema_validator: '_Validator | None' = None, schema_allow_network: 'bool' = False, data: 'bool' = True, data_validator: 'DataValidator | None' = None, data_reader_factory: 'DataReaderFactory | None' = None, live: 'bool | None' = None, live_prober: 'LiveProber | None' = None, live_base_url: 'str | None' = None, fetcher: 'Fetcher | None' = None, max_documents: 'int' = 10000) -> None",
+      "ValidationOptions": "(*, config: 'RulesConfig | None' = None, rules: 'Sequence[Rule] | None' = None, structural: 'bool' = True, structural_validator: '_Validator | None' = None, extensions: 'bool' = True, schema: 'bool' = False, schema_validator: '_Validator | None' = None, schema_allow_network: 'bool' = False, schema_map: 'Mapping[str, dict[str, Any]] | None' = None, data: 'bool' = True, data_validator: 'DataValidator | None' = None, data_reader_factory: 'DataReaderFactory | None' = None, live: 'bool | None' = None, live_prober: 'LiveProber | None' = None, live_base_url: 'str | None' = None, fetcher: 'Fetcher | None' = None, max_documents: 'int' = 10000) -> None",
       "canonical_spdx_id": "(value: 'object') -> 'str | None'",
       "decode_multihash": "(value: 'object') -> 'tuple[int, bytes] | None'",
       "encode_multihash": "(code: 'int', digest: 'bytes') -> 'str'",
@@ -51,12 +51,12 @@
       "Report": "(findings: 'list[Finding]' = <factory>, files_checked: 'int' = 0) -> None",
       "RuleSummary": "(rule_id: 'str', severity: 'Severity', count: 'int', file_count: 'int', description: 'str' = '') -> None",
       "RulesConfig": "(disabled: 'frozenset[str]' = frozenset(), severity_overrides: 'dict[str, Severity]' = <factory>) -> None",
-      "ValidationOptions": "(*, config: 'RulesConfig | None' = None, rules: 'Sequence[Rule] | None' = None, structural: 'bool' = True, structural_validator: '_Validator | None' = None, extensions: 'bool' = True, schema: 'bool' = False, schema_validator: '_Validator | None' = None, schema_allow_network: 'bool' = False, data: 'bool' = True, data_validator: 'DataValidator | None' = None, data_reader_factory: 'DataReaderFactory | None' = None, live: 'bool | None' = None, live_prober: 'LiveProber | None' = None, live_base_url: 'str | None' = None, fetcher: 'Fetcher | None' = None, max_documents: 'int' = 10000) -> None",
+      "ValidationOptions": "(*, config: 'RulesConfig | None' = None, rules: 'Sequence[Rule] | None' = None, structural: 'bool' = True, structural_validator: '_Validator | None' = None, extensions: 'bool' = True, schema: 'bool' = False, schema_validator: '_Validator | None' = None, schema_allow_network: 'bool' = False, schema_map: 'Mapping[str, dict[str, Any]] | None' = None, data: 'bool' = True, data_validator: 'DataValidator | None' = None, data_reader_factory: 'DataReaderFactory | None' = None, live: 'bool | None' = None, live_prober: 'LiveProber | None' = None, live_base_url: 'str | None' = None, fetcher: 'Fetcher | None' = None, max_documents: 'int' = 10000) -> None",
       "describe": "(rule_id: 'str') -> 'str'",
       "validate": "(catalog_path: 'Path | str', *, options: 'ValidationOptions | None' = None) -> 'Report'",
       "validate_data": "(graph: 'CatalogGraph', validator: 'Validator | None' = None, *, reader_factory: 'ReaderFactory | None' = None) -> 'list[Finding]'",
       "validate_live": "(graph: 'CatalogGraph', prober: 'Prober | None' = None, *, base_url: 'str | None' = None, known_statuses: 'Mapping[str, int] | None' = None) -> 'list[Finding]'",
-      "validate_schema": "(graph: 'CatalogGraph', validator: 'Validator | None' = None, schema_uri: 'str | None' = None, *, allow_network: 'bool' = False) -> 'list[Finding]'",
+      "validate_schema": "(graph: 'CatalogGraph', validator: 'Validator | None' = None, schema_uri: 'str | None' = None, *, allow_network: 'bool' = False, schema_map: 'Mapping[str, dict[str, Any]] | None' = None) -> 'list[Finding]'",
       "validate_structural": "(graph: 'CatalogGraph', validator: 'Validator | None' = None) -> 'list[Finding]'"
     }
   }

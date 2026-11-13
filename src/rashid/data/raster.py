@@ -7,9 +7,11 @@ from typing import Any
 
 import rasterio
 from pyproj import CRS
+from rasterio.enums import ColorInterp, MaskFlags
 from rio_cogeo.cogeo import cog_validate
 
 from rashid import _trace
+from rashid.catalog import Node
 from rashid.data import DataDefect
 from rashid.data._files import AssetFiles
 from rashid.data.reader import Locator
@@ -18,10 +20,13 @@ from rashid.model import Severity
 from rashid.registry import (
     DAT_COG,
     DAT_COG_STATS,
+    DAT_OVERVIEW_FORMAT,
     DAT_OVERVIEWS,
+    DAT_SCENE_MASK,
     DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
 )
+from rashid.rules._common import is_overview_asset, roles_of
 
 # geotiff-stats-headers.md — the embedded per-band statistics a COG MUST carry.
 _COG_STAT_KEYS = (
@@ -33,6 +38,10 @@ _COG_STAT_KEYS = (
 
 # formats.md:121 — SHOULD per band, MUST when the band has a nodata value.
 _VALID_PERCENT_KEY = "STATISTICS_VALID_PERCENT"
+
+# STAC best-practice and EO roles for per-pixel masks: their zeros are values,
+# not empty pixels, so such an asset is not an imagery scene.
+_MASK_ROLES = {"data-mask", "date", "snow-ice", "land-water", "water-mask", "cloud", "cloud-shadow"}
 
 
 def check_raster(key: str, located: Locator, files: AssetFiles) -> list[DataDefect]:
@@ -241,6 +250,52 @@ def _check_cog_stats(key: str, files: AssetFiles) -> list[DataDefect]:
             )
         )
     return defects
+
+
+def check_display(
+    node: Node, key: str, asset: dict[str, Any], files: AssetFiles
+) -> list[DataDefect]:
+    """formats.md, Raster: an overview is 8-bit RGB(A); an imagery scene masks empty pixels.
+
+    An imagery scene is an item-level data COG with three or more bands and no
+    mask role: a one-band DEM or index is not drawn as a photo, so it is not judged.
+    Overview color interpretation is not compared: GDAL's COG driver writes
+    three 8-bit bands as undefined unless PHOTOMETRIC=RGB is set.
+    """
+    roles = set(roles_of(asset))
+    overview = node.kind == "collection" and is_overview_asset(asset)
+    scene = node.kind == "item" and "data" in roles and not roles & _MASK_ROLES
+    if not (overview or scene):
+        return []
+    try:
+        with rasterio.Env(GDAL_PAM_ENABLED="NO"):
+            src = files.raster()
+            count, dtypes = src.count, sorted(set(src.dtypes))
+            alpha = count == 4 and src.colorinterp[3] == ColorInterp.alpha
+            masked = any(flags != [MaskFlags.all_valid] for flags in src.mask_flag_enums)
+    except Exception:  # unreadable raster: the COG check owns reporting it
+        return []
+    if overview and (dtypes != ["uint8"] or not (count == 3 or alpha)):
+        return [
+            DataDefect(
+                DAT_OVERVIEW_FORMAT,
+                Severity.WARNING,
+                f"overview asset '{key}' has {count} band(s) of {', '.join(dtypes)};"
+                " an overview should be 8-bit RGB with an optional alpha band",
+                key,
+            )
+        ]
+    if scene and count >= 3 and not masked:
+        return [
+            DataDefect(
+                DAT_SCENE_MASK,
+                Severity.WARNING,
+                f"imagery asset '{key}' declares no nodata value and has no alpha band or mask,"
+                " so clients draw its empty pixels as black",
+                key,
+            )
+        ]
+    return []
 
 
 def geo_from_raster(files: AssetFiles) -> Geo | None:

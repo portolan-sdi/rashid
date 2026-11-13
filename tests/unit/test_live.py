@@ -36,6 +36,7 @@ from rashid.registry import (
     LIV_SELF_BASE,
     LIV_UNAVAILABLE,
 )
+from rashid.rules._common import is_partial_read_media_type
 from tests._https import HttpsServer, Route
 from tests.conftest import VALID_MULTIHASH, CatalogBuilder, mutate_json
 
@@ -184,14 +185,14 @@ def test_missing_expose_headers_lists_the_missing(catalog: CatalogBuilder) -> No
     assert "Content-Range" not in message  # present ones are not reported
 
 
-def test_missing_content_type_exposure_is_an_error(catalog: CatalogBuilder) -> None:
+def test_content_type_and_length_need_no_exposure(catalog: CatalogBuilder) -> None:
+    # Browsers read both across origins already (PORTO-CORE-045).
     graph = _graph_with_remote(catalog)
     response = _good_range(
-        **{"access-control-expose-headers": "Content-Length, Content-Range, Accept-Ranges, ETag"}
+        **{"access-control-expose-headers": "Content-Range, Accept-Ranges, ETag"}
     )
     findings = validate_live(graph, FakeProber(range_response=response))
-    assert LIV_CORS_EXPOSE in _ids(findings)
-    assert "Content-Type" in next(f.message for f in findings if f.rule_id == LIV_CORS_EXPOSE)
+    assert LIV_CORS_EXPOSE not in _ids(findings)
 
 
 def test_wildcard_expose_headers_passes(catalog: CatalogBuilder) -> None:
@@ -201,14 +202,13 @@ def test_wildcard_expose_headers_passes(catalog: CatalogBuilder) -> None:
     assert LIV_CORS_EXPOSE not in _ids(findings)
 
 
-def test_preflight_missing_method_is_error(catalog: CatalogBuilder) -> None:
+def test_preflight_allowed_methods_are_not_checked(catalog: CatalogBuilder) -> None:
+    # GET and HEAD are CORS-safelisted: a browser allows them whatever the list says.
     graph = _graph_with_remote(catalog)
     prober = FakeProber(
-        preflight_response=_good_preflight(**{"access-control-allow-methods": "GET"})
+        preflight_response=_good_preflight(**{"access-control-allow-methods": "GET, OPTIONS"})
     )
-    findings = validate_live(graph, prober)
-    assert LIV_CORS_PREFLIGHT in _ids(findings)
-    assert "HEAD" in next(f.message for f in findings if f.rule_id == LIV_CORS_PREFLIGHT)
+    assert validate_live(graph, prober) == []
 
 
 def test_preflight_missing_range_header_is_error(catalog: CatalogBuilder) -> None:
@@ -361,9 +361,11 @@ def test_upstream_hosts_are_not_probed(catalog: CatalogBuilder) -> None:
     graph = CatalogGraph.load(catalog.write())
     prober = FakeProber()
     findings = validate_live(graph, prober, base_url="https://data.example.org/cat")
-    assert prober.range_calls == []
-    # the remaining HEADs are the link-target probes, all on the publish host
-    assert all(u.startswith("https://data.example.org/cat/") for u in prober.head_calls)
+    # the remaining probes are the link-target HEADs and the metadata CORS
+    # GET, all on the publish host
+    calls = prober.head_calls + prober.range_calls
+    assert all(u.startswith("https://data.example.org/cat/") for u in calls)
+    assert prober.preflight_calls == []
     assert _ids(findings) == [LIV_UNAVAILABLE]  # no asset is probeable
 
 
@@ -560,7 +562,7 @@ def test_base_url_skips_hrefs_escaping_the_tree(catalog: CatalogBuilder) -> None
     graph = CatalogGraph.load(catalog.write())
     prober = FakeProber()
     findings = validate_live(graph, prober, base_url="https://data.example.org/cat")
-    assert prober.range_calls == []  # no asset host to probe
+    assert not any(u.endswith("outside.parquet") for u in prober.range_calls)
     assert not any(u.endswith("outside.parquet") for u in prober.head_calls)
     assert LIV_UNAVAILABLE in _ids(findings)  # no asset probeable after the skip
 
@@ -811,8 +813,8 @@ def test_link_target_shared_with_an_asset_is_headed_once(catalog: CatalogBuilder
 
 
 def test_head_405_is_reported_not_retried_as_get(catalog: CatalogBuilder) -> None:
-    # PORTO-CORE-043 makes HEAD a MUST for the publish host, so a 405 is the
-    # finding, not a cue to fall back to GET.
+    # PORTO-CORE-086 requires every metadata file to allow HEAD, so a 405 is
+    # the finding, not a cue to fall back to GET.
     graph = _nested_tree(catalog)
     url = f"{_BASE}/sector-1/catalog.json"
     prober = StatusProber({url: 405})
@@ -1564,3 +1566,240 @@ def test_a_stand_in_whose_ranged_get_redirects_too_is_reported_and_warned(
     assert prober.range_calls == [first, second]
     assert _ids(findings) == [LIV_OFF_HTTPS, LIV_OFF_HTTPS, LIV_UNAVAILABLE]
     assert "every asset tried" in findings[2].message
+
+
+# --- partial-read media types (PORTO-CORE-043, PORTO-CORE-045, PORTO-CORE-086) ---
+
+_PNG = "https://data.example.com/thumb.png"
+
+
+def _png_asset(url: str = _PNG) -> dict[str, object]:
+    return {"href": url, "type": "image/png", "roles": ["thumbnail"]}
+
+
+@pytest.mark.parametrize(
+    ("media_type", "partial"),
+    [
+        ("image/tiff; application=geotiff; profile=cloud-optimized", True),
+        ("image/tiff; profile=cloud-optimized; application=geotiff", True),
+        ("application/vnd.apache.parquet", True),
+        ("application/vnd.pmtiles", True),
+        ("application/vnd.laszip+copc", True),
+        ("image/tiff; application=geotiff", False),
+        ("image/png", False),
+        ("application/json", False),
+        (None, False),
+    ],
+)
+def test_partial_read_media_types(media_type: object, *, partial: bool) -> None:
+    assert is_partial_read_media_type(media_type) is partial
+
+
+def test_a_host_without_partial_read_files_gets_only_the_cors_origin_probe(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.collection("roads", assets={"thumbnail": _png_asset()})
+    graph = CatalogGraph.load(catalog.write())
+    no_range = ProbeResponse(status=200, headers={"access-control-allow-origin": "*"})
+    prober = FakeProber(
+        range_response=no_range,
+        head_response=ProbeResponse(status=200, headers={}),
+        preflight_response=ProbeResponse(status=405, headers={}),
+    )
+    assert validate_live(graph, prober) == []
+    assert prober.range_calls == [_PNG]
+    assert prober.preflight_calls == []
+
+
+def test_a_host_without_partial_read_files_still_needs_cors(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"thumbnail": _png_asset()})
+    graph = CatalogGraph.load(catalog.write())
+    prober = FakeProber(range_response=ProbeResponse(status=200, headers={}))
+    findings = validate_live(graph, prober)
+    assert _ids(findings) == [LIV_CORS_ORIGIN]
+    assert findings[0].json_pointer == "/assets/thumbnail/href"
+
+
+def test_range_probes_use_the_first_partial_read_asset(catalog: CatalogBuilder) -> None:
+    catalog.collection(
+        "roads",
+        assets={"a_thumb": _png_asset(), "data": _remote_asset(), "z": _remote_asset(_URL + "?2")},
+    )
+    graph = CatalogGraph.load(catalog.write())
+    prober = FakeProber()
+    assert validate_live(graph, prober) == []
+    assert prober.range_calls == [_URL]
+    assert prober.preflight_calls == [_URL]
+
+
+def test_head_length_applies_to_partial_read_assets_only(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"data": _remote_asset(), "thumbnail": _png_asset()})
+    graph = CatalogGraph.load(catalog.write())
+    prober = FakeProber(head_response=ProbeResponse(status=200, headers={}))
+    findings = validate_live(graph, prober)
+    assert [f.json_pointer for f in findings if f.rule_id == LIV_HEAD_LENGTH] == ["/assets/data"]
+
+
+def _metadata_only_tree(catalog: CatalogBuilder) -> CatalogGraph:
+    """A tree whose only assets live on another host: the publish host serves metadata."""
+    catalog.collection("roads", assets={"data": _remote_asset()})
+    return CatalogGraph.load(catalog.write())
+
+
+class _PublishHostProber(StatusProber):
+    """StatusProber whose ranged GET answers ``publish``."""
+
+    def __init__(self, publish: ProbeResponse, statuses: dict[str, int] | None = None) -> None:
+        super().__init__(statuses)
+        self.publish = publish
+
+    def get_range(self, url: str) -> ProbeResponse:
+        self.range_calls.append(url)
+        return self.publish
+
+
+def _publish_gets(prober: FakeProber) -> list[str]:
+    return [u for u in prober.range_calls if u.startswith(_BASE)]
+
+
+def test_a_metadata_only_publish_host_gets_one_cors_probe(catalog: CatalogBuilder) -> None:
+    graph = _metadata_only_tree(catalog)
+    # GitHub Pages: no exposed headers, and OPTIONS would answer 405.
+    pages = ProbeResponse(status=206, headers={"access-control-allow-origin": "*"})
+    prober = _PublishHostProber(pages)
+    findings = validate_live(graph, prober, base_url=_BASE)
+    assert _ids(findings) == [LIV_UNAVAILABLE]  # no asset on the publish host
+    assert _publish_gets(prober) == [f"{_BASE}/AGENTS.md"]  # the first link target, by URL
+    assert not any(u.startswith(_BASE) for u in prober.preflight_calls)
+
+
+def test_a_metadata_only_publish_host_without_cors_is_an_error(catalog: CatalogBuilder) -> None:
+    graph = _metadata_only_tree(catalog)
+    prober = _PublishHostProber(ProbeResponse(status=200, headers={}))
+    findings = validate_live(graph, prober, base_url=_BASE)
+    assert _ids(findings) == [LIV_UNAVAILABLE, LIV_CORS_ORIGIN]
+    finding = findings[1]
+    assert finding.path == "catalog.json"
+    index = _link_index(graph, "catalog.json", "agents", "./AGENTS.md")
+    assert finding.json_pointer == f"/links/{index}/href"
+    assert finding.message == (
+        "host 'data.example.org': no Access-Control-Allow-Origin on a GET carrying an Origin header"
+    )
+
+
+def test_the_metadata_cors_probe_skips_link_targets_that_fail(catalog: CatalogBuilder) -> None:
+    graph = _metadata_only_tree(catalog)
+    prober = StatusProber({f"{_BASE}/AGENTS.md": 404})
+    findings = validate_live(graph, prober, base_url=_BASE)
+    assert _ids(findings) == [LIV_UNAVAILABLE, LIV_LINK_TARGET]
+    assert _publish_gets(prober) == [f"{_BASE}/README.md"]
+
+
+def test_a_metadata_cors_probe_off_https_is_reported(catalog: CatalogBuilder) -> None:
+    graph = _metadata_only_tree(catalog)
+    findings = validate_live(graph, _PublishHostProber(_MOVED), base_url=_BASE)
+    assert _ids(findings) == [LIV_UNAVAILABLE, LIV_OFF_HTTPS]
+    assert findings[1].json_pointer.startswith("/links/")
+    assert "rel:'agents'" in findings[1].message
+
+
+def test_a_dead_metadata_host_is_not_asked_for_cors(catalog: CatalogBuilder) -> None:
+    graph = _metadata_only_tree(catalog)
+
+    class DeadPages(StatusProber):
+        def head(self, url: str) -> ProbeResponse:
+            if url.startswith(_BASE):
+                raise OSError("connection refused")
+            return super().head(url)
+
+    prober = DeadPages()
+    findings = validate_live(graph, prober, base_url=_BASE)
+    assert _ids(findings) == [LIV_UNAVAILABLE, LIV_UNAVAILABLE]
+    assert _publish_gets(prober) == []
+
+
+def test_a_metadata_cors_probe_failure_is_a_warning(catalog: CatalogBuilder) -> None:
+    graph = _metadata_only_tree(catalog)
+
+    class GetFails(StatusProber):
+        def get_range(self, url: str) -> ProbeResponse:
+            raise OSError("connection reset")
+
+    findings = validate_live(graph, GetFails(), base_url=_BASE)
+    assert _ids(findings) == [LIV_UNAVAILABLE, LIV_UNAVAILABLE]
+    assert "connection reset" in findings[1].message
+
+
+def test_a_denied_head_on_a_non_partial_asset_still_warns(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"data": _remote_asset(), "thumbnail": _png_asset()})
+    graph = CatalogGraph.load(catalog.write())
+
+    class DeniedThumb(FakeProber):
+        def head(self, url: str) -> ProbeResponse:
+            self.head_calls.append(url)
+            return ProbeResponse(status=403, headers={}) if url == _PNG else _good_head()
+
+    findings = validate_live(graph, DeniedThumb())
+    assert _ids(findings) == [LIV_UNAVAILABLE]
+    assert "asset 'thumbnail'" in findings[0].message
+    assert "403" in findings[0].message
+
+
+def test_a_whole_file_carries_cors_when_no_partial_read_asset_stays_on_https(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.collection("roads", assets={"data": _remote_asset(), "thumbnail": _png_asset()})
+    graph = CatalogGraph.load(catalog.write())
+    no_cors = ProbeResponse(status=200, headers={})
+    prober = _PerUrlProber({_URL}, range_response=no_cors)
+
+    findings = validate_live(graph, prober)
+
+    assert prober.range_calls == [_URL, _PNG]
+    assert prober.preflight_calls == [_URL]
+    assert _ids(findings) == [LIV_OFF_HTTPS, LIV_CORS_ORIGIN, LIV_UNAVAILABLE]
+    assert findings[1].json_pointer == "/assets/thumbnail/href"
+    assert findings[2].message == (
+        "range probes against host 'data.example.com' did not run:"
+        " every partial-read asset on it redirects off https"
+    )
+
+
+def test_a_whole_file_stand_in_off_https_skips_range_and_cors(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"data": _remote_asset(), "thumbnail": _png_asset()})
+    graph = CatalogGraph.load(catalog.write())
+    prober = _PerUrlProber({_URL}, range_moved={_PNG})
+
+    findings = validate_live(graph, prober)
+
+    assert _ids(findings) == [LIV_OFF_HTTPS, LIV_OFF_HTTPS, LIV_UNAVAILABLE]
+    assert findings[2].message.startswith("range and CORS probes")
+
+
+def test_a_dead_host_after_an_off_https_redirect_tries_no_stand_in(
+    catalog: CatalogBuilder,
+) -> None:
+    graph, first, _second = _two_assets(catalog)
+
+    class DeadHeads(_PerUrlProber):
+        def head(self, url: str) -> ProbeResponse:
+            raise OSError("connection refused")
+
+    prober = DeadHeads({first})
+    findings = validate_live(graph, prober)
+    assert prober.range_calls == [first]
+    assert _ids(findings) == [LIV_OFF_HTTPS, LIV_UNAVAILABLE]
+
+
+def test_a_stand_in_probe_failure_is_a_warning(catalog: CatalogBuilder) -> None:
+    graph, first, second = _two_assets(catalog)
+
+    class StandInFails(_PerUrlProber):
+        def get_range(self, url: str) -> ProbeResponse:
+            if url == second:
+                raise OSError("connection reset")
+            return super().get_range(url)
+
+    findings = validate_live(graph, StandInFails({first}))
+    assert _ids(findings) == [LIV_OFF_HTTPS, LIV_UNAVAILABLE]
+    assert "connection reset" in findings[1].message

@@ -15,8 +15,9 @@ from rashid.catalog import Node
 from rashid.data import DataDefect
 from rashid.data._files import AssetFiles
 from rashid.data.spatial import Geo, as_bbox, bbox_union, unreadable_spatial_metadata
-from rashid.model import Severity
+from rashid.model import Severity, json_pointer
 from rashid.registry import (
+    DAT_COLUMN_DESCRIPTIONS,
     DAT_GEOPARQUET_VERSION,
     DAT_NATIVE_CRS,
     DAT_ORDERING,
@@ -26,8 +27,10 @@ from rashid.registry import (
     DAT_VECTOR_COLUMNS,
 )
 from rashid.rules._common import (
+    assets_of,
     has_table_columns,
     roles_of,
+    table_declarations,
 )
 
 # formats.md:75 — a GeoParquet row group MUST hold no more than this many rows.
@@ -92,10 +95,10 @@ def check_geoparquet(
     Parquet and GeoParquet share the ``application/vnd.apache.parquet`` media
     type. A file is geospatial when it carries a ``geo`` metadata key or a
     column of the native Parquet ``GEOMETRY``/``GEOGRAPHY`` logical type
-    (PORTO-FMT-055); only a file with neither is plain tabular Parquet. A
+    (PORTO-FMT-004); only a file with neither is plain tabular Parquet. A
     native-geo file with no ``geo`` key is the spec's third accepted form, so
-    the missing key is not faulted — its CRS rules are (PORTO-FMT-056/057) —
-    and Iceberg writers produce exactly that file (#200).
+    the missing key is not faulted. Its CRS recommendation applies instead
+    (PORTO-FMT-081), and Iceberg writers produce exactly that file (#200).
 
     ``subject`` names the file in the message. It defaults to the asset the key
     belongs to; the partition pass passes the matched path instead, since a
@@ -113,9 +116,9 @@ def check_geoparquet(
     defects: list[DataDefect] = []
     native = _native_geo_columns(parquet)
     if geo is None and native:
-        # PORTO-FMT-055: the spec's third accepted form. The missing key is
-        # not faulted; the native crs field is held to PORTO-FMT-056/057
-        # instead, and the version rule applies only to a ``geo`` key.
+        # PORTO-FMT-004: the spec's third accepted form. The missing key is
+        # not faulted. The native crs field is held to PORTO-FMT-081 instead,
+        # and the version rule applies only to a ``geo`` key.
         defects.extend(_check_native_crs(key, parquet, native, subject=subject))
         geo = {"primary_column": _primary_geometry_column(parquet, {})}
     elif isinstance(geo, dict):
@@ -240,8 +243,8 @@ def _native_crs(parquet: Any, name: str) -> str | None:
 
 
 # A CRS registry identifier: `<authority>:<code>`, which also matches
-# `srid:<identifier>`. Resolving one needs a registry, which is why PORTO-FMT-057
-# prefers inline PROJJSON and keeps this form a warning rather than an error.
+# `srid:<identifier>`. Resolving one needs a registry, which is why PORTO-FMT-081
+# recommends inline PROJJSON or a `projjson:<key>` reference instead.
 _AUTHORITY_CODE = re.compile(r"[A-Za-z][A-Za-z0-9_]*:[A-Za-z0-9_.]+\Z")
 
 
@@ -250,15 +253,13 @@ def _check_native_crs(
 ) -> list[DataDefect]:
     """The CRS of each native geospatial column resolves from the file alone.
 
-    formats.md: the native ``crs`` value MUST use one of the four formats the
-    Parquet geospatial specification suggests, and an absent value is
-    OGC:CRS84 (PORTO-FMT-056).
-    Inline PROJJSON and a ``projjson:<key>`` reference into the file metadata
-    resolve from the file alone; an ``<authority>:<code>`` or ``srid:<identifier>``
-    value needs a CRS registry, so it is a warning (PORTO-FMT-057). Anything
-    else is an error. These rules only reach a file with no ``geo`` key —
-    with one, the key's own ``crs`` field governs and the consistency check
-    reads that.
+    formats.md: a file without a ``geo`` key SHOULD give the CRS of each
+    geometry column as inline PROJJSON or a ``projjson:<key>`` reference in the
+    native ``crs`` field (PORTO-FMT-081). An absent value is OGC:CRS84, as the
+    Parquet geospatial specification defines. Any other value, or a reference
+    that does not resolve, is a warning, because the requirement is a SHOULD.
+    These rules only reach a file with no ``geo`` key. With one, the key's own
+    ``crs`` field governs and the consistency check reads that.
     """
     subject = subject or f"asset '{key}'"
     defects: list[DataDefect] = []
@@ -277,10 +278,10 @@ def _check_native_crs(
                 defects.append(
                     DataDefect(
                         DAT_NATIVE_CRS,
-                        Severity.ERROR,
+                        Severity.WARNING,
                         f"{subject} geometry column '{name}' carries a crs that opens "
-                        "like JSON but does not parse; it must use one of the four "
-                        "formats the Parquet geospatial specification suggests",
+                        "like JSON but does not parse; use inline PROJJSON or a "
+                        "projjson:<key> reference",
                         key,
                     )
                 )
@@ -303,9 +304,9 @@ def _check_native_crs(
         defects.append(
             DataDefect(
                 DAT_NATIVE_CRS,
-                Severity.ERROR,
-                f"{subject} geometry column '{name}' crs '{value}' is not one of the four "
-                "formats the Parquet geospatial specification suggests",
+                Severity.WARNING,
+                f"{subject} geometry column '{name}' crs '{value}' is not inline PROJJSON "
+                "or a projjson:<key> reference, so a reader cannot resolve it from the file",
                 key,
             )
         )
@@ -323,7 +324,7 @@ def _projjson_reference_defects(
         return [
             DataDefect(
                 DAT_NATIVE_CRS,
-                Severity.ERROR,
+                Severity.WARNING,
                 f"{subject} geometry column '{name}' crs names file metadata key "
                 f"'{meta_key}', which the file does not carry",
                 key,
@@ -335,7 +336,7 @@ def _projjson_reference_defects(
         return [
             DataDefect(
                 DAT_NATIVE_CRS,
-                Severity.ERROR,
+                Severity.WARNING,
                 f"{subject} geometry column '{name}' crs names file metadata key "
                 f"'{meta_key}', which does not hold PROJJSON",
                 key,
@@ -488,6 +489,69 @@ def check_vector_columns(
             Severity.WARNING,
             f"vector asset '{key}': {where} with the table extension (table:columns)",
             key,
+        )
+    ]
+
+
+def check_column_descriptions(node: Node, key: str, asset: dict[str, Any]) -> list[DataDefect]:
+    """Every ``table:columns`` entry of a data asset carries a description.
+
+    formats.md, Vector Data: "Every entry in ``table:columns`` SHOULD include a
+    ``description``" (PORTO-FMT-077). A name and a type are already in the
+    Parquet footer. A mirror whose source has no descriptions notes this in the
+    collection README (PORTO-FMT-078) and still gets this warning. The check
+    is presence only: it does not detect placeholders (PORTO-FMT-079). It
+    reads no file.
+    """
+    if "data" not in roles_of(asset):
+        return []
+    # Every declaration counts: object, properties, and the asset itself.
+    columns = [
+        column
+        for holder in table_declarations(node, asset)
+        if isinstance(holder.get("table:columns"), list)
+        for column in holder["table:columns"]
+    ]
+    return _bare_columns(columns, f"asset '{key}'", key)
+
+
+def check_partitioned_column_descriptions(node: Node) -> list[DataDefect]:
+    """PTL-DAT-020 for a collection that publishes through ``partition:glob``.
+
+    Such a collection declares its columns on itself and has no data asset, so
+    the per-asset check never sees them. With a data asset, that check owns
+    the finding.
+    """
+    columns = node.data.get("table:columns")
+    if not isinstance(node.data.get("partition:glob"), str) or not isinstance(columns, list):
+        return []
+    if any("data" in roles_of(asset) for _pointer, _key, asset in assets_of(node)):
+        return []
+    return _bare_columns(columns, "partitioned collection", "", json_pointer("table:columns"))
+
+
+def _bare_columns(
+    columns: list[Any], subject: str, key: str, pointer: str | None = None
+) -> list[DataDefect]:
+    bare = [
+        str(column.get("name", "?"))
+        for column in columns
+        if isinstance(column, dict)
+        and not (isinstance(text := column.get("description"), str) and text.strip())
+    ]
+    if not bare:
+        return []  # also no declaration: PTL-DAT-015 and PTL-DAT-017 own it
+    shown = ", ".join(bare[:5])
+    more = f", and {len(bare) - 5} more" if len(bare) > 5 else ""
+    return [
+        DataDefect(
+            DAT_COLUMN_DESCRIPTIONS,
+            Severity.WARNING,
+            f"{subject}: {len(bare)} of {len(columns)} table:columns entries carry "
+            f"no description ({shown}{more}). If the dataset is a mirror and the "
+            "source has no descriptions, note this in the collection README.",
+            key,
+            json_pointer=pointer,
         )
     ]
 

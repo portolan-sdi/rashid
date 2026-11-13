@@ -36,9 +36,9 @@ def test_native_geometry_is_accepted_and_still_checks_groups(
 ) -> None:
     """#200: native geometry is spatial even when the GeoParquet key is absent.
 
-    PORTO-FMT-055 makes the native-geo file without a ``geo`` key the spec's
+    PORTO-FMT-004 makes the native-geo file without a ``geo`` key the spec's
     third accepted form, so the missing key is no longer faulted (the native
-    ``crs`` rules take its place); the storage rules still run on the file.
+    ``crs`` recommendation takes its place); the storage rules still run on the file.
     """
     directory = _catalog(tmp_path)
     path = directory / "native.parquet"
@@ -56,7 +56,7 @@ def test_native_geometry_is_accepted_and_still_checks_groups(
     )
     _declare(directory, [path.name])
     assert not _findings(tmp_path, "PTL-DAT-012"), "the missing geo key is not a version error"
-    assert not _findings(tmp_path, "PTL-DAT-018"), "an absent native crs is OGC:CRS84"
+    assert not _findings(tmp_path, "PTL-DAT-023"), "an absent native crs is OGC:CRS84"
     if not spherical:
         assert any(f["severity"] == "error" for f in _findings(tmp_path, "PTL-DAT-006"))
     assert [f["severity"] for f in _findings(tmp_path, "PTL-DAT-007")] == (
