@@ -160,7 +160,7 @@ def asset_class_lists(pointer: str, asset: dict[str, Any]) -> list[ClassList]:
         for index, band in enumerate(bands):
             if not isinstance(band, dict) or CLASSES_FIELD not in band:
                 continue
-            if field == "raster:bands" and _mirrors(asset, index):
+            if field == "raster:bands" and _mirrors(asset, index, band):
                 continue
             found.append(
                 ClassList(
@@ -174,11 +174,23 @@ def asset_class_lists(pointer: str, asset: dict[str, Any]) -> list[ClassList]:
     return found
 
 
-def _mirrors(asset: dict[str, Any], index: int) -> bool:
-    """Whether the legacy ``raster:bands`` entry ``index`` has a copy of another list."""
+def _home(asset: dict[str, Any], index: int) -> dict[str, Any] | None:
+    """The ``bands`` entry, or the single-band asset, with classes for legacy band ``index``."""
     if _has_classes(asset, index):
-        return True
-    return index == 0 and band_count(asset) == 1 and CLASSES_FIELD in asset
+        band: dict[str, Any] = asset["bands"][index]
+        return band
+    if index == 0 and band_count(asset) == 1 and CLASSES_FIELD in asset:
+        return asset
+    return None
+
+
+def _mirrors(asset: dict[str, Any], index: int, legacy: dict[str, Any]) -> bool:
+    """Whether a legacy ``raster:bands`` entry repeats the class list and nodata of its home."""
+    home = _home(asset, index)
+    if home is None or home.get(CLASSES_FIELD) != legacy[CLASSES_FIELD]:
+        return False
+    inherited = asset.get("nodata", _ABSENT)
+    return bool(home.get("nodata", inherited) == legacy.get("nodata", inherited))
 
 
 def _containers(node: Node) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -304,8 +316,18 @@ class ClassListRule(Rule):
                 fix_hint="list one object per class, each with a value and a name",
             )
             return
+        seen: list[Any] = []
         for index, entry in enumerate(found.classes):
             pointer = json_pointer(index, prefix=found.pointer)
+            if entry in seen:  # the schema's uniqueItems compares whole classes
+                yield self.finding(
+                    node,
+                    f"class {pointer} repeats an earlier class",
+                    json_pointer=pointer,
+                    fix_hint="remove the repeated class",
+                )
+                continue
+            seen.append(entry)
             for field, reason in class_object_errors(entry):
                 if field == "title" and not found.source:
                     continue  # the title check below reports it
@@ -407,12 +429,15 @@ def _misplaced(asset: dict[str, Any], found: ClassList) -> str | None:
     """Where a class list on an asset belongs, or None when it is already there.
 
     A single-band asset has the list itself; a multi-band asset has it on the
-    band it describes in ``bands``.
+    band it describes in ``bands``. A legacy ``raster:bands`` list passes when
+    that place has classes too.
     """
     multi = band_count(asset) > 1
     if multi and found.band_index is None:
         return "the band it describes in bands"
     if found.band_field == ("bands" if multi else None):
+        return None
+    if found.band_field == "raster:bands" and _home(asset, found.band_index or 0) is not None:
         return None
     return f"bands/{found.band_index}" if multi else "the asset"
 

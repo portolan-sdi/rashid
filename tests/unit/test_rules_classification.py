@@ -246,6 +246,23 @@ def test_item_assets_classes_are_checked(catalog: CatalogBuilder) -> None:
     ]
 
 
+def test_repeated_band_class_is_flagged(catalog: CatalogBuilder) -> None:
+    root = _built(catalog, lambda d: _classes(d).append(dict(_classes(d)[1])))
+    assert _schema_and_class_findings(root) == [f"{_POINTER}/5"]
+
+
+def test_legacy_list_that_differs_from_bands_is_checked(catalog: CatalogBuilder) -> None:
+    def differ(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["raster:bands"] = json.loads(json.dumps(asset["bands"]))
+        del asset["raster:bands"][0]["classification:classes"][1]["title"]
+
+    report = validate(_built(catalog, differ))
+    assert [(f.rule_id, f.json_pointer) for rule in _ALL for f in findings_for(report, rule)] == [
+        ("PTL-CLS-002", "/assets/data/raster:bands/0/classification:classes/1")
+    ]
+
+
 def test_legacy_mirror_of_a_band_list_is_not_checked_again(catalog: CatalogBuilder) -> None:
     def mirror(data: dict[str, Any]) -> None:
         del _classes(data)[1]["title"]
