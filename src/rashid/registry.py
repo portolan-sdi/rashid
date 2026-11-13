@@ -383,9 +383,9 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
     ),
     CheckInfo(
         DAT_ORDERING,
-        "GeoParquet rows are spatially ordered",
-        Severity.ERROR,
-        ("PORTO-FMT-006", "PORTO-FMT-043", "PORTO-FMT-044", "PORTO-FMT-045", "PORTO-FMT-004"),
+        "GeoParquet rows are spatially ordered, measured with the incubating method",
+        Severity.WARNING,
+        ("PORTO-FMT-006",),
         stage="data",
     ),
     CheckInfo(

@@ -9,10 +9,11 @@ each non-compliant variant raises exactly the rule it violates (formats.md:30/64
 from __future__ import annotations
 
 import json
+import re
+import struct
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
-from types import SimpleNamespace
 
 import pytest
 
@@ -20,6 +21,7 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 from click.testing import CliRunner
 from pyproj import CRS
@@ -93,6 +95,297 @@ def _gpq(path: Path) -> list:
     return geoparquet.check_geoparquet("data", _files(path))
 
 
+def _errors(defects: list) -> list:
+    return [d for d in defects if d.severity is Severity.ERROR]
+
+
+def _warnings(defects: list) -> list:
+    return [d for d in defects if d.severity is Severity.WARNING]
+
+
+def _ordering(defects: list) -> list:
+    return [d for d in defects if d.rule_id == DAT_ORDERING]
+
+
+def test_a_chunk_with_no_boxed_row_contributes_no_box() -> None:
+    boxes: list = [(float(i), 0.0, float(i), 1.0) for i in range(20)]
+    boxes[4] = boxes[5] = None
+    assert len(geoparquet._chunked_bboxes(boxes)[0]) == 9
+
+
+def test_a_row_without_a_box_stays_in_its_chunk() -> None:
+    """A null covering value keeps its slot and does not extend the chunk's box."""
+    boxes: list = [(float(i), 0.0, float(i), 1.0) for i in range(20)]
+    boxes[3] = None  # would have closed chunk 1 at x=3
+    boxes[19] = None
+    chunks, weights = geoparquet._chunked_bboxes(boxes)
+    assert len(chunks) == 10
+    assert chunks[1] == (2.0, 0.0, 2.0, 1.0)
+    assert chunks[9] == (18.0, 0.0, 18.0, 1.0)
+    assert weights[1] == 1.0  # the null row keeps its slot but adds no weight
+    assert weights[9] == 1.0
+
+
+@pytest.mark.parametrize(("sort", "verdict"), [(True, []), (False, [Severity.WARNING])])
+def test_a_small_file_with_enough_rows_gets_a_verdict(
+    tmp_path: Path, sort: bool, verdict: list[Severity]
+) -> None:
+    """No size floor: a kilobyte file with 400 rows is judged by the row check.
+
+    The verdict depends on the order of the rows, not on the file size, so the
+    sorted copy passes and the shuffled copy fails.
+    """
+    points = assets.scattered_points(400)
+    if sort:
+        points = assets.hilbert_sorted(points)
+    path = tmp_path / "small.parquet"
+    assets.write_geoparquet(path, points=points, row_group_size=len(points))
+    assert path.stat().st_size < 5_000_000
+    defects = _gpq(path)
+    assert [d.severity for d in defects] == verdict
+    if verdict:
+        assert "split into 10 chunks in file order" in defects[0].message
+
+
+def test_a_whole_chunk_of_null_boxes_is_left_out_and_said_so(tmp_path: Path) -> None:
+    """Chunk 2 of ten holds only geometry-less rows: nine boxes, a nine-cell
+    reference, and the message says how many chunks carried a box."""
+    points = assets.scattered_points(2000)
+    path = tmp_path / "chunk_of_nulls.parquet"
+    assets.write_geoparquet(
+        path, points=points, row_group_size=len(points), null_rows=set(range(400, 600))
+    )
+    defects = _gpq(path)
+    assert [d.severity for d in defects] == [Severity.WARNING]
+    assert "split into 10 chunks in file order, 9 of which carry a box" in defects[0].message
+    assert "sized 10% of the chunk it lands in" in defects[0].message
+
+
+def test_chunk_boundaries_follow_the_spec_for_an_uneven_row_count() -> None:
+    """PORTO-FMT-006 pins chunk k to floor(k*N/10) <= i < floor((k+1)*N/10).
+
+    ``numpy.array_split`` and a ceil-sized slice both cut 23 rows differently.
+    Each row's box is its own index, so the chunk boxes read back as index
+    ranges.
+    """
+    boxes = [(float(i), 0.0, float(i), 1.0) for i in range(23)]
+    chunks, _ = geoparquet._chunked_bboxes(boxes)
+    ranges = [(int(a), int(c)) for a, _, c, _ in chunks]
+    assert ranges == [
+        (0, 1),
+        (2, 3),
+        (4, 5),
+        (6, 8),
+        (9, 10),
+        (11, 12),
+        (13, 15),
+        (16, 17),
+        (18, 19),
+        (20, 22),
+    ]
+    assert ranges == [(k * 23 // 10, (k + 1) * 23 // 10 - 1) for k in range(10)]
+
+
+@pytest.mark.parametrize("groups", [1, 2, 4, 7])
+def test_curve_sorted_rows_are_clean_below_the_row_group_floor(tmp_path: Path, groups: int) -> None:
+    """The same rows spatially sorted pass, so the check above is not vacuous."""
+    rows = 6300  # divisible by 1, 2, 4, and 7
+    path = tmp_path / f"sorted_{groups}.parquet"
+    points = assets.hilbert_sorted(assets.scattered_points(rows))
+    assets.write_geoparquet(path, points=points, row_group_size=rows // groups)
+    assert pq.ParquetFile(path).metadata.num_row_groups == groups
+    defects = _gpq(path)
+    assert _errors(defects) == []
+    assert [d.severity for d in defects] == ([Severity.INFO] if groups > 1 else [])
+
+
+def test_eight_row_groups_ordered_is_clean(tmp_path: Path) -> None:
+    """The first count the row-group check judges, on rows that satisfy it."""
+    path = tmp_path / "eight_groups.parquet"
+    assets.write_geoparquet(path, points=assets.ordered_points(16))
+    assert pq.ParquetFile(path).metadata.num_row_groups == 8
+    assert _gpq(path) == []
+
+
+def test_footer_verdict_settles_a_file_the_row_check_would_fail(tmp_path: Path) -> None:
+    """One file, one verdict: at the floor the footer decides (PORTO-FMT-050).
+
+    Twenty tight clusters tiling a 5x4 grid, visited in an order that alternates
+    between opposite ends of that grid. Each row group is a small box, so the
+    footer passes; each file-order chunk joins two clusters from opposite
+    corners and spans most of the extent, so the row check would fail. The
+    spec scopes the row check to files the footer does not judge, so the file
+    passes -- and this fixture is the cost of that scope: repacked into other
+    row groups, it loses its locality. The row check is what a publisher's
+    repack would then meet.
+    """
+    groups = 20
+    rows_per_group = 300
+
+    def cell(k: int) -> tuple[float, float]:
+        return (k % 5) * 40.0 - 80.0, (k // 5) * 30.0 - 45.0
+
+    order = [(i // 2) if i % 2 == 0 else (groups - 1 - i // 2) for i in range(groups)]
+    points = []
+    for group, k in enumerate(order):
+        cx, cy = cell(k)
+        points.extend(
+            (x * 2.0 / 9.0 + cx, y * 2.0 / 9.0 + cy)
+            for x, y in assets.scattered_points(rows_per_group, seed=group)
+        )
+    path = tmp_path / "footer_pass_rows_fail.parquet"
+    assets.write_geoparquet(path, points=points, row_group_size=rows_per_group)
+    parquet = pq.ParquetFile(path)
+    geo = geoparquet.geo_metadata(parquet) or {}
+    bboxes, _ = geoparquet._rowgroup_stat_defects("data", parquet, geo)
+    assert bboxes is not None
+    footer = geoparquet._pruning_score(bboxes)
+    assert footer.efficiency == pytest.approx(0.92, abs=0.01)
+    assert not footer.below_bar
+
+    rows = geoparquet._row_ordering_defects("data", parquet, geo, (len(points), groups))
+    assert [d.severity for d in rows] == [Severity.WARNING]
+    assert ", under the 0.65 bar)" in rows[0].message
+
+    assert _gpq(path) == []
+
+
+@pytest.mark.parametrize("groups", [2, 4, 7])
+def test_row_group_layout_is_reported_not_judged_below_the_floor(
+    tmp_path: Path, groups: int
+) -> None:
+    """Between two and seven row groups the numbers are reported at INFO.
+
+    PORTO-FMT-044 forbids a verdict from those boxes (a grid of so few cells
+    is a poor model of a curve sort), but the numbers still tell a publisher
+    what a reader would skip. One box is the extent itself, so a single row
+    group has no layout to report and stays silent.
+    """
+    rows = 6300  # divisible by 1, 2, 4, and 7
+    path = tmp_path / f"sorted_{groups}.parquet"
+    assets.write_geoparquet(
+        path,
+        points=assets.hilbert_sorted(assets.scattered_points(rows)),
+        row_group_size=rows // groups,
+    )
+    infos = [d for d in _ordering(_gpq(path)) if d.severity is Severity.INFO]
+    assert len(infos) >= 1
+    message = infos[0].message
+    assert f"has {groups} row groups, under the 8 the footer check needs" in message
+    assert "its rows are judged instead" in message
+    assert "reads" in message and "of the bytes" in message
+    area_sum = re.search(r"the boxes sum to (\d+\.\d\d) of the extent", message)
+    assert area_sum is not None
+
+
+@pytest.mark.parametrize("groups", [1, 2, 4, 7])
+def test_row_ordering_is_judged_below_the_row_group_floor(tmp_path: Path, groups: int) -> None:
+    """Every file under eight row groups takes the row check.
+
+    Globally scattered rows fail at every count, two groups included, and the
+    verdict always comes from the file-order chunks, never from the boxes.
+    """
+    rows = 6300  # divisible by 1, 2, 4, and 7
+    path = tmp_path / f"scattered_{groups}.parquet"
+    points = assets.scattered_points(rows)
+    assets.write_geoparquet(path, points=points, row_group_size=rows // groups)
+    assert pq.ParquetFile(path).metadata.num_row_groups == groups
+    defects = _gpq(path)
+    errors = _warnings(defects)
+    assert [d.rule_id for d in errors] == [DAT_ORDERING]
+    message = errors[0].message
+    assert f"{rows} rows in {groups} row group" in message
+    assert "split into 10 chunks in file order" in message
+    assert "under the 0.65 bar" in message
+
+
+@pytest.mark.parametrize("groups", [3, 5, 7])
+def test_low_footer_efficiency_below_eight_groups_takes_the_row_check(
+    tmp_path: Path, groups: int
+) -> None:
+    """Every box spans the extent, footer efficiency 0.00, yet no footer verdict.
+
+    The retired clear-fail rule would have failed these boxes. Now the rows
+    decide: corner-to-corner rows fail the row check, and the message names
+    the chunks, not the row groups.
+    """
+    rows = 210 * groups
+    path = tmp_path / f"interleaved_{groups}.parquet"
+    assets.write_geoparquet(
+        path, points=assets.interleaved_points(rows), row_group_size=rows // groups
+    )
+    parquet = pq.ParquetFile(path)
+    assert parquet.metadata.num_row_groups == groups
+    bboxes, _ = geoparquet._rowgroup_stat_defects("data", parquet, geoparquet.geo_metadata(parquet))
+    assert bboxes is not None
+    assert geoparquet._pruning_score(bboxes).efficiency == pytest.approx(0.0)
+    errors = _warnings(_gpq(path))
+    assert [d.rule_id for d in errors] == [DAT_ORDERING]
+    assert "split into 10 chunks in file order" in errors[0].message
+    assert "across its" not in errors[0].message
+
+
+def test_seven_interleaved_row_groups_with_few_rows_get_no_verdict(tmp_path: Path) -> None:
+    """Fourteen corner-to-corner rows in seven groups: too few rows to judge.
+
+    The boxes score 0.00, but PORTO-FMT-044 forbids judging them, and the row
+    check needs 200 rows (PORTO-FMT-052).
+    """
+    path = tmp_path / "seven_groups.parquet"
+    assets.write_geoparquet(path, points=assets.interleaved_points(14))
+    assert pq.ParquetFile(path).metadata.num_row_groups == 7
+    defects = _gpq(path)
+    assert [d.severity for d in defects] == [Severity.INFO]
+    assert "too few rows to judge" in defects[0].message
+
+
+@pytest.mark.parametrize(("rows", "why"), [(16, "too few rows to judge"), (400, "undefined")])
+def test_an_undefined_footer_efficiency_takes_the_row_check(
+    tmp_path: Path, rows: int, why: str
+) -> None:
+    """Eight groups at one point: the boxes give no efficiency, so the rows
+    decide. Rows at one point give no efficiency either, which is no verdict."""
+    path = tmp_path / "one_point.parquet"
+    assets.write_geoparquet(path, points=[(5.0, 51.0)] * rows, row_group_size=rows // 8)
+    assert pq.ParquetFile(path).metadata.num_row_groups == 8
+    defects = _gpq(path)
+    assert [d.severity for d in defects] == [Severity.INFO]
+    assert why in defects[0].message
+    assert "could not be evaluated" in defects[0].message
+
+
+def test_seven_middling_row_groups_withhold_the_pass(tmp_path: Path) -> None:
+    """PORTO-FMT-044: below eight groups the boxes give no verdict, and
+    fourteen rows are too few for the row check. The finding says so rather
+    than staying silent."""
+    path = tmp_path / "seven_sorted_groups.parquet"
+    assets.write_geoparquet(path, points=assets.ordered_points(14))
+    assert pq.ParquetFile(path).metadata.num_row_groups == 7
+    defects = _gpq(path)
+    assert _errors(defects) == []
+    assert [d.severity for d in _ordering(defects)] == [Severity.INFO]
+    assert "could not be evaluated" in defects[-1].message
+
+
+def test_single_row_group_has_no_layout_to_report(tmp_path: Path) -> None:
+    rows = 6000
+    path = tmp_path / "one_group_sorted.parquet"
+    points = assets.hilbert_sorted(assets.scattered_points(rows))
+    assets.write_geoparquet(path, points=points, row_group_size=rows)
+    assert _gpq(path) == []
+
+
+def test_the_row_group_floor_is_one_constant(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Floor 8 against bar 0.65 is the open decision; flipping it is one line."""
+    monkeypatch.setattr(geoparquet, "_MIN_ORDERING_ROW_GROUPS", 5)
+    path = tmp_path / "five_groups.parquet"
+    assets.write_geoparquet(path, points=assets.interleaved_points(10))
+    assert pq.ParquetFile(path).metadata.num_row_groups == 5
+    assert [d.severity for d in _gpq(path)] == [Severity.WARNING]
+
+
 def _raster(path: Path, asset: dict | None = None) -> list:
     asset = asset or {}
     defects = raster.check_raster("data", asset, _loc(path), _files(path))
@@ -107,75 +400,42 @@ def _raster(path: Path, asset: dict | None = None) -> list:
 
 
 def test_compliant_geoparquet_is_clean(tmp_path: Path) -> None:
+    """Six rows in three row groups: too few rows for the row check.
+
+    The file is not judged and the only finding says so. An INFO, never silence, because a publisher reading a clean run
+    must be able to tell "ordered" from "not measured" (rashid#174 review).
+    """
     path = tmp_path / "ok.parquet"
     assets.write_geoparquet(path)
-    assert _gpq(path) == []
+    defects = _gpq(path)
+    assert [(d.rule_id, d.severity) for d in defects] == [(DAT_ORDERING, Severity.INFO)]
+    assert "6 rows in 3 row groups" in defects[0].message
+    assert "too few rows to judge" in defects[0].message
+    assert "needs 200 rows with a bounding box" in defects[0].message
+    assert "could not be evaluated" in defects[0].message
 
 
 def test_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
+    """Sixteen corner-to-corner rows in eight groups: the first count judged."""
     path = tmp_path / "unordered.parquet"
     assets.write_geoparquet(path, points=assets.interleaved_points())
-    assert pq.ParquetFile(path).metadata.num_row_groups == 5
+    assert pq.ParquetFile(path).metadata.num_row_groups == geoparquet._MIN_ORDERING_ROW_GROUPS
     defects = _gpq(path)
     assert [d.rule_id for d in defects] == [DAT_ORDERING]
-    assert defects[0].severity is Severity.ERROR
-
-
-def test_four_row_groups_skip_the_row_group_criteria(tmp_path: Path) -> None:
-    """PORTO-FMT-044: below five row groups neither criterion can be expressed.
-
-    These eight rows are the same interleaved layout the five-group file above
-    is faulted for. They clear because the criteria do not apply at four groups
-    and because eight rows are too few to chunk, not because they are ordered.
-    """
-    path = tmp_path / "four_groups.parquet"
-    assets.write_geoparquet(path, points=assets.interleaved_points(8))
-    assert pq.ParquetFile(path).metadata.num_row_groups == 4
-    assert _gpq(path) == []
-
-
-@pytest.mark.parametrize("groups", [2, 3, 4])
-def test_row_ordering_is_judged_below_five_row_groups(tmp_path: Path, groups: int) -> None:
-    """Row ordering binds every file, so the exemption does not reach it.
-
-    The row-group criteria are skipped at these counts, and the rows are still
-    partitioned into the chunks a conforming writer would have emitted. Globally
-    scattered rows do not cluster in any of them.
-    """
-    rows = 6000
-    path = tmp_path / f"scattered_{groups}.parquet"
-    points = assets.scattered_points(rows)
-    assets.write_geoparquet(path, points=points, row_group_size=rows // groups)
-    assert pq.ParquetFile(path).metadata.num_row_groups == groups
-    defects = _gpq(path)
-    assert [d.rule_id for d in defects] == [DAT_ORDERING]
-    assert defects[0].severity is Severity.ERROR
-    assert f"in {groups} row groups" in defects[0].message
-
-
-@pytest.mark.parametrize("groups", [2, 3, 4])
-def test_curve_sorted_rows_are_clean_below_five_row_groups(tmp_path: Path, groups: int) -> None:
-    """The same rows spatially sorted pass, so the check above is not vacuous."""
-    rows = 6000
-    path = tmp_path / f"sorted_{groups}.parquet"
-    points = assets.hilbert_sorted(assets.scattered_points(rows))
-    assets.write_geoparquet(path, points=points, row_group_size=rows // groups)
-    assert pq.ParquetFile(path).metadata.num_row_groups == groups
-    assert _gpq(path) == []
-
-
-def test_five_row_groups_ordered_is_clean(tmp_path: Path) -> None:
-    """The first count the criteria do apply at, on rows that satisfy them."""
-    path = tmp_path / "five_groups.parquet"
-    assets.write_geoparquet(path, points=assets.ordered_points(10))
-    assert pq.ParquetFile(path).metadata.num_row_groups == 5
-    assert _gpq(path) == []
+    assert defects[0].severity is Severity.WARNING
+    message = defects[0].message
+    assert "rows are not spatially ordered across its 8 row groups" in message
+    assert "reads 100% of the bytes against 14% for an ideal tiling" in message
+    assert "(efficiency 0.00, under the 0.65 bar)" in message
+    assert "windows at 1% and 25% read 100% and 100%" in message
+    assert "the boxes sum to 8.00 of the extent" in message
+    assert "the largest boxes are row groups" in message
 
 
 def test_many_row_groups_use_only_footer_for_ordering(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Conservative footer bounds can prove the row-level check (#166)."""
+    """At the floor the row-group boxes decide and no row is read (PORTO-FMT-050)."""
     path = tmp_path / "footer_only.parquet"
     points = assets.hilbert_sorted(assets.scattered_points(6000))
     assets.write_geoparquet(path, points=points, row_group_size=100)
@@ -194,83 +454,19 @@ def test_many_row_groups_use_only_footer_for_ordering(
     assert _gpq(path) == []
 
 
-def test_footer_shortcut_reads_rows_when_covering_values_are_null(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """NULL covering values make the conservative shortcut unavailable."""
-    path = tmp_path / "footer_with_nulls.parquet"
-    points = assets.hilbert_sorted(assets.scattered_points(6000))
-    assets.write_geoparquet(
-        path,
-        points=points,
-        row_group_size=100,
-        null_rows={5997, 5998, 5999},
-    )
-    parquet = pq.ParquetFile(path)
-    reads = 0
-
-    class _TrackedParquet:
-        metadata = parquet.metadata
-        schema_arrow = parquet.schema_arrow
-
-        def read(self, *args: object, **kwargs: object) -> object:
-            nonlocal reads
-            reads += 1
-            return parquet.read(*args, **kwargs)
-
-    monkeypatch.setattr(file_owner.pq, "ParquetFile", lambda source: _TrackedParquet())
-    assert _gpq(path) == []
-    assert reads == 1
-
-
-def test_footer_pass_does_not_mask_unordered_rows(tmp_path: Path) -> None:
-    """Disjoint row groups do not prove that rows inside them are ordered."""
-    groups = 5
-    rows_per_group = 1200
-    points = []
-    for group in range(groups):
-        offset = -90.0 if group % 2 == 0 else 90.0
-        points.extend(
-            (x * 4.0 / 9.0 + offset, y)
-            for x, y in assets.scattered_points(rows_per_group, seed=group)
-        )
-    path = tmp_path / "footer_false_positive.parquet"
-    assets.write_geoparquet(path, points=points, row_group_size=rows_per_group)
-    parquet = pq.ParquetFile(path)
-    geo = geoparquet.geo_metadata(parquet) or {}
-    bboxes, _ = geoparquet._rowgroup_stat_defects("data", parquet, geo)
-    assert bboxes is not None and geoparquet._is_spatially_ordered(bboxes)
-
-    defects = _gpq(path)
-    assert [d.rule_id for d in defects] == [DAT_ORDERING]
-    assert defects[0].severity is Severity.ERROR
-
-
-def test_incomplete_covering_cannot_prove_zero_nulls() -> None:
-    incomplete = {
-        "primary_column": "geometry",
-        "columns": {"geometry": {"covering": {"bbox": {"xmin": ["bbox", "xmin"]}}}},
-    }
-    assert not geoparquet._covering_has_no_nulls(object(), incomplete)
-
-
-def test_empty_row_groups_have_no_conservative_chunks() -> None:
-    assert geoparquet._conservative_chunk_bboxes([], []) == []
-
-
-@pytest.mark.parametrize("groups", [5, 6, 7])
+@pytest.mark.parametrize("groups", [8, 10, 13])
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_hilbert_sorted_rows_pass_where_the_criteria_apply(
     tmp_path: Path, groups: int, seed: int
 ) -> None:
-    """The counts the 30% threshold was set from (formats.md:38).
+    """The first counts the row-group check judges (formats.md:38).
 
-    Hilbert-sorted boxes average 0.263 to 0.274 of the extent at five row groups
-    and 0.250 to 0.270 at six, so the old 25% rejected them for their row-group
-    count rather than their ordering. Consecutive boxes overlap at these counts,
-    so low overlap never carries the file and the locality figure is what decides.
+    A grid is a poor model of a curve sort at small counts: the same
+    Hilbert-sorted rows score 0.89 at five row groups and 0.96 at eight, and
+    real files fell to 0.60 at five. The floor sits at eight so a well-sorted
+    file is not faulted for its row-group count (rashid#174 review, point 3).
     """
-    rows = 6300  # divisible by 5, 6, and 7
+    rows = 6240  # divisible by 8, 10, and 13
     path = tmp_path / f"hilbert_{groups}_{seed}.parquet"
     points = assets.hilbert_sorted(assets.scattered_points(rows, seed=seed))
     assets.write_geoparquet(path, points=points, row_group_size=rows // groups)
@@ -278,10 +474,10 @@ def test_hilbert_sorted_rows_pass_where_the_criteria_apply(
     assert _gpq(path) == []
 
 
-@pytest.mark.parametrize("groups", [5, 6, 7])
+@pytest.mark.parametrize("groups", [8, 10, 13])
 def test_unsorted_rows_still_fail_where_the_criteria_apply(tmp_path: Path, groups: int) -> None:
-    """Raising the threshold to 30% does not let genuinely poor ordering through."""
-    rows = 6300
+    """The floor does not let genuinely poor ordering through at the counts it judges."""
+    rows = 6240
     path = tmp_path / f"scattered_{groups}.parquet"
     assets.write_geoparquet(
         path, points=assets.scattered_points(rows), row_group_size=rows // groups
@@ -289,7 +485,7 @@ def test_unsorted_rows_still_fail_where_the_criteria_apply(tmp_path: Path, group
     assert pq.ParquetFile(path).metadata.num_row_groups == groups
     defects = _gpq(path)
     assert [d.rule_id for d in defects] == [DAT_ORDERING]
-    assert defects[0].severity is Severity.ERROR
+    assert defects[0].severity is Severity.WARNING
 
 
 def test_single_row_group_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
@@ -305,7 +501,7 @@ def test_single_row_group_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
     assets.write_geoparquet(path, points=points, row_group_size=len(points))
     defects = _gpq(path)
     assert [d.rule_id for d in defects] == [DAT_ORDERING]
-    assert defects[0].severity is Severity.ERROR
+    assert defects[0].severity is Severity.WARNING
 
 
 def test_single_row_group_curve_sorted_rows_are_clean(tmp_path: Path) -> None:
@@ -317,11 +513,20 @@ def test_single_row_group_curve_sorted_rows_are_clean(tmp_path: Path) -> None:
 
 
 def test_small_single_row_group_collection_is_not_judged(tmp_path: Path) -> None:
-    """Too few rows for chunking to mean anything, so no spurious finding."""
+    """Too few rows for chunking to mean anything: no verdict, and it says so.
+
+    Half the layers in a small catalog can sit under the 200-row floor, and a
+    silent skip there reads as a pass (rashid#174 review). The INFO names both
+    floors so the publisher knows which check would need what.
+    """
     path = tmp_path / "small.parquet"
     points = assets.local_points(20)
     assets.write_geoparquet(path, points=points, row_group_size=len(points))
-    assert _gpq(path) == []
+    defects = _gpq(path)
+    assert [(d.rule_id, d.severity) for d in defects] == [(DAT_ORDERING, Severity.INFO)]
+    assert "20 rows in 1 row group" in defects[0].message
+    assert "the row check needs 200 rows with a bounding box" in defects[0].message
+    assert "could not be evaluated" in defects[0].message
 
 
 def test_null_geometry_rows_do_not_cost_a_sorted_file_its_check(tmp_path: Path) -> None:
@@ -356,7 +561,7 @@ def test_null_geometry_rows_do_not_mask_unordered_rows(tmp_path: Path) -> None:
     )
     defects = _gpq(path)
     assert [d.rule_id for d in defects] == [DAT_ORDERING]
-    assert defects[0].severity is Severity.ERROR
+    assert defects[0].severity is Severity.WARNING
 
 
 def test_one_surviving_box_is_unevaluated_not_a_crash(tmp_path: Path) -> None:
@@ -364,7 +569,7 @@ def test_one_surviving_box_is_unevaluated_not_a_crash(tmp_path: Path) -> None:
 
     The applicability guard counts rows, but the verdict comes from the boxes
     that survive the NULL skip. One box in a 300-row file used to reach
-    ``_is_spatially_ordered`` and raise ZeroDivisionError.
+    the skip-rate metric and raise ZeroDivisionError.
     """
     points = assets.hilbert_sorted(assets.scattered_points(300))
     path = tmp_path / "one_box.parquet"
@@ -377,7 +582,7 @@ def test_one_surviving_box_is_unevaluated_not_a_crash(tmp_path: Path) -> None:
     defects = _gpq(path)
     ordering = [d for d in defects if d.rule_id == DAT_ORDERING]
     assert [d.severity for d in ordering] == [Severity.INFO]
-    assert "1 carries a covering box" in ordering[0].message
+    assert "1 carries a bounding box" in ordering[0].message
     assert "could not be evaluated" in ordering[0].message
 
 
@@ -401,7 +606,7 @@ def test_a_handful_of_boxes_is_unevaluated_not_an_error(tmp_path: Path) -> None:
     defects = _gpq(path)
     ordering = [d for d in defects if d.rule_id == DAT_ORDERING]
     assert [d.severity for d in ordering] == [Severity.INFO]
-    assert "6 carry a covering box" in ordering[0].message
+    assert "6 carry a bounding box" in ordering[0].message
 
 
 def test_all_null_geometry_is_never_faulted_as_disorder(tmp_path: Path) -> None:
@@ -426,35 +631,16 @@ def test_all_null_geometry_is_never_faulted_as_disorder(tmp_path: Path) -> None:
 
 
 def test_single_row_group_without_readable_row_boxes_reports_unevaluated() -> None:
-    """Honest silence, not a false pass, when the boxes cannot be read.
+    """Honest silence, not a false pass, when the row boxes cannot be read.
 
-    A file whose per-row-group boxes come from native GeospatialStatistics has
-    no covering column to read row by row, so ordering stays unmeasured and
-    the check says so rather than reporting success.
+    Neither a covering nor a WKB geometry gives a box, so ordering stays
+    unmeasured and the check says so rather than reporting success.
     """
-    parquet = SimpleNamespace(
-        metadata=SimpleNamespace(
-            num_rows=5000, num_row_groups=1, row_group=lambda i: SimpleNamespace(num_rows=5000)
-        )
-    )
-    defects = geoparquet._ordering_defect("data", parquet, {}, [], subject="asset 'data'")
-    assert defects.rule_id == DAT_ORDERING
-    assert defects.severity is Severity.INFO
-    assert "could not be evaluated" in defects.message
-
-
-def test_unreadable_boxes_stay_quiet_when_the_criteria_apply() -> None:
-    """At five or more row groups the footer metrics measure ordering anyway,
-    so an unreadable covering column is not a gap worth reporting."""
-    parquet = SimpleNamespace(
-        metadata=SimpleNamespace(
-            num_rows=5000, num_row_groups=8, row_group=lambda i: SimpleNamespace(num_rows=625)
-        )
-    )
-    defects = geoparquet._ordering_defect(
-        "data", parquet, {}, [(0.0, 0.0, 0.0, 0.0)] * 5, subject="asset 'data'"
-    )
-    assert defects is None
+    defects = geoparquet._row_ordering_defects("data", object(), {}, (5000, 1))
+    assert [d.rule_id for d in defects] == [DAT_ORDERING]
+    assert defects[0].severity is Severity.INFO
+    assert "cannot be read from a covering or a WKB geometry" in defects[0].message
+    assert "could not be evaluated" in defects[0].message
 
 
 @pytest.mark.parametrize(
@@ -512,8 +698,26 @@ def test_missing_rowgroup_stats_flag_dat_007(tmp_path: Path) -> None:
     path = tmp_path / "no_covering.parquet"
     assets.write_geoparquet(path, covering=False)
     defects = _gpq(path)
-    assert [d.rule_id for d in defects] == [DAT_ROWGROUP_STATS]
+    assert [d.rule_id for d in defects] == [DAT_ROWGROUP_STATS, DAT_ORDERING]
     assert defects[0].severity is Severity.ERROR
+    # Without per-row-group boxes the row check runs, and says why it cannot.
+    assert defects[1].severity is Severity.INFO
+    assert "could not be evaluated" in defects[1].message
+
+
+def test_missing_rowgroup_stats_send_the_file_to_the_row_check(tmp_path: Path) -> None:
+    """A covering column without statistics: no footer boxes, so the rows decide."""
+    path = tmp_path / "no_stats.parquet"
+    assets.write_geoparquet(path, points=assets.scattered_points(400), row_group_size=400)
+    table = pq.read_table(path)
+    unstated = tmp_path / "no_stats_written.parquet"
+    pq.write_table(table, unstated, write_statistics=False)
+    defects = _gpq(unstated)
+    assert [(d.rule_id, d.severity) for d in defects] == [
+        (DAT_ROWGROUP_STATS, Severity.ERROR),
+        (DAT_ORDERING, Severity.WARNING),
+    ]
+    assert "split into 10 chunks in file order" in defects[1].message
 
 
 # --- native GeospatialStatistics (GeoParquet 2.x / Parquet GEOMETRY) ---------
@@ -610,12 +814,17 @@ def test_sorted_file_split_for_the_ceiling_stays_clean(tmp_path: Path) -> None:
     150,001 rows in groups of 50,000 is four row groups, and four boxes off a
     curve sort average about 46% of the extent. The flat 25% limit read that as
     unordered, so satisfying one storage rule produced a finding under another.
+    Four row groups is under the floor, so the layout is reported at INFO and
+    the rows decide; a curve sort passes them.
     """
     path = tmp_path / "ceiling.parquet"
     points = assets.hilbert_sorted(assets.scattered_points(150_001))
     assets.write_geoparquet(path, points=points, row_group_size=50_000)
     assert pq.ParquetFile(path).metadata.num_row_groups == 4
-    assert _gpq(path) == []
+    defects = _gpq(path)
+    assert _errors(defects) == []
+    assert [d.severity for d in defects] == [Severity.INFO]
+    assert "has 4 row groups, under the 8 the footer check needs" in defects[0].message
 
 
 def test_plain_parquet_is_skipped(tmp_path: Path) -> None:
@@ -650,12 +859,13 @@ def test_native_geo_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
     path = tmp_path / "native.parquet"
     assets.write_native_geoparquet(path, points=assets.interleaved_points())
     defects = _gpq(path)
-    assert [d.rule_id for d in defects if d.severity is Severity.ERROR] == [DAT_ORDERING]
+    assert [d.severity for d in _ordering(defects)] == [Severity.WARNING]
 
 
 def test_native_geo_ordered_rows_keep_only_the_covering_warning(tmp_path: Path) -> None:
     path = tmp_path / "native.parquet"
-    assets.write_native_geoparquet(path, points=assets.ordered_points(10))
+    assets.write_native_geoparquet(path, points=assets.ordered_points(16))
+    assert pq.ParquetFile(path).metadata.num_row_groups == 8
     defects = _gpq(path)
     assert [d.rule_id for d in defects] == [DAT_ROWGROUP_STATS]
     assert defects[0].severity is Severity.WARNING
@@ -668,16 +878,82 @@ def test_native_geo_missing_geo_key_is_not_a_version_error(tmp_path: Path) -> No
     assert DAT_GEOPARQUET_VERSION not in [d.rule_id for d in _gpq(path)]
 
 
-def test_native_geo_single_row_group_reports_unevaluated_ordering(tmp_path: Path) -> None:
-    # Parity with a geo-key file that has native statistics and no covering
-    # column: the row check has no covering column to read, and it says so
-    # instead of staying silent.
+@pytest.mark.parametrize(("sort", "errors"), [(True, []), (False, [DAT_ORDERING])])
+def test_native_geometry_without_a_covering_is_judged_from_its_geometry(
+    tmp_path: Path, sort: bool, errors: list[str]
+) -> None:
+    """No geo key and no covering: the row check boxes each row from its WKB.
+
+    Four row groups send the file to the row check of spatial-order.md, and the
+    geometry gives every row a box, so the file gets a verdict
+    (rashid#200, spec #226).
+    """
+    points = assets.scattered_points(400)
+    if sort:
+        points = assets.hilbert_sorted(points)
     path = tmp_path / "native.parquet"
-    assets.write_native_geoparquet(path, points=assets.ordered_points(200), row_group_size=200)
+    assets.write_native_geoparquet(path, points=points, row_group_size=100)
+    parquet = pq.ParquetFile(path)
+    assert parquet.metadata.num_row_groups == 4
+    assert geoparquet.geo_metadata(parquet) is None
     defects = _gpq(path)
-    ordering = [d for d in defects if d.rule_id == DAT_ORDERING]
+    assert [d.rule_id for d in _ordering(_warnings(defects))] == errors
+    if errors:
+        assert "split into 10 chunks in file order" in _ordering(_warnings(defects))[0].message
+
+
+@pytest.mark.parametrize(("sort", "errors"), [(True, []), (False, [DAT_ORDERING])])
+def test_a_geo_key_without_a_covering_is_judged_from_its_geometry(
+    tmp_path: Path, sort: bool, errors: list[str]
+) -> None:
+    """A GeoParquet file with a geo key and no covering column also takes its
+    row boxes from the geometry. PTL-DAT-007 still faults the missing stats."""
+    points = assets.scattered_points(400)
+    if sort:
+        points = assets.hilbert_sorted(points)
+    path = tmp_path / "no_covering.parquet"
+    assets.write_geoparquet(path, points=points, covering=False, row_group_size=len(points))
+    defects = _gpq(path)
+    assert [d.rule_id for d in _errors(defects)] == [DAT_ROWGROUP_STATS]
+    assert [d.rule_id for d in _warnings(defects)] == errors
+
+
+def test_null_and_empty_geometries_keep_their_place_and_miss_the_floor(tmp_path: Path) -> None:
+    """A null or empty geometry has no box. It keeps its chunk position and
+    does not count toward the 200 boxed-row floor."""
+    points = assets.hilbert_sorted(assets.scattered_points(210))
+    path = tmp_path / "null_and_empty.parquet"
+    assets.write_geoparquet(
+        path, points=points, covering=False, row_group_size=len(points), null_rows={0, 1, 2, 3, 4}
+    )
+    table = pq.read_table(path)
+    empty = struct.pack("<BIdd", 1, 1, float("nan"), float("nan"))  # POINT EMPTY
+    wkb = table.column("geometry").to_pylist()
+    for i in range(200, 210):
+        wkb[i] = empty
+    table = table.set_column(0, "geometry", pa.array(wkb, type=pa.binary()))
+    pq.write_table(table, path)
+    parquet = pq.ParquetFile(path)
+    boxes = geoparquet._row_bboxes(parquet, geoparquet.geo_metadata(parquet) or {})
+    assert boxes is not None
+    assert len(boxes) == 210
+    assert [i for i, b in enumerate(boxes) if b is None] == [*range(5), *range(200, 210)]
+    assert boxes[5] == (points[5][0], points[5][1], points[5][0], points[5][1])
+    ordering = _ordering(_gpq(path))
     assert [d.severity for d in ordering] == [Severity.INFO]
-    assert "could not be evaluated" in ordering[0].message
+    assert "210 rows in 1 row group of which 195 carry a bounding box" in ordering[0].message
+    assert "too few rows to judge" in ordering[0].message
+
+
+def test_geometry_that_is_not_wkb_gives_no_row_boxes(tmp_path: Path) -> None:
+    """A GeoArrow native encoding is not decoded: the row check says so."""
+    path = tmp_path / "native_encoding.parquet"
+    table = pa.table({"geometry": pa.array([{"x": 1.0, "y": 2.0}] * 3)})
+    pq.write_table(table, path)
+    parquet = pq.ParquetFile(path)
+    assert geoparquet._row_bboxes(parquet, {"primary_column": "geometry"}) is None
+    assert geoparquet._row_bboxes(parquet, {"primary_column": "missing"}) is None
+    assert geoparquet._row_bboxes(parquet, {}) is None
 
 
 def test_native_geo_footprint_reaches_the_consistency_check(tmp_path: Path) -> None:
@@ -1211,7 +1487,12 @@ def test_conformant_partitions_are_clean(tmp_path: Path) -> None:
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
     assets.write_geoparquet(parts / "b.parquet")
-    assert _partition_bytes(_partitioned_collection(tmp_path)) == []
+    defects = _partition_bytes(_partitioned_collection(tmp_path))
+    # Six-row fixtures are under both ordering floors, which is reported, not an error.
+    assert _errors(defects) == []
+    assert [(d.rule_id, d.severity) for d in defects] == [(DAT_ORDERING, Severity.INFO)]
+    assert defects[0].message.startswith("2 of 2 partition files")
+    assert "could not be evaluated" in defects[0].message
 
 
 def test_oversized_partition_row_group_flags_dat_008(tmp_path: Path) -> None:
@@ -1221,9 +1502,8 @@ def test_oversized_partition_row_group_flags_dat_008(tmp_path: Path) -> None:
     assets.write_geoparquet(
         parts / "b.parquet", points=assets.ordered_points(150_001), row_group_size=200_000
     )
-    defects = _partition_bytes(_partitioned_collection(tmp_path))
+    defects = _errors(_partition_bytes(_partitioned_collection(tmp_path)))
     assert [d.rule_id for d in defects] == [DAT_ROWGROUP_SIZE]
-    assert defects[0].severity is Severity.ERROR
     assert defects[0].json_pointer == "/partition:glob"
     assert defects[0].message.startswith("partition file 'parts/b.parquet' has a row group")
 
@@ -1242,9 +1522,8 @@ def test_partition_without_rowgroup_stats_flags_dat_007(tmp_path: Path) -> None:
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
     assets.write_geoparquet(parts / "b.parquet", covering=False)
-    defects = _partition_bytes(_partitioned_collection(tmp_path))
+    defects = _errors(_partition_bytes(_partitioned_collection(tmp_path)))
     assert [d.rule_id for d in defects] == [DAT_ROWGROUP_STATS]
-    assert defects[0].severity is Severity.ERROR
 
 
 def test_unordered_partition_rows_flag_dat_006(tmp_path: Path) -> None:
@@ -1252,9 +1531,9 @@ def test_unordered_partition_rows_flag_dat_006(tmp_path: Path) -> None:
     parts.mkdir()
     assets.write_geoparquet(parts / "a.parquet")
     assets.write_geoparquet(parts / "b.parquet", points=assets.interleaved_points())
-    defects = _partition_bytes(_partitioned_collection(tmp_path))
+    defects = _warnings(_partition_bytes(_partitioned_collection(tmp_path)))
     assert [d.rule_id for d in defects] == [DAT_ORDERING]
-    assert defects[0].severity is Severity.ERROR
+    assert "partition file 'parts/b.parquet' rows are not spatially ordered" in defects[0].message
 
 
 def test_one_defect_reports_the_file_alone(tmp_path: Path) -> None:
@@ -1362,7 +1641,7 @@ def test_assetless_partitioned_collection_reports_through_check_node(tmp_path: P
     node = _partitioned_collection(tmp_path)
     assert node.data.get("assets") is None
     defects = checks.check_node(node, _NoAssets())
-    assert [d.rule_id for d in defects] == [DAT_ROWGROUP_SIZE]
+    assert [d.rule_id for d in _errors(defects)] == [DAT_ROWGROUP_SIZE]
 
 
 # --- tabular collections (PTL-DAT-015) --------------------------------------

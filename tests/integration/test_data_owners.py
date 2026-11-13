@@ -43,7 +43,7 @@ def test_partition_handles_and_covering_policies(tmp_path: Path, nested: bool) -
     with _trace.counting() as counts:
         ordering = _findings(tmp_path, "PTL-DAT-006")
     assert counts["parquet.opens"] == 3
-    assert {f["severity"] for f in ordering} == ({"info"} if nested else {"error"})
+    assert {f["severity"] for f in ordering} == ({"info"} if nested else {"warning"})
     assert not _findings(tmp_path, "PTL-DAT-007")
 
 
