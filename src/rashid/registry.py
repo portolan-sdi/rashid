@@ -155,6 +155,7 @@ DAT_OVERVIEW_FORMAT = "PTL-DAT-018"
 DAT_SCENE_MASK = "PTL-DAT-019"
 DAT_COLUMN_DESCRIPTIONS = "PTL-DAT-020"
 DAT_CLASS_COLORS = "PTL-DAT-021"
+DAT_NATIVE_CRS = "PTL-DAT-023"
 LIV_UNAVAILABLE = "PTL-LIV-000"
 LIV_RANGE = "PTL-LIV-001"
 LIV_HEAD_LENGTH = "PTL-LIV-002"
@@ -384,14 +385,14 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         DAT_ORDERING,
         "GeoParquet rows are spatially ordered",
         Severity.ERROR,
-        ("PORTO-FMT-006", "PORTO-FMT-043", "PORTO-FMT-044", "PORTO-FMT-045"),
+        ("PORTO-FMT-006", "PORTO-FMT-043", "PORTO-FMT-044", "PORTO-FMT-045", "PORTO-FMT-004"),
         stage="data",
     ),
     CheckInfo(
         DAT_ROWGROUP_STATS,
         "GeoParquet row groups carry spatial statistics",
         Severity.ERROR,
-        ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043", "PORTO-FMT-045"),
+        ("PORTO-FMT-007", "PORTO-FMT-008", "PORTO-FMT-043", "PORTO-FMT-045", "PORTO-FMT-004"),
         stage="data",
     ),
     CheckInfo(
@@ -490,6 +491,13 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         "a class color_hint matches the COG color table, and the class list fits the file's bands",
         Severity.ERROR,
         ("PORTO-FMT-050", "PORTO-FMT-054"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_NATIVE_CRS,
+        "a native geometry column gives its CRS as inline PROJJSON or a projjson:<key> reference",
+        Severity.WARNING,
+        ("PORTO-FMT-081",),
         stage="data",
     ),
     CheckInfo(
