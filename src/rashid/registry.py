@@ -121,6 +121,7 @@ STR_INVALID = "PTL-STR-001"
 STR_UNAVAILABLE = "PTL-STR-000"
 SCH_INVALID = "PTL-SCH-001"
 SCH_UNAVAILABLE = "PTL-SCH-000"
+SCH_UNUSED_MAP = "PTL-SCH-002"
 EXT_INVALID = "PTL-EXT-001"
 EXT_UNAVAILABLE = "PTL-EXT-000"
 EXT_UNVALIDATED = "PTL-EXT-002"
@@ -308,6 +309,15 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         Severity.ERROR,
         ("PORTO-CORE-006",),
         stage="schema",
+    ),
+    CheckInfo(
+        SCH_UNUSED_MAP,
+        "every profile schema mapping applies to a validated document",
+        Severity.WARNING,
+        (),
+        stage="schema",
+        enables_pass=False,
+        spec_note="An unused schema map reports caller configuration, not a spec requirement.",
     ),
     CheckInfo(
         DAT_UNAVAILABLE,

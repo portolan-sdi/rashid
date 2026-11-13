@@ -38,7 +38,8 @@ jobs:
 
       - name: Clone portolan-spec main
         run: |
-          git clone --depth 1 \
+          # Release schemas come from tags, including tags outside main history.
+          git clone --tags \
             https://github.com/portolan-sdi/portolan-spec.git \
             "$RUNNER_TEMP/portolan-spec"
 
