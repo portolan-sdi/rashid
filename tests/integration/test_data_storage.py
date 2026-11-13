@@ -833,10 +833,11 @@ def test_non_overview_collection_raster_is_not_judged(tmp_path: Path) -> None:
         ("item", {"count": 3}, True),
         ("item", {"count": 3, "nodata": 0}, False),
         ("item", {"count": 4, "alpha": True}, False),
+        ("item", {"count": 3, "mask": True}, False),
         ("item", {"count": 1}, False),
         ("collection", {"count": 3}, False),
     ],
-    ids=["unmasked-rgb", "nodata", "alpha", "single-band", "collection-asset"],
+    ids=["unmasked-rgb", "nodata", "alpha", "internal-mask", "single-band", "collection-asset"],
 )
 def test_imagery_scene_declares_nodata_or_alpha(
     tmp_path: Path, kind: str, cog: dict, flagged: bool

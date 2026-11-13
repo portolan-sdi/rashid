@@ -255,6 +255,8 @@ def check_display(
 
     An imagery scene is an item-level data COG with three or more bands: a
     one-band DEM or index is not drawn as a photo, so it is not judged.
+    Overview color interpretation is not compared: GDAL's COG driver writes
+    three 8-bit bands as undefined unless PHOTOMETRIC=RGB is set.
     """
     overview = node.kind == "collection" and "overview" in roles_of(asset)
     scene = node.kind == "item" and "data" in roles_of(asset)
