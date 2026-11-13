@@ -329,27 +329,33 @@ def _check_class_placement(key: str, asset: dict[str, Any], files: AssetFiles) -
 
     ``PTL-CLS-005`` judges placement by the band count the metadata declares.
     When that disagrees with the file, the file decides: a multi-band file
-    needs the list on a band in ``bands``, and a single-band file on the asset.
+    needs the list on a band in ``bands``, a single-band file on the asset,
+    and no list may describe a band the file lacks.
     """
     lists = [
         found
         for found in asset_class_lists(json_pointer("assets", key), asset)
         if found.band_field != "raster:bands"
     ]
-    declared = band_count(asset)
-    on_asset = [found for found in lists if found.band_index is None]
-    on_band = [found for found in lists if found.band_index is not None]
-    # Where the metadata already agrees, PTL-CLS-005 reports any misplacement.
-    if not (on_asset and declared <= 1) and not (on_band and declared > 1):
+    if not lists:
         return []
     try:
         count = files.raster().count
     except Exception:  # unreadable raster: the COG check owns reporting it
         return []
+    declared = band_count(asset)
+    on_asset = [found for found in lists if found.band_index is None]
+    on_band = [found for found in lists if found.band_index is not None]
+    beyond = [
+        found for found in on_band if found.band_index is not None and found.band_index >= count
+    ]
+    # Where the metadata agrees with the file, PTL-CLS-005 reports misplacement.
     if count > 1 and on_asset and declared <= 1:
         where, misplaced = "on the asset instead of on the band it describes in bands", on_asset
     elif count == 1 and on_band and declared > 1:
         where, misplaced = "on a band instead of on the asset", on_band
+    elif beyond:
+        where, misplaced = f"on band {beyond[0].band_index} in bands, which the file lacks", beyond
     else:
         return []
     return [

@@ -1622,6 +1622,17 @@ def test_band_classes_on_a_single_band_file_belong_on_the_asset(tmp_path: Path) 
     ]
 
 
+def test_classes_on_a_band_the_file_lacks_are_an_error(tmp_path: Path) -> None:
+    path = tmp_path / "three.tif"
+    assets.write_cog(path, count=2)
+    classes = [{"value": 1, "name": "urban", "title": "Urban"}]
+    bands = [{}, {}, {"classification:classes": classes}]
+    defects = [d for d in _raster(path, {"bands": bands}) if d.rule_id == DAT_CLASS_COLORS]
+    assert [(d.severity, d.json_pointer) for d in defects] == [
+        (Severity.ERROR, "/assets/data/bands/2/classification:classes")
+    ]
+
+
 def test_inherited_class_findings_point_into_the_item(
     catalog: CatalogBuilder, tmp_path: Path
 ) -> None:
