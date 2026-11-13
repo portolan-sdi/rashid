@@ -451,7 +451,7 @@ def _mosaic_items(node: Node, graph: CatalogGraph) -> int:
 
 
 class MosaicOverviewRule(Rule):
-    """A collection of many rasters provides an overview COG (visual and overview roles).
+    """A collection of two or more rasters provides an overview COG (visual, overview roles).
 
     Mosaic detection is a footprint heuristic (see :func:`_mosaic_items`), so
     this is a WARNING, the SHOULD's own severity, and stays silent when unsure.
@@ -461,8 +461,8 @@ class MosaicOverviewRule(Rule):
     spec_ids = ("PORTO-FMT-067",)
     default_severity = Severity.WARNING
     description = (
-        "a collection of many rasters should provide an overview COG with the visual and "
-        "overview roles"
+        "a collection of two or more rasters should provide an overview COG with the visual "
+        "and overview roles"
     )
     kinds = ("collection",)
 

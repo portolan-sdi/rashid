@@ -578,10 +578,18 @@ def test_overview_is_a_cog_with_both_roles(catalog: CatalogBuilder, overview: di
         (1, None),
         (3, [4.0, 50.0, 6.0, 52.0]),
         (3, [4.0, 50.0, 5.5, 51.5]),
+        (2, [4.0, 50.0, 5.5, 51.5]),
         (3, [4.0, 52.0, 6.0, 50.0]),
         (3, [5.0, 51.0, 5.0, 51.0]),
     ],
-    ids=["one-item", "time-series", "large-scenes", "reversed-latitudes", "points"],
+    ids=[
+        "one-item",
+        "time-series",
+        "large-scenes",
+        "two-large-scenes",
+        "reversed-latitudes",
+        "points",
+    ],
 )
 def test_non_mosaic_raster_is_silent(
     catalog: CatalogBuilder, tiles: int, bbox: list[float] | None
