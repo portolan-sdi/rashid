@@ -1,11 +1,10 @@
 """Partition rules (spec: formats.md, Partitioned Collections).
 
-formats.md: "Partitioning MUST be described per the partition extension
-(v1.0.0), with its schema declared in `stac_extensions` and its required
-fields carried — `partition:scheme`, `partition:keys`, and `partition:glob`."
-And: "`partition:glob` is the normative bulk-access path; the collection
-description SHOULD also mention the glob for human readers, but validators
-read only the field."
+formats.md: "Partitioning MUST follow the partition extension v1.0.0. Declare
+its schema in `stac_extensions`, and set `partition:scheme`, `partition:keys`,
+and `partition:glob`." And: "`partition:glob` MUST be an absolute URL with a
+scheme that supports listing. Publishers SHOULD use `s3://`, `gs://`, or
+`az://`."
 
 A collection is taken to be partitioned when it declares any ``partition:*``
 field or the partition extension URI — the signals the Portolan partition
@@ -16,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from rashid._href import split_href
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
@@ -30,8 +30,7 @@ class PartitionFieldsRule(Rule):
 
     One finding per missing piece: the extension URI in ``stac_extensions``,
     and each of ``partition:scheme``, ``partition:keys``, ``partition:glob``.
-    The glob field alone is normative; a glob mentioned only in the
-    description does not satisfy it ("validators read only the field").
+    A glob mentioned only in the description does not satisfy the field.
     """
 
     id = "PTL-PRT-001"
@@ -96,21 +95,45 @@ def _declares_extension(node: Node) -> bool:
 
 
 class PartitionGlobSchemeRule(Rule):
-    """HTTP cannot list objects for partition glob expansion."""
+    """``partition:glob`` is an absolute URL that clients can list.
+
+    A relative path, an ``http(s)://`` URL, or a Windows drive path cannot be
+    listed (PORTO-FMT-064, ERROR). Any other scheme is absolute; it warns
+    unless it is ``s3``, ``gs``, or ``az`` (PORTO-FMT-075).
+    """
 
     id = "PTL-PRT-002"
-    spec_ids = ("PORTO-FMT-064",)
+    spec_ids = ("PORTO-FMT-064", "PORTO-FMT-075")
     default_severity = Severity.ERROR
-    description = "partition:glob must not use HTTP or HTTPS"
+    description = "partition:glob must be an absolute URL that clients can list"
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         glob = node.data.get("partition:glob")
-        if isinstance(glob, str) and glob.lstrip().lower().startswith(("http://", "https://")):
+        if not isinstance(glob, str) or not glob.strip():
+            return  # PTL-PRT-001 reports a missing glob
+        parsed = split_href(glob)
+        scheme = parsed.scheme.lower() if parsed is not None else ""
+        # A one-letter scheme is a Windows drive letter, not a URL scheme.
+        if len(scheme) < 2 or scheme in ("http", "https"):
             yield self.finding(
                 node,
-                "partition:glob uses HTTP or HTTPS, which cannot list partition objects",
+                "partition:glob is not an absolute URL that clients can list;"
+                " relative paths and HTTP or HTTPS URLs cannot be listed",
                 json_pointer=json_pointer("partition:glob"),
-                fix_hint="use a relative glob or a bucket-native scheme such as s3:// or gs://",
+                fix_hint=_GLOB_HINT,
                 actual=glob,
             )
+        elif scheme not in _RECOMMENDED_SCHEMES:
+            yield self.finding(
+                node,
+                f"partition:glob uses scheme '{scheme}'; readers support s3, gs, and az",
+                severity=Severity.WARNING,
+                json_pointer=json_pointer("partition:glob"),
+                fix_hint=_GLOB_HINT,
+                actual=glob,
+            )
+
+
+_RECOMMENDED_SCHEMES = ("s3", "gs", "az")
+_GLOB_HINT = "use the absolute bucket URL, e.g. 's3://bucket/data/*.parquet'"

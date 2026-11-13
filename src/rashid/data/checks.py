@@ -47,6 +47,8 @@ The four GeoParquet checks â€” ``PTL-DAT-006``, ``007``, ``008``, and ``012`` â€
 run over an asset and over every file a local relative ``partition:glob``
 matches. A partitioned collection publishes its data through the glob and
 declares no ``data`` asset, so the glob is the only place those bytes appear.
+A conformant glob is an absolute bucket URL, which rashid does not list, so
+these checks reach partition files only through a relative glob.
 Each rule reports once per collection, at ``/partition:glob``, naming how many
 partition files failed.
 
