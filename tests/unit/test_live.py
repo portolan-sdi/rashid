@@ -202,14 +202,13 @@ def test_wildcard_expose_headers_passes(catalog: CatalogBuilder) -> None:
     assert LIV_CORS_EXPOSE not in _ids(findings)
 
 
-def test_preflight_missing_method_is_error(catalog: CatalogBuilder) -> None:
+def test_preflight_allowed_methods_are_not_checked(catalog: CatalogBuilder) -> None:
+    # GET and HEAD are CORS-safelisted: a browser allows them whatever the list says.
     graph = _graph_with_remote(catalog)
     prober = FakeProber(
-        preflight_response=_good_preflight(**{"access-control-allow-methods": "GET"})
+        preflight_response=_good_preflight(**{"access-control-allow-methods": "GET, OPTIONS"})
     )
-    findings = validate_live(graph, prober)
-    assert LIV_CORS_PREFLIGHT in _ids(findings)
-    assert "HEAD" in next(f.message for f in findings if f.rule_id == LIV_CORS_PREFLIGHT)
+    assert validate_live(graph, prober) == []
 
 
 def test_preflight_missing_range_header_is_error(catalog: CatalogBuilder) -> None:

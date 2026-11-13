@@ -467,9 +467,9 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
     ),
     CheckInfo(
         LIV_CORS_PREFLIGHT,
-        "CORS preflight for a partial-read file accepts GET and HEAD with Range",
+        "CORS preflight for a partial-read file allows Range and the conditional headers",
         Severity.ERROR,
-        ("PORTO-CORE-045", "PORTO-CORE-086", "PORTO-CORE-073"),
+        ("PORTO-CORE-045", "PORTO-CORE-073"),
         stage="live",
     ),
     CheckInfo(

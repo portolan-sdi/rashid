@@ -17,8 +17,11 @@ metadata and asset file (PORTO-CORE-086). Per host, the probes are:
   gets the same GET of its first asset, and only its allowed origin is read.
 - an **OPTIONS preflight** of the same partial-read asset
   (``Access-Control-Request-Method: GET``, and ``Access-Control-Request-Headers``
-  naming ``Range`` plus the conditional-request headers) — allowed methods and
-  request headers appear only on preflight responses, never on GET/HEAD. A
+  naming ``Range`` plus the conditional-request headers) — allowed request
+  headers appear only on preflight responses, never on GET/HEAD. A failed
+  preflight is an error, since no allowance can be read from it. GET and HEAD
+  are CORS-safelisted methods, so ``Access-Control-Allow-Methods`` is not
+  checked. A
   file read whole needs none: a browser sends a plain GET or HEAD without a
   preflight, so a host with no partial-read asset gets no OPTIONS.
 - a **HEAD** per asset — an accurate ``Content-Length`` for a partial-read
@@ -453,11 +456,6 @@ def _check_preflight(rep: _Target, response: ProbeResponse) -> list[Finding]:
     problems: list[str] = []
     if response.status >= 400:
         problems.append(f"preflight returned {response.status}")
-    methods = _header_set(response.header("access-control-allow-methods"))
-    if "*" not in methods:
-        missing = [m for m in ("GET", "HEAD") if m.lower() not in methods]
-        if missing:
-            problems.append("allowed methods omit " + ", ".join(missing))
     allowed = _header_set(response.header("access-control-allow-headers"))
     if "*" not in allowed:
         absent = [h for h in _REQUIRED_REQUEST if h.lower() not in allowed]
@@ -470,9 +468,7 @@ def _check_preflight(rep: _Target, response: ProbeResponse) -> list[Finding]:
             LIV_CORS_PREFLIGHT,
             message="CORS preflight failed: " + "; ".join(problems),
             fix_hint=(
-                "allow the GET and HEAD methods and the "
-                + ", ".join(_REQUIRED_REQUEST)
-                + " request headers in the CORS policy"
+                "allow the " + ", ".join(_REQUIRED_REQUEST) + " request headers in the CORS policy"
             ),
         )
     ]
