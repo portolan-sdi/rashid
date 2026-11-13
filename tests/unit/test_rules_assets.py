@@ -67,6 +67,20 @@ def test_s3_href_without_https_alternate_is_an_error(catalog: CatalogBuilder) ->
     assert "alternate" in findings[0].message
 
 
+@pytest.mark.parametrize("href", ["https:", "https:///data.parquet", "https://exa mple.org/x"])
+def test_unusable_https_alternate_keeps_the_error(catalog: CatalogBuilder, href: str) -> None:
+    catalog.collection(
+        "roads",
+        assets={
+            "data": _asset(
+                href="s3://bucket/roads/data.parquet", alternate={"https": {"href": href}}
+            )
+        },
+    )
+    findings = findings_for(validate(catalog.write()), "PTL-AST-002")
+    assert [f.severity for f in findings] == [Severity.ERROR]
+
+
 def test_s3_href_with_https_alternate_is_a_warning(catalog: CatalogBuilder) -> None:
     alternate = {"https": {"href": "https://bucket.example.org/roads/data.parquet"}}
     catalog.collection(

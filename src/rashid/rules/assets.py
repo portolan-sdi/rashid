@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from rashid._href import split_href
+from rashid._href import is_uri_reference, split_href
 from rashid._multihash import is_well_formed_multihash
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
@@ -111,7 +111,7 @@ class AssetHrefSchemeRule(Rule):
                 continue
             alternates = asset.get("alternate")
             if isinstance(alternates, dict) and any(
-                isinstance(alt, dict) and _absolute_scheme(alt.get("href")) == "https"
+                isinstance(alt, dict) and _is_https_url(alt.get("href"))
                 for alt in alternates.values()
             ):
                 yield self.finding(
@@ -179,6 +179,14 @@ def _absolute_scheme(href: object) -> str | None:
     if parsed is None:
         return None  # PTL-LNK-006 reports the malformed URI reference.
     return parsed.scheme.lower() or None
+
+
+def _is_https_url(href: object) -> bool:
+    """A well-formed https URL with a host."""
+    if not isinstance(href, str) or not is_uri_reference(href):
+        return False
+    parsed = split_href(href)
+    return parsed is not None and parsed.scheme.lower() == "https" and bool(parsed.hostname)
 
 
 class CogMediaTypeRule(Rule):
