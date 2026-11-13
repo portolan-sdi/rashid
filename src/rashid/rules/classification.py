@@ -102,9 +102,12 @@ def _optional_field_errors(entry: dict[str, Any]) -> Iterator[tuple[str, str]]:
         if field in _HAND_CHECKED or field not in entry:
             continue
         value, kind = entry[field], rule.get("type", "")
-        if not isinstance(value, _JSON_TYPES.get(kind, object)) or (
-            isinstance(value, bool) and kind != "boolean"
-        ):
+        # Draft-07 counts an integral float such as 40.0 as an integer.
+        integral = isinstance(value, float) and value.is_integer()
+        if (
+            not isinstance(value, _JSON_TYPES.get(kind, object))
+            and not (kind == "integer" and integral)
+        ) or (isinstance(value, bool) and kind != "boolean"):
             yield field, f"is not a JSON {kind}"
         elif "minimum" in rule and value < rule["minimum"]:
             yield field, f"is below the minimum of {rule['minimum']}"

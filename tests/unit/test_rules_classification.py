@@ -166,6 +166,7 @@ def test_hash_prefixed_color_hint_suggests_the_bare_digits(catalog: CatalogBuild
         ("count", -1, True),
         ("count", 1.5, True),
         ("count", 40, False),
+        ("count", 40.0, False),
         ("description", 7, True),
         ("description", "Water present in both dates", False),
     ],
