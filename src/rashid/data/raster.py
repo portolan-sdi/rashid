@@ -95,6 +95,7 @@ def check_raster(
         defects.extend(_check_tile_size(key, files))
         defects.extend(_check_class_placement(key, asset, files))
         defects.extend(_check_class_colors(key, asset, files))
+        defects.extend(_check_nodata_classes(key, asset, files))
         defects.extend(_check_palette_classes(key, asset, files))
     return defects
 
@@ -374,6 +375,47 @@ def _check_class_placement(key: str, asset: dict[str, Any], files: AssetFiles) -
             json_pointer=misplaced[0].pointer,
         )
     ]
+
+
+def _check_nodata_classes(key: str, asset: dict[str, Any], files: AssetFiles) -> list[DataDefect]:
+    """A class marked nodata SHOULD be the file's nodata (PORTO-FMT-057).
+
+    ``PTL-CLS-003`` compares it with the metadata's nodata. When the file
+    declares another nodata, readers draw the class the legend leaves out.
+    """
+    marked = [
+        (found, pointer, entry["value"])
+        for found in asset_class_lists(json_pointer("assets", key), asset)
+        for pointer, entry in found.entries()
+        if entry.get("nodata") is True and is_integer(entry.get("value"))
+    ]
+    if not marked:
+        return []
+    try:
+        src = files.raster()
+        count, nodatavals = src.count, src.nodatavals
+    except Exception:  # unreadable raster: the COG check owns reporting it
+        return []
+    defects: list[DataDefect] = []
+    for found, pointer, value in marked:
+        band = 1 if found.band_index is None and count == 1 else None
+        if found.band_index is not None and found.band_index < count:
+            band = found.band_index + 1
+        nodata = nodatavals[band - 1] if band is not None else None
+        if nodata is not None and nodata != value:
+            defects.append(
+                DataDefect(
+                    DAT_CLASS_COLORS,
+                    Severity.WARNING,
+                    f"asset '{key}' class value {value} is marked nodata, but band {band}'s"
+                    f" nodata in the file is {nodata:g}, so readers draw it",
+                    key,
+                    json_pointer=json_pointer("nodata", prefix=pointer),
+                    expected=nodata,
+                    actual=value,
+                )
+            )
+    return defects
 
 
 def from_item_assets(key: str, defects: list[DataDefect]) -> list[DataDefect]:

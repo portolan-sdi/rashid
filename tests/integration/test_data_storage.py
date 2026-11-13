@@ -1538,6 +1538,16 @@ def test_class_equal_to_file_nodata_without_a_table_is_a_warning(tmp_path: Path)
     ]
 
 
+def test_nodata_class_off_the_file_nodata_is_a_warning(tmp_path: Path) -> None:
+    # The metadata says 0 is nodata, but the file masks 255 and draws 0.
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=255, colormap=_FLOOD_TABLE)
+    defects = [d for d in _raster(path, _classified_asset()) if d.rule_id == DAT_CLASS_COLORS]
+    assert [(d.severity, d.json_pointer, d.expected) for d in defects] == [
+        (Severity.WARNING, "/assets/data/bands/0/classification:classes/0/nodata", 255)
+    ]
+
+
 def test_classes_on_a_picture_channel_are_a_warning(tmp_path: Path) -> None:
     path = tmp_path / "visual.tif"
     assets.write_cog(path)
