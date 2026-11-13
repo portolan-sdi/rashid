@@ -532,6 +532,14 @@ def test_item_assets_with_another_legend_warn(
     assert [f.actual for f in findings] == ([[2]] if flagged else [])
 
 
+def test_source_item_assets_need_no_template(catalog: CatalogBuilder) -> None:
+    root = _scene_catalog(catalog, None)
+    source = {**_raster_asset(), "roles": ["source"]}
+    for path in (root / "flood").rglob("scene-*.json"):
+        mutate_json(path, lambda data: data.update(assets={"data": source}))
+    assert findings_for(validate(root), "PTL-CLS-006") == []
+
+
 def _single_band_asset() -> dict[str, Any]:
     asset = _raster_asset()
     asset.update(asset.pop("bands")[0])

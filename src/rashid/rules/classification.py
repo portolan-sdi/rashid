@@ -639,7 +639,8 @@ class ItemAssetClassesRule(Rule):
             if not isinstance(assets, dict):
                 continue
             for key, asset in assets.items():
-                if not isinstance(asset, dict):
+                # PORTO-FMT-045: format rules skip upstream source files.
+                if not isinstance(asset, dict) or is_source_asset(asset):
                     continue
                 for found in asset_class_lists("", asset):
                     if found.band_field == "raster:bands" or (key, found.band_index) in reported:
