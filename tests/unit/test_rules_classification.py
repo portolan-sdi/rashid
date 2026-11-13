@@ -158,6 +158,28 @@ def test_hash_prefixed_color_hint_suggests_the_bare_digits(catalog: CatalogBuild
     assert "'0000FF'" in finding.fix_hint
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "flagged"),
+    [
+        ("percentage", 101, True),
+        ("percentage", 12.5, False),
+        ("count", -1, True),
+        ("count", 1.5, True),
+        ("count", 40, False),
+        ("description", 7, True),
+        ("description", "Water present in both dates", False),
+    ],
+)
+def test_band_class_optional_fields_follow_the_extension_schema(
+    catalog: CatalogBuilder, field: str, value: Any, flagged: bool
+) -> None:
+    def set_field(data: dict[str, Any]) -> None:
+        _classes(data)[2][field] = value
+
+    findings = findings_for(validate(_built(catalog, set_field)), "PTL-CLS-002")
+    assert [f.json_pointer for f in findings] == ([f"{_POINTER}/2/{field}"] if flagged else [])
+
+
 @pytest.mark.parametrize("classes", [[], {"value": 1}])
 def test_empty_or_non_list_classes_are_flagged(catalog: CatalogBuilder, classes: Any) -> None:
     def replace(data: dict[str, Any]) -> None:

@@ -37,8 +37,11 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+from functools import lru_cache
+from importlib import resources
 from typing import Any, TypeGuard
 
+from rashid import _json
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
@@ -69,6 +72,44 @@ _INTEGER_RANGES: dict[str, tuple[int, int]] = {
 }
 
 _ABSENT = object()
+
+_CLASS_SCHEMA = "_schemas/extensions/stac-extensions.github.io/classification/v2.0.0/schema.json"
+# Fields the rules above check with their own messages.
+_HAND_CHECKED = frozenset({"value", "name", "title", "color_hint", "nodata"})
+_JSON_TYPES: dict[str, type | tuple[type, ...]] = {
+    "string": str,
+    "number": (int, float),
+    "integer": int,
+    "boolean": bool,
+}
+
+
+@lru_cache(maxsize=1)
+def _class_properties() -> dict[str, dict[str, Any]]:
+    """The field schemas of the vendored extension's class object."""
+    schema = _json.loads(resources.files("rashid").joinpath(_CLASS_SCHEMA).read_bytes())
+    properties: dict[str, dict[str, Any]] = schema["definitions"]["class_object"]["properties"]
+    return properties
+
+
+def _optional_field_errors(entry: dict[str, Any]) -> Iterator[tuple[str, str]]:
+    """(field, reason) for each other class field the extension's schema rejects.
+
+    shortcut: reads only type, minimum and maximum, the keywords those fields
+    use in v2.0.0; extend it if a later schema adds others.
+    """
+    for field, rule in _class_properties().items():
+        if field in _HAND_CHECKED or field not in entry:
+            continue
+        value, kind = entry[field], rule.get("type", "")
+        if not isinstance(value, _JSON_TYPES.get(kind, object)) or (
+            isinstance(value, bool) and kind != "boolean"
+        ):
+            yield field, f"is not a JSON {kind}"
+        elif "minimum" in rule and value < rule["minimum"]:
+            yield field, f"is below the minimum of {rule['minimum']}"
+        elif "maximum" in rule and value > rule["maximum"]:
+            yield field, f"is above the maximum of {rule['maximum']}"
 
 
 @dataclass(frozen=True)
@@ -245,13 +286,32 @@ class ClassListRule(Rule):
                     fix_hint="set title to the class's human-readable label, e.g. 'Permanent water'",
                 )
             yield from self._check_color_hint(node, pointer, entry)
-            if "nodata" in entry and not isinstance(entry["nodata"], bool):
-                yield self.finding(
-                    node,
-                    f"class {pointer} has a nodata flag that is not a boolean",
-                    json_pointer=json_pointer("nodata", prefix=pointer),
-                    fix_hint="set nodata to true or false",
-                )
+            yield from self._check_fields(
+                node, pointer, entry, in_bands=found.band_field == "bands"
+            )
+
+    def _check_fields(
+        self, node: Node, pointer: str, entry: dict[str, Any], *, in_bands: bool
+    ) -> Iterator[Finding]:
+        if "nodata" in entry and not isinstance(entry["nodata"], bool):
+            yield self.finding(
+                node,
+                f"class {pointer} has a nodata flag that is not a boolean",
+                json_pointer=json_pointer("nodata", prefix=pointer),
+                fix_hint="set nodata to true or false",
+            )
+        # The extension's schema checks these fields on assets and raster:bands
+        # (PTL-EXT-001) but never reaches core bands.
+        if not in_bands:
+            return
+        for field, reason in _optional_field_errors(entry):
+            yield self.finding(
+                node,
+                f"class {pointer} {field} {reason}",
+                json_pointer=json_pointer(field, prefix=pointer),
+                fix_hint=f"correct {field} as the classification extension's class object defines it",
+                actual=entry[field],
+            )
 
     def _check_value(
         self, node: Node, pointer: str, entry: dict[str, Any], seen: dict[int, str]
