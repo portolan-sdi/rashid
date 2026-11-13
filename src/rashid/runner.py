@@ -64,6 +64,7 @@ class ValidationOptions:
     schema: bool = False
     schema_validator: _Validator | None = None
     schema_allow_network: bool = False
+    schema_map: Mapping[str, dict[str, Any]] | None = None
     data: bool = True
     data_validator: DataValidator | None = None
     data_reader_factory: DataReaderFactory | None = None
@@ -105,7 +106,10 @@ def _optional_passes(
             _stage(
                 "schema",
                 lambda: validate_schema(
-                    graph, options.schema_validator, allow_network=options.schema_allow_network
+                    graph,
+                    options.schema_validator,
+                    allow_network=options.schema_allow_network,
+                    schema_map=options.schema_map,
                 ),
             )
         )
@@ -191,6 +195,8 @@ def validate(
     A schema version this build does not carry is fetched over the network when
     ``options.schema_allow_network`` is set, and degrades to a ``PTL-SCH-000`` warning
     otherwise. Disabling ``PTL-SCH-001`` via ``options.config`` skips the pass.
+    ``options.schema_map`` maps profile URIs to parsed local schema objects, which
+    take precedence over bundled and fetched copies.
     ``options.schema_validator`` injects an alternate validator, chiefly for testing.
 
     The data pass runs by default too, reading each asset's bytes (local

@@ -26,6 +26,7 @@ substitute their own.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import lru_cache
 from importlib import resources
 from typing import Any
@@ -138,8 +139,13 @@ def validate_schema(
     schema_uri: str | None = None,
     *,
     allow_network: bool = False,
+    schema_map: Mapping[str, dict[str, Any]] | None = None,
 ) -> list[Finding]:
     """Validate every catalog, collection, and item against the profile schema.
+
+    ``schema_map`` maps profile URIs (without a trailing ``#``) to local schema
+    objects. A matching entry takes precedence over bundled and fetched copies.
+    The selected schema is compiled once for the whole graph, with no global cache.
 
     Returns ``PTL-SCH-001`` errors for each schema failure. The schema comes
     from the bundled copies in the wheel; a version this build does not carry
@@ -151,8 +157,15 @@ def validate_schema(
     uri = DEFAULT_SCHEMA_URI
     if validator is None:
         uri = schema_uri if schema_uri is not None else _schema_uri_for(graph)
+
+    def factory() -> Validator:
+        local_schema = (schema_map or {}).get(uri.rstrip("#"))
+        if local_schema is not None:
+            return validator_from_schema(local_schema)
+        return default_validator(uri, allow_network=allow_network)
+
     return _PASS.run(
         validator,
-        lambda: default_validator(uri, allow_network=allow_network),
+        factory,
         schema_targets(graph, "Portolan profile schema"),
     ).findings
