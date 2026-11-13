@@ -20,7 +20,7 @@ def test_kitchen_sink(catalog: CatalogBuilder) -> None:
             {"name": "B", "roles": ["host"]},
         ],
         assets={
-            "data": {  # no roles -> AST-001; s3 -> AST-002; raw digest -> AST-004
+            "data": {  # no roles -> AST-001; s3 -> AST-002; raw digest -> AST-004; no title -> AST-010
                 "href": "s3://bucket/data.parquet",
                 "type": "application/vnd.apache.parquet",
                 "file:size": 10,
@@ -55,6 +55,7 @@ def test_kitchen_sink(catalog: CatalogBuilder) -> None:
         "PTL-AST-001",
         "PTL-AST-002",
         "PTL-AST-004",
+        "PTL-AST-010",
         "PTL-TMP-002",
         "PTL-FIL-001",
         "PTL-FIL-002",

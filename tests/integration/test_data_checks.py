@@ -454,7 +454,7 @@ def test_collapse_keeps_one_defect_per_shared_field() -> None:
 
 def test_check_raster_reader_error_is_info() -> None:
     located = Locator(is_remote=False, source="/no/such/file.tif")
-    defects = raster.check_raster("data", located, AssetFiles(located))
+    defects = raster.check_raster("data", {}, located, AssetFiles(located))
     assert [d.rule_id for d in defects] == [DAT_COG]
     assert defects[0].severity is Severity.INFO
 

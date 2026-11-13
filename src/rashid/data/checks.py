@@ -45,6 +45,9 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
 - ``PTL-DAT-020`` a ``table:columns`` entry of a data asset, or of a
   partitioned collection with no data asset, has no description (SHOULD,
   formats.md, Vector Data)
+- ``PTL-DAT-021`` a class ``color_hint`` differs from the embedded color
+  table entry for its value (WARNING, PORTO-FMT-054), or a class list is in
+  the wrong place for the file's real band count (ERROR, PORTO-FMT-050)
 
 The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
 run over an asset and over every file a local relative ``partition:glob``
@@ -229,7 +232,7 @@ def _check_asset(
             # being scoped to assets with the 'data' role.
             defects.extend(check_mirror(node, key, files, graph))
         if expected == "tiff":
-            defects.extend(check_raster(key, located, files))
+            defects.extend(check_raster(key, asset, located, files))
             defects.extend(check_display(node, key, asset, files))
         if expected == "parquet":
             defects.extend(check_geoparquet(key, files))

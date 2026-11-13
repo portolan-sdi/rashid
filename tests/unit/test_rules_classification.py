@@ -1,0 +1,570 @@
+"""Tests for PTL-CLS-001..003, 005 and 006, the classification class lists on raster bands."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from rashid import Report
+from rashid import validate as _run
+from tests.conftest import CatalogBuilder, findings_for, mutate_json, resolve_pointer
+
+pytestmark = pytest.mark.unit
+
+
+def validate(root: Path) -> Report:
+    """Validate, and check that every PTL-CLS pointer resolves in its own document."""
+    report = _run(root)
+    for finding in report.findings:
+        if finding.rule_id.startswith("PTL-CLS-") and finding.json_pointer is not None:
+            document = json.loads((root / finding.path).read_text(encoding="utf-8"))
+            resolve_pointer(document, finding.json_pointer)
+    return report
+
+
+_CLASSIFICATION_URI = "https://stac-extensions.github.io/classification/v2.0.0/schema.json"
+
+
+def _flood_classes() -> list[dict[str, Any]]:
+    """The geohazards-tep flood classes, as portolan-spec#41 proposes them."""
+    return [
+        {"value": 0, "name": "no-data", "title": "No data", "nodata": True},
+        {"value": 1, "name": "unchanged", "title": "Unchanged", "color_hint": "000000"},
+        {"value": 2, "name": "permanent-water", "title": "Permanent water", "color_hint": "0000FF"},
+        {"value": 3, "name": "flood", "title": "Flood", "color_hint": "00FF00"},
+        {"value": 4, "name": "receded", "title": "Receded water", "color_hint": "00FFFF"},
+    ]
+
+
+def _raster_asset() -> dict[str, Any]:
+    return {
+        "href": "./flood.tif",
+        "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+        "roles": ["data"],
+        # Two bands, so the class list belongs on the band it describes.
+        "bands": [
+            {"nodata": 0, "data_type": "uint8", "classification:classes": _flood_classes()},
+            {"name": "confidence", "data_type": "uint8"},
+        ],
+    }
+
+
+def _collection(root: Path) -> Path:
+    return root / "flood" / "collection.json"
+
+
+def _built(catalog: CatalogBuilder, mutate: Any = None) -> Path:
+    catalog.collection("flood")
+    root = catalog.write()
+
+    def classify(data: dict[str, Any]) -> None:
+        data["stac_extensions"] = [*data["stac_extensions"], _CLASSIFICATION_URI]
+        data["assets"]["data"] = _raster_asset()
+        if mutate is not None:
+            mutate(data)
+
+    mutate_json(_collection(root), classify)
+    return root
+
+
+def _classes(data: dict[str, Any]) -> list[dict[str, Any]]:
+    classes: list[dict[str, Any]] = data["assets"]["data"]["bands"][0]["classification:classes"]
+    return classes
+
+
+_ALL = tuple(f"PTL-CLS-00{n}" for n in (1, 2, 3, 5, 6))
+_POINTER = "/assets/data/bands/0/classification:classes"
+
+
+def test_well_formed_band_classes_are_clean(catalog: CatalogBuilder) -> None:
+    report = validate(_built(catalog))
+    assert [f for rule in _ALL for f in findings_for(report, rule)] == []
+
+
+def test_collection_without_classes_is_clean(catalog: CatalogBuilder) -> None:
+    catalog.collection("flood")
+    report = validate(catalog.write())
+    assert [f for rule in _ALL for f in findings_for(report, rule)] == []
+
+
+# --- PTL-CLS-001 -------------------------------------------------------------
+
+
+def test_undeclared_extension_is_flagged(catalog: CatalogBuilder) -> None:
+    def drop(data: dict[str, Any]) -> None:
+        data["stac_extensions"].remove(_CLASSIFICATION_URI)
+
+    findings = findings_for(validate(_built(catalog, drop)), "PTL-CLS-001")
+    assert len(findings) == 1
+    assert findings[0].json_pointer == "/stac_extensions"
+    assert _CLASSIFICATION_URI in findings[0].fix_hint
+
+
+def test_older_extension_version_counts_as_declared(catalog: CatalogBuilder) -> None:
+    def older(data: dict[str, Any]) -> None:
+        data["stac_extensions"].remove(_CLASSIFICATION_URI)
+        data["stac_extensions"].append(_CLASSIFICATION_URI.replace("v2.0.0", "v1.1.0"))
+
+    assert findings_for(validate(_built(catalog, older)), "PTL-CLS-001") == []
+
+
+def test_item_property_bands_need_the_extension(catalog: CatalogBuilder) -> None:
+    catalog.collection("flood").item(
+        "scene",
+        properties={
+            "datetime": "2024-01-01T00:00:00Z",
+            "bands": [{"nodata": 0, "classification:classes": _flood_classes()}],
+        },
+    )
+    findings = findings_for(validate(catalog.write()), "PTL-CLS-001")
+    assert [f.object_id for f in findings] == ["scene"]
+
+
+# --- PTL-CLS-002 -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("change", "pointer"),
+    [
+        (lambda c: c[1].pop("value"), "/1"),
+        (lambda c: c[1].update(value=1.5), "/1/value"),
+        (lambda c: c[1].update(value=True), "/1/value"),
+        (lambda c: c[1].pop("name"), "/1"),
+        (lambda c: c[1].update(name="permanent water"), "/1/name"),
+        (lambda c: c[1].pop("title"), "/1"),
+        (lambda c: c[1].update(title=" "), "/1/title"),
+        (lambda c: c[1].update(color_hint="#000000"), "/1/color_hint"),
+        (lambda c: c[1].update(color_hint="00F"), "/1/color_hint"),
+        (lambda c: c[1].update(nodata="yes"), "/1/nodata"),
+        (lambda c: c.__setitem__(1, "unchanged"), "/1"),
+    ],
+    ids=[
+        "no-value",
+        "float-value",
+        "bool-value",
+        "no-name",
+        "name-with-space",
+        "no-title",
+        "blank-title",
+        "hash-color",
+        "short-color",
+        "non-boolean-nodata",
+        "not-an-object",
+    ],
+)
+def test_malformed_class_is_flagged(catalog: CatalogBuilder, change: Any, pointer: str) -> None:
+    findings = findings_for(validate(_built(catalog, lambda d: change(_classes(d)))), "PTL-CLS-002")
+    assert [f.json_pointer for f in findings] == [f"{_POINTER}{pointer}"]
+    assert findings[0].fix_hint
+
+
+def test_integral_float_value_is_an_integer(catalog: CatalogBuilder) -> None:
+    def as_float(data: dict[str, Any]) -> None:
+        _classes(data)[1]["value"] = 1.0
+
+    report = validate(_built(catalog, as_float))
+    assert [f for rule in _ALL for f in findings_for(report, rule)] == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "flagged"),
+    [
+        ("percentage", 101, True),
+        ("percentage", 12.5, False),
+        ("count", -1, True),
+        ("count", 1.5, True),
+        ("count", 40, False),
+        ("count", 40.0, False),
+        ("description", 7, True),
+        ("description", "Water present in both dates", False),
+    ],
+)
+def test_band_class_optional_fields_follow_the_extension_schema(
+    catalog: CatalogBuilder, field: str, value: Any, flagged: bool
+) -> None:
+    def set_field(data: dict[str, Any]) -> None:
+        _classes(data)[2][field] = value
+
+    findings = findings_for(validate(_built(catalog, set_field)), "PTL-CLS-002")
+    assert [f.json_pointer for f in findings] == ([f"{_POINTER}/2/{field}"] if flagged else [])
+
+
+@pytest.mark.parametrize("classes", [[], {"value": 1}])
+def test_empty_or_non_list_classes_are_flagged(catalog: CatalogBuilder, classes: Any) -> None:
+    def replace(data: dict[str, Any]) -> None:
+        data["assets"]["data"]["bands"][0]["classification:classes"] = classes
+
+    findings = findings_for(validate(_built(catalog, replace)), "PTL-CLS-002")
+    assert [f.json_pointer for f in findings] == [_POINTER]
+
+
+def _schema_and_class_findings(root: Path) -> list[str | None]:
+    report = validate(root)
+    return [f.json_pointer for rule in ("PTL-EXT-001", *_ALL) for f in findings_for(report, rule)]
+
+
+def test_asset_level_class_object_is_left_to_the_extension_schema(
+    catalog: CatalogBuilder,
+) -> None:
+    def flatten(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset.update(asset.pop("bands")[0])
+        asset["classification:classes"][3]["color_hint"] = "lime"
+
+    findings = findings_for(validate(_built(catalog, flatten)), "PTL-EXT-001")
+    assert len(findings) == 1
+    assert findings_for(validate(_built(catalog, flatten)), "PTL-CLS-002") == []
+
+
+def test_band_class_object_mistake_is_reported_once(catalog: CatalogBuilder) -> None:
+    root = _built(catalog, lambda d: _classes(d)[3].update(color_hint="lime"))
+    assert _schema_and_class_findings(root) == [f"{_POINTER}/3/color_hint"]
+
+
+def test_legacy_raster_bands_class_object_is_left_to_the_extension_schema(
+    catalog: CatalogBuilder,
+) -> None:
+    def legacy(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["raster:bands"] = asset.pop("bands")
+        asset["raster:bands"][0]["classification:classes"][1]["name"] = "un changed"
+
+    assert findings_for(validate(_built(catalog, legacy)), "PTL-CLS-002") == []
+
+
+def test_item_assets_classes_are_checked(catalog: CatalogBuilder) -> None:
+    def template(data: dict[str, Any]) -> None:
+        data["item_assets"] = {"data": _raster_asset()}
+        data["item_assets"]["data"]["bands"][0]["classification:classes"][3]["color_hint"] = "lime"
+
+    findings = findings_for(validate(_built(catalog, template)), "PTL-CLS-002")
+    assert [f.json_pointer for f in findings] == [
+        "/item_assets/data/bands/0/classification:classes/3/color_hint"
+    ]
+
+
+def test_repeated_band_class_is_flagged(catalog: CatalogBuilder) -> None:
+    root = _built(catalog, lambda d: _classes(d).append(dict(_classes(d)[1])))
+    assert _schema_and_class_findings(root) == [f"{_POINTER}/5"]
+
+
+def test_integral_float_repeat_is_flagged(catalog: CatalogBuilder) -> None:
+    root = _built(catalog, lambda d: _classes(d).append({**_classes(d)[1], "value": 1.0}))
+    assert _schema_and_class_findings(root) == [f"{_POINTER}/5"]
+
+
+def test_classes_differing_only_in_json_type_are_not_repeats(catalog: CatalogBuilder) -> None:
+    def extra(data: dict[str, Any]) -> None:
+        _classes(data).append({**_classes(data)[1], "x": 0})
+        _classes(data)[1]["x"] = False
+
+    assert _schema_and_class_findings(_built(catalog, extra)) == []
+
+
+def test_legacy_list_that_differs_from_bands_is_checked(catalog: CatalogBuilder) -> None:
+    def differ(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["raster:bands"] = json.loads(json.dumps(asset["bands"]))
+        del asset["raster:bands"][0]["classification:classes"][1]["title"]
+
+    report = validate(_built(catalog, differ))
+    assert [(f.rule_id, f.json_pointer) for rule in _ALL for f in findings_for(report, rule)] == [
+        ("PTL-CLS-002", "/assets/data/raster:bands/0/classification:classes/1")
+    ]
+
+
+def test_legacy_mirror_of_a_band_list_is_not_checked_again(catalog: CatalogBuilder) -> None:
+    def mirror(data: dict[str, Any]) -> None:
+        del _classes(data)[1]["title"]
+        _classes(data)[0]["nodata"] = False
+        asset = data["assets"]["data"]
+        asset["raster:bands"] = json.loads(json.dumps(asset["bands"]))
+
+    report = validate(_built(catalog, mirror))
+    assert [(f.rule_id, f.json_pointer) for rule in _ALL for f in findings_for(report, rule)] == [
+        ("PTL-CLS-002", f"{_POINTER}/1"),
+        ("PTL-CLS-003", f"{_POINTER}/0/nodata"),
+    ]
+
+
+# --- PTL-CLS-003 -------------------------------------------------------------
+
+
+def test_nodata_class_with_another_value_is_flagged(catalog: CatalogBuilder) -> None:
+    def move(data: dict[str, Any]) -> None:
+        data["assets"]["data"]["bands"][0]["nodata"] = 255
+
+    findings = findings_for(validate(_built(catalog, move)), "PTL-CLS-003")
+    assert [f.json_pointer for f in findings] == [f"{_POINTER}/0/value"]
+    assert (findings[0].expected, findings[0].actual) == (255, 0)
+
+
+def test_nodata_class_without_band_nodata_is_flagged(catalog: CatalogBuilder) -> None:
+    def drop(data: dict[str, Any]) -> None:
+        del data["assets"]["data"]["bands"][0]["nodata"]
+
+    findings = findings_for(validate(_built(catalog, drop)), "PTL-CLS-003")
+    assert [f.json_pointer for f in findings] == [f"{_POINTER}/0/nodata"]
+
+
+def test_band_inherits_nodata_from_its_asset(catalog: CatalogBuilder) -> None:
+    def hoist(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["nodata"] = asset["bands"][0].pop("nodata")
+
+    assert findings_for(validate(_built(catalog, hoist)), "PTL-CLS-003") == []
+
+
+def test_class_at_band_nodata_must_be_marked(catalog: CatalogBuilder) -> None:
+    def unmark(data: dict[str, Any]) -> None:
+        del _classes(data)[0]["nodata"]
+
+    findings = findings_for(validate(_built(catalog, unmark)), "PTL-CLS-003")
+    # The flag is absent, so the finding points at the class itself.
+    assert [f.json_pointer for f in findings] == [f"{_POINTER}/0"]
+    assert findings[0].expected is True
+
+
+@pytest.mark.parametrize("nodata", [0.0, "nan"])
+def test_band_nodata_compares_as_a_number(catalog: CatalogBuilder, nodata: Any) -> None:
+    def set_nodata(data: dict[str, Any]) -> None:
+        data["assets"]["data"]["bands"][0]["nodata"] = nodata
+
+    findings = findings_for(validate(_built(catalog, set_nodata)), "PTL-CLS-003")
+    assert len(findings) == (0 if nodata == 0.0 else 1)
+
+
+# --- PTL-CLS-005 -------------------------------------------------------------
+
+
+def test_multi_band_asset_level_classes_belong_on_a_band(catalog: CatalogBuilder) -> None:
+    def hoist(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["classification:classes"] = asset["bands"][0].pop("classification:classes")
+
+    findings = findings_for(validate(_built(catalog, hoist)), "PTL-CLS-005")
+    assert [f.json_pointer for f in findings] == ["/assets/data/classification:classes"]
+    assert findings[0].severity.value == "error"
+
+
+def _single_band(data: dict[str, Any]) -> None:
+    data["assets"]["data"]["bands"].pop()
+
+
+def test_single_band_classes_on_the_asset_pass(catalog: CatalogBuilder) -> None:
+    def flatten(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset.update(asset.pop("bands")[0])
+
+    report = validate(_built(catalog, flatten))
+    assert [f for rule in _ALL for f in findings_for(report, rule)] == []
+
+
+def test_single_band_classes_belong_on_the_asset(catalog: CatalogBuilder) -> None:
+    findings = findings_for(validate(_built(catalog, _single_band)), "PTL-CLS-005")
+    assert [f.json_pointer for f in findings] == [_POINTER]
+    assert "onto the asset" in findings[0].fix_hint
+
+
+def test_source_asset_classes_are_exempt_from_placement(catalog: CatalogBuilder) -> None:
+    def source(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["roles"] = ["source"]
+        asset["raster:bands"] = asset.pop("bands")
+
+    assert findings_for(validate(_built(catalog, source)), "PTL-CLS-005") == []
+
+
+def test_source_asset_classes_skip_portolan_class_rules(catalog: CatalogBuilder) -> None:
+    def source(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["roles"] = ["source"]
+        asset["bands"][0]["nodata"] = 255
+        del _classes(data)[1]["title"]
+
+    report = validate(_built(catalog, source))
+    assert [f for rule in _ALL for f in findings_for(report, rule)] == []
+
+
+def test_source_asset_classes_keep_the_extension_class_object(catalog: CatalogBuilder) -> None:
+    def source(data: dict[str, Any]) -> None:
+        data["assets"]["data"]["roles"] = ["source"]
+        _classes(data)[1]["name"] = "not valid"
+
+    findings = findings_for(validate(_built(catalog, source)), "PTL-CLS-002")
+    assert [f.json_pointer for f in findings] == [f"{_POINTER}/1/name"]
+
+
+@pytest.mark.parametrize("title", [7, None])
+def test_source_asset_class_title_must_be_a_string(catalog: CatalogBuilder, title: Any) -> None:
+    def source(data: dict[str, Any]) -> None:
+        data["assets"]["data"]["roles"] = ["source"]
+        _classes(data)[1]["title"] = title
+
+    findings = findings_for(validate(_built(catalog, source)), "PTL-CLS-002")
+    assert [f.json_pointer for f in findings] == [f"{_POINTER}/1/title"]
+
+
+def test_single_band_legacy_mirror_beyond_band_0_is_flagged(catalog: CatalogBuilder) -> None:
+    def legacy(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["classification:classes"] = asset["bands"][0].pop("classification:classes")
+        asset["bands"] = [{}]
+        mirrored = {"classification:classes": asset["classification:classes"]}
+        asset["raster:bands"] = [dict(mirrored), dict(mirrored)]
+
+    findings = findings_for(validate(_built(catalog, legacy)), "PTL-CLS-005")
+    assert [f.json_pointer for f in findings] == [
+        "/assets/data/raster:bands/1/classification:classes"
+    ]
+
+
+def test_object_level_classes_belong_on_the_data_asset(catalog: CatalogBuilder) -> None:
+    def top(data: dict[str, Any]) -> None:
+        data["classification:classes"] = _flood_classes()
+
+    findings = findings_for(validate(_built(catalog, top)), "PTL-CLS-005")
+    assert [f.json_pointer for f in findings] == ["/classification:classes"]
+    assert "the data asset" in findings[0].fix_hint
+
+
+def test_legacy_raster_bands_alone_are_flagged(catalog: CatalogBuilder) -> None:
+    def legacy(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["raster:bands"] = asset.pop("bands")
+
+    findings = findings_for(validate(_built(catalog, legacy)), "PTL-CLS-005")
+    assert [f.json_pointer for f in findings] == [
+        "/assets/data/raster:bands/0/classification:classes"
+    ]
+    assert "bands/0" in findings[0].fix_hint
+
+
+def test_legacy_raster_bands_mirroring_bands_pass(catalog: CatalogBuilder) -> None:
+    def mirror(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["raster:bands"] = [dict(band) for band in asset["bands"]]
+
+    assert findings_for(validate(_built(catalog, mirror)), "PTL-CLS-005") == []
+
+
+# --- PTL-CLS-006 -------------------------------------------------------------
+
+
+def _scene_catalog(catalog: CatalogBuilder, template: dict[str, Any] | None) -> Path:
+    built = catalog.collection("flood")
+    built.item("scene-1")
+    built.item("scene-2")
+    root = catalog.write()
+
+    def classify(data: dict[str, Any]) -> None:
+        data["stac_extensions"] = [*data.get("stac_extensions", []), _CLASSIFICATION_URI]
+        data["assets"] = {"data": _raster_asset()}
+
+    for item_id in ("scene-1", "scene-2"):
+        for path in (root / "flood").rglob(f"{item_id}.json"):
+            mutate_json(path, classify)
+
+    def collection(data: dict[str, Any]) -> None:
+        data["stac_extensions"] = [*data["stac_extensions"], _CLASSIFICATION_URI]
+        if template is not None:
+            data["item_assets"] = {"data": template}
+
+    mutate_json(_collection(root), collection)
+    return root
+
+
+def test_item_classes_missing_from_item_assets_warn_once(catalog: CatalogBuilder) -> None:
+    findings = findings_for(validate(_scene_catalog(catalog, None)), "PTL-CLS-006")
+    assert len(findings) == 1
+    # The collection has no item_assets, so the finding points at its root.
+    assert findings[0].json_pointer == ""
+    assert "on band 0 of asset 'data'," in findings[0].message
+    assert findings[0].severity.value == "warning"
+    assert "item_assets/data/bands/0/classification:classes" in findings[0].fix_hint
+
+
+def test_item_assets_without_the_band_classes_warn(catalog: CatalogBuilder) -> None:
+    template = _raster_asset()
+    del template["bands"][0]["classification:classes"]
+    findings = findings_for(validate(_scene_catalog(catalog, template)), "PTL-CLS-006")
+    assert [f.json_pointer for f in findings] == ["/item_assets/data"]
+
+
+def test_item_assets_without_the_asset_key_point_at_item_assets(catalog: CatalogBuilder) -> None:
+    root = _scene_catalog(catalog, None)
+    mutate_json(_collection(root), lambda data: data.update(item_assets={"other": {}}))
+    findings = findings_for(validate(root), "PTL-CLS-006")
+    assert [f.json_pointer for f in findings] == ["/item_assets"]
+
+
+def test_item_assets_with_the_classes_pass(catalog: CatalogBuilder) -> None:
+    report = validate(_scene_catalog(catalog, _raster_asset()))
+    assert [f for rule in _ALL for f in findings_for(report, rule)] == []
+
+
+def test_item_assets_with_other_classes_in_the_same_place_pass(catalog: CatalogBuilder) -> None:
+    # PORTO-FMT-051 asks for the list in the same place, not for equal contents.
+    template = _raster_asset()
+    template["bands"][0]["classification:classes"][2]["title"] = "Open water"
+    assert findings_for(validate(_scene_catalog(catalog, template)), "PTL-CLS-006") == []
+
+
+def test_differing_legacy_item_list_needs_no_template_band(catalog: CatalogBuilder) -> None:
+    def legacy(data: dict[str, Any]) -> None:
+        asset = _single_band_asset()
+        mirror = json.loads(json.dumps(asset["classification:classes"]))
+        mirror[1]["title"] = "Same"
+        asset["raster:bands"] = [{"classification:classes": mirror}]
+        data.update(assets={"data": asset})
+
+    root = _scene_catalog(catalog, _single_band_asset())
+    for path in (root / "flood").rglob("scene-*.json"):
+        mutate_json(path, legacy)
+    assert findings_for(validate(root), "PTL-CLS-006") == []
+
+
+def test_misplaced_item_classes_are_left_to_placement(catalog: CatalogBuilder) -> None:
+    root = _scene_catalog(catalog, None)
+    for path in (root / "flood").rglob("scene-*.json"):
+        mutate_json(path, lambda data: _single_band(data))
+    report = validate(root)
+    assert [f.rule_id for rule in _ALL for f in findings_for(report, rule)] == [
+        "PTL-CLS-005",
+        "PTL-CLS-005",
+    ]
+
+
+def test_source_item_assets_need_no_template(catalog: CatalogBuilder) -> None:
+    root = _scene_catalog(catalog, None)
+    source = {**_raster_asset(), "roles": ["source"]}
+    for path in (root / "flood").rglob("scene-*.json"):
+        mutate_json(path, lambda data: data.update(assets={"data": source}))
+    assert findings_for(validate(root), "PTL-CLS-006") == []
+
+
+def _single_band_asset() -> dict[str, Any]:
+    asset = _raster_asset()
+    asset.update(asset.pop("bands")[0])
+    return asset
+
+
+def test_single_band_item_classes_missing_from_item_assets_warn(catalog: CatalogBuilder) -> None:
+    root = _scene_catalog(catalog, None)
+    for path in (root / "flood").rglob("scene-*.json"):
+        mutate_json(path, lambda data: data.update(assets={"data": _single_band_asset()}))
+    findings = findings_for(validate(root), "PTL-CLS-006")
+    assert len(findings) == 1
+    assert "on asset 'data'," in findings[0].message
+    assert "item_assets/data/classification:classes" in findings[0].fix_hint
+
+
+def test_single_band_item_assets_with_the_classes_pass(catalog: CatalogBuilder) -> None:
+    root = _scene_catalog(catalog, _single_band_asset())
+    for path in (root / "flood").rglob("scene-*.json"):
+        mutate_json(path, lambda data: data.update(assets={"data": _single_band_asset()}))
+    report = validate(root)
+    assert [f for rule in _ALL for f in findings_for(report, rule)] == []
