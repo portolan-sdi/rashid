@@ -459,6 +459,23 @@ def test_item_assets_with_the_classes_pass(catalog: CatalogBuilder) -> None:
     assert [f for rule in _ALL for f in findings_for(report, rule)] == []
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "flagged"),
+    [
+        ("title", "Open water", True),
+        ("color_hint", "1E90FF", True),
+        ("color_hint", "0000ff", False),
+    ],
+)
+def test_item_assets_with_another_legend_warn(
+    catalog: CatalogBuilder, field: str, value: str, flagged: bool
+) -> None:
+    template = _raster_asset()
+    template["bands"][0]["classification:classes"][2][field] = value
+    findings = findings_for(validate(_scene_catalog(catalog, template)), "PTL-CLS-006")
+    assert [f.actual for f in findings] == ([[2]] if flagged else [])
+
+
 def _single_band_asset() -> dict[str, Any]:
     asset = _raster_asset()
     asset.update(asset.pop("bands")[0])

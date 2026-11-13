@@ -565,12 +565,17 @@ class BandPlacementRule(Rule):
                 )
 
 
-def _legend(classes: Any) -> dict[int, Any]:
-    """Class value -> name for each class with an integer value."""
+def _legend(classes: Any) -> dict[int, tuple[Any, ...]]:
+    """Class value -> what a legend shows for it, for each class with an integer value."""
     if not isinstance(classes, list):
         return {}
     return {
-        entry["value"]: entry.get("name")
+        entry["value"]: (
+            entry.get("name"),
+            entry.get("title"),
+            hint.upper() if isinstance(hint := entry.get("color_hint"), str) else hint,
+            entry.get("nodata") is True,
+        )
         for entry in classes
         if isinstance(entry, dict) and is_integer(entry.get("value"))
     }
@@ -664,6 +669,7 @@ class ItemAssetClassesRule(Rule):
             f"item_assets/{key} classes differ from those on {place} of items such as"
             f" {example} at values {differing}",
             json_pointer=matches[0].pointer,
-            fix_hint="give the template the same class values and names as the items",
+            fix_hint="give the template the same classes as the items: values, names, titles,"
+            " color hints and nodata flags",
             actual=differing,
         )
