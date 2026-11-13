@@ -40,7 +40,8 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
 - ``PTL-DAT-018`` a collection asset with the ``overview`` role is not 8-bit
   RGB with an optional alpha band (SHOULD, formats.md, Raster)
 - ``PTL-DAT-019`` an imagery scene, an item-level data COG with three or more
-  bands, has no nodata value, alpha band, or mask (SHOULD, formats.md, Imagery)
+  bands and no mask role, has no nodata value, alpha band, or mask (SHOULD,
+  formats.md, Imagery)
 
 The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
 run over an asset and over every file a local relative ``partition:glob``

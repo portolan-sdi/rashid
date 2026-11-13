@@ -39,6 +39,10 @@ _COG_STAT_KEYS = (
 # formats.md:121 — SHOULD per band, MUST when the band has a nodata value.
 _VALID_PERCENT_KEY = "STATISTICS_VALID_PERCENT"
 
+# STAC best-practice and EO roles for per-pixel masks: their zeros are values,
+# not empty pixels, so such an asset is not an imagery scene.
+_MASK_ROLES = {"data-mask", "date", "snow-ice", "land-water", "water-mask", "cloud", "cloud-shadow"}
+
 
 def check_raster(key: str, located: Locator, files: AssetFiles) -> list[DataDefect]:
     """A raster asset MUST be a valid COG (formats.md:91) with embedded band stats.
@@ -253,13 +257,14 @@ def check_display(
 ) -> list[DataDefect]:
     """formats.md, Raster: an overview is 8-bit RGB(A); an imagery scene masks empty pixels.
 
-    An imagery scene is an item-level data COG with three or more bands: a
-    one-band DEM or index is not drawn as a photo, so it is not judged.
+    An imagery scene is an item-level data COG with three or more bands and no
+    mask role: a one-band DEM or index is not drawn as a photo, so it is not judged.
     Overview color interpretation is not compared: GDAL's COG driver writes
     three 8-bit bands as undefined unless PHOTOMETRIC=RGB is set.
     """
-    overview = node.kind == "collection" and "overview" in roles_of(asset)
-    scene = node.kind == "item" and "data" in roles_of(asset)
+    roles = set(roles_of(asset))
+    overview = node.kind == "collection" and "overview" in roles
+    scene = node.kind == "item" and "data" in roles and not roles & _MASK_ROLES
     if not (overview or scene):
         return []
     try:

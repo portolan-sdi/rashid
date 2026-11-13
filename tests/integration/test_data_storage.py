@@ -847,6 +847,12 @@ def test_imagery_scene_declares_nodata_or_alpha(
     assert all(d.severity is Severity.WARNING for d in defects)
 
 
+@pytest.mark.parametrize("role", ["cloud", "data-mask"])
+def test_mask_asset_is_not_an_imagery_scene(tmp_path: Path, role: str) -> None:
+    """Planet's 8-band udm2 asset carries these roles; its zeros are values."""
+    assert _display(tmp_path, "item", ["data", role], count=8) == []
+
+
 def test_check_node_reports_an_unmasked_scene(tmp_path: Path) -> None:
     path = tmp_path / "scene.tif"
     assets.write_cog(path, size=256, count=3)
