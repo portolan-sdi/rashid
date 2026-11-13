@@ -129,6 +129,8 @@ def test_empty_field_values_are_flagged(catalog: CatalogBuilder) -> None:
         "abfs:container/*.parquet",
         "s3://user@/data/*.parquet",
         "s3://:80/data/*.parquet",
+        "s3://bucket:bad/data/*.parquet",
+        "s3://bucket:99999/data/*.parquet",
         "file:parts/*.parquet",
         "file:",
     ],

@@ -115,6 +115,10 @@ class PartitionGlobSchemeRule(Rule):
         if not isinstance(glob, str) or not glob.strip():
             return  # PTL-PRT-001 reports a missing glob
         parsed = split_href(glob)
+        try:
+            _ = parsed.port if parsed is not None else None
+        except ValueError:
+            parsed = None  # a malformed port makes the authority unusable
         scheme = parsed.scheme.lower() if parsed is not None else ""
         bucket = parsed.hostname if parsed is not None else None
         path = parsed.path if parsed is not None else ""
