@@ -1361,6 +1361,39 @@ def test_described_collection_columns_do_not_hide_bare_asset_columns() -> None:
     assert "extra" in defects[0].message
 
 
+def test_assetless_partitioned_collection_gets_dat_020(tmp_path: Path) -> None:
+    # The shape formats.md prescribes: columns on the collection, data
+    # through an s3:// glob that the data pass does not list, no data asset.
+    node = _partitioned_collection(tmp_path, glob="s3://bucket/parts/*.parquet")
+    node.data["table:columns"] = [{"name": "value", "type": "int64"}]
+    node.data["assets"] = {"visual": {"href": "./b.pmtiles", "roles": ["visual"]}}
+    defects = geoparquet.check_partitioned_column_descriptions(node)
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+    assert defects[0].json_pointer == "/table:columns"
+    assert "1 of 1" in defects[0].message
+    assert [d.rule_id for d in checks.check_node(node, _NoAssets())] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_partitioned_collection_with_a_data_asset_is_left_to_the_asset_check(
+    tmp_path: Path,
+) -> None:
+    node = _partitioned_collection(tmp_path)
+    node.data["table:columns"] = [{"name": "value", "type": "int64"}]
+    node.data["assets"] = {"data": {"href": "./d.parquet", "roles": ["data"]}}
+    assert geoparquet.check_partitioned_column_descriptions(node) == []
+
+
+def test_unpartitioned_or_described_collections_get_no_collection_finding(
+    tmp_path: Path,
+) -> None:
+    bare = [{"name": "value", "type": "int64"}]
+    check = geoparquet.check_partitioned_column_descriptions
+    assert check(_tabular_collection(**{"table:columns": bare})) == []
+    described = _partitioned_collection(tmp_path)
+    described.data["table:columns"] = _COLUMNS
+    assert check(described) == []
+
+
 def test_more_than_five_bare_columns_are_summarized() -> None:
     columns = [{"name": f"c{i}", "type": "int64"} for i in range(7)]
     defects = _described(_tabular_collection(**{"table:columns": columns}))
