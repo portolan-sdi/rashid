@@ -182,11 +182,17 @@ def _absolute_scheme(href: object) -> str | None:
 
 
 def _is_https_url(href: object) -> bool:
-    """A well-formed https URL with a host."""
+    """A well-formed https URL with a host and a valid port."""
     if not isinstance(href, str) or not is_uri_reference(href):
         return False
     parsed = split_href(href)
-    return parsed is not None and parsed.scheme.lower() == "https" and bool(parsed.hostname)
+    if parsed is None or parsed.scheme.lower() != "https" or not parsed.hostname:
+        return False
+    try:
+        _ = parsed.port
+    except ValueError:
+        return False
+    return True
 
 
 class CogMediaTypeRule(Rule):

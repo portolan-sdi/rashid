@@ -67,7 +67,10 @@ def test_s3_href_without_https_alternate_is_an_error(catalog: CatalogBuilder) ->
     assert "alternate" in findings[0].message
 
 
-@pytest.mark.parametrize("href", ["https:", "https:///data.parquet", "https://exa mple.org/x"])
+@pytest.mark.parametrize(
+    "href",
+    ["https:", "https:///data.parquet", "https://exa mple.org/x", "https://example.org:99999/x"],
+)
 def test_unusable_https_alternate_keeps_the_error(catalog: CatalogBuilder, href: str) -> None:
     catalog.collection(
         "roads",
