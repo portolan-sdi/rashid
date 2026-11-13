@@ -410,7 +410,10 @@ class LargeVectorWithoutVisualRule(Rule):
 
 
 def _bbox_area(box: Any) -> float | None:
-    """Area in squared degrees of a 2D or 3D bbox; None when malformed or nonfinite."""
+    """Area in squared degrees of a 2D or 3D bbox; None unless finite and positive.
+
+    Reversed latitudes, points, and lines give no area, so they never pass for a tile.
+    """
     if not isinstance(box, list) or len(box) not in (4, 6):
         return None
     if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in box):
@@ -419,7 +422,7 @@ def _bbox_area(box: Any) -> float | None:
     west, south, east, north = (float(box[i]) for i in (0, 1, half, half + 1))
     # A west edge east of the east edge crosses the antimeridian.
     area = (east - west if east >= west else east - west + 360) * (north - south)
-    return area if math.isfinite(area) else None
+    return area if math.isfinite(area) and area > 0 else None
 
 
 def _mosaic_items(node: Node, graph: CatalogGraph) -> int:

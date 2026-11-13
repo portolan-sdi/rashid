@@ -564,8 +564,14 @@ def test_overview_needs_both_roles(catalog: CatalogBuilder) -> None:
 
 @pytest.mark.parametrize(
     ("tiles", "bbox"),
-    [(2, None), (3, [4.0, 50.0, 6.0, 52.0]), (3, [4.0, 50.0, 5.5, 51.5])],
-    ids=["two-items", "time-series", "large-scenes"],
+    [
+        (2, None),
+        (3, [4.0, 50.0, 6.0, 52.0]),
+        (3, [4.0, 50.0, 5.5, 51.5]),
+        (3, [4.0, 52.0, 6.0, 50.0]),
+        (3, [5.0, 51.0, 5.0, 51.0]),
+    ],
+    ids=["two-items", "time-series", "large-scenes", "reversed-latitudes", "points"],
 )
 def test_non_mosaic_raster_is_silent(
     catalog: CatalogBuilder, tiles: int, bbox: list[float] | None
@@ -640,8 +646,24 @@ def test_overview_with_datetime_passes(catalog: CatalogBuilder, fields: dict) ->
         ([4.0, 50.0, float("inf"), 52.0], None),
         ([4.0, 50.0, float("nan"), 52.0], None),
         ([-1.7e308, 50.0, 1.7e308, 52.0], None),
+        ([4.0, 52.0, 6.0, 50.0], None),
+        ([5.0, 51.0, 5.0, 51.0], None),
+        ([4.0, 51.0, 6.0, 51.0], None),
     ],
-    ids=["2d", "3d", "antimeridian", "short", "string", "missing", "inf", "nan", "overflow"],
+    ids=[
+        "2d",
+        "3d",
+        "antimeridian",
+        "short",
+        "string",
+        "missing",
+        "inf",
+        "nan",
+        "overflow",
+        "reversed-latitudes",
+        "point",
+        "line",
+    ],
 )
 def test_bbox_area(box: object, area: float | None) -> None:
     assert _bbox_area(box) == area
