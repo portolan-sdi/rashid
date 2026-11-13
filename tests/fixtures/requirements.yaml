@@ -11,10 +11,6 @@
 #   process   - not machine-checkable from the catalog or its bytes
 #               (publish-time behavior, upstream knowledge, guidance).
 #
-# The optional test field follows quote and defines the abstract test for a
-# requirement. It gives the procedure and thresholds that the spec references.
-# check_requirements.py does not check the test field.
-#
 # Run `uv run specs/tools/check_requirements.py` after editing the spec or this
 # file; it fails when a quote no longer anchors or a keyword occurrence is
 # not covered by a requirement or exclusion.
@@ -896,143 +892,14 @@ requirements:
 
   - id: PORTO-FMT-006
     severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      Rows MUST follow a spatial order that places nearby features near each
-      other in the file.
-    # The validator runs this abstract row test on a file with fewer than
-    # eight row groups, or without per-row-group spatial statistics. The spec
-    # states the rule and references this procedure.
-    test: >-
-      The validator takes the N rows in file order and splits them into ten
-      chunks. Chunk k, for k from 0 to 9, contains rows with zero-based
-      index i such that floor(k * N / 10) <= i < floor((k + 1) * N / 10). A
-      row's bounding box is its bbox covering when the file has one.
-      Otherwise, it is the minimum and maximum of the row's coordinates in
-      the primary geometry column. A chunk's box is the union of its rows'
-      bounding boxes. A row with a null bbox covering, or a null or empty
-      geometry, keeps its position in its file-order chunk. It does
-      not extend the chunk's box. The validator omits any chunk with no
-      boxed rows from the layout. The number of chunks with a box is n. The
-      validator computes the pruning efficiency from formats.md on these
-      chunk boxes. Each chunk's row count r_i is its count of boxed rows.
-      Its byte count s_i equals that row count. With all ten chunks present,
-      the reference grid divides their extent into 4 + 4 + 2 cells. The rows
-      pass at the same bar as any layout. The row floor in formats.md
-      requires ten chunks of twenty boxed rows. Below that floor, the validator
-      reports that the file has too few rows to judge and gives no verdict.
-
-  - id: PORTO-FMT-053
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      The reference layout MUST use the following near-square grid of `n`
-      cells with uniform `r_i` and `s_i`.
-    test: >-
-      The layouts in
-      specs/portolan/abstract-tests/spatial-metric-vectors.json use this
-      reference grid. five-strips-n5 distinguishes the grid from a strip
-      tiling. three-boxes-old-vs-new-reference distinguishes it from a grid
-      with empty cells.
-
-  - id: PORTO-FMT-054
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      A validator MUST reproduce the expected values in the abstract test
-      vectors in
-      [`abstract-tests/spatial-metric-vectors.json`](abstract-tests/spatial-metric-vectors.json).
-    test: >-
-      The validator checks every entry under layouts and rows in that file.
-      It reproduces count, achieved, achievable, efficiency and area_sum to
-      six decimals, and the verdict of each entry. It reports efficiency, area_sum and below_bar as absent
-      where the file specifies null. line-n8 tests an extent with zero width
-      on one axis, with efficiency 1.0 and area_sum null. single-box tests
-      undefined efficiency at n = 1. outlier-sorted-n20 and
-      outlier-shuffled-n20 test window placement.
-      whole-extent-box-heavy-bytes-n8 tests byte weights. crowded-tile-n4
-      tests row weights. two-hundred-rows-hilbert and
-      two-hundred-rows-shuffled test a row-check pass and a row-check failure
-      at the row floor.
-
-  - id: PORTO-FMT-050
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      A file with eight or more row groups MUST reach the pass
-      bar on its row-group boxes.
-
-  - id: PORTO-FMT-044
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      A validator MUST NOT judge a file with fewer than eight row groups by its
-      row-group boxes. It MAY report their statistics.
-
-  # PORTO-FMT-059 (clear failure below eight row groups) is retired. Files
-  # with fewer than eight row groups take the row check (#188).
-  - id: PORTO-FMT-051
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      Wherever it reports a verdict, a validator MUST also report the
-      efficiency, the achievable skip rate, and the area sum as statistics.
-      These statistics do not give separate verdicts. The achievable skip
-      rate is the reference grid's skip rate. When the extent has no area,
-      the area sum is undefined. A validator MUST report an undefined area
-      sum as absent rather than as 0.
-
-  # PORTO-FMT-058 (5 MB size floor) is retired. Every file with enough rows
-  # receives a verdict (#188).
-  - id: PORTO-FMT-060
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      A validator MUST start its verdict with the expected share of the
-      file's bytes that the query window reads.
-
-  - id: PORTO-FMT-061
-    severity: SHOULD
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      On a failure, a validator SHOULD identify the row groups whose boxes
-      are largest relative to the extent. This helps a publisher see whether
-      one outlier or the whole file causes the failure. A validator SHOULD
-      also report the read share for windows at 1% and at 25% of each
-      dimension beside the 10% figure.
-
-  - id: PORTO-FMT-073
-    severity: MAY
     enforcement: process
     file: specs/portolan/formats.md
     quote: >-
-      A validator MAY use page-level statistics to refine the read share it
-      reports.
+      Rows MUST follow a spatial order that places nearby features near each other in
+      the file.
 
-  - id: PORTO-FMT-052
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      Below that count, a validator MUST report that the file has too few
-      rows to judge. It MUST NOT withhold that message.
-
-  - id: PORTO-FMT-049
-    severity: MUST
-    enforcement: validator
-    file: specs/portolan/formats.md
-    quote: >-
-      A validator MAY report the fraction of consecutive row-group pairs
-      whose boxes overlap as a statistic. It MUST NOT base its verdict on
-      that fraction.
+  # PORTO-FMT-044 (no failure on a threshold out of reach) is retired. The
+  # spatial-order thresholds moved to specs/incubating/spatial-order.md (#188).
 
   - id: PORTO-FMT-007
     severity: MUST

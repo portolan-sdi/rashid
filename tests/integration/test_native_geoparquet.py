@@ -58,7 +58,7 @@ def test_native_geometry_is_accepted_and_still_checks_groups(
     assert not _findings(tmp_path, "PTL-DAT-012"), "the missing geo key is not a version error"
     assert not _findings(tmp_path, "PTL-DAT-023"), "an absent native crs is OGC:CRS84"
     if not spherical:
-        assert any(f["severity"] == "error" for f in _findings(tmp_path, "PTL-DAT-006"))
+        assert any(f["severity"] == "warning" for f in _findings(tmp_path, "PTL-DAT-006"))
     assert [f["severity"] for f in _findings(tmp_path, "PTL-DAT-007")] == (
         ["error"] if spherical else ["warning"]
     )

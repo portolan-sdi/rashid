@@ -40,18 +40,18 @@ _MAX_ROW_GROUP_ROWS = 150_000
 # formats.md:75 — a GeoParquet row group MUST hold no more than this many rows.
 _MAX_ROW_GROUP_ROWS = 150_000
 
-# formats.md:38 — the row-group check computes the expected share of the file's
+# spatial-order.md (incubating) — the row-group check computes the expected share of the file's
 # bytes a query window lets a reader skip, and compares that against an ideal
 # tiling of the extent into the same number of row groups. The window's centre
 # falls in a box with probability proportional to its rows and the window spans
 # _QUERY_FRACTION of each dimension of that box, so empty extent cannot decide
-# the verdict (spec PORTO-FMT-050/053; the outlier vectors pin it). It is an
+# the verdict (spatial-order.md, Method; the outlier vectors pin it). It is an
 # expectation, not a sample: the closed form is O(n^2), reads the footer only
 # and has no seed, so another implementation reaches the same number.
 _QUERY_FRACTION = 0.10
-# The windows a verdict's message reports the read share for (PORTO-FMT-060
-# names the absolute cost at the query window; PORTO-FMT-061 adds the 1% and
-# 25% windows beside it).
+# The windows a verdict's message reports the read share for. The reporting
+# rules of spatial-order.md name the absolute cost at the query window and add
+# the 1% and 25% windows beside it.
 _REPORT_FRACTIONS = (0.01, _QUERY_FRACTION, 0.25)
 # 0.65 comes from the 2026-11 registry survey and its Hilbert-sort control
 # (the spec's calibration directory): the 32 sorted copies eligible for a
@@ -63,12 +63,12 @@ _MIN_SKIP_EFFICIENCY = 0.65
 # large as the extent, or an extent with no area. Float noise, not a layout.
 _NO_SKIP = 1e-9
 
-# formats.md, the two paths: a file with eight or more row groups takes the
-# footer check on its row-group boxes (PORTO-FMT-050). Below eight the grid
+# spatial-order.md, the two paths: a file with eight or more row groups takes the
+# footer check on its row-group boxes. Below eight the grid
 # reference is a poor model of a curve sort, so well-sorted files from several
 # catalogs score 0.60 to 0.88 at five row groups and 0.76 to 0.94 at eight
-# (rashid#174 review, spec point 3). PORTO-FMT-044 forbids judging such a file
-# by its row-group boxes, so it takes the row check instead.
+# (rashid#174 review, spec point 3). The method forbids judging such a file by
+# its row-group boxes, so it takes the row check instead.
 _MIN_ORDERING_ROW_GROUPS = 8
 
 # Row ordering is a separate rule that applies to every file, whatever its row-group
@@ -729,13 +729,15 @@ def _ordering_defects(
     subject: str,
 ) -> list[DataDefect]:
     """Spatial ordering, judged on one of the spec's two paths
-    (formats.md:30,38; PORTO-FMT-050, PORTO-FMT-044).
+    (formats.md, PORTO-FMT-006; measured with the incubating spatial-order.md).
+
+    The method is not part of conformance, so a failure is a WARNING.
 
     At eight or more row groups the footer check decides from the row-group
     boxes and no row is read. Where those boxes give an undefined efficiency,
     as with a point extent, the row check decides instead. Below eight row
     groups the boxes give no verdict: their statistics are reported at INFO,
-    which PORTO-FMT-044 allows, and the row check judges the rows in
+    which the method allows, and the row check judges the rows in
     file-order chunks by the same metric and bar. One file, one verdict: the
     footer verdict and the row check never both run, so they cannot disagree.
     """
@@ -751,7 +753,7 @@ def _ordering_defects(
         return [
             DataDefect(
                 DAT_ORDERING,
-                Severity.ERROR,
+                Severity.WARNING,
                 f"{subject} rows are not spatially ordered across its "
                 f"{_plural(groups, 'row group')}: {summary}",
                 key,
@@ -784,7 +786,7 @@ def _row_ordering_defects(
     *,
     subject: str | None = None,
 ) -> list[DataDefect]:
-    """The row check, PORTO-FMT-006's test: the path for a file with fewer
+    """The row check of spatial-order.md: the path for a file with fewer
     than eight row groups, or without per-row-group spatial statistics.
 
     formats.md:30 requires spatially ordered rows in every file, and the row
@@ -801,7 +803,7 @@ def _row_ordering_defects(
     defeats, and it disagreed with the row-group check about real files.
 
     Every reason the check cannot run is an INFO rather than silence
-    (PORTO-FMT-052): a validator's silence reads as a pass. Under 200 rows
+    (the row floor of spatial-order.md): a validator's silence reads as a pass. Under 200 rows
     the file has too few rows to judge, and an undefined efficiency, as with
     rows all at one point, gives no verdict either.
     """
@@ -828,7 +830,7 @@ def _row_ordering_defects(
         return [_unevaluated(key, subject, rows, groups, _undefined_efficiency())]
     if verdict == "pass":
         return []
-    # n is the number of chunks that carry a box (PORTO-FMT-006's test), so the
+    # n is the number of chunks that carry a box (the row check of spatial-order.md), so the
     # reference shrinks with them rather than staying at ten cells.
     split = f"split into {_ORDERING_CHUNKS} chunks in file order"
     if len(chunks) < _ORDERING_CHUNKS:
@@ -837,7 +839,7 @@ def _row_ordering_defects(
     return [
         DataDefect(
             DAT_ORDERING,
-            Severity.ERROR,
+            Severity.WARNING,
             f"{subject} rows are not spatially ordered: {rows} rows in "
             f"{_plural(groups, 'row group')}, {split}, {summary}",
             key,
@@ -846,18 +848,18 @@ def _row_ordering_defects(
 
 
 def _footer_verdict(score: _PruningScore) -> str:
-    """The footer check's verdict on row-group boxes, as PORTO-FMT-054's
+    """The footer check's verdict on row-group boxes, as the spatial-order vectors'
     vectors name it: ``pass`` or ``fail`` from eight boxes with a defined
-    efficiency (PORTO-FMT-050), otherwise ``row-check`` (PORTO-FMT-044)."""
+    efficiency, otherwise ``row-check`` (spatial-order.md, Footer check)."""
     if score.count < _MIN_ORDERING_ROW_GROUPS or score.below_bar is None:
         return "row-check"
     return "fail" if score.below_bar else "pass"
 
 
 def _row_verdict(score: _PruningScore, boxed_rows: int) -> str:
-    """The row check's verdict on file-order chunks, as PORTO-FMT-054's
+    """The row check's verdict on file-order chunks, as the spatial-order vectors'
     vectors name it: ``too-few-rows`` under the 200-row floor
-    (PORTO-FMT-052), ``none`` for an undefined efficiency, otherwise ``pass``
+    (the row floor of spatial-order.md), ``none`` for an undefined efficiency, otherwise ``pass``
     or ``fail``. The floor counts the rows that carry a box."""
     if boxed_rows < _MIN_ORDERING_ROWS:
         return "too-few-rows"
@@ -898,7 +900,7 @@ def _chunked_bboxes(
     """Box each of the ten file-order chunks, as row groups would have been.
 
     Chunk ``k`` holds the rows with index ``floor(k * N / 10) <= i <
-    floor((k + 1) * N / 10)``, the boundaries PORTO-FMT-006's test pins, so
+    floor((k + 1) * N / 10)``, the boundaries the row check of spatial-order.md pins, so
     every implementation splits an ``N`` not divisible by ten the same way
     (``numpy.array_split`` does not). A row without a box stays in its chunk
     and does not extend the box. A chunk with no boxed row at all contributes
@@ -924,7 +926,7 @@ def _chunked_bboxes(
 def _row_bboxes(
     parquet: Any, geo: dict[str, Any]
 ) -> list[tuple[float, float, float, float] | None] | None:
-    """Per-row [minx, miny, maxx, maxy] in file order, PORTO-FMT-006's row boxes.
+    """Per-row [minx, miny, maxx, maxy] in file order, the row boxes of spatial-order.md.
 
     A row's box is its bbox covering when the file declares one. Otherwise it
     is the min and max of the row's coordinates in the primary geometry column
@@ -1119,7 +1121,7 @@ class _PruningScore:
     oversized box barely moves it (a 94-group file scored 0.94 with an area sum
     of 4.07; a re-sort brought that to 1.42). It is ``None`` when the extent
     has no area. ``read_profile`` carries the expected read share at the 1%,
-    10% and 25% windows (PORTO-FMT-060/061), and ``largest`` the zero-based
+    10% and 25% windows (spatial-order.md, Reporting), and ``largest`` the zero-based
     indexes of the up-to-three boxes largest against the extent, so a failure
     can say whether one outlier or the whole file is at fault.
     """
@@ -1149,7 +1151,7 @@ class _PruningScore:
 
         An undefined efficiency is no verdict, not a failure and not a pass: a
         reader that took ``False`` for "pass" would print one for a layout the
-        spec does not judge (PORTO-FMT-054's vectors pin ``null``).
+        spec does not judge (the spatial-order vectors pin ``null``).
         """
         efficiency = self.efficiency
         if efficiency is None:
@@ -1165,7 +1167,7 @@ def _pruning_score(
     """Score a layout of boxes by the share of its bytes a query window skips.
 
     The extent is the union of the boxes, not the file's declared bbox. The
-    reference grid is scored with uniform rows and bytes (PORTO-FMT-053).
+    reference grid is scored with uniform rows and bytes (the reference grid of spatial-order.md).
     ``rows`` weighs the window placement and ``sizes`` the cost of a hit; a
     layout with no byte counts, such as the row check's chunks, weighs bytes
     by rows (formats.md: ``s_i = r_i``). Callers hold the applicability floors
@@ -1173,7 +1175,7 @@ def _pruning_score(
     undefined efficiency because its reference is the extent itself.
 
     Deliberately not the fraction of consecutive pairs that overlap
-    (PORTO-FMT-049): row groups produced by a space-filling-curve sort are
+    (the overlap statistic of spatial-order.md): row groups produced by a space-filling-curve sort are
     spatially adjacent by construction, so their boxes touch. For perfectly tiled
     data that fraction runs about 0.75 at thirteen boxes, 0.88 at fifty-nine and
     0.96 at five hundred and eighty-nine -- it is near 1.0 for the best possible
@@ -1200,10 +1202,10 @@ def _pruning_summary(
 ) -> str:
     """The measured quantity, for a message, leading with the absolute cost.
 
-    PORTO-FMT-060: the share of the bytes a typical query reads comes first,
+    spatial-order.md, Reporting: the share of the bytes a typical query reads comes first,
     then the achievable rate and the efficiency (with the bar a verdict rests
-    on), the 1% and 25% window profile (PORTO-FMT-061), the area sum
-    (PORTO-FMT-051), and on a failure the largest boxes (PORTO-FMT-061).
+    on), the 1% and 25% window profile, the area sum, and on a failure the
+    largest boxes.
     """
     efficiency = "undefined" if score.efficiency is None else f"{score.efficiency:.2f}"
     verdict = f", under the {bar:.2f} bar" if judged else ""

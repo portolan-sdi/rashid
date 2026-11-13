@@ -23,6 +23,6 @@ def test_null_only_group_retains_statistics_and_ordering(tmp_path: Path, null_gr
     assets.write_geoparquet(path, points=points, null_rows={offset, offset + 1})
     _declare(directory, [path.name])
     assert not _findings(tmp_path, "PTL-DAT-007")
-    assert [f["severity"] for f in _findings(tmp_path, "PTL-DAT-006")] == ["error"]
+    assert [f["severity"] for f in _findings(tmp_path, "PTL-DAT-006")] == ["warning"]
     assets.write_geoparquet(path, points=points, null_rows=set(range(len(points))))
     assert [f["severity"] for f in _findings(tmp_path, "PTL-DAT-007")] == ["error"]
