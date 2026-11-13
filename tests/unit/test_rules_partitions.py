@@ -143,7 +143,7 @@ def test_unlistable_glob_is_rejected(catalog: CatalogBuilder, glob: str) -> None
     assert len(findings) == 1
     assert findings[0].severity.value == "error"
     assert findings[0].json_pointer == "/partition:glob"
-    assert "s3://" in findings[0].fix_hint
+    assert findings[0].fix_hint == "use the absolute bucket URL, e.g. 's3://bucket/data/*.parquet'"
 
 
 @pytest.mark.parametrize(
