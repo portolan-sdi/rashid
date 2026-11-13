@@ -557,12 +557,28 @@ class BandPlacementRule(Rule):
                 )
 
 
+def _legend(classes: Any) -> dict[int, Any]:
+    """Class value -> name for each class with an integer value."""
+    if not isinstance(classes, list):
+        return {}
+    return {
+        entry["value"]: entry.get("name")
+        for entry in classes
+        if isinstance(entry, dict) and _is_integer(entry.get("value"))
+    }
+
+
+def _same_place(template: ClassList, found: ClassList) -> bool:
+    return template.band_field != "raster:bands" and template.band_index == found.band_index
+
+
 class ItemAssetClassesRule(Rule):
     """A collection of scene items repeats the class lists in ``item_assets``.
 
     A client builds a legend from the collection alone, without opening an
     item, only when the collection's ``item_assets`` template has the classes
-    its items' assets declare, in the same place.
+    its items' assets declare, in the same place, with the same values and
+    names.
     """
 
     id = "PTL-CLS-006"
@@ -573,8 +589,8 @@ class ItemAssetClassesRule(Rule):
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         templates = node.data.get("item_assets")
-        templates = templates if isinstance(templates, dict) else {}
-        missing: dict[tuple[str, int | None], str] = {}
+        templates = templates if isinstance(templates, dict) else None
+        reported: set[tuple[str, int | None]] = set()
         for item in graph.items_of(node):
             assets = item.data.get("assets")
             if not isinstance(assets, dict):
@@ -583,21 +599,63 @@ class ItemAssetClassesRule(Rule):
                 if not isinstance(asset, dict):
                     continue
                 for found in asset_class_lists("", asset):
-                    if found.band_field == "raster:bands":
+                    if found.band_field == "raster:bands" or (key, found.band_index) in reported:
                         continue
-                    template = templates.get(key)
-                    if (key, found.band_index) in missing or (
-                        isinstance(template, dict) and _has_classes(template, found.band_index)
-                    ):
-                        continue
-                    missing[(key, found.band_index)] = item.path.as_posix()
-        for (key, index), example in missing.items():
-            where = "the asset" if index is None else f"band {index}"
-            place = "" if index is None else f"bands/{index}/"
-            yield self.finding(
-                node,
-                f"items such as {example} have classes on asset '{key}' {where},"
-                f" but item_assets/{key} does not",
-                json_pointer=json_pointer("item_assets", key),
-                fix_hint=f"copy the class list into item_assets/{key}/{place}{CLASSES_FIELD}",
+                    finding = self._compare(node, item, key, found, templates)
+                    if finding is not None:
+                        reported.add((key, found.band_index))
+                        yield finding
+
+    def _compare(
+        self,
+        node: Node,
+        item: Node,
+        key: str,
+        found: ClassList,
+        templates: dict[str, Any] | None,
+    ) -> Finding | None:
+        """The finding for one item list against its template, if they disagree."""
+        template = templates.get(key) if templates is not None else None
+        place = f"asset '{key}'"
+        if found.band_index is not None:
+            place = f"band {found.band_index} of {place}"
+        example = item.path.as_posix()
+        matches = [
+            listed
+            for listed in (
+                asset_class_lists(json_pointer("item_assets", key), template)
+                if isinstance(template, dict)
+                else []
             )
+            if _same_place(listed, found)
+        ]
+        if not matches:
+            target = "" if found.band_index is None else f"bands/{found.band_index}/"
+            if isinstance(template, dict):
+                pointer = json_pointer("item_assets", key)
+            elif templates is not None:
+                pointer = json_pointer("item_assets")
+            else:
+                pointer = ""
+            return self.finding(
+                node,
+                f"items such as {example} have classes on {place}, but item_assets/{key} does not",
+                json_pointer=pointer,
+                fix_hint=f"copy the class list into item_assets/{key}/{target}{CLASSES_FIELD}",
+            )
+        ours, theirs = _legend(found.classes), _legend(matches[0].classes)
+        differing = sorted(
+            value
+            for value in ours.keys() | theirs.keys()
+            if ours.get(value, _ABSENT) != theirs.get(value, _ABSENT)
+        )
+        if not differing:
+            return None
+        return self.finding(
+            node,
+            f"item_assets/{key} classes differ from those on {place} of items such as"
+            f" {example} at values {differing}",
+            json_pointer=matches[0].pointer,
+            fix_hint="give the template the same class values and names as the items",
+            actual=differing,
+        )

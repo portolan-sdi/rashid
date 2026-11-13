@@ -399,7 +399,9 @@ def _scene_catalog(catalog: CatalogBuilder, template: dict[str, Any] | None) -> 
 def test_item_classes_missing_from_item_assets_warn_once(catalog: CatalogBuilder) -> None:
     findings = findings_for(validate(_scene_catalog(catalog, None)), "PTL-CLS-006")
     assert len(findings) == 1
-    assert findings[0].json_pointer == "/item_assets/data"
+    # The collection has no item_assets, so the finding points at its root.
+    assert findings[0].json_pointer == ""
+    assert "on band 0 of asset 'data'," in findings[0].message
     assert findings[0].severity.value == "warning"
     assert "item_assets/data/bands/0/classification:classes" in findings[0].fix_hint
 
@@ -408,7 +410,26 @@ def test_item_assets_without_the_band_classes_warn(catalog: CatalogBuilder) -> N
     template = _raster_asset()
     del template["bands"][0]["classification:classes"]
     findings = findings_for(validate(_scene_catalog(catalog, template)), "PTL-CLS-006")
-    assert len(findings) == 1
+    assert [f.json_pointer for f in findings] == ["/item_assets/data"]
+
+
+def test_item_assets_without_the_asset_key_point_at_item_assets(catalog: CatalogBuilder) -> None:
+    root = _scene_catalog(catalog, None)
+    mutate_json(_collection(root), lambda data: data.update(item_assets={"other": {}}))
+    findings = findings_for(validate(root), "PTL-CLS-006")
+    assert [f.json_pointer for f in findings] == ["/item_assets"]
+
+
+def test_item_assets_with_other_classes_warn(catalog: CatalogBuilder) -> None:
+    template = _raster_asset()
+    classes = template["bands"][0]["classification:classes"]
+    classes[1]["name"] = "urban"
+    classes.pop()
+    findings = findings_for(validate(_scene_catalog(catalog, template)), "PTL-CLS-006")
+    assert [f.json_pointer for f in findings] == [
+        "/item_assets/data/bands/0/classification:classes"
+    ]
+    assert findings[0].actual == [1, 4]
 
 
 def test_item_assets_with_the_classes_pass(catalog: CatalogBuilder) -> None:
@@ -428,6 +449,7 @@ def test_single_band_item_classes_missing_from_item_assets_warn(catalog: Catalog
         mutate_json(path, lambda data: data.update(assets={"data": _single_band_asset()}))
     findings = findings_for(validate(root), "PTL-CLS-006")
     assert len(findings) == 1
+    assert "on asset 'data'," in findings[0].message
     assert "item_assets/data/classification:classes" in findings[0].fix_hint
 
 
