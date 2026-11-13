@@ -103,7 +103,8 @@ def _optional_passes(
         )
     if options.schema and not config.disabled >= check_ids("schema", enables_pass_only=True):
         findings.extend(
-            _stage(
+            f
+            for f in _stage(
                 "schema",
                 lambda: validate_schema(
                     graph,
@@ -112,6 +113,7 @@ def _optional_passes(
                     schema_map=options.schema_map,
                 ),
             )
+            if f.rule_id not in config.disabled
         )
     if options.data and not config.disabled >= check_ids("data", enables_pass_only=True):
         findings.extend(

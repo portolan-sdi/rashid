@@ -88,7 +88,7 @@ rashid check path/to/catalog --schema \
   --schema-map https://schemas.portolan-sdi.org/portolan/v0.3.0/schema.json=path/to/schema.json
 ```
 
-The URI must match the profile URI in the root catalog. The local JSON object overrides bundled and fetched schemas for that run. Repeat `--schema-map` for more URIs. Each later mapping for a URI replaces its earlier mapping. A malformed mapping, unreadable file, or invalid JSON produces a usage error.
+The URI must match the profile URI in the root catalog and must not contain `=`. The local JSON object overrides bundled and fetched schemas for that run. Repeat `--schema-map` for more URIs. Each later mapping for a URI replaces its earlier mapping. A malformed mapping, unreadable file, or invalid JSON produces a usage error. `--schema-map` also requires `--schema`. Each unused URI produces a `PTL-SCH-002` warning with the selected and declared profile URIs.
 
 The extension pass uses the versions that the profile's extension registry pins. rashid packages those schemas, so a catalog at the pinned versions needs no network. A catalog that declares an older version of a registered extension is checked against that version's schema, which rashid fetches over https. rashid reports an extension outside the registry as an info finding rather than validating it. Use `--schema-allow-network` to fetch and check such a schema.
 

@@ -170,7 +170,8 @@ def main(
     multiple=True,
     metavar="URI=PATH",
     help="Use a local JSON file for a profile schema URI with --schema. Repeat for "
-    "more URIs. Later mappings replace earlier ones. Overrides bundled and fetched copies.",
+    "more URIs. The URI must not contain '='. Later mappings replace earlier ones. "
+    "Overrides bundled and fetched copies. Unused mappings produce a warning.",
 )
 @click.option(
     "--schema-allow-network",
@@ -242,6 +243,8 @@ def check(  # noqa: PLR0913, PLR0917 - Click passes one argument per CLI option
     CATALOG is the catalog directory, or the catalog.json inside it, or the
     https URL the catalog is published under. For a URL rashid follows the
     links from the root catalog and runs the hosting checks by default."""
+    if schema_map and not schema:
+        raise click.UsageError("--schema-map requires --schema.")
     if list_all and force_summary:
         raise click.UsageError("--all and --summary ask for opposite things.")
     if data_scope != "all" and not data:

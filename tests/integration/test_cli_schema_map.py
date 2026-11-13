@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from rashid import _trace
+from rashid import RulesConfig, ValidationOptions, _trace, validate
 from rashid.cli import SchemaMapping, main
 from tests._https import HttpsServer, Route
 from tests.conftest import PORTOLAN_URI, CatalogBuilder
@@ -72,7 +72,11 @@ def test_draft_map_validates_every_object_once(
 
     assert result.exit_code == 1, result.output
     findings = json.loads(result.output)["findings"]
-    schema_findings = [f for f in findings if f["rule_id"].startswith("PTL-SCH-")]
+    schema_findings = [f for f in findings if f["rule_id"] == "PTL-SCH-001"]
+    unused_findings = [f for f in findings if f["rule_id"] == "PTL-SCH-002"]
+    assert len(unused_findings) == 1
+    assert PORTOLAN_URI in unused_findings[0]["message"]
+    assert DRAFT_URI in unused_findings[0]["message"]
     assert {f["path"] for f in schema_findings} == {
         "catalog.json",
         "roads/collection.json",
@@ -108,6 +112,7 @@ def test_mapping_overrides_bundled_schema_without_cache_leak(
     "value",
     [
         "missing-equals",
+        DRAFT_URI,
         "=schema.json",
         "relative=schema.json",
         DRAFT_URI + "=",
@@ -148,3 +153,67 @@ def test_bad_schema_files_are_usage_errors(
 def test_schema_mapping_accepts_an_already_converted_value() -> None:
     value = (DRAFT_URI, {"required": ["proof"]})
     assert SchemaMapping().convert(value, None, None) is value
+
+
+@pytest.mark.parametrize("schema_flags", [[], ["--no-schema"]])
+def test_schema_map_requires_the_profile_pass(
+    catalog: CatalogBuilder, tmp_path: Path, schema_flags: list[str]
+) -> None:
+    path = _schema_file(tmp_path, "schema.json", {})
+    result = CliRunner().invoke(
+        main,
+        ["check", str(catalog.write()), *schema_flags, "--schema-map", f"{PORTOLAN_URI}={path}"],
+    )
+    assert result.exit_code == 2
+    assert "--schema-map requires --schema" in result.output
+
+
+@pytest.mark.parametrize(
+    "unused_uri",
+    [
+        PORTOLAN_URI.replace("https:", "http:"),
+        PORTOLAN_URI + "/",
+        PORTOLAN_URI.replace("v0.2.0", "v0.1.0"),
+    ],
+)
+def test_unused_map_warns_even_when_the_bundled_schema_passes(
+    catalog: CatalogBuilder, tmp_path: Path, unused_uri: str
+) -> None:
+    path = _schema_file(tmp_path, "reject.json", {"required": ["local_proof"]})
+    result = CliRunner().invoke(
+        main, [*_FLAGS, str(catalog.write()), "--schema-map", f"{unused_uri}={path}"]
+    )
+    assert result.exit_code == 0, result.output
+    findings = json.loads(result.output)["findings"]
+    schema_findings = [f for f in findings if f["rule_id"].startswith("PTL-SCH-")]
+    assert len(schema_findings) == 1
+    warning = schema_findings[0]
+    assert warning["rule_id"] == "PTL-SCH-002"
+    assert warning["severity"] == "warning"
+    assert unused_uri in warning["message"]
+    assert PORTOLAN_URI in warning["message"]
+
+
+def test_unused_map_diagnostic_can_be_disabled_without_skipping_validation(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.overrides["title"] = None
+    options = ValidationOptions(
+        rules=[],
+        structural=False,
+        extensions=False,
+        data=False,
+        schema=True,
+        schema_map={DRAFT_URI: {}},
+        config=RulesConfig(disabled=frozenset({"PTL-SCH-002"})),
+    )
+    report = validate(catalog.write(), options=options)
+    assert report.errors
+    assert all(f.rule_id == "PTL-SCH-001" for f in report.errors)
+    assert report.warnings == []
+
+
+def test_help_states_the_schema_uri_delimiter_limit() -> None:
+    result = CliRunner().invoke(main, ["check", "--help"])
+    assert result.exit_code == 0
+    assert "URI must not contain '='" in " ".join(result.output.split())
