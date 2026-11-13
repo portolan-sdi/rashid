@@ -16,6 +16,13 @@ def _properties(node: Node) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def has_datetime(fields: dict[str, Any]) -> bool:
+    """Whether ``fields`` carry a datetime or both ends of an interval."""
+    return fields.get("datetime") is not None or (
+        fields.get("start_datetime") is not None and fields.get("end_datetime") is not None
+    )
+
+
 class DatetimePresentRule(Rule):
     """Items carry a datetime or a start/end interval (SHOULD)."""
 
@@ -26,12 +33,7 @@ class DatetimePresentRule(Rule):
     kinds = ("item",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        props = _properties(node)
-        has_datetime = props.get("datetime") is not None
-        has_interval = (
-            props.get("start_datetime") is not None and props.get("end_datetime") is not None
-        )
-        if not has_datetime and not has_interval:
+        if not has_datetime(_properties(node)):
             yield self.finding(
                 node,
                 "item has no datetime and no complete start_datetime/end_datetime interval",

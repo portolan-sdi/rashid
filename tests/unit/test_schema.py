@@ -9,6 +9,7 @@ reachable.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -382,3 +383,20 @@ def test_root_self_link_passes_both_passes(catalog: CatalogBuilder) -> None:
     errors = [f for f in report.findings if f.severity is Severity.ERROR]
     assert errors == [], errors
     assert _schema_uri_for(CatalogGraph.load(root)) == PORTOLAN_URI
+
+
+def test_injected_validator_leaves_schema_map_unused(catalog: CatalogBuilder) -> None:
+    findings = validate_schema(
+        _graph(catalog),
+        validator=lambda data: [],
+        schema_map={PORTOLAN_URI: {"required": ["never_applied"]}},
+    )
+    assert [f.rule_id for f in findings] == ["PTL-SCH-002"]
+    assert PORTOLAN_URI in findings[0].message
+
+
+def test_empty_graph_does_not_use_a_schema_map(tmp_path: Path) -> None:
+    graph = CatalogGraph(root_path=tmp_path)
+    findings = validate_schema(graph, schema_map={DEFAULT_SCHEMA_URI: {}})
+    assert [f.rule_id for f in findings] == ["PTL-SCH-002"]
+    assert "declared profile URIs: (none)" in findings[0].message

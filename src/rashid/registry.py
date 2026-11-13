@@ -22,6 +22,7 @@ from rashid.rules.assets import (
     ChecksumMultihashRule,
     CogMediaTypeRule,
     CollectionDataRule,
+    DataAssetSingleFileRule,
     ItemDataRule,
     PMTilesDataRule,
 )
@@ -77,6 +78,8 @@ from rashid.rules.versions import VersionChainRule
 from rashid.rules.viz import (
     DefaultStyleRoleRule,
     LargeVectorWithoutVisualRule,
+    MosaicOverviewRule,
+    OverviewDatetimeRule,
     PMTilesRegistrationRule,
     StyleMediaTypeRule,
     StylesForDerivativeRule,
@@ -134,6 +137,7 @@ STR_INVALID = "PTL-STR-001"
 STR_UNAVAILABLE = "PTL-STR-000"
 SCH_INVALID = "PTL-SCH-001"
 SCH_UNAVAILABLE = "PTL-SCH-000"
+SCH_UNUSED_MAP = "PTL-SCH-002"
 EXT_INVALID = "PTL-EXT-001"
 EXT_UNAVAILABLE = "PTL-EXT-000"
 EXT_UNVALIDATED = "PTL-EXT-002"
@@ -155,6 +159,9 @@ DAT_PARTITION_SCHEMA = "PTL-DAT-014"
 DAT_TABULAR = "PTL-DAT-015"
 DAT_MIRROR = "PTL-DAT-016"
 DAT_VECTOR_COLUMNS = "PTL-DAT-017"
+DAT_OVERVIEW_FORMAT = "PTL-DAT-018"
+DAT_SCENE_MASK = "PTL-DAT-019"
+DAT_COLUMN_DESCRIPTIONS = "PTL-DAT-020"
 ZAR_STORE_VERSION = "PTL-ZAR-001"
 ZAR_CONVENTIONS = "PTL-ZAR-002"
 ZAR_CORS = "PTL-ZAR-003"
@@ -212,6 +219,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     NoProprietaryLicenseRule(),
     AssetFieldsRule(),
     AssetHrefSchemeRule(),
+    DataAssetSingleFileRule(),
     CogMediaTypeRule(),
     AssetFileFieldsRule(),
     ChecksumMultihashRule(),
@@ -234,6 +242,8 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     StyleMediaTypeRule(),
     DefaultStyleRoleRule(),
     LargeVectorWithoutVisualRule(),
+    MosaicOverviewRule(),
+    OverviewDatetimeRule(),
     PartitionFieldsRule(),
     PartitionGlobSchemeRule(),
     SingleFileCollectionRule(),
@@ -334,6 +344,15 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         Severity.ERROR,
         ("PORTO-CORE-006",),
         stage="schema",
+    ),
+    CheckInfo(
+        SCH_UNUSED_MAP,
+        "every profile schema mapping applies to a validated document",
+        Severity.WARNING,
+        (),
+        stage="schema",
+        enables_pass=False,
+        spec_note="An unused schema map reports caller configuration, not a spec requirement.",
     ),
     CheckInfo(
         DAT_UNAVAILABLE,
@@ -461,6 +480,27 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         "a GeoParquet data asset's columns are documented with table:columns",
         Severity.WARNING,
         ("PORTO-FMT-046", "PORTO-FMT-047", "PORTO-FMT-048", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_OVERVIEW_FORMAT,
+        "a collection overview COG is 8-bit RGB with an optional alpha band",
+        Severity.WARNING,
+        ("PORTO-FMT-068",),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_SCENE_MASK,
+        "an imagery scene declares nodata or carries an alpha band or mask",
+        Severity.WARNING,
+        ("PORTO-FMT-073",),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_COLUMN_DESCRIPTIONS,
+        "every table:columns entry of a data asset carries a description",
+        Severity.WARNING,
+        ("PORTO-FMT-077",),
         stage="data",
     ),
     CheckInfo(
@@ -600,35 +640,35 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
     ),
     CheckInfo(
         LIV_RANGE,
-        "the server honors ranged GET with 206 and Accept-Ranges: bytes",
+        "the server honors ranged GET of a partial-read file with 206 and Accept-Ranges: bytes",
         Severity.ERROR,
         ("PORTO-CORE-043", "PORTO-CORE-073"),
         stage="live",
     ),
     CheckInfo(
         LIV_HEAD_LENGTH,
-        "HEAD returns a Content-Length matching the declared file:size",
+        "HEAD of a partial-read file returns a Content-Length matching the declared file:size",
         Severity.ERROR,
         ("PORTO-CORE-043", "PORTO-CORE-073"),
         stage="live",
     ),
     CheckInfo(
         LIV_CORS_ORIGIN,
-        "the server allows the requesting CORS origin",
+        "the server allows the requesting CORS origin for metadata and asset files",
         Severity.ERROR,
-        ("PORTO-CORE-045", "PORTO-CORE-073"),
+        ("PORTO-CORE-086", "PORTO-CORE-073"),
         stage="live",
     ),
     CheckInfo(
         LIV_CORS_EXPOSE,
-        "the server exposes the headers a browser client reads",
+        "the server exposes the range headers a browser reads from a partial-read file",
         Severity.ERROR,
         ("PORTO-CORE-045", "PORTO-CORE-073"),
         stage="live",
     ),
     CheckInfo(
         LIV_CORS_PREFLIGHT,
-        "CORS preflight accepts GET and HEAD with Range",
+        "CORS preflight for a partial-read file allows Range and the conditional headers",
         Severity.ERROR,
         ("PORTO-CORE-045", "PORTO-CORE-073"),
         stage="live",
@@ -637,7 +677,7 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         LIV_LINK_TARGET,
         "every link target under the publish base answers HEAD with 2xx",
         Severity.ERROR,
-        ("PORTO-CORE-035", "PORTO-CORE-036", "PORTO-CORE-073"),
+        ("PORTO-CORE-035", "PORTO-CORE-036", "PORTO-CORE-086", "PORTO-CORE-073"),
         stage="live",
     ),
     CheckInfo(

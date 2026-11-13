@@ -37,11 +37,21 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   count, ids, geometry, datetime, or bbox (MUST, formats.md, Raster § Item
   mirror). A mirror runs the GeoParquet checks above as well: the spec binds
   it to them like any other spatial table.
+- ``PTL-DAT-018`` a collection overview COG (``visual`` and ``overview`` roles) is not 8-bit
+  RGB with an optional alpha band (SHOULD, formats.md, Raster)
+- ``PTL-DAT-019`` an imagery scene, an item-level data COG with three or more
+  bands and no mask role, has no nodata value, alpha band, or mask (SHOULD,
+  formats.md, Imagery)
+- ``PTL-DAT-020`` a ``table:columns`` entry of a data asset, or of a
+  partitioned collection with no data asset, has no description (SHOULD,
+  formats.md, Vector Data)
 
 The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
 run over an asset and over every file a local relative ``partition:glob``
 matches. A partitioned collection publishes its data through the glob and
 declares no ``data`` asset, so the glob is the only place those bytes appear.
+A conformant glob is an absolute bucket URL, which rashid does not list, so
+these checks reach partition files only through a relative glob.
 Each rule reports once per collection, at ``/partition:glob``, naming how many
 partition files failed.
 
@@ -72,14 +82,16 @@ from rashid.catalog import CatalogGraph, Node
 from rashid.data import DataDefect, DataResults
 from rashid.data._files import AssetFiles
 from rashid.data.geoparquet import (
+    check_column_descriptions,
     check_geoparquet,
+    check_partitioned_column_descriptions,
     check_tabular,
     check_vector_columns,
     geo_from_parquet,
 )
 from rashid.data.mirror import check_mirror
 from rashid.data.partitions import check_partitions
-from rashid.data.raster import check_raster, geo_from_raster
+from rashid.data.raster import check_display, check_raster, geo_from_raster
 from rashid.data.reader import AssetReader
 from rashid.data.spatial import (
     Geo,
@@ -150,6 +162,7 @@ def check_node(
     schemas, partitions, total = check_partitions(node, reader)
     results.extend(schemas)
     results.extend(partitions, partition_total=total)
+    results.extend(check_partitioned_column_descriptions(node))
     for _pointer, key, asset in assets_of(node):
         href = asset.get("href")
         if not isinstance(href, str) or not href:
@@ -231,10 +244,12 @@ def _check_asset(
             defects.extend(check_mirror(node, key, files, graph))
         if expected == "tiff":
             defects.extend(check_raster(key, located, files))
+            defects.extend(check_display(node, key, asset, files))
         if expected == "parquet":
             defects.extend(check_geoparquet(key, files))
             defects.extend(check_tabular(node, key, asset, files))
             defects.extend(check_vector_columns(node, key, asset, files))
+            defects.extend(check_column_descriptions(node, key, asset))
         if expected in {"parquet", "tiff", "pmtiles"}:
             consistency, bounds, complete = _check_consistency(
                 node, key=key, asset=asset, expected=expected, files=files

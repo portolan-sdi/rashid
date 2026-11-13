@@ -20,9 +20,13 @@ from collections.abc import Iterable
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import assets_of, is_raster_data_asset, roles_of
+from rashid.rules._common import (
+    PARQUET_MEDIA_TYPE,
+    assets_of,
+    is_raster_data_asset,
+    roles_of,
+)
 
-PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
 MIRROR_ROLE = "collection-mirror"
 MIRROR_FILENAME = "items.parquet"
 

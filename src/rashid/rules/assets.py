@@ -132,6 +132,43 @@ class AssetHrefSchemeRule(Rule):
                 )
 
 
+class DataAssetSingleFileRule(Rule):
+    """A data asset's href names one file, not a glob.
+
+    formats.md: "Each data asset links to only one file. Its `href` MUST NOT
+    contain `*` or `[`. It MAY include a query string." The whole href counts,
+    query and fragment included. A ``[`` inside the authority is an IPv6 host,
+    not a glob. A percent-encoded ``%2A`` or ``%5B`` is not a glob character.
+    """
+
+    id = "PTL-AST-012"
+    spec_ids = ("PORTO-FMT-065",)
+    default_severity = Severity.ERROR
+    description = "a data asset's href must link to one file, without * or ["
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in assets_of(node):
+            href = asset.get("href")
+            if "data" not in roles_of(asset) or not isinstance(href, str):
+                continue
+            parsed = split_href(href)
+            if parsed is None:
+                continue  # PTL-LNK-006 reports a malformed URI reference
+            head, authority, tail = href.partition(f"//{parsed.netloc}")
+            outside = head + tail if parsed.netloc and authority else href
+            if "*" not in href and "[" not in outside:
+                continue
+            yield self.finding(
+                node,
+                f"data asset '{key}' href is a glob; a data asset links to one file",
+                json_pointer=json_pointer("href", prefix=pointer),
+                fix_hint="link each file in its own asset or item, or set partition:glob"
+                " on the collection",
+                actual=href,
+            )
+
+
 class CogMediaTypeRule(Rule):
     """Primary raster data declares the required COG media type.
 
