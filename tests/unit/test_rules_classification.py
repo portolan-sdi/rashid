@@ -392,6 +392,16 @@ def test_source_asset_classes_keep_the_extension_class_object(catalog: CatalogBu
     assert [f.json_pointer for f in findings] == [f"{_POINTER}/1/name"]
 
 
+@pytest.mark.parametrize("title", [7, None])
+def test_source_asset_class_title_must_be_a_string(catalog: CatalogBuilder, title: Any) -> None:
+    def source(data: dict[str, Any]) -> None:
+        data["assets"]["data"]["roles"] = ["source"]
+        _classes(data)[1]["title"] = title
+
+    findings = findings_for(validate(_built(catalog, source)), "PTL-CLS-002")
+    assert [f.json_pointer for f in findings] == [f"{_POINTER}/1/title"]
+
+
 def test_object_level_classes_belong_on_the_data_asset(catalog: CatalogBuilder) -> None:
     def top(data: dict[str, Any]) -> None:
         data["classification:classes"] = _flood_classes()

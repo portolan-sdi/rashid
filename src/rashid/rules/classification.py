@@ -222,6 +222,18 @@ def _field_at(pointer: str, entry: dict[str, Any], field: str) -> str:
     return json_pointer(field, prefix=pointer) if field in entry else pointer
 
 
+def _title_problem(entry: dict[str, Any], *, source: bool) -> bool:
+    """Whether a class lacks the title it needs.
+
+    PORTO-FMT-052 requires a readable title, but a source asset is exempt
+    (PORTO-FMT-045) and needs only the extension's string type when present.
+    """
+    title = entry.get("title")
+    if source:
+        return "title" in entry and not isinstance(title, str)
+    return not isinstance(title, str) or not title.strip()
+
+
 def is_integer(value: Any) -> TypeGuard[int]:
     """A JSON integer as draft-07 reads it: 1 or 1.0, but neither true nor 1.5."""
     # JSON true is a Python int; the schema's integer type excludes it.
@@ -296,9 +308,7 @@ class ClassListRule(Rule):
                 continue
             yield from self._check_value(node, pointer, entry, values)
             yield from self._check_name(node, pointer, entry, names)
-            if not found.source and (
-                not isinstance(entry.get("title"), str) or not entry["title"].strip()
-            ):
+            if _title_problem(entry, source=found.source):
                 yield self.finding(
                     node,
                     f"class {pointer} has no title",
