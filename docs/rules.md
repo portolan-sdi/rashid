@@ -25,7 +25,7 @@ Severities follow the Portolan specification. MUST requirements produce errors, 
 - `PTL-EXT-002` produces an info finding when an object declares an extension the profile's registry does not list. The finding records that rashid did not validate against that schema. It does not claim the object is wrong.
 - `PTL-EXT-000` produces a warning when one extension schema cannot be fetched or resolved. rashid reports it once for each URI and validates every other extension.
 - `PTL-VIZ-004` produces an info finding when a large vector lacks a visual derivative. The render-path MUST depends on whether source rendering is viable, which metadata cannot prove. The 100 MB threshold is also heuristic.
-- `PTL-VIZ-007` treats a collection as a spatial mosaic when items with raster data sit at three or more distinct bboxes, and each item's bbox covers at most half of the collection's extent. Metadata cannot show that the items share bands and a time period, so the rule stays silent for fewer or larger items.
+- `PTL-VIZ-007` treats a collection as a spatial mosaic when its raster items have three or more distinct bboxes. Each item's bbox must cover at most half of the collection's extent. Metadata cannot show that the items share bands and a time, so rashid reports nothing for fewer or larger items.
 
 `PTL-CNF-004` reads `src/rashid/_schemas/extension-registry.json`. This file contains the profile's registry table from `stac/README.md` in the specification.
 
