@@ -1507,6 +1507,15 @@ def test_nodata_class_hint_is_compared_too(tmp_path: Path) -> None:
     ]
 
 
+def test_unmarked_nodata_class_is_left_to_the_metadata_rule(tmp_path: Path) -> None:
+    # PTL-CLS-003 compares the class with the metadata nodata (PORTO-FMT-057).
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    asset = _classified_asset()
+    del asset["bands"][0]["classification:classes"][0]["nodata"]
+    assert _raster(path, asset) == []
+
+
 def test_malformed_hint_is_left_to_the_metadata_rule(tmp_path: Path) -> None:
     # PTL-CLS-002 reports a '#'-prefixed hint, so the data pass does not.
     path = tmp_path / "flood.tif"

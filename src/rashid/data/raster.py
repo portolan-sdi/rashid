@@ -173,7 +173,8 @@ def _check_class_placement(key: str, asset: dict[str, Any], files: AssetFiles) -
     ``PTL-CLS-005`` judges placement by the band count the metadata declares.
     When that disagrees with the file, the file decides: a multi-band file
     needs the list on a band in ``bands``, a single-band file on the asset,
-    and no list may describe a band the file lacks.
+    and no list may describe a band the file lacks, since formats.md asks
+    that it "accompany the band it describes".
     """
     every = asset_class_lists(json_pointer("assets", key), asset)
     lists = [found for found in every if found.band_field != "raster:bands"]
