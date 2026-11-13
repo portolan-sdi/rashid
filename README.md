@@ -81,6 +81,15 @@ rashid provides six separate validation passes:
 
 Metadata, structural, extension, and data checks run by default. The live hosting pass also runs by default for a catalog URL. Use `--schema` as a cross-check against the published profile schema. Use `--live` to run the hosting checks on a directory.
 
+To validate a draft profile before its release, use `--schema-map URI=PATH` with `--schema`:
+
+```bash
+rashid check path/to/catalog --schema \
+  --schema-map https://schemas.portolan-sdi.org/portolan/v0.3.0/schema.json=path/to/schema.json
+```
+
+The URI must match the profile URI in the root catalog and must not contain `=`. The local JSON object overrides bundled and fetched schemas for that run. Repeat `--schema-map` for more URIs. Each later mapping for a URI replaces its earlier mapping. A malformed mapping, unreadable file, or invalid JSON produces a usage error. `--schema-map` also requires `--schema`. Each unused URI produces a `PTL-SCH-002` warning with the selected and declared profile URIs.
+
 The extension pass uses the versions that the profile's extension registry pins. rashid packages those schemas, so a catalog at the pinned versions needs no network. A catalog that declares an older version of a registered extension is checked against that version's schema, which rashid fetches over https. rashid reports an extension outside the registry as an info finding rather than validating it. Use `--schema-allow-network` to fetch and check such a schema.
 
 If a pass cannot run, rashid reports a warning. It does not treat the skipped pass as successful.

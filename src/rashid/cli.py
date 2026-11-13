@@ -9,11 +9,12 @@ from __future__ import annotations
 import json as json_module
 import os
 from pathlib import Path
+from typing import Any
 
 import click
 
-from rashid import ValidationOptions, _trace
-from rashid._href import is_catalog_url
+from rashid import ValidationOptions, _json, _trace
+from rashid._href import is_catalog_url, is_uri_reference, split_href
 from rashid.data.reader import LocalOnlyReader
 from rashid.model import Report, Severity
 from rashid.runner import validate
@@ -56,6 +57,37 @@ class CatalogLocation(click.ParamType[Path | str]):
         if not path.exists():
             self.fail(f"Path {str(value)!r} does not exist.", param, ctx)
         return path
+
+
+class SchemaMapping(click.ParamType[tuple[str, dict[str, Any]]]):
+    """An explicit profile URI and its local JSON schema object."""
+
+    name = "schema mapping"
+
+    def convert(
+        self, value: object, param: click.Parameter | None, ctx: click.Context | None
+    ) -> tuple[str, dict[str, Any]]:
+        if isinstance(value, tuple):
+            return value
+        uri, separator, filename = str(value).partition("=")
+        parsed = split_href(uri)
+        if (
+            not separator
+            or not filename
+            or not is_uri_reference(uri)
+            or not parsed
+            or not parsed.scheme
+        ):
+            self.fail("expected an absolute schema URI and local path as URI=PATH", param, ctx)
+        try:
+            schema = _json.loads(Path(filename).read_bytes())
+        except OSError as exc:
+            self.fail(f"cannot read schema file {filename!r}: {exc}", param, ctx)
+        except ValueError as exc:
+            self.fail(f"invalid JSON in schema file {filename!r}: {exc}", param, ctx)
+        if not isinstance(schema, dict):
+            self.fail(f"schema file {filename!r} must contain a JSON object", param, ctx)
+        return uri.rstrip("#"), schema
 
 
 @click.group()
@@ -133,6 +165,15 @@ def main(
     help="Also validate against the bundled Portolan profile schema (offline).",
 )
 @click.option(
+    "--schema-map",
+    type=SchemaMapping(),
+    multiple=True,
+    metavar="URI=PATH",
+    help="Use a local JSON file for a profile schema URI with --schema. Repeat for "
+    "more URIs. The URI must not contain '='. Later mappings replace earlier ones. "
+    "Overrides bundled and fetched copies. Unused mappings produce a warning.",
+)
+@click.option(
     "--schema-allow-network",
     is_flag=True,
     help="Fetch a schema this build does not bundle over https: an unbundled "
@@ -186,6 +227,7 @@ def check(  # noqa: PLR0913, PLR0917 - Click passes one argument per CLI option
     extensions: bool,
     schema: bool,
     schema_allow_network: bool,
+    schema_map: tuple[tuple[str, dict[str, Any]], ...],
     data: bool,
     data_scope: str,
     live: bool | None,
@@ -201,6 +243,8 @@ def check(  # noqa: PLR0913, PLR0917 - Click passes one argument per CLI option
     CATALOG is the catalog directory, or the catalog.json inside it, or the
     https URL the catalog is published under. For a URL rashid follows the
     links from the root catalog and runs the hosting checks by default."""
+    if schema_map and not schema:
+        raise click.UsageError("--schema-map requires --schema.")
     if list_all and force_summary:
         raise click.UsageError("--all and --summary ask for opposite things.")
     if data_scope != "all" and not data:
@@ -219,6 +263,7 @@ def check(  # noqa: PLR0913, PLR0917 - Click passes one argument per CLI option
                 extensions=extensions,
                 schema=schema,
                 schema_allow_network=schema_allow_network,
+                schema_map=dict(schema_map),
                 data=data,
                 data_reader_factory=LocalOnlyReader if data_scope == "local" else None,
                 live=live,

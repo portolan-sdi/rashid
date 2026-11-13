@@ -26,15 +26,23 @@ substitute their own.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import lru_cache
 from importlib import resources
 from typing import Any
 
 from rashid import _json
-from rashid._jsonschema import SchemaPass, Validator, fetch_schema, schema_targets
+from rashid._jsonschema import (
+    SchemaError,
+    SchemaPass,
+    Validator,
+    fetch_schema,
+    schema_nodes,
+    schema_targets,
+)
 from rashid.catalog import CatalogGraph
-from rashid.model import Finding
-from rashid.registry import SCH_INVALID, SCH_UNAVAILABLE
+from rashid.model import Finding, Severity
+from rashid.registry import SCH_INVALID, SCH_UNAVAILABLE, SCH_UNUSED_MAP
 from rashid.rules.conformance import declared_schema_uris
 
 # The pinned v0.1 profile schema, used when the root declares no single URI.
@@ -132,14 +140,43 @@ def default_validator(
     )
 
 
+def _unused_schema_mappings(
+    graph: CatalogGraph,
+    schema_map: Mapping[str, dict[str, Any]],
+    used: set[str],
+    selected: str,
+) -> list[Finding]:
+    """Report ignored caller configuration separately from schema availability."""
+    declared = sorted({uri for node in schema_nodes(graph) for uri in declared_schema_uris(node)})
+    return [
+        Finding(
+            rule_id=SCH_UNUSED_MAP,
+            severity=Severity.WARNING,
+            message=(
+                f"unused profile schema mapping {uri!r}; selected schema URI {selected!r}; "
+                f"declared profile URIs: {', '.join(declared) or '(none)'}"
+            ),
+            path=".",
+            fix_hint="match --schema-map URI to the root catalog's profile URI, or remove the mapping",
+        )
+        for uri in sorted(schema_map.keys() - used)
+    ]
+
+
 def validate_schema(
     graph: CatalogGraph,
     validator: Validator | None = None,
     schema_uri: str | None = None,
     *,
     allow_network: bool = False,
+    schema_map: Mapping[str, dict[str, Any]] | None = None,
 ) -> list[Finding]:
     """Validate every catalog, collection, and item against the profile schema.
+
+    ``schema_map`` maps profile URIs (without a trailing ``#``) to local schema
+    objects. A matching entry takes precedence over bundled and fetched copies.
+    The selected schema is compiled once for the whole graph, with no global cache.
+    Each unused map key produces a ``PTL-SCH-002`` warning with the observed URIs.
 
     Returns ``PTL-SCH-001`` errors for each schema failure. The schema comes
     from the bundled copies in the wheel; a version this build does not carry
@@ -148,11 +185,26 @@ def validate_schema(
     failed fetch), returns a single ``PTL-SCH-000`` warning instead of failing
     the run — a systemic failure is reported once, not once per object.
     """
-    uri = DEFAULT_SCHEMA_URI
-    if validator is None:
-        uri = schema_uri if schema_uri is not None else _schema_uri_for(graph)
-    return _PASS.run(
+    uri = schema_uri if schema_uri is not None else _schema_uri_for(graph)
+    used: set[str] = set()
+
+    def factory() -> Validator:
+        local_schema = (schema_map or {}).get(uri.rstrip("#"))
+        if local_schema is not None:
+            mapped_validator = validator_from_schema(local_schema)
+
+            def mapped(data: dict[str, Any]) -> list[SchemaError]:
+                used.add(uri.rstrip("#"))
+                return mapped_validator(data)
+
+            return mapped
+        return default_validator(uri, allow_network=allow_network)
+
+    findings = _PASS.run(
         validator,
-        lambda: default_validator(uri, allow_network=allow_network),
+        factory,
         schema_targets(graph, "Portolan profile schema"),
     ).findings
+    if schema_map:
+        findings.extend(_unused_schema_mappings(graph, schema_map, used, uri))
+    return findings

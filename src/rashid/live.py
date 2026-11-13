@@ -43,8 +43,8 @@ Range and CORS semantics are server properties, so the GET and OPTIONS probes
 run once per distinct host; only the cheap HEAD runs per asset. Absolute
 ``https`` hrefs are probed as declared; relative hrefs are probed when the
 caller supplies ``base_url`` — the URL the catalog root is published under —
-by joining the root-relative asset path onto it. ``s3`` and friends are
-``PTL-AST-002``'s domain. The pass needs no geospatial stack and lives in core;
+by joining the root-relative asset path onto it. Other absolute schemes
+are ``PTL-AST-002``'s domain, and their ``alternate`` URLs are not probed. The pass needs no geospatial stack and lives in core;
 like every optional pass it degrades to ``PTL-LIV-000`` warnings when it cannot
 probe rather than failing the run.
 

@@ -18,6 +18,7 @@ from rashid.rules.assets import (
     AssetFieldsRule,
     AssetFileFieldsRule,
     AssetHrefSchemeRule,
+    AssetTitleDescriptionRule,
     CatalogAssetsRule,
     ChecksumMultihashRule,
     CogMediaTypeRule,
@@ -28,6 +29,13 @@ from rashid.rules.assets import (
 )
 from rashid.rules.bbox import BboxValidRule
 from rashid.rules.catalogs import SubcatalogFanoutRule
+from rashid.rules.classification import (
+    BandPlacementRule,
+    ClassificationExtensionRule,
+    ClassListRule,
+    ItemAssetClassesRule,
+    NodataClassRule,
+)
 from rashid.rules.collections import (
     CollectionIdRule,
     MissingItemTreeRule,
@@ -121,6 +129,7 @@ STR_INVALID = "PTL-STR-001"
 STR_UNAVAILABLE = "PTL-STR-000"
 SCH_INVALID = "PTL-SCH-001"
 SCH_UNAVAILABLE = "PTL-SCH-000"
+SCH_UNUSED_MAP = "PTL-SCH-002"
 EXT_INVALID = "PTL-EXT-001"
 EXT_UNAVAILABLE = "PTL-EXT-000"
 EXT_UNVALIDATED = "PTL-EXT-002"
@@ -145,6 +154,7 @@ DAT_VECTOR_COLUMNS = "PTL-DAT-017"
 DAT_OVERVIEW_FORMAT = "PTL-DAT-018"
 DAT_SCENE_MASK = "PTL-DAT-019"
 DAT_COLUMN_DESCRIPTIONS = "PTL-DAT-020"
+DAT_CLASS_COLORS = "PTL-DAT-021"
 LIV_UNAVAILABLE = "PTL-LIV-000"
 LIV_RANGE = "PTL-LIV-001"
 LIV_HEAD_LENGTH = "PTL-LIV-002"
@@ -184,6 +194,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     AssetFieldsRule(),
     AssetHrefSchemeRule(),
     DataAssetSingleFileRule(),
+    AssetTitleDescriptionRule(),
     CogMediaTypeRule(),
     AssetFileFieldsRule(),
     ChecksumMultihashRule(),
@@ -210,6 +221,11 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     OverviewDatetimeRule(),
     PartitionFieldsRule(),
     PartitionGlobSchemeRule(),
+    ClassificationExtensionRule(),
+    ClassListRule(),
+    NodataClassRule(),
+    BandPlacementRule(),
+    ItemAssetClassesRule(),
     SingleFileCollectionRule(),
     RasterSceneItemRule(),
     MissingItemTreeRule(),
@@ -225,6 +241,8 @@ _METADATA_SPEC_NOTES = {
     "PTL-CNF-004": "The extension registry pin sentence has no manifest ID.",
     "PTL-VER-001": "The delegated version extension navigation semantics have no manifest ID.",
     "PTL-PRO-004": "The official-catalog upstream-link sentence has no RFC 2119 keyword.",
+    "PTL-CLS-001": "The extension registry row for Classification, a SHOULD for classified"
+    " rasters with classification:classes, has no manifest ID.",
 }
 
 _PASS_CHECKS: tuple[CheckInfo, ...] = (
@@ -308,6 +326,15 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         Severity.ERROR,
         ("PORTO-CORE-006",),
         stage="schema",
+    ),
+    CheckInfo(
+        SCH_UNUSED_MAP,
+        "every profile schema mapping applies to a validated document",
+        Severity.WARNING,
+        (),
+        stage="schema",
+        enables_pass=False,
+        spec_note="An unused schema map reports caller configuration, not a spec requirement.",
     ),
     CheckInfo(
         DAT_UNAVAILABLE,
@@ -456,6 +483,13 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         "every table:columns entry of a data asset carries a description",
         Severity.WARNING,
         ("PORTO-FMT-077",),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_CLASS_COLORS,
+        "a class color_hint matches the COG color table, and the class list fits the file's bands",
+        Severity.ERROR,
+        ("PORTO-FMT-050", "PORTO-FMT-054"),
         stage="data",
     ),
     CheckInfo(
