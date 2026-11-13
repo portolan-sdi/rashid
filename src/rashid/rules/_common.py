@@ -23,6 +23,8 @@ from rashid.model import json_pointer
 STRUCTURAL_RELS = ("root", "parent", "child", "item", "collection")
 
 PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
+PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
+COPC_MEDIA_TYPE = "application/vnd.laszip+copc"
 
 # core.md, Assets: Portolan raster data is COG, declared with this media type.
 # A plain GeoTIFF may appear only as an upstream source, not as primary data.
@@ -103,6 +105,18 @@ def is_cog_media_type(value: object) -> bool:
         return False
     parts = [part.strip().lower() for part in value.split(";")]
     return bool(parts) and parts[0] == _TIFF_MEDIA_TYPE and _COG_PARAMETERS.issubset(parts[1:])
+
+
+def is_partial_read_media_type(value: object) -> bool:
+    """Whether clients read a file of this media type by byte range.
+
+    core.md, Data Storage lists COG, Parquet, PMTiles, and COPC.
+    """
+    return is_cog_media_type(value) or value in (
+        PARQUET_MEDIA_TYPE,
+        PMTILES_MEDIA_TYPE,
+        COPC_MEDIA_TYPE,
+    )
 
 
 def is_raster_data_asset(asset: dict[str, Any]) -> bool:

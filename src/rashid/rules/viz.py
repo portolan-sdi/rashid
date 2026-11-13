@@ -21,6 +21,7 @@ from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import (
+    COPC_MEDIA_TYPE,
     PMTILES_MEDIA_TYPE,
     assets_of,
     declares_geometry,
@@ -48,7 +49,7 @@ def _has_spatial_media_type(node: Node) -> bool:
             isinstance(media_type, str)
             and (
                 is_tiff_media_type(media_type, policy="literal-prefix")
-                or media_type == "application/vnd.laszip+copc"
+                or media_type == COPC_MEDIA_TYPE
             )
         ):
             return True
