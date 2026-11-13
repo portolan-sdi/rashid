@@ -6,14 +6,16 @@ against. Both live upstream in ``portolan-spec`` and drift as the spec evolves,
 so a hand-copied snapshot rots — that rot is exactly the schema-URI-namespace
 break this script exists to catch early.
 
-Running it against a spec checkout refreshes the bundled schemas and four
-fixture sets, and records the spec commit they came from in ``SPEC_REF``:
+Running it against a spec checkout refreshes the bundled schemas and test
+fixtures, and records the spec commit they came from in ``SPEC_REF``:
 
 - ``tests/fixtures/reference-catalog/`` — the JSON and Markdown of the reference
   catalog, binaries stripped (rashid validates metadata, never asset bytes).
 - ``src/rashid/_schemas/portolan/<vX.Y.Z>/schema.json`` — every published
-  profile schema version, discovered on disk, never hardcoded. These ship in
+  profile schema version, discovered from git tags, never hardcoded. These ship in
   the wheel: the schema pass validates against them offline.
+- ``tests/fixtures/draft-profile-schema.json`` — the profile schema on spec main,
+  used only by tests for an unreleased catalog URI. It never ships in the wheel.
 - ``tests/fixtures/profile-examples/`` — the profile's own hand-authored STAC
   example objects (the micro-cases its ``check-portolan`` runs).
 - ``src/rashid/_schemas/extension-registry.json`` — the profile's normative
@@ -26,7 +28,7 @@ fixture sets, and records the spec commit they came from in ``SPEC_REF``:
   against.
 
 Nothing here assumes a single schema version: the schema set is enumerated from
-``stac/json-schema/v*/`` so a new version is vendored the moment it exists.
+the spec checkout's release tags. Only the test fixture includes the draft on main.
 
 Usage::
 
@@ -56,7 +58,8 @@ EXTENSION_REGISTRY_DEST = SCHEMAS_ROOT / "extension-registry.json"
 
 # Relative to the spec checkout root.
 CATALOG_SRC = Path("examples/catalog/portolan-reference")
-SCHEMA_GLOB = "stac/json-schema/v*/schema.json"
+SCHEMA_SRC = "stac/json-schema/schema.json"
+RELEASE_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 PROFILE_EXAMPLES_SRC = Path("stac/examples")
 REQUIREMENTS_SRC = Path("specs/portolan/requirements.yaml")
 EXTENSION_REGISTRY_SRC = Path("stac/README.md")
@@ -109,20 +112,71 @@ def _vendor_catalog(spec: Path) -> int:
     return count
 
 
+def _tagged_schema(spec: Path, tag: str) -> bytes:
+    """Read the single-file layout, or the legacy version folder, at a tag."""
+    for path in (SCHEMA_SRC, f"stac/json-schema/{tag}/schema.json"):
+        ref = f"refs/tags/{tag}:{path}"
+        exists = subprocess.run(
+            ["git", "-C", str(spec), "cat-file", "-e", ref],
+            capture_output=True,
+            check=False,
+        )
+        if exists.returncode == 0:
+            contents = subprocess.run(
+                ["git", "-C", str(spec), "show", ref], capture_output=True, check=True
+            ).stdout
+            _check_schema_id(contents, tag)
+            return contents
+    sys.exit(f"no profile schema found at tag {tag} in {spec}")
+
+
+def _check_schema_id(contents: bytes, tag: str) -> None:
+    """Reject tagged schemas that identify a different profile version."""
+    try:
+        schema = json.loads(contents)
+    except ValueError as exc:
+        sys.exit(f"invalid profile schema JSON at tag {tag}: {exc}")
+    schema_id = schema.get("$id") if isinstance(schema, dict) else None
+    if not isinstance(schema_id, str) or f"/portolan/{tag}/" not in schema_id:
+        sys.exit(f"profile schema $id {schema_id!r} at tag {tag} must contain /portolan/{tag}/")
+
+
+def _version_key(tag: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in tag.removeprefix("v").split("."))
+
+
 def _vendor_schemas(spec: Path) -> list[str]:
-    schemas = sorted(spec.glob(SCHEMA_GLOB))
-    if not schemas:
-        sys.exit(f"no profile schemas found under {spec / 'stac/json-schema'}")
-    dest_root = BUNDLED_SCHEMAS
-    _reset_dir(dest_root)
-    versions = []
-    for schema in schemas:
-        version = schema.parent.name  # e.g. "v0.1.0"
-        target = dest_root / version / "schema.json"
+    tags = subprocess.run(
+        ["git", "-C", str(spec), "tag", "--list", "v*"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    tags = [tag for tag in tags if RELEASE_TAG.fullmatch(tag)]
+    if not tags:
+        sys.exit(f"no profile schema tags found in {spec}; fetch the v* tags first")
+    schemas = [(tag, _tagged_schema(spec, tag)) for tag in sorted(tags, key=_version_key)]
+    _reset_dir(BUNDLED_SCHEMAS)
+    for version, contents in schemas:
+        target = BUNDLED_SCHEMAS / version / "schema.json"
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(schema, target)
-        versions.append(version)
-    return versions
+        target.write_bytes(contents)
+    return [version for version, _ in schemas]
+
+
+def _vendor_draft_schema(spec: Path) -> None:
+    """Copy the draft into tests only, with the newest legacy folder as fallback."""
+    source = spec / SCHEMA_SRC
+    if not source.is_file():
+        schemas = [
+            path
+            for path in (spec / "stac/json-schema").glob("v*/schema.json")
+            if RELEASE_TAG.fullmatch(path.parent.name)
+        ]
+        if not schemas:
+            sys.exit(f"no draft profile schema found under {spec / 'stac/json-schema'}")
+        source = max(schemas, key=lambda path: _version_key(path.parent.name))
+    shutil.copyfile(source, FIXTURES / "draft-profile-schema.json")
 
 
 def _vendor_profile_examples(spec: Path) -> int:
@@ -203,6 +257,7 @@ def main() -> None:
     spec = _resolve_spec(args.spec)
     files = _vendor_catalog(spec)
     versions = _vendor_schemas(spec)
+    _vendor_draft_schema(spec)
     examples = _vendor_profile_examples(spec)
     registered = _vendor_extension_registry(spec)
     requirements = _vendor_requirements(spec)
@@ -218,6 +273,7 @@ def main() -> None:
     print(f"vendored from {spec} @ {ref[:12]}")
     print(f"  reference-catalog: {files} json/md files")
     print(f"  schema versions:   {', '.join(versions)}")
+    print("  draft schema:      tests/fixtures/draft-profile-schema.json")
     print(f"  profile-examples:  {examples} objects")
     print(f"  extension registry: {registered} extensions")
     print(f"  requirements:      {requirements} manifest entries")

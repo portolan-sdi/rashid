@@ -15,7 +15,7 @@ from rashid.rule import Rule
 _SENTINEL_MAGNITUDE = 1.7e308
 
 
-def _bboxes_of(node: Node) -> list[tuple[str, Any]]:
+def bboxes_of(node: Node) -> list[tuple[str, Any]]:
     """All bbox arrays on a node, with a JSON pointer for each."""
     found: list[tuple[str, Any]] = []
     if node.kind == "item":
@@ -43,7 +43,7 @@ class BboxValidRule(Rule):
     kinds = ("catalog", "collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for pointer, box in _bboxes_of(node):
+        for pointer, box in bboxes_of(node):
             yield from self._check_bbox(node, pointer, box)
 
     def _check_bbox(self, node: Node, pointer: str, box: Any) -> Iterable[Finding]:

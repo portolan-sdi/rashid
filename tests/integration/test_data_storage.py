@@ -35,12 +35,15 @@ from rashid.model import Severity
 from rashid.registry import (
     DAT_COG,
     DAT_COG_STATS,
+    DAT_COLUMN_DESCRIPTIONS,
     DAT_GEOPARQUET_VERSION,
     DAT_ORDERING,
+    DAT_OVERVIEW_FORMAT,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
+    DAT_SCENE_MASK,
     DAT_TABULAR,
     DAT_TILE_SIZE,
     DAT_UNAVAILABLE,
@@ -616,7 +619,7 @@ def test_plain_parquet_is_skipped(tmp_path: Path) -> None:
     assert _gpq(path) == []
 
 
-# --- native-geo Parquet: GEOMETRY logical type, no geo key (PORTO-FMT-055) ---
+# --- native-geo Parquet: GEOMETRY logical type, no geo key (PORTO-FMT-004) ---
 #
 # The file DuckDB's Iceberg writer produces (portolan-sdi/rashid#200). The spec
 # accepts it as its third form, so the storage rules run on it; the missing
@@ -692,7 +695,9 @@ def test_native_vector_collection_without_table_columns_flags_dat_017(tmp_path: 
     assert [d.rule_id for d in defects] == [DAT_VECTOR_COLUMNS]
 
 
-# --- the native crs (PTL-DAT-018) --------------------------------------------
+# --- the native crs (PTL-DAT-023) --------------------------------------------
+#
+# PORTO-FMT-081 is a SHOULD, so every finding is a warning.
 #
 # pyarrow 25 reads a crs off the GEOMETRY logical type but cannot write one,
 # so these drive the check over duck-typed schema metadata shaped exactly like
@@ -758,7 +763,7 @@ def test_inline_projjson_native_crs_is_clean() -> None:
 @pytest.mark.parametrize("crs", ["EPSG:4326", "srid:3857"])
 def test_registry_code_native_crs_warns(crs: str) -> None:
     defects = _crs_defects(crs)
-    assert [d.rule_id for d in defects] == ["PTL-DAT-018"]
+    assert [d.rule_id for d in defects] == ["PTL-DAT-023"]
     assert [d.severity for d in defects] == [Severity.WARNING]
     assert crs in defects[0].message
 
@@ -767,25 +772,25 @@ def test_projjson_reference_resolves_against_file_metadata() -> None:
     assert _crs_defects("projjson:my_crs", {b"my_crs": b'{"type": "GeographicCRS"}'}) == []
 
 
-def test_projjson_reference_to_a_missing_key_errors() -> None:
+def test_projjson_reference_to_a_missing_key_warns() -> None:
     defects = _crs_defects("projjson:my_crs", {})
-    assert [d.severity for d in defects] == [Severity.ERROR]
+    assert [d.severity for d in defects] == [Severity.WARNING]
     assert "my_crs" in defects[0].message
 
 
-def test_projjson_reference_to_a_non_json_key_errors() -> None:
+def test_projjson_reference_to_a_non_json_key_warns() -> None:
     defects = _crs_defects("projjson:my_crs", {b"my_crs": b"not json"})
-    assert [d.severity for d in defects] == [Severity.ERROR]
+    assert [d.severity for d in defects] == [Severity.WARNING]
 
 
-def test_undefined_native_crs_form_errors() -> None:
+def test_undefined_native_crs_form_warns() -> None:
     defects = _crs_defects("a free-text datum description")
-    assert [d.severity for d in defects] == [Severity.ERROR]
+    assert [d.severity for d in defects] == [Severity.WARNING]
 
 
-def test_broken_inline_projjson_errors() -> None:
+def test_broken_inline_projjson_warns() -> None:
     defects = _crs_defects("{not projjson")
-    assert [d.severity for d in defects] == [Severity.ERROR]
+    assert [d.severity for d in defects] == [Severity.WARNING]
 
 
 def test_native_detection_shrugs_off_unhelpful_schemas() -> None:
@@ -1012,6 +1017,85 @@ def test_raster_larger_than_its_own_small_tile_needs_overviews(tmp_path: Path) -
     defects = [d for d in _raster(path) if d.rule_id == DAT_OVERVIEWS]
     assert len(defects) == 1
     assert "256px" in defects[0].message
+
+
+# --- overview format and scene masks (PTL-DAT-018/019) ----------------------
+
+_COG_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
+
+
+def _display(tmp_path: Path, kind: str, roles: list[str], **cog: object) -> list[DataDefect]:
+    path = tmp_path / "raster.tif"
+    assets.write_cog(path, size=256, **cog)  # type: ignore[arg-type]
+    asset = {"href": "./raster.tif", "type": _COG_TYPE, "roles": roles}
+    node = _node_with_asset(asset)
+    node = Node(path=node.path, abs_path=node.abs_path, kind=kind, id=node.id, data=node.data)
+    with AssetFiles(_loc(path)) as files:
+        return raster.check_display(node, "a", asset, files)
+
+
+@pytest.mark.parametrize(
+    ("cog", "flagged"),
+    [
+        ({"count": 3}, False),
+        ({"count": 4, "alpha": True}, False),
+        ({"count": 4}, True),
+        ({"count": 1}, True),
+        ({"count": 3, "dtype": "uint16"}, True),
+    ],
+    ids=["rgb", "rgba", "four-bands", "one-band", "16-bit"],
+)
+def test_overview_must_be_8bit_rgb(tmp_path: Path, cog: dict, flagged: bool) -> None:
+    defects = _display(tmp_path, "collection", ["visual", "overview"], **cog)
+    assert [d.rule_id for d in defects] == ([DAT_OVERVIEW_FORMAT] if flagged else [])
+    assert all(d.severity is Severity.WARNING for d in defects)
+
+
+@pytest.mark.parametrize("roles", [["data"], ["overview"]])
+def test_non_overview_collection_raster_is_not_judged(tmp_path: Path, roles: list[str]) -> None:
+    assert _display(tmp_path, "collection", roles, count=1, dtype="uint16") == []
+
+
+@pytest.mark.parametrize(
+    ("kind", "cog", "flagged"),
+    [
+        ("item", {"count": 3}, True),
+        ("item", {"count": 3, "nodata": 0}, False),
+        ("item", {"count": 4, "alpha": True}, False),
+        ("item", {"count": 3, "mask": True}, False),
+        ("item", {"count": 1}, False),
+        ("collection", {"count": 3}, False),
+    ],
+    ids=["unmasked-rgb", "nodata", "alpha", "internal-mask", "single-band", "collection-asset"],
+)
+def test_imagery_scene_declares_nodata_or_alpha(
+    tmp_path: Path, kind: str, cog: dict, flagged: bool
+) -> None:
+    defects = _display(tmp_path, kind, ["data"], **cog)
+    assert [d.rule_id for d in defects] == ([DAT_SCENE_MASK] if flagged else [])
+    assert all(d.severity is Severity.WARNING for d in defects)
+
+
+@pytest.mark.parametrize("role", ["cloud", "data-mask"])
+def test_mask_asset_is_not_an_imagery_scene(tmp_path: Path, role: str) -> None:
+    """Planet's 8-band udm2 asset carries these roles; its zeros are values."""
+    assert _display(tmp_path, "item", ["data", role], count=8) == []
+
+
+def test_check_node_reports_an_unmasked_scene(tmp_path: Path) -> None:
+    path = tmp_path / "scene.tif"
+    assets.write_cog(path, size=256, count=3)
+    asset = {"href": "./scene.tif", "type": _COG_TYPE, "roles": ["data"]}
+    defects = checks.check_node(_node_with_asset(asset), _FileReader("./scene.tif", path))
+    assert DAT_SCENE_MASK in [d.rule_id for d in defects]
+
+
+def test_unreadable_raster_is_left_to_the_cog_check(tmp_path: Path) -> None:
+    path = tmp_path / "broken.tif"
+    path.write_bytes(b"not a tiff")
+    asset = {"href": "./broken.tif", "type": _COG_TYPE, "roles": ["data"]}
+    with AssetFiles(_loc(path)) as files:
+        assert raster.check_display(_node_with_asset(asset), "a", asset, files) == []
 
 
 # --- partition schema consistency (PTL-DAT-014) ------------------------------
@@ -1452,6 +1536,122 @@ def test_plain_parquet_is_not_vector(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False)
     assert _vector(_tabular_collection(), path) == []
+
+
+# --- column descriptions (PTL-DAT-020) --------------------------------------
+#
+# PORTO-FMT-077: every table:columns entry SHOULD carry a description.
+# PORTO-FMT-078: a mirror with no source descriptions notes this in the README.
+
+
+def _described(node: Node, **asset_fields: object) -> list:
+    asset = {"href": "./data.parquet", "roles": ["data"], **asset_fields}
+    return geoparquet.check_column_descriptions(node, "data", asset)
+
+
+def test_columns_without_descriptions_flag_dat_020() -> None:
+    columns = [
+        {"name": "value", "type": "int64"},
+        {"name": "label", "type": "string", "description": "a label"},
+    ]
+    defects = _described(_tabular_collection(**{"table:columns": columns}))
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+    assert defects[0].severity is Severity.WARNING
+    assert "1 of 2" in defects[0].message
+    assert "value" in defects[0].message
+    assert "README" in defects[0].message
+
+
+def test_columns_with_descriptions_are_clean() -> None:
+    assert _described(_tabular_collection(**{"table:columns": _COLUMNS})) == []
+
+
+def test_a_blank_description_does_not_count() -> None:
+    # An empty string satisfies the key but documents nothing.
+    columns = [{"name": "value", "type": "int64", "description": "   "}]
+    defects = _described(_tabular_collection(**{"table:columns": columns}))
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_a_description_that_is_not_text_does_not_count() -> None:
+    columns = [{"name": "value", "type": "int64", "description": 5}]
+    defects = _described(_tabular_collection(**{"table:columns": columns}))
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_described_collection_columns_do_not_hide_bare_asset_columns() -> None:
+    bare = [{"name": "extra", "type": "int64"}]
+    node = _tabular_collection(**{"table:columns": _COLUMNS})
+    defects = _described(node, **{"table:columns": bare})
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+    assert f"1 of {len(_COLUMNS) + 1}" in defects[0].message
+    assert "extra" in defects[0].message
+
+
+def test_assetless_partitioned_collection_gets_dat_020(tmp_path: Path) -> None:
+    # The shape formats.md prescribes: columns on the collection, data
+    # through an s3:// glob that the data pass does not list, no data asset.
+    node = _partitioned_collection(tmp_path, glob="s3://bucket/parts/*.parquet")
+    node.data["table:columns"] = [{"name": "value", "type": "int64"}]
+    node.data["assets"] = {"visual": {"href": "./b.pmtiles", "roles": ["visual"]}}
+    defects = geoparquet.check_partitioned_column_descriptions(node)
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+    assert defects[0].json_pointer == "/table:columns"
+    assert "1 of 1" in defects[0].message
+    assert [d.rule_id for d in checks.check_node(node, _NoAssets())] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_partitioned_collection_with_a_data_asset_is_left_to_the_asset_check(
+    tmp_path: Path,
+) -> None:
+    node = _partitioned_collection(tmp_path)
+    node.data["table:columns"] = [{"name": "value", "type": "int64"}]
+    node.data["assets"] = {"data": {"href": "./d.parquet", "roles": ["data"]}}
+    assert geoparquet.check_partitioned_column_descriptions(node) == []
+
+
+def test_unpartitioned_or_described_collections_get_no_collection_finding(
+    tmp_path: Path,
+) -> None:
+    bare = [{"name": "value", "type": "int64"}]
+    check = geoparquet.check_partitioned_column_descriptions
+    assert check(_tabular_collection(**{"table:columns": bare})) == []
+    described = _partitioned_collection(tmp_path)
+    described.data["table:columns"] = _COLUMNS
+    assert check(described) == []
+
+
+def test_more_than_five_bare_columns_are_summarized() -> None:
+    columns = [{"name": f"c{i}", "type": "int64"} for i in range(7)]
+    defects = _described(_tabular_collection(**{"table:columns": columns}))
+    assert "c0, c1, c2, c3, c4, and 2 more" in defects[0].message
+
+
+def test_asset_level_columns_are_read() -> None:
+    columns = [{"name": "value", "type": "int64"}]
+    defects = _described(_tabular_collection(), **{"table:columns": columns})
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_undeclared_columns_are_not_this_rules_business() -> None:
+    # Declaring nothing at all is PTL-DAT-015 or PTL-DAT-017's finding.
+    assert _described(_tabular_collection()) == []
+
+
+def test_item_column_descriptions_are_read_from_properties() -> None:
+    properties = {
+        "datetime": "2024-01-01T00:00:00Z",
+        "table:columns": [{"name": "value", "type": "int64"}],
+    }
+    defects = _described(_vector_item(properties=properties))
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_non_data_roles_carry_no_column_finding() -> None:
+    columns = [{"name": "value", "type": "int64"}]
+    node = _tabular_collection(**{"table:columns": columns})
+    asset = {"href": "./x.parquet", "roles": ["metadata"]}
+    assert geoparquet.check_column_descriptions(node, "x", asset) == []
 
 
 def test_non_data_roles_are_not_vector(tmp_path: Path) -> None:

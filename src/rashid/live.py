@@ -1,24 +1,35 @@
-"""Live-hosting pass: probe the servers behind remote assets for the Data
-Storage MUSTs — HTTP range support and CORS (core.md, Data Storage).
+"""Live-hosting pass: probe the publisher's servers for the Data Storage MUSTs —
+HTTP range support and CORS (core.md, Data Storage).
 
 The metadata and data passes read what is *in* the catalog; whether the hosting
 server honors ``Range`` or lets a browser read across origins is a property of
-the server itself, checkable only by probing it. Three probes per host cover
-the section's MUSTs:
+the server itself, checkable only by probing it.
 
-- a **ranged GET** (with an ``Origin`` header) — ``206 Partial Content``,
-  ``Accept-Ranges: bytes``, and the simple-response CORS headers. Servers omit
+The range rules apply only to files with a partial-read media type (COG,
+Parquet, PMTiles, COPC; PORTO-CORE-043, PORTO-CORE-045). CORS applies to every
+metadata and asset file (PORTO-CORE-086). Per host, the probes are:
+
+- a **ranged GET** (with an ``Origin`` header) of the first partial-read asset
+  — ``206 Partial Content``, ``Accept-Ranges: bytes``,
+  ``Access-Control-Allow-Origin``, and the exposed range headers. Servers omit
   every ``Access-Control-*`` header unless the request carries ``Origin``, so
-  sending one is required, not optional.
-- a **HEAD** per asset — an accurate ``Content-Length`` (checked for presence,
-  and against the declared ``file:size`` when the asset carries one).
-- an **OPTIONS preflight** (``Access-Control-Request-Method: GET``, and
-  ``Access-Control-Request-Headers`` naming ``Range`` plus the
-  conditional-request headers) — allowed methods and request headers appear
-  only on preflight responses, never on GET/HEAD.
+  sending one is required, not optional. A host with no partial-read asset
+  gets the same GET of its first asset, and only its allowed origin is read.
+- an **OPTIONS preflight** of the same partial-read asset
+  (``Access-Control-Request-Method: GET``, and ``Access-Control-Request-Headers``
+  naming ``Range`` plus the conditional-request headers) — allowed request
+  headers appear only on preflight responses, never on GET/HEAD. A failed
+  preflight is an error, since no allowance can be read from it. GET and HEAD
+  are CORS-safelisted methods, so ``Access-Control-Allow-Methods`` is not
+  checked. A
+  file read whole needs none: a browser sends a plain GET or HEAD without a
+  preflight, so a host with no partial-read asset gets no OPTIONS.
+- a **HEAD** per asset — an accurate ``Content-Length`` for a partial-read
+  asset (checked for presence, and against the declared ``file:size`` when
+  the asset carries one).
 
-The section scopes its MUSTs to the servers hosting the catalog's own
-cloud-native assets and exempts bytes a third party hosts, so the target set is
+The section scopes its MUSTs to the servers hosting the publisher's own files
+and exempts bytes a third party hosts (PORTO-CORE-073), so the target set is
 built from who serves an asset rather than from the roles it carries. Given
 ``base_url``, an asset is the catalog's own when its href is relative (it lives
 in the published tree) or absolute on the publish host; an absolute href on any
@@ -29,13 +40,13 @@ and the PORTO-CORE-073 carve-out cannot be applied — pass ``base_url`` for a
 catalog that cites upstream copies.
 
 Range and CORS semantics are server properties, so the GET and OPTIONS probes
-run once per distinct host (via its lexically first asset); only the cheap HEAD
-runs per asset. Absolute ``https`` hrefs are probed as declared; relative
-hrefs are probed when the caller supplies ``base_url`` — the URL the catalog
-root is published under — by joining the root-relative asset path onto it.
-``s3`` and friends are ``PTL-AST-002``'s domain. The pass needs no geospatial
-stack and lives in core; like every optional pass it degrades to
-``PTL-LIV-000`` warnings when it cannot probe rather than failing the run.
+run once per distinct host; only the cheap HEAD runs per asset. Absolute
+``https`` hrefs are probed as declared; relative hrefs are probed when the
+caller supplies ``base_url`` — the URL the catalog root is published under —
+by joining the root-relative asset path onto it. ``s3`` and friends are
+``PTL-AST-002``'s domain. The pass needs no geospatial stack and lives in core;
+like every optional pass it degrades to ``PTL-LIV-000`` warnings when it cannot
+probe rather than failing the run.
 
 Given ``base_url`` the pass also asks whether the documents behind the
 catalog's **links** exist on the publish host (``PTL-LIV-006``). core.md,
@@ -49,16 +60,18 @@ the base — ``child``, ``item``, ``parent``, ``root``, ``self``, ``agents``,
 ``describedby``, ``alternate``, a relative ``license``, and any other rel — is
 HEADed once per distinct URL, in URL order; the same PORTO-CORE-073 host
 scoping as for assets keeps the probes off other hosts. There is no GET
-fallback on a 405: PORTO-CORE-043 makes HEAD a MUST for the publish host, so a
-host that rejects HEAD is reported, not worked around.
+fallback on a 405: every metadata file MUST allow HEAD (PORTO-CORE-086), so a
+host that rejects HEAD is reported, not worked around. A publish host that
+serves metadata but no asset gets its CORS GET through the first link target
+that answers 2xx.
 
 No probe leaves https. A redirect to another https URL is followed, and the
 checks read the answer at its end. A redirect to any other scheme is not
 followed: a client that stays on https gets no object there, so the asset or
 link is reported as ``PTL-LIV-008``, with the URL the redirect names. When
 the host's first asset redirects that way, the range and CORS probes move to
-the first asset whose HEAD stays on https; when none does, ``PTL-LIV-000``
-says they did not run.
+the next asset of the same kind whose HEAD stays on https; when none does,
+``PTL-LIV-000`` says they did not run.
 """
 
 from __future__ import annotations
@@ -94,7 +107,7 @@ from rashid.registry import (
     LIV_SELF_BASE,
     LIV_UNAVAILABLE,
 )
-from rashid.rules._common import assets_of, indexed_links_of
+from rashid.rules._common import assets_of, indexed_links_of, is_partial_read_media_type
 
 log = logging.getLogger(__name__)
 
@@ -112,16 +125,16 @@ _WORKERS = 32
 # restrictive one will not match this, correctly failing the check.
 _PROBE_ORIGIN = "https://rashid-live-probe.invalid"
 
-# core.md, Data Storage — the response headers a server MUST expose to browsers.
+# core.md, Data Storage — the response headers a server MUST expose to browsers
+# for a partial-read file.
 _REQUIRED_EXPOSED = (
-    "Content-Type",
-    "Content-Length",
     "Content-Range",
     "Accept-Ranges",
     "ETag",
 )
 
-# core.md, Data Storage — the request headers a server MUST allow. The
+# core.md, Data Storage — the request headers a server MUST allow for a
+# partial-read file. The
 # conditional ones let a browser revalidate a cached range instead of
 # refetching it.
 _REQUIRED_REQUEST = (
@@ -185,12 +198,18 @@ class Prober(Protocol):
 
 @dataclass(frozen=True)
 class _Target:
-    """One probeable asset: where it is declared and what size it claims."""
+    """One probeable file: where it is declared, and what the checks read off it.
+
+    An asset, or a metadata document that stands in for a host with no asset.
+    """
 
     node: Node
     key: str
     url: str
     declared_size: int | None
+    partial_read: bool
+    pointer: str  # the href that names the file
+    subject: str  # how a message names it
 
     def server_finding(
         self,
@@ -209,7 +228,7 @@ class _Target:
             message=f"host '{host}': {message}",
             path=str(self.node.path),
             object_id=self.node.id,
-            json_pointer=json_pointer("assets", self.key, "href"),
+            json_pointer=self.pointer,
             fix_hint=fix_hint,
             expected=expected,
             actual=actual,
@@ -320,6 +339,9 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
                     key=key,
                     url=url,
                     declared_size=size if isinstance(size, int) else None,
+                    partial_read=is_partial_read_media_type(asset.get("type")),
+                    pointer=json_pointer("assets", key, "href"),
+                    subject=f"asset '{key}'",
                 )
             )
     return by_host
@@ -386,13 +408,6 @@ def _off_https_finding(
 
 
 def _check_range(rep: _Target, response: ProbeResponse) -> list[Finding]:
-    if response.access_denied():
-        return [
-            _unavailable(
-                f"range and CORS probes for {rep.url} returned {response.status}; asset inaccessible",
-                str(rep.node.path),
-            )
-        ]
     problems: list[str] = []
     if response.status != 206:
         problems.append(f"a ranged GET returned {response.status}, expected 206 Partial Content")
@@ -423,7 +438,7 @@ def _check_cors(rep: _Target, response: ProbeResponse) -> list[Finding]:
             )
         ]
     exposed = _header_set(response.header("access-control-expose-headers"))
-    if "*" in exposed:
+    if not rep.partial_read or "*" in exposed:
         return []
     missing = [name for name in _REQUIRED_EXPOSED if name.lower() not in exposed]
     if not missing:
@@ -441,11 +456,6 @@ def _check_preflight(rep: _Target, response: ProbeResponse) -> list[Finding]:
     problems: list[str] = []
     if response.status >= 400:
         problems.append(f"preflight returned {response.status}")
-    methods = _header_set(response.header("access-control-allow-methods"))
-    if "*" not in methods:
-        missing = [m for m in ("GET", "HEAD") if m.lower() not in methods]
-        if missing:
-            problems.append("allowed methods omit " + ", ".join(missing))
     allowed = _header_set(response.header("access-control-allow-headers"))
     if "*" not in allowed:
         absent = [h for h in _REQUIRED_REQUEST if h.lower() not in allowed]
@@ -458,9 +468,7 @@ def _check_preflight(rep: _Target, response: ProbeResponse) -> list[Finding]:
             LIV_CORS_PREFLIGHT,
             message="CORS preflight failed: " + "; ".join(problems),
             fix_hint=(
-                "allow the GET and HEAD methods and the "
-                + ", ".join(_REQUIRED_REQUEST)
-                + " request headers in the CORS policy"
+                "allow the " + ", ".join(_REQUIRED_REQUEST) + " request headers in the CORS policy"
             ),
         )
     ]
@@ -629,13 +637,14 @@ def _check_heads(
             break
         location = response.off_https()
         if location is None:
-            findings.extend(_check_head(target, response))
+            if target.partial_read or response.access_denied():
+                findings.extend(_check_head(target, response))
         elif target is not reported:
             findings.append(
                 _off_https_finding(
                     target.node,
-                    pointer=json_pointer("assets", target.key, "href"),
-                    subject=f"asset '{target.key}'",
+                    pointer=target.pointer,
+                    subject=target.subject,
                     result=_ProbeRedirect("HEAD", target.url, location),
                 )
             )
@@ -644,14 +653,21 @@ def _check_heads(
 
 def _probe_host(
     host: str, rep: _Target, prober: Prober, heads: _HeadCache
-) -> tuple[ProbeResponse, ProbeResponse] | Finding:
-    """The ranged GET and the preflight of ``rep``, or the warning that the host failed."""
+) -> tuple[ProbeResponse, ProbeResponse | None] | Finding:
+    """The ranged GET of ``rep`` and, for a partial-read file, its preflight;
+    or the warning that the host failed.
+
+    A file read whole needs no preflight: a browser sends a plain GET or HEAD
+    without one, and only ``Access-Control-Allow-Origin`` decides it.
+    """
     log.debug("probing host %s: range and CORS via %s", host, rep.url)
+    preflighted = None
     try:
         _trace.count("live.range_probes")
         ranged = prober.get_range(rep.url)
-        _trace.count("live.preflights")
-        preflighted = prober.preflight(rep.url)
+        if rep.partial_read:
+            _trace.count("live.preflights")
+            preflighted = prober.preflight(rep.url)
     except Exception as exc:  # an unreachable host is reported once
         log.debug("host %s failed: %s", host, exc)
         heads.failed.setdefault(host, exc)
@@ -659,20 +675,30 @@ def _probe_host(
     return ranged, preflighted
 
 
-def _check_server(rep: _Target, ranged: ProbeResponse, preflighted: ProbeResponse) -> list[Finding]:
-    """The host-level range and CORS checks, read off ``rep``'s two probes."""
-    findings = _check_range(rep, ranged)
-    if not ranged.access_denied():
+def _check_server(
+    rep: _Target, ranged: ProbeResponse, preflighted: ProbeResponse | None
+) -> list[Finding]:
+    """The host-level range and CORS checks, read off ``rep``'s probes."""
+    if ranged.access_denied():
+        findings = [
+            _unavailable(
+                f"range and CORS probes for {rep.url} returned {ranged.status}; asset inaccessible",
+                str(rep.node.path),
+            )
+        ]
+    else:
+        findings = _check_range(rep, ranged) if rep.partial_read else []
         findings.extend(_check_cors(rep, ranged))
-    findings.extend(_check_preflight(rep, preflighted))
+    if preflighted is not None:
+        findings.extend(_check_preflight(rep, preflighted))
     return findings
 
 
 def _ranged_off_https(rep: _Target, location: str) -> Finding:
     return _off_https_finding(
         rep.node,
-        pointer=json_pointer("assets", rep.key, "href"),
-        subject=f"asset '{rep.key}'",
+        pointer=rep.pointer,
+        subject=rep.subject,
         result=_ProbeRedirect("a ranged GET of", rep.url, location),
     )
 
@@ -682,14 +708,16 @@ def _check_host(
 ) -> list[Finding]:
     """Range and CORS once per host, through one representative asset; then every HEAD.
 
-    The representative is the host's first asset. When its ranged GET
-    redirects off https, the 3xx says nothing about range or CORS support, so
-    the redirect is reported and the HEADs pick the next representative: the
-    first asset at another URL whose HEAD stays on https. When no asset
-    qualifies, or its ranged GET redirects off https too, ``PTL-LIV-000``
-    says the host-level checks did not run.
+    The representative is the host's first partial-read asset, or its first
+    asset when it has none. When its ranged GET redirects off https, the 3xx
+    says nothing about range or CORS support, so the redirect is reported and
+    the HEADs pick the next representative of the same kind: the first at
+    another URL whose HEAD stays on https. When no partial-read asset
+    qualifies, the first other asset that does still gets the CORS check.
+    ``PTL-LIV-000`` names the checks that did not run.
     """
-    first = targets[0]
+    candidates = [t for t in targets if t.partial_read] or targets
+    first = candidates[0]
     log.debug("probing host %s: %d target(s)", host, len(targets))
     probed = _probe_host(host, first, prober, heads)
     if isinstance(probed, Finding):
@@ -704,22 +732,31 @@ def _check_host(
     head_findings = _check_heads(host, targets, heads, reported=first)
     if host in heads.failed:
         return findings + head_findings
-    rep = next((t for t in targets if t.url != first.url and _stays_on_https(heads, t.url)), None)
-    skipped = "every asset on it redirects off https"
-    if rep is not None:
+    # Without a partial-read stand-in, a file read whole still carries the CORS check.
+    whole = [t for t in targets if not t.partial_read] if first.partial_read else []
+    skipped = f"every {'partial-read ' if whole else ''}asset on it redirects off https"
+    what = "range and CORS probes"
+    for pool in (candidates, whole):
+        rep = next((t for t in pool if t.url != first.url and _stays_on_https(heads, t.url)), None)
+        if rep is None:
+            continue
         probed = _probe_host(host, rep, prober, heads)
         if isinstance(probed, Finding):
             return [*findings, probed, *head_findings]
         ranged, preflighted = probed
         location = ranged.off_https()
-        if location is None:
-            findings.extend(_check_server(rep, ranged, preflighted))
+        if location is not None:
+            findings.append(_ranged_off_https(rep, location))
+            skipped = "the ranged GET of every asset tried redirects off https"
+            continue
+        findings.extend(_check_server(rep, ranged, preflighted))
+        if rep.partial_read == first.partial_read:
             return findings + head_findings
-        findings.append(_ranged_off_https(rep, location))
-        skipped = "the ranged GET of every asset tried redirects off https"
+        what = "range probes"
+        break
     findings.append(
         _unavailable(
-            f"range and CORS probes against host '{host}' did not run: {skipped}",
+            f"{what} against host '{host}' did not run: {skipped}",
             str(first.node.path),
         )
     )
@@ -735,8 +772,8 @@ def _stays_on_https(heads: _HeadCache, url: str) -> bool:
 def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> list[Finding]:
     """HEAD every distinct link URL on the publish host; any non-2xx is an error.
 
-    HEAD is a MUST for this host (PORTO-CORE-043), so a 405 is reported as the
-    status it is rather than retried as GET. A host that already failed in
+    Every metadata file MUST allow HEAD (PORTO-CORE-086), so a 405 is reported
+    as the status it is rather than retried as GET. A host that already failed in
     transport during the asset probes was reported there and is not asked
     again; one that fails here is reported once as ``PTL-LIV-000``.
     """
@@ -785,6 +822,35 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
             )
         )
     return findings
+
+
+def _check_metadata_host(
+    host: str, targets: list[_LinkTarget], prober: Prober, heads: _HeadCache
+) -> list[Finding]:
+    """CORS on a publish host that serves no asset, through its first link target
+    that answers 2xx (PORTO-CORE-086). The HEADs are already held, so only the
+    one GET goes out.
+    """
+    link = next((t for t in targets if 200 <= (heads.status(t.url) or 0) < 300), None)
+    if host in heads.failed or link is None:
+        return []
+    rep = _Target(
+        node=link.node,
+        key="",
+        url=link.url,
+        declared_size=None,
+        partial_read=False,
+        pointer=json_pointer("links", link.index, "href"),
+        subject=f"link rel:{link.rel!r} href '{link.href}'",
+    )
+    probed = _probe_host(host, rep, prober, heads)
+    if isinstance(probed, Finding):
+        return [probed]
+    ranged, _ = probed
+    location = ranged.off_https()
+    if location is not None:
+        return [_ranged_off_https(rep, location)]
+    return _check_server(rep, ranged, None)
 
 
 def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
@@ -886,7 +952,10 @@ def validate_live(
         findings.extend(_check_host(host, by_host[host], prober, heads))
     if base is not None:
         base_host = href_host(base)
-        findings.extend(_check_links(base_host, _link_targets(graph, base), heads))
+        links = _link_targets(graph, base)
+        findings.extend(_check_links(base_host, links, heads))
+        if base_host not in by_host:
+            findings.extend(_check_metadata_host(base_host, links, prober, heads))
         if named:
             findings.extend(_check_self_base(graph, base))
     return findings

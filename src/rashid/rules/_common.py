@@ -23,6 +23,8 @@ from rashid.model import json_pointer
 STRUCTURAL_RELS = ("root", "parent", "child", "item", "collection")
 
 PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
+PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
+COPC_MEDIA_TYPE = "application/vnd.laszip+copc"
 
 # core.md, Assets: Portolan raster data is COG, declared with this media type.
 # A plain GeoTIFF may appear only as an upstream source, not as primary data.
@@ -105,6 +107,18 @@ def is_cog_media_type(value: object) -> bool:
     return bool(parts) and parts[0] == _TIFF_MEDIA_TYPE and _COG_PARAMETERS.issubset(parts[1:])
 
 
+def is_partial_read_media_type(value: object) -> bool:
+    """Whether clients read a file of this media type by byte range.
+
+    core.md, Data Storage lists COG, Parquet, PMTiles, and COPC.
+    """
+    return is_cog_media_type(value) or value in (
+        PARQUET_MEDIA_TYPE,
+        PMTILES_MEDIA_TYPE,
+        COPC_MEDIA_TYPE,
+    )
+
+
 def is_raster_data_asset(asset: dict[str, Any]) -> bool:
     """Whether an asset declares primary raster-data intent.
 
@@ -123,6 +137,14 @@ def is_raster_data_asset(asset: dict[str, Any]) -> bool:
         return False
     parsed = split_href(href)
     return parsed is not None and parsed.path.lower().endswith(TIFF_SUFFIXES)
+
+
+def is_overview_asset(asset: dict[str, Any]) -> bool:
+    """formats.md, Raster: an overview is a COG with the visual and overview roles.
+
+    The ``overview`` role alone is STAC's generic preview image, often a PNG.
+    """
+    return {"visual", "overview"} <= set(roles_of(asset)) and is_cog_media_type(asset.get("type"))
 
 
 def has_cog(node: Node) -> bool:
