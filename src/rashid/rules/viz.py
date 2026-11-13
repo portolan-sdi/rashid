@@ -1,4 +1,4 @@
-"""Visualization rules (spec: core.md, Visualization; formats.md, PMTiles).
+"""Visualization rules (spec: core.md, Visualization; formats.md, PMTiles and Raster).
 
 Metadata-checkable subset only: thumbnail presence, style assets when a
 visualization derivative exists, and PMTiles registration. Whether a
@@ -15,7 +15,9 @@ mistakes "could not tell" for "nothing to fix".
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
+from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
@@ -27,11 +29,15 @@ from rashid.rules._common import (
     declares_geometry,
     indexed_links_of,
     is_cog_media_type,
+    is_overview_asset,
     is_pmtiles_asset,
+    is_raster_data_asset,
     is_tiff_media_type,
     links_of,
     roles_of,
 )
+from rashid.rules.bbox import bboxes_of
+from rashid.rules.temporal import has_datetime
 
 STYLE_MEDIA_TYPE = "application/vnd.mapbox.style+json"
 _THUMBNAIL_TYPES = ("image/png", "image/jpeg", "image/webp")
@@ -39,6 +45,9 @@ _WEB_MAP_LINKS_PREFIX = "https://stac-extensions.github.io/web-map-links/"
 # Render-from-source is plausible for small files; above this, a missing
 # visual derivative is worth a nudge. Deliberately conservative.
 _LARGE_VECTOR_BYTES = 100_000_000
+# formats.md leaves "much larger" open: a mosaic here is raster items at this many distinct
+# bboxes, each covering at most 1/ratio of the collection's extent. Deliberately conservative.
+_MOSAIC_MIN_ITEMS, _MOSAIC_AREA_RATIO = 2, 2.0
 
 
 def _has_spatial_media_type(node: Node) -> bool:
@@ -397,3 +406,97 @@ class LargeVectorWithoutVisualRule(Rule):
                 json_pointer=json_pointer("assets"),
                 fix_hint="publish a PMTiles derivative with a MapLibre style",
             )
+
+
+def _bbox_area(box: Any) -> float | None:
+    """Area in squared degrees of a 2D or 3D bbox; None unless finite and positive.
+
+    Reversed latitudes, points, and lines give no area, so they never pass for a tile.
+    """
+    if not isinstance(box, list) or len(box) not in (4, 6):
+        return None
+    if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in box):
+        return None
+    half = len(box) // 2
+    west, south, east, north = (float(box[i]) for i in (0, 1, half, half + 1))
+    # A west edge east of the east edge crosses the antimeridian.
+    area = (east - west if east >= west else east - west + 360) * (north - south)
+    return area if math.isfinite(area) and area > 0 else None
+
+
+def _mosaic_items(node: Node, graph: CatalogGraph) -> int:
+    """How many raster items tile the collection's extent, or 0 if not a mosaic.
+
+    Bands and time periods are not compared, so the footprint test alone must
+    rule out a time series: every item has to be much smaller than the extent,
+    and the items must sit at enough distinct places.
+    """
+    extents = bboxes_of(node)
+    extent = _bbox_area(extents[0][1]) if extents else None
+    if extent is None:
+        return 0
+    boxes: list[Any] = [
+        item.data.get("bbox")
+        for item in graph.items_of(node)
+        if any(is_raster_data_asset(asset) for _p, _k, asset in assets_of(item))
+    ]
+    areas = [_bbox_area(box) for box in boxes]
+    if any(area is None or area * _MOSAIC_AREA_RATIO > extent for area in areas):
+        return 0
+    # Places, not items: a site revisited on many dates is a time series.
+    places = {(box[0], box[1], box[len(box) // 2], box[len(box) // 2 + 1]) for box in boxes}
+    if len(places) < _MOSAIC_MIN_ITEMS:
+        return 0
+    return len(boxes)
+
+
+class MosaicOverviewRule(Rule):
+    """A collection of two or more rasters provides an overview COG (visual, overview roles).
+
+    Mosaic detection is a footprint heuristic (see :func:`_mosaic_items`), so
+    this is a WARNING, the SHOULD's own severity, and stays silent when unsure.
+    """
+
+    id = "PTL-VIZ-007"
+    spec_ids = ("PORTO-FMT-067",)
+    default_severity = Severity.WARNING
+    description = (
+        "a collection of two or more rasters should provide an overview COG with the visual "
+        "and overview roles"
+    )
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        has_overview = any(is_overview_asset(asset) for _p, _k, asset in assets_of(node))
+        tiles = 0 if has_overview else _mosaic_items(node, graph)
+        if tiles:
+            yield self.finding(
+                node,
+                f"collection's {tiles} raster items tile an extent much larger than any one"
+                " of them, but no collection asset is a COG with the 'visual' and 'overview' roles",
+                json_pointer=json_pointer("assets"),
+                fix_hint="add an 8-bit RGB overview COG of the mosaic as a collection asset"
+                ' with roles ["visual", "overview"] and a datetime',
+            )
+
+
+class OverviewDatetimeRule(Rule):
+    """Each overview COG carries a datetime or a start/end interval."""
+
+    id = "PTL-VIZ-008"
+    spec_ids = ("PORTO-FMT-072",)
+    default_severity = Severity.WARNING
+    description = "overview assets should carry a datetime or a start/end interval"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in assets_of(node):
+            if is_overview_asset(asset) and not has_datetime(asset):
+                yield self.finding(
+                    node,
+                    f"overview asset '{key}' has no datetime and no complete"
+                    " start_datetime/end_datetime interval",
+                    json_pointer=pointer,
+                    fix_hint="add datetime, or both start_datetime and end_datetime, to the"
+                    " overview asset so clients can match it to its items",
+                )

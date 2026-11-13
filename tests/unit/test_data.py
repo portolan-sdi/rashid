@@ -32,10 +32,12 @@ from rashid.registry import (
     DAT_GEOPARQUET_VERSION,
     DAT_MIRROR,
     DAT_ORDERING,
+    DAT_OVERVIEW_FORMAT,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
+    DAT_SCENE_MASK,
     DAT_SIZE,
     DAT_TABULAR,
     DAT_TILE_SIZE,
@@ -360,6 +362,8 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
             DAT_TABULAR,
             DAT_MIRROR,
             DAT_VECTOR_COLUMNS,
+            DAT_OVERVIEW_FORMAT,
+            DAT_SCENE_MASK,
         }
     )
     validate(

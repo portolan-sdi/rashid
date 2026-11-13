@@ -36,10 +36,12 @@ from rashid.registry import (
     DAT_COG_STATS,
     DAT_GEOPARQUET_VERSION,
     DAT_ORDERING,
+    DAT_OVERVIEW_FORMAT,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
+    DAT_SCENE_MASK,
     DAT_TABULAR,
     DAT_TILE_SIZE,
     DAT_UNAVAILABLE,
@@ -787,6 +789,85 @@ def test_raster_larger_than_its_own_small_tile_needs_overviews(tmp_path: Path) -
     defects = [d for d in _raster(path) if d.rule_id == DAT_OVERVIEWS]
     assert len(defects) == 1
     assert "256px" in defects[0].message
+
+
+# --- overview format and scene masks (PTL-DAT-018/019) ----------------------
+
+_COG_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
+
+
+def _display(tmp_path: Path, kind: str, roles: list[str], **cog: object) -> list[DataDefect]:
+    path = tmp_path / "raster.tif"
+    assets.write_cog(path, size=256, **cog)  # type: ignore[arg-type]
+    asset = {"href": "./raster.tif", "type": _COG_TYPE, "roles": roles}
+    node = _node_with_asset(asset)
+    node = Node(path=node.path, abs_path=node.abs_path, kind=kind, id=node.id, data=node.data)
+    with AssetFiles(_loc(path)) as files:
+        return raster.check_display(node, "a", asset, files)
+
+
+@pytest.mark.parametrize(
+    ("cog", "flagged"),
+    [
+        ({"count": 3}, False),
+        ({"count": 4, "alpha": True}, False),
+        ({"count": 4}, True),
+        ({"count": 1}, True),
+        ({"count": 3, "dtype": "uint16"}, True),
+    ],
+    ids=["rgb", "rgba", "four-bands", "one-band", "16-bit"],
+)
+def test_overview_must_be_8bit_rgb(tmp_path: Path, cog: dict, flagged: bool) -> None:
+    defects = _display(tmp_path, "collection", ["visual", "overview"], **cog)
+    assert [d.rule_id for d in defects] == ([DAT_OVERVIEW_FORMAT] if flagged else [])
+    assert all(d.severity is Severity.WARNING for d in defects)
+
+
+@pytest.mark.parametrize("roles", [["data"], ["overview"]])
+def test_non_overview_collection_raster_is_not_judged(tmp_path: Path, roles: list[str]) -> None:
+    assert _display(tmp_path, "collection", roles, count=1, dtype="uint16") == []
+
+
+@pytest.mark.parametrize(
+    ("kind", "cog", "flagged"),
+    [
+        ("item", {"count": 3}, True),
+        ("item", {"count": 3, "nodata": 0}, False),
+        ("item", {"count": 4, "alpha": True}, False),
+        ("item", {"count": 3, "mask": True}, False),
+        ("item", {"count": 1}, False),
+        ("collection", {"count": 3}, False),
+    ],
+    ids=["unmasked-rgb", "nodata", "alpha", "internal-mask", "single-band", "collection-asset"],
+)
+def test_imagery_scene_declares_nodata_or_alpha(
+    tmp_path: Path, kind: str, cog: dict, flagged: bool
+) -> None:
+    defects = _display(tmp_path, kind, ["data"], **cog)
+    assert [d.rule_id for d in defects] == ([DAT_SCENE_MASK] if flagged else [])
+    assert all(d.severity is Severity.WARNING for d in defects)
+
+
+@pytest.mark.parametrize("role", ["cloud", "data-mask"])
+def test_mask_asset_is_not_an_imagery_scene(tmp_path: Path, role: str) -> None:
+    """Planet's 8-band udm2 asset carries these roles; its zeros are values."""
+    assert _display(tmp_path, "item", ["data", role], count=8) == []
+
+
+def test_check_node_reports_an_unmasked_scene(tmp_path: Path) -> None:
+    path = tmp_path / "scene.tif"
+    assets.write_cog(path, size=256, count=3)
+    asset = {"href": "./scene.tif", "type": _COG_TYPE, "roles": ["data"]}
+    defects = checks.check_node(_node_with_asset(asset), _FileReader("./scene.tif", path))
+    assert DAT_SCENE_MASK in [d.rule_id for d in defects]
+
+
+def test_unreadable_raster_is_left_to_the_cog_check(tmp_path: Path) -> None:
+    path = tmp_path / "broken.tif"
+    path.write_bytes(b"not a tiff")
+    asset = {"href": "./broken.tif", "type": _COG_TYPE, "roles": ["data"]}
+    with AssetFiles(_loc(path)) as files:
+        assert raster.check_display(_node_with_asset(asset), "a", asset, files) == []
 
 
 # --- partition schema consistency (PTL-DAT-014) ------------------------------
