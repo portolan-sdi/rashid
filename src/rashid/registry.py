@@ -154,7 +154,6 @@ DAT_OVERVIEW_FORMAT = "PTL-DAT-018"
 DAT_SCENE_MASK = "PTL-DAT-019"
 DAT_COLUMN_DESCRIPTIONS = "PTL-DAT-020"
 DAT_CLASS_COLORS = "PTL-DAT-021"
-DAT_PALETTE_CLASSES = "PTL-DAT-022"
 LIV_UNAVAILABLE = "PTL-LIV-000"
 LIV_RANGE = "PTL-LIV-001"
 LIV_HEAD_LENGTH = "PTL-LIV-002"
@@ -477,18 +476,10 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
     ),
     CheckInfo(
         DAT_CLASS_COLORS,
-        "a class list agrees with the COG it describes: its band, nodata, and color table",
+        "a class color_hint matches the COG color table, and the class list fits the file's bands",
         Severity.ERROR,
-        ("PORTO-FMT-050", "PORTO-FMT-054", "PORTO-FMT-057"),
+        ("PORTO-FMT-050", "PORTO-FMT-054"),
         stage="data",
-    ),
-    CheckInfo(
-        DAT_PALETTE_CLASSES,
-        "a COG band with an embedded color table declares classification:classes",
-        Severity.INFO,
-        (),
-        stage="data",
-        spec_note="A palette only hints at classes; PORTO-FMT-049 is enforcement: process.",
     ),
     CheckInfo(
         LIV_UNAVAILABLE,

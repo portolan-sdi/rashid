@@ -134,11 +134,8 @@ def test_schema_pass_gates_exclude_diagnostics(
 def test_networked_pass_gates_include_every_check_except_availability(
     stage: registry.PassName,
 ) -> None:
-    # An uncited hint such as PTL-DAT-022 is still a rule; only -000 reports availability.
     expected = {
-        info.id
-        for info in registry.CHECKS.values()
-        if info.stage == stage and not info.id.endswith("-000")
+        info.id for info in registry.CHECKS.values() if info.stage == stage and info.spec_ids
     }
     assert registry.check_ids(stage, enables_pass_only=True) == expected
     assert len(registry.check_ids(stage) - expected) == 1

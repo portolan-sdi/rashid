@@ -45,18 +45,9 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
 - ``PTL-DAT-020`` a ``table:columns`` entry of a data asset, or of a
   partitioned collection with no data asset, has no description (SHOULD,
   formats.md, Vector Data)
-- ``PTL-DAT-021`` a classification class disagrees with the COG band it
-  describes, such as a ``color_hint`` that differs from the embedded color
-  table. The color table is authoritative for rendering and the hint only
-  mirrors it, so a difference is a WARNING (PORTO-FMT-054). A class at the
-  file's nodata that is not marked nodata is a WARNING too (PORTO-FMT-057).
-  When the metadata's band count disagrees with the file, a class list on
-  the asset of a multi-band file, or on a band of a single-band file, is an
-  ERROR (PORTO-FMT-050).
-- ``PTL-DAT-022`` a COG band drawn through an embedded color table declares no
-  ``classification:classes`` (INFO, uncited). A palette is only a hint, since
-  continuous rasters ship one too. An item asset with no classes of its own is
-  read with its collection's ``item_assets`` template.
+- ``PTL-DAT-021`` a class ``color_hint`` differs from the embedded color
+  table entry for its value (WARNING, PORTO-FMT-054), or a class list is in
+  the wrong place for the file's real band count (ERROR, PORTO-FMT-050)
 
 The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
 run over an asset and over every file a local relative ``partition:glob``
@@ -106,8 +97,6 @@ from rashid.data.partitions import check_partitions
 from rashid.data.raster import (
     check_display,
     check_raster,
-    classified_asset,
-    from_item_assets,
     geo_from_raster,
 )
 from rashid.data.reader import AssetReader
@@ -247,11 +236,7 @@ def _check_asset(
             # being scoped to assets with the 'data' role.
             defects.extend(check_mirror(node, key, files, graph))
         if expected == "tiff":
-            classed = classified_asset(node, key, asset, graph)
-            raster_defects = check_raster(key, classed, located, files)
-            if classed is not asset:
-                raster_defects = from_item_assets(key, raster_defects)
-            defects.extend(raster_defects)
+            defects.extend(check_raster(key, asset, located, files))
             defects.extend(check_display(node, key, asset, files))
         if expected == "parquet":
             defects.extend(check_geoparquet(key, files))
