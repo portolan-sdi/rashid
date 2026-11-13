@@ -753,8 +753,10 @@ def test_asset_without_title_or_description_warns(
     ]
 
 
-def test_item_asset_templates_need_no_title_or_description(catalog: CatalogBuilder) -> None:
-    catalog.collection(
-        "roads", item_assets={"data": {"type": "application/vnd.apache.parquet", "roles": ["data"]}}
-    )
-    assert findings_for(validate(catalog.write()), "PTL-AST-010") == []
+def test_item_asset_templates_need_a_title_and_description(catalog: CatalogBuilder) -> None:
+    template = {"type": "application/vnd.apache.parquet", "roles": ["data"], "title": "Data"}
+    catalog.collection("roads", item_assets={"data": template})
+    findings = findings_for(validate(catalog.write()), "PTL-AST-010")
+    assert [(f.severity, f.json_pointer) for f in findings] == [
+        (Severity.WARNING, "/item_assets/data/description")
+    ]
