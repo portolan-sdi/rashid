@@ -653,6 +653,12 @@ def test_orphan_pmtiles_item_still_reports_errors(tmp_path) -> None:  # type: ig
         "./parts/[0-9].parquet",
         "https://example.org/parts/*.parquet?token=a",
         "s3://bucket/**/data.parquet",
+        "./part-?/*.parquet",
+        "https://*.example.org/d.parquet",
+        "s3://bucket-*/data.parquet",
+        "https://example.org/data.parquet?glob=*",
+        "https://example.org/data.parquet?range=[0,1]",
+        "./data.parquet#[x]",
     ],
 )
 def test_data_asset_href_with_a_glob_is_flagged(catalog: CatalogBuilder, href: str) -> None:
@@ -674,10 +680,10 @@ def test_item_data_asset_href_with_a_glob_is_flagged(catalog: CatalogBuilder) ->
     "href",
     [
         "./data.parquet",
-        "https://example.org/data.parquet?glob=*&range=[0,1]",
-        "./data.parquet#[x]",
+        "https://example.org/data.parquet?token=abc&v=2",
         "./part%2A%5B0%5D.parquet",
         "https://[::1]/data.parquet",
+        "https://[::1]:8443/data.parquet?x=1",
     ],
 )
 def test_single_file_data_href_passes(catalog: CatalogBuilder, href: str) -> None:

@@ -135,9 +135,9 @@ class DataAssetSingleFileRule(Rule):
     """A data asset's href names one file, not a glob.
 
     formats.md: "Each data asset links to only one file. Its `href` MUST NOT
-    contain `*` or `[`. It MAY include a query string." Only the path counts,
-    so a query or fragment may hold either character. A percent-encoded
-    ``%2A`` or ``%5B`` is a literal character, not a glob.
+    contain `*` or `[`. It MAY include a query string." The whole href counts,
+    query and fragment included. A ``[`` inside the authority is an IPv6 host,
+    not a glob. A percent-encoded ``%2A`` or ``%5B`` is not a glob character.
     """
 
     id = "PTL-AST-012"
@@ -152,8 +152,12 @@ class DataAssetSingleFileRule(Rule):
             if "data" not in roles_of(asset) or not isinstance(href, str):
                 continue
             parsed = split_href(href)
-            if parsed is None or not any(char in parsed.path for char in "*["):
+            if parsed is None:
                 continue  # PTL-LNK-006 reports a malformed URI reference
+            head, authority, tail = href.partition(f"//{parsed.netloc}")
+            outside = head + tail if parsed.netloc and authority else href
+            if "*" not in href and "[" not in outside:
+                continue
             yield self.finding(
                 node,
                 f"data asset '{key}' href is a glob; a data asset links to one file",
