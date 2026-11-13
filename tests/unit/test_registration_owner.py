@@ -139,3 +139,17 @@ def test_networked_pass_gates_include_every_check_except_availability(
     }
     assert registry.check_ids(stage, enables_pass_only=True) == expected
     assert len(registry.check_ids(stage) - expected) == 1
+
+
+def test_an_incubating_check_may_not_declare_an_error() -> None:
+    """An incubating requirement is outside the conformance surface.
+
+    The declaration is refused at the registry so a new Zarr check cannot make
+    a store with broken metadata fail a run; ``rashid.runner.cap_incubating``
+    caps the findings as the second guard.
+    """
+    check = registry.CHECKS[registry.ZAR_STORE_VERSION]
+    assert registry.is_incubating(check.id)
+    assert registry._build((), (check,))[check.id] == check
+    with pytest.raises(registry.RegistryError, match="may not declare an error"):
+        registry._build((), (replace(check, severity=Severity.ERROR),))

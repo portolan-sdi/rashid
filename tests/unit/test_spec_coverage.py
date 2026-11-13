@@ -20,8 +20,17 @@ This module gates the join in both directions:
 - every cited ID exists in the manifest;
 - severities map: a MUST is cited by at least one ERROR-severity check, a
   SHOULD by at least one WARNING-or-stronger check, except where the spec
-  itself pins a softer severity (the documented exception table);
+  itself pins a softer severity (the documented exception table), and except
+  for an entry the manifest marks ``status: incubating``, whose MUST is
+  satisfied by a WARNING;
 - every check that cites spec IDs is exercised by at least one test.
+
+An incubating requirement is one the spec states but keeps outside the
+conformance surface of the current Portolan version, so breaking it cannot
+make a catalog nonconformant. ``rashid.registry`` refuses an ERROR declaration
+for the check families that enforce such text, and
+``rashid.runner.cap_incubating`` caps the findings, so the floor the gate
+applies here matches what the validator can actually emit.
 """
 
 from __future__ import annotations
@@ -41,18 +50,23 @@ pytestmark = pytest.mark.unit
 _TESTS_DIR = Path(__file__).resolve().parent.parent
 _MANIFEST = _TESTS_DIR / "fixtures" / "requirements.yaml"
 
-# Manifest entries keep a fixed field order (id, severity, enforcement, file,
-# quote), possibly with comment lines between fields; the spec repo's
-# check_requirements.py validates the file upstream, so a plain scan is
-# reliable and keeps rashid free of a YAML dependency.
+# Manifest entries keep a fixed field order (id, severity, enforcement, an
+# optional status, file, quote), possibly with comment lines between fields;
+# the spec repo's check_requirements.py validates the file upstream, so a plain
+# scan is reliable and keeps rashid free of a YAML dependency.
 _COMMENTS = r"(?:\s*#[^\n]*\n)*"
 _ENTRY = re.compile(
-    r"- id: (PORTO-(?:CORE|FMT)-\d{3})\s*\n"
+    r"- id: (PORTO-(?:CORE|FMT|ZARR)-\d{3})\s*\n"
     + _COMMENTS
     + r"\s+severity: (MUST|SHOULD|MAY)\s*\n"
     + _COMMENTS
     + r"\s+enforcement: (validator|process)\s*\n"
+    + _COMMENTS
+    + r"(?:\s+status: (\w+)\s*\n)?"
 )
+
+#: The ``status`` value that puts a requirement outside the conformance surface.
+_INCUBATING = "incubating"
 
 # MUST requirements deliberately not enforced by any ERROR-severity check.
 # Every entry quotes the spec text that mandates the softer severity; an
@@ -77,8 +91,12 @@ _SEVERITY_EXCEPTIONS: dict[str, str] = {
 _RANK = {Severity.INFO: 0, Severity.WARNING: 1, Severity.ERROR: 2}
 
 
-def _manifest_entries() -> list[tuple[str, str, str]]:
-    """(id, severity, enforcement) triples from the vendored manifest."""
+def _manifest_entries() -> list[tuple[str, str, str, str]]:
+    """(id, severity, enforcement, status) rows from the vendored manifest.
+
+    ``status`` is the empty string for an entry that declares none, which is
+    every entry of the conformance surface itself.
+    """
     entries = _ENTRY.findall(_MANIFEST.read_text(encoding="utf-8"))
     assert len(entries) > 100, "manifest scan found suspiciously few entries"
     return entries
@@ -123,7 +141,7 @@ def test_every_validator_must_and_should_is_cited() -> None:
     cited = _citations()
     missing = [
         f"{req_id} ({severity})"
-        for req_id, severity, enforcement in _manifest_entries()
+        for req_id, severity, enforcement, _status in _manifest_entries()
         if enforcement == "validator" and severity in ("MUST", "SHOULD") and req_id not in cited
     ]
     assert not missing, f"validator requirements cited by no check: {missing}"
@@ -133,7 +151,7 @@ def _validator_mays() -> list[str]:
     """Every ``MAY`` requirement the manifest assigns to the validator."""
     return [
         req_id
-        for req_id, severity, enforcement in _manifest_entries()
+        for req_id, severity, enforcement, _status in _manifest_entries()
         if enforcement == "validator" and severity == "MAY"
     ]
 
@@ -189,11 +207,18 @@ def test_every_cited_id_exists_in_the_manifest() -> None:
 def test_severity_mapping() -> None:
     cited = _citations()
     floors = {"MUST": _RANK[Severity.ERROR], "SHOULD": _RANK[Severity.WARNING]}
+    incubating_floors = {"MUST": _RANK[Severity.WARNING], "SHOULD": _RANK[Severity.WARNING]}
     weak: list[str] = []
-    for req_id, severity, enforcement in _manifest_entries():
+    for req_id, severity, enforcement, status in _manifest_entries():
         if enforcement != "validator" or severity not in floors or req_id not in cited:
             continue
         strongest = max(_RANK[s] for _c, s in cited[req_id])
+        if status == _INCUBATING:
+            # Outside the conformance surface, so a MUST earns a warning, and a
+            # check that emitted an error here would fail a conforming catalog.
+            if strongest < incubating_floors[severity]:
+                weak.append(f"{req_id} ({severity}, incubating) is not even warned about")
+            continue
         if req_id in _SEVERITY_EXCEPTIONS:
             # An exception that is no longer needed must be removed.
             assert severity == "MUST", f"{req_id}: exceptions are for MUST entries"
@@ -203,6 +228,25 @@ def test_severity_mapping() -> None:
         if strongest < floors[severity]:
             weak.append(f"{req_id} ({severity}) strongest citation is below the floor")
     assert not weak, weak
+
+
+def test_incubating_requirements_are_enforced_by_incubating_checks() -> None:
+    """A check citing incubating text must be in a family that cannot error.
+
+    The two halves of the cap meet here: the manifest says the requirement is
+    outside the conformance surface, and ``rashid.registry.is_incubating``
+    says the check enforcing it caps at a warning. A check that cited one
+    without being in such a family would pass the severity floors above while
+    still being able to fail a catalog.
+    """
+    statuses = {req_id: status for req_id, _sev, _enf, status in _manifest_entries()}
+    stray = [
+        f"{check_id} cites {spec_id}"
+        for check_id, (spec_ids, _severity) in _checks().items()
+        for spec_id in spec_ids
+        if statuses.get(spec_id) == _INCUBATING and not registry.is_incubating(check_id)
+    ]
+    assert not stray, f"incubating requirements enforced by conformance checks: {stray}"
 
 
 def _constant_aliases() -> dict[str, set[str]]:

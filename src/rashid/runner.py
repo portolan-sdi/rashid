@@ -27,6 +27,7 @@ from rashid.registry import (
     GEN_PARTIAL_TREE,
     GEN_UNPARSEABLE,
     check_ids,
+    is_incubating,
 )
 from rashid.remote import (
     DEFAULT_MAX_DOCUMENTS,
@@ -372,6 +373,27 @@ def _partial_tree_findings(crawled: Crawl, root_url: str) -> list[Finding]:
     return findings
 
 
+def cap_incubating(findings: Sequence[Finding]) -> list[Finding]:
+    """Soften every finding from an incubating check to WARNING at most.
+
+    The spec marks an incubating requirement ``status: incubating`` and puts it
+    outside the conformance surface of the current Portolan version, so
+    breaking one must not make ``Report.passed`` false. The cap sits here, at
+    the one place every pass's findings meet, rather than in each check: a new
+    incubating check cannot forget it, and it runs after
+    ``config.severity_overrides``, so a caller cannot promote one either.
+    :func:`rashid.registry.is_incubating` names the families, and
+    ``registry._build`` already refuses an ERROR declaration, so this is the
+    second of two guards rather than the only one.
+    """
+    return [
+        dataclasses.replace(f, severity=Severity.WARNING)
+        if f.severity is Severity.ERROR and is_incubating(f.rule_id)
+        else f
+        for f in findings
+    ]
+
+
 def _run_rules(graph: CatalogGraph, rules: Sequence[Rule], config: RulesConfig) -> list[Finding]:
     """Every enabled rule over every object of the kinds it reads.
 
@@ -453,5 +475,6 @@ def _validate_graph(
             for f in findings
         ]
 
+    findings = cap_incubating(findings)
     findings.sort(key=lambda f: (f.path, f.rule_id, f.message))
     return Report(findings=findings, files_checked=len(graph.nodes))

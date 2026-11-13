@@ -35,6 +35,7 @@ from rashid.registry import (
     LIV_RANGE,
     LIV_SELF_BASE,
     LIV_UNAVAILABLE,
+    ZAR_CORS,
 )
 from tests._https import HttpsServer, Route
 from tests.conftest import VALID_MULTIHASH, CatalogBuilder, mutate_json
@@ -471,7 +472,12 @@ def test_live_off_by_default(catalog: CatalogBuilder) -> None:
     assert prober.range_calls == []
 
 
-def test_disabling_all_liv_rules_skips_pass(catalog: CatalogBuilder) -> None:
+def test_disabling_every_live_check_skips_pass(catalog: CatalogBuilder) -> None:
+    """The pass is skipped only when every check it can emit is disabled.
+
+    ``PTL-ZAR-003`` probes a Zarr store's cross-origin policy from this pass,
+    so it belongs in the set; leaving it out leaves the pass with work to do.
+    """
     catalog.collection("roads", assets={"data": _remote_asset()})
     root = catalog.write()
     prober = FakeProber()
@@ -486,6 +492,7 @@ def test_disabling_all_liv_rules_skips_pass(catalog: CatalogBuilder) -> None:
                 LIV_LINK_TARGET,
                 LIV_SELF_BASE,
                 LIV_OFF_HTTPS,
+                ZAR_CORS,
             }
         )
     )
@@ -1564,3 +1571,160 @@ def test_a_stand_in_whose_ranged_get_redirects_too_is_reported_and_warned(
     assert prober.range_calls == [first, second]
     assert _ids(findings) == [LIV_OFF_HTTPS, LIV_OFF_HTTPS, LIV_UNAVAILABLE]
     assert "every asset tried" in findings[2].message
+
+
+# --- the incubating Zarr store probe (PTL-ZAR-003) --------------------------
+
+_STORE_URL = "https://data.example.com/temps.zarr"
+_STORE_METADATA = f"{_STORE_URL}/zarr.json"
+
+
+class _ZarrProber(FakeProber):
+    """A prober that answers the store's metadata URL differently from the asset.
+
+    The store href names a key prefix, so the asset probes read whatever the
+    host says about a directory; only the ``zarr.json`` answer settles the
+    store's cross-origin policy.
+    """
+
+    def __init__(self, metadata: ProbeResponse) -> None:
+        super().__init__()
+        self._metadata = metadata
+
+    def get_range(self, url: str) -> ProbeResponse:
+        self.range_calls.append(url)
+        return self._metadata if url == _STORE_METADATA else self.range_response
+
+
+def _graph_with_store(catalog: CatalogBuilder, href: str = _STORE_URL) -> CatalogGraph:
+    asset = {"href": href, "type": "application/vnd.zarr; version=3", "roles": ["data"]}
+    catalog.collection("temps", assets={"data": asset})
+    return CatalogGraph.load(catalog.write())
+
+
+def test_a_store_whose_metadata_allows_an_origin_is_accepted(catalog: CatalogBuilder) -> None:
+    prober = _ZarrProber(_good_range())
+    findings = validate_live(_graph_with_store(catalog), prober)
+    assert ZAR_CORS not in _ids(findings)
+    assert _STORE_METADATA in prober.range_calls
+
+
+def test_a_store_whose_metadata_allows_no_origin_is_reported(catalog: CatalogBuilder) -> None:
+    denied = _good_range()
+    del denied.headers["access-control-allow-origin"]
+    findings = validate_live(_graph_with_store(catalog), _ZarrProber(denied))
+    finding = next(f for f in findings if f.rule_id == ZAR_CORS)
+    assert finding.severity is Severity.WARNING
+    assert _STORE_METADATA in finding.message
+    assert finding.json_pointer == "/assets/data/href"
+
+
+def test_a_store_that_serves_no_metadata_cannot_be_judged(catalog: CatalogBuilder) -> None:
+    missing = ProbeResponse(status=404, headers={})
+    findings = validate_live(_graph_with_store(catalog), _ZarrProber(missing))
+    assert ZAR_CORS not in _ids(findings)
+    assert any("Zarr CORS probe" in f.message for f in findings if f.rule_id == LIV_UNAVAILABLE)
+
+
+def test_a_store_href_with_a_trailing_slash_probes_one_metadata_url(
+    catalog: CatalogBuilder,
+) -> None:
+    prober = _ZarrProber(_good_range())
+    validate_live(_graph_with_store(catalog, f"{_STORE_URL}/"), prober)
+    assert prober.range_calls.count(_STORE_METADATA) == 1
+
+
+def test_a_catalog_without_a_zarr_asset_sends_no_store_probe(catalog: CatalogBuilder) -> None:
+    prober = FakeProber()
+    validate_live(_graph_with_remote(catalog), prober)
+    assert not [url for url in prober.range_calls if url.endswith("/zarr.json")]
+
+
+def test_two_assets_naming_one_store_are_probed_once(catalog: CatalogBuilder) -> None:
+    """The metadata URL identifies the store, so a trailing slash is not a second one."""
+    zarr = {"type": "application/vnd.zarr; version=3", "roles": ["data"]}
+    catalog.collection(
+        "temps",
+        assets={
+            "a": {"href": _STORE_URL, **zarr},
+            "b": {"href": f"{_STORE_URL}/", **zarr},
+        },
+    )
+    prober = _ZarrProber(_good_range())
+    validate_live(CatalogGraph.load(catalog.write()), prober)
+    assert prober.range_calls.count(_STORE_METADATA) == 1
+
+
+def test_a_relative_store_href_is_probed_under_the_base(catalog: CatalogBuilder) -> None:
+    asset = {"href": "./data.zarr", "type": "application/vnd.zarr; version=3", "roles": ["data"]}
+    catalog.collection("temps", assets={"data": asset})
+    prober = _ZarrProber(_good_range())
+    validate_live(
+        CatalogGraph.load(catalog.write()),
+        prober,
+        base_url="https://example.org/catalog/",
+    )
+    assert "https://example.org/catalog/temps/data.zarr/zarr.json" in prober.range_calls
+
+
+def test_a_store_on_a_scheme_that_cannot_be_probed_is_skipped(catalog: CatalogBuilder) -> None:
+    """An ``s3`` store href has no https URL to probe, and ``PTL-AST-002`` owns it.
+
+    The collection also carries a probeable https asset, so the pass runs
+    rather than stopping at "nothing to probe".
+    """
+    store = {
+        "href": "s3://example-bucket/temps.zarr",
+        "type": "application/vnd.zarr; version=3",
+        "roles": ["data"],
+    }
+    catalog.collection("temps", assets={"data": _remote_asset(), "store": store})
+    prober = _ZarrProber(_good_range())
+    findings = validate_live(CatalogGraph.load(catalog.write()), prober)
+    assert not [url for url in prober.range_calls if url.endswith("/zarr.json")]
+    assert ZAR_CORS not in _ids(findings)
+
+
+def test_a_store_whose_host_is_unreachable_is_reported_once(catalog: CatalogBuilder) -> None:
+    class _Failing(_ZarrProber):
+        def get_range(self, url: str) -> ProbeResponse:
+            if url == _STORE_METADATA:
+                raise OSError("connection reset")
+            return super().get_range(url)
+
+    findings = validate_live(_graph_with_store(catalog), _Failing(_good_range()))
+    unavailable = [f for f in findings if f.rule_id == LIV_UNAVAILABLE]
+    assert any("connection reset" in f.message for f in unavailable)
+
+
+def test_a_store_on_another_host_than_the_publish_base_is_still_probed(
+    catalog: CatalogBuilder,
+) -> None:
+    """PORTO-CORE-073's publish-host scoping does not reach the Zarr store rule.
+
+    A catalog commonly publishes its metadata on one host and its store on a
+    bucket with another name. The asset probes drop that store as somebody
+    else's bytes; the Zarr profile binds the store itself, so this probe keeps
+    it.
+    """
+    denied = _good_range()
+    del denied.headers["access-control-allow-origin"]
+    findings = validate_live(
+        _graph_with_store(catalog),
+        _ZarrProber(denied),
+        base_url="https://catalog.example.org/",
+    )
+    assert ZAR_CORS in _ids(findings)
+
+
+def test_a_source_store_is_not_probed(catalog: CatalogBuilder) -> None:
+    """A source asset names the upstream original, not the published store."""
+    asset = {
+        "href": _STORE_URL,
+        "type": "application/vnd.zarr; version=3",
+        "roles": ["source"],
+    }
+    catalog.collection("temps", assets={"data": _remote_asset(), "upstream": asset})
+    prober = _ZarrProber(_good_range())
+    validate_live(CatalogGraph.load(catalog.write()), prober)
+    assert _STORE_METADATA not in prober.range_calls

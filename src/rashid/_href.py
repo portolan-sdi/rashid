@@ -105,6 +105,21 @@ def href_suffix(href: str) -> str:
     return href[len(containment_href(href)) :]
 
 
+def store_member_href(href: str, member: str) -> str:
+    """The href of ``member`` inside the store that ``href`` names.
+
+    A Zarr store is a key prefix rather than one object, so its documents are
+    addressed by appending path segments. Publishers write the store href
+    both with and without a trailing slash, and ``member`` is a Zarr node
+    path such as ``"0/rgba"``, so both sides are trimmed before they join.
+    The result keeps the href's class: a relative store href yields a
+    relative member href, which the asset reader resolves against the tree.
+    """
+    base = containment_href(href).rstrip("/")
+    trimmed = member.strip("/")
+    return f"{base}/{trimmed}" if trimmed else base
+
+
 def _relative_join(directory: str, path: str) -> str | None:
     joined = posixpath.normpath(posixpath.join(directory, path))
     if joined == "." or joined.startswith(".."):

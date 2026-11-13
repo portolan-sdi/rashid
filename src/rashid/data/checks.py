@@ -95,6 +95,7 @@ from rashid.data.spatial import (
     wgs84_bounds,
 )
 from rashid.data.storage import check_bytes, expected_format
+from rashid.data.zarr import check_zarr
 from rashid.model import Severity
 from rashid.registry import (
     DAT_CONSISTENCY,
@@ -103,6 +104,7 @@ from rashid.rules._common import (
     asset_refers_to_self,
     assets_of,
     is_source_asset,
+    is_zarr_media_type,
 )
 from rashid.rules.item_mirror import is_mirror_asset
 
@@ -189,6 +191,13 @@ def _check_asset(
     expected = expected_format(media_type) if isinstance(media_type, str) else None
 
     defects.extend(check_bytes(key, asset=asset, expected=expected, node=node, reader=reader))
+
+    if is_zarr_media_type(media_type) and not is_source_asset(asset):
+        # A Zarr asset href names a key prefix, so reader.locate() answers None
+        # for it the way it answers None for a directory. The store's checks
+        # resolve the zarr.json documents inside the prefix themselves, so they
+        # run before that answer is taken as "nothing to read" below.
+        defects.extend(check_zarr(node, key=key, asset=asset, reader=reader))
 
     located = reader.locate(node, href)
     if located is None or is_source_asset(asset):

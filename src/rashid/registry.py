@@ -87,6 +87,22 @@ __all__ = ["CHECKS", "CheckInfo", "RegistryError", "describe"]
 
 PassName = Literal["metadata", "runner", "structural", "extensions", "schema", "data", "live"]
 
+#: Check families that enforce an incubating part of the spec. The spec marks
+#: such a requirement ``status: incubating`` and states that it is outside the
+#: conformance surface of the current Portolan version, so a store that breaks
+#: one is not nonconformant. These checks therefore cap at WARNING, however
+#: strong the requirement's own RFC 2119 keyword is. :func:`_build` refuses an
+#: ERROR declaration here, and :func:`rashid.runner.cap_incubating` caps the
+#: findings themselves, so neither a new check nor a severity override can
+#: turn an incubating requirement into a conformance failure.
+INCUBATING_FAMILIES = frozenset({"ZAR"})
+
+
+def is_incubating(check_id: str) -> bool:
+    """Whether ``check_id`` belongs to a family that enforces incubating spec text."""
+    parts = check_id.split("-")
+    return len(parts) == 3 and parts[1] in INCUBATING_FAMILIES
+
 
 @dataclass(frozen=True)
 class CheckInfo:
@@ -139,6 +155,25 @@ DAT_PARTITION_SCHEMA = "PTL-DAT-014"
 DAT_TABULAR = "PTL-DAT-015"
 DAT_MIRROR = "PTL-DAT-016"
 DAT_VECTOR_COLUMNS = "PTL-DAT-017"
+ZAR_STORE_VERSION = "PTL-ZAR-001"
+ZAR_CONVENTIONS = "PTL-ZAR-002"
+ZAR_CORS = "PTL-ZAR-003"
+ZAR_ASSET = "PTL-ZAR-004"
+ZAR_TRANSFORM = "PTL-ZAR-005"
+ZAR_AXIS_ORDER = "PTL-ZAR-006"
+ZAR_ROW_MAJOR = "PTL-ZAR-007"
+ZAR_CRS = "PTL-ZAR-008"
+ZAR_PYRAMID = "PTL-ZAR-009"
+ZAR_LAYOUT_FIELDS = "PTL-ZAR-010"
+ZAR_LEVEL_STEP = "PTL-ZAR-011"
+ZAR_VARIABLES = "PTL-ZAR-012"
+ZAR_DISPLAY_RANGE = "PTL-ZAR-013"
+ZAR_NODATA = "PTL-ZAR-014"
+ZAR_READ_AMPLIFICATION = "PTL-ZAR-015"
+ZAR_NONSPATIAL_CHUNK = "PTL-ZAR-016"
+ZAR_CHUNK_SIZE = "PTL-ZAR-017"
+ZAR_SHARD_SPAN = "PTL-ZAR-018"
+ZAR_CODECS = "PTL-ZAR-019"
 LIV_UNAVAILABLE = "PTL-LIV-000"
 LIV_RANGE = "PTL-LIV-001"
 LIV_HEAD_LENGTH = "PTL-LIV-002"
@@ -429,6 +464,132 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         stage="data",
     ),
     CheckInfo(
+        ZAR_STORE_VERSION,
+        "a Zarr store asset points at a readable Zarr v3 store",
+        Severity.WARNING,
+        ("PORTO-ZARR-001",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_CONVENTIONS,
+        "the store declares the spatial, proj, and multiscales conventions and conforms to them",
+        Severity.WARNING,
+        ("PORTO-ZARR-002",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_ASSET,
+        "the asset declares the Zarr v3 media type and its href names a group",
+        Severity.WARNING,
+        ("PORTO-ZARR-004",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_TRANSFORM,
+        "every renderable array resolves an affine spatial:transform",
+        Severity.WARNING,
+        ("PORTO-ZARR-006",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_AXIS_ORDER,
+        "the spatial axes are the last two dimensions of every renderable array, Y before X",
+        Severity.WARNING,
+        ("PORTO-ZARR-007",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_ROW_MAJOR,
+        "arrays are stored row-major, with no transpose codec reordering them",
+        Severity.WARNING,
+        ("PORTO-ZARR-008",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_CRS,
+        "the store attributes carry proj:code, or proj:projjson instead",
+        Severity.WARNING,
+        ("PORTO-ZARR-009", "PORTO-ZARR-010"),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_PYRAMID,
+        "a store wider than 4 chunks carries a pyramid whose coarsest level fits in 4",
+        Severity.WARNING,
+        ("PORTO-ZARR-011", "PORTO-ZARR-012"),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_LAYOUT_FIELDS,
+        "every multiscales layout entry carries spatial:transform and spatial:shape",
+        Severity.WARNING,
+        ("PORTO-ZARR-013",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_LEVEL_STEP,
+        "pyramid levels step by a factor of 2",
+        Severity.WARNING,
+        ("PORTO-ZARR-014",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_VARIABLES,
+        "a store with more than one data variable declares cube:variables",
+        Severity.WARNING,
+        ("PORTO-ZARR-016",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_DISPLAY_RANGE,
+        "every renderable array carries band statistics or a renders rescale",
+        Severity.WARNING,
+        ("PORTO-ZARR-017",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_NODATA,
+        "a renderable array declares nodata on its bands entry",
+        Severity.WARNING,
+        ("PORTO-ZARR-018",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_READ_AMPLIFICATION,
+        "a client reads no more than 8 samples for every sample it draws",
+        Severity.WARNING,
+        ("PORTO-ZARR-020",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_NONSPATIAL_CHUNK,
+        "non-spatial dimensions have a chunk length of 1",
+        Severity.WARNING,
+        ("PORTO-ZARR-021",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_CHUNK_SIZE,
+        "chunks are 256 to 1024 samples on X and Y, whatever the shard spans",
+        Severity.WARNING,
+        ("PORTO-ZARR-023", "PORTO-ZARR-024"),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_SHARD_SPAN,
+        "a shard spans the non-spatial dimensions by a product of 8 or less",
+        Severity.WARNING,
+        ("PORTO-ZARR-025",),
+        stage="data",
+    ),
+    CheckInfo(
+        ZAR_CODECS,
+        "every codec in the chain has a JavaScript implementation",
+        Severity.WARNING,
+        ("PORTO-ZARR-026",),
+        stage="data",
+    ),
+    CheckInfo(
         LIV_UNAVAILABLE,
         "the live pass could reach a host to probe",
         Severity.WARNING,
@@ -493,6 +654,13 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         ("PORTO-CORE-023", "PORTO-CORE-035", "PORTO-CORE-073"),
         stage="live",
     ),
+    CheckInfo(
+        ZAR_CORS,
+        "the host of a Zarr store permits a cross-origin read of its metadata",
+        Severity.WARNING,
+        ("PORTO-ZARR-003",),
+        stage="live",
+    ),
 )
 
 
@@ -519,6 +687,10 @@ def _build(
             raise RegistryError(f"rule {info.id} has no description")
         if not info.spec_ids and not info.spec_note:
             raise RegistryError(f"rule {info.id} has no spec metadata")
+        if is_incubating(info.id) and info.severity is Severity.ERROR:
+            raise RegistryError(
+                f"rule {info.id} enforces incubating spec text and may not declare an error"
+            )
         checks[info.id] = info
     return checks
 

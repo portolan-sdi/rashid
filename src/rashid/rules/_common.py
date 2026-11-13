@@ -24,6 +24,12 @@ STRUCTURAL_RELS = ("root", "parent", "child", "item", "collection")
 
 PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
 
+# incubating/zarr.md, Access: a Zarr store asset carries the Zarr media type
+# with a version parameter, and MAY carry more parameters such as
+# `profile=multiscales`. The base type alone marks the asset as a Zarr store;
+# PTL-ZAR-004 judges the parameters.
+ZARR_MEDIA_TYPE = "application/vnd.zarr"
+
 # core.md, Assets: Portolan raster data is COG, declared with this media type.
 # A plain GeoTIFF may appear only as an upstream source, not as primary data.
 COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
@@ -90,6 +96,23 @@ def is_tiff_media_type(
     if policy == "prefix":
         return value.lower().startswith(_TIFF_MEDIA_TYPE)
     return value.split(";", 1)[0].strip().lower() == _TIFF_MEDIA_TYPE
+
+
+def media_parameters(value: str) -> dict[str, str]:
+    """The parameters of a media type, lowercased, order and spacing ignored."""
+    parameters: dict[str, str] = {}
+    for part in value.split(";")[1:]:
+        name, separator, raw = part.partition("=")
+        if separator:
+            parameters[name.strip().lower()] = raw.strip().strip('"').lower()
+    return parameters
+
+
+def is_zarr_media_type(value: object) -> bool:
+    """Whether a media type names a Zarr store, whatever its parameters."""
+    if not isinstance(value, str):
+        return False
+    return value.split(";", 1)[0].strip().lower() == ZARR_MEDIA_TYPE
 
 
 def is_cog_media_type(value: object) -> bool:

@@ -22,6 +22,7 @@ dropping a requirement.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ import pytest
 
 from rashid import validate
 from tests.conftest import (
+    PORTOLAN_URI,
     CatalogBuilder,
     default_asset,
     default_providers,
@@ -58,6 +60,7 @@ PERMISSION_TESTS: dict[str, str] = {
     "PORTO-FMT-016": "test_large_files_may_be_partitioned",
     "PORTO-FMT-020": "test_partition_glob_may_use_bucket_native_schemes",
     "PORTO-FMT-035": "test_converted_source_may_be_retained_alongside_the_parquet",
+    "PORTO-ZARR-005": "test_a_zarr_store_may_declare_an_s3_href_beside_the_https_one",
 }
 
 _PARTITION_URI = "https://schemas.portolan-sdi.org/incubating/partition/v1.0.0/schema.json"
@@ -323,4 +326,44 @@ def test_a_catalog_may_publish_an_alternate_language_tree(catalog: CatalogBuilde
     finds nothing, rather than reporting that it could not check them.
     """
     report = validate(write_language_trees(catalog))
+    assert report.findings == []
+
+
+# --- incubating/zarr.md ----------------------------------------------------
+
+_ZARR_STORES = Path(__file__).resolve().parents[1] / "fixtures" / "zarr-stores"
+_ALTERNATE_ASSETS_URI = "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json"
+
+
+def test_a_zarr_store_may_declare_an_s3_href_beside_the_https_one(
+    catalog: CatalogBuilder,
+) -> None:
+    """PORTO-ZARR-005: an ``s3://`` href MAY sit beside the ``https`` one.
+
+    The STAC spelling for a second location of one object is the Alternate
+    Assets extension, so the permitted form is an ``alternate`` member on the
+    Zarr asset rather than a second asset. ``PTL-AST-002`` bans a non-https
+    asset href, and the two coexist only because that rule reads each asset's
+    own ``href`` and never the alternates beneath it. The whole report is
+    asserted, because the Zarr checks read the same asset and could reach the
+    alternate as easily.
+    """
+    zarr = default_asset()
+    zarr["href"] = "./data.zarr"
+    zarr["type"] = "application/vnd.zarr; version=3"
+    zarr["bands"] = [
+        {"name": "temp", "nodata": -9999, "statistics": {"minimum": -50.0, "maximum": 50.0}}
+    ]
+    zarr["alternate"] = {
+        "s3": {"href": "s3://example-bucket/temps/data.zarr", "title": "S3 access"}
+    }
+    catalog.collection(
+        "temps",
+        title="Daily Temperatures",
+        assets={"data": zarr, "thumbnail": thumbnail_asset()},
+        stac_extensions=[PORTOLAN_URI, _ALTERNATE_ASSETS_URI],
+    )
+    root = catalog.write()
+    shutil.copytree(_ZARR_STORES / "flat", root / "temps" / "data.zarr")
+    report = validate(root)
     assert report.findings == []
