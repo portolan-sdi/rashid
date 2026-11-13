@@ -42,6 +42,8 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
 - ``PTL-DAT-019`` an imagery scene, an item-level data COG with three or more
   bands and no mask role, has no nodata value, alpha band, or mask (SHOULD,
   formats.md, Imagery)
+- ``PTL-DAT-020`` a ``table:columns`` entry of a data asset has no
+  description (SHOULD, formats.md, Vector Data)
 
 The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
 run over an asset and over every file a local relative ``partition:glob``

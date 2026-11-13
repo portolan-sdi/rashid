@@ -1346,6 +1346,21 @@ def test_a_blank_description_does_not_count() -> None:
     assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
 
 
+def test_a_description_that_is_not_text_does_not_count() -> None:
+    columns = [{"name": "value", "type": "int64", "description": 5}]
+    defects = _described(_tabular_collection(**{"table:columns": columns}))
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_described_collection_columns_do_not_hide_bare_asset_columns() -> None:
+    bare = [{"name": "extra", "type": "int64"}]
+    node = _tabular_collection(**{"table:columns": _COLUMNS})
+    defects = _described(node, **{"table:columns": bare})
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+    assert f"1 of {len(_COLUMNS) + 1}" in defects[0].message
+    assert "extra" in defects[0].message
+
+
 def test_more_than_five_bare_columns_are_summarized() -> None:
     columns = [{"name": f"c{i}", "type": "int64"} for i in range(7)]
     defects = _described(_tabular_collection(**{"table:columns": columns}))

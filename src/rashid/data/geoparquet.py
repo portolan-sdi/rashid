@@ -318,16 +318,20 @@ def check_column_descriptions(node: Node, key: str, asset: dict[str, Any]) -> li
     """
     if "data" not in roles_of(asset):
         return []
-    for holder in table_declarations(node, asset):
-        columns = holder.get("table:columns")
-        if isinstance(columns, list) and columns:
-            break
-    else:
+    # Every declaration counts: object, properties, and the asset itself.
+    columns = [
+        column
+        for holder in table_declarations(node, asset)
+        if isinstance(holder.get("table:columns"), list)
+        for column in holder["table:columns"]
+    ]
+    if not columns:
         return []  # no declaration: PTL-DAT-015 and PTL-DAT-017 own it
     bare = [
         str(column.get("name", "?"))
         for column in columns
-        if isinstance(column, dict) and not str(column.get("description") or "").strip()
+        if isinstance(column, dict)
+        and not (isinstance(text := column.get("description"), str) and text.strip())
     ]
     if not bare:
         return []
