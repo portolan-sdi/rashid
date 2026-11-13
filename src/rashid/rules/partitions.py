@@ -97,9 +97,10 @@ def _declares_extension(node: Node) -> bool:
 class PartitionGlobSchemeRule(Rule):
     """``partition:glob`` is an absolute URL that clients can list.
 
-    A relative path, an ``http(s)://`` URL, a Windows drive path, or a bucket
-    URL without a bucket cannot be listed (PORTO-FMT-064, ERROR). Any other scheme is absolute; it warns
-    unless it is ``s3``, ``gs``, or ``az`` (PORTO-FMT-075).
+    An ERROR under PORTO-FMT-064: a relative path, an ``http(s)://`` URL, a
+    Windows drive path, or a URL with no host or bucket (except ``file``).
+    A WARNING under PORTO-FMT-075: any other scheme than ``s3``, ``gs``, or
+    ``az``.
     """
 
     id = "PTL-PRT-002"
@@ -114,10 +115,10 @@ class PartitionGlobSchemeRule(Rule):
             return  # PTL-PRT-001 reports a missing glob
         parsed = split_href(glob)
         scheme = parsed.scheme.lower() if parsed is not None else ""
-        bucket = parsed.netloc if parsed is not None else ""
+        bucket = parsed.hostname if parsed is not None else None
         # A one-letter scheme is a Windows drive letter, not a URL scheme.
         unlistable = len(scheme) < 2 or scheme in ("http", "https")
-        if unlistable or (scheme in _RECOMMENDED_SCHEMES and not bucket):
+        if unlistable or (scheme != "file" and not bucket):
             yield self.finding(
                 node,
                 "partition:glob is not an absolute URL that clients can list, such as"

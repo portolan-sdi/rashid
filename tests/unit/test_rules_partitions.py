@@ -125,6 +125,10 @@ def test_empty_field_values_are_flagged(catalog: CatalogBuilder) -> None:
         "s3://",
         "gs:///data/*.parquet",
         "az:container/*.parquet",
+        "year:2024/*.parquet",
+        "abfs:container/*.parquet",
+        "s3://user@/data/*.parquet",
+        "s3://:80/data/*.parquet",
     ],
 )
 def test_unlistable_glob_is_rejected(catalog: CatalogBuilder, glob: str) -> None:
