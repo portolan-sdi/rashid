@@ -20,7 +20,6 @@ below; the gap is one of consistency. Closing it means passing
 from __future__ import annotations
 
 from functools import lru_cache
-from importlib.metadata import PackageNotFoundError, version
 
 _PROJECT_URL = "https://github.com/portolan-sdi/rashid"
 
@@ -37,7 +36,10 @@ def user_agent() -> str:
     servers are being read.
 
     Read at first use, not at import, so `import rashid` stays cheap.
+    ``importlib.metadata`` alone costs about 9 ms to import.
     """
+    from importlib.metadata import PackageNotFoundError, version
+
     try:
         release = version("rashid")
     except PackageNotFoundError:  # pragma: no cover - installed metadata is always present

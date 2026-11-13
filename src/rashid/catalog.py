@@ -8,14 +8,20 @@ observes exactly what is on disk.
 from __future__ import annotations
 
 import os
-import posixpath
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import quote
 
 from rashid import _json
+from rashid._href import (
+    is_absolute_href,
+    local_path,
+    relative_path,
+    self_link_base,
+    structural_prefix,
+)
 
 Kind = Literal["catalog", "collection", "item", "unknown"]
 
@@ -52,36 +58,6 @@ def _detect_kind(data: dict[str, Any]) -> Kind:
     if stac_type == "Feature" and "stac_version" in data:
         return "item"
     return "unknown"
-
-
-def is_absolute_href(href: str) -> bool:
-    """True for hrefs with a URI scheme or a leading slash."""
-    return href.startswith("/") or bool(urlparse(href).scheme)
-
-
-def self_link_base(root: Node | None) -> str | None:
-    """The URL prefix a root catalog is published under, from its ``self`` link.
-
-    core.md, Links: a catalog served over the internet from a single fixed
-    URL SHOULD carry an absolute ``self`` link on its root catalog
-    (PORTO-CORE-081). That link names the published location of the root
-    file, so the URL minus the root file name is the base every file in the
-    tree is served under. None when ``root`` is None, carries no absolute
-    ``self`` link, or its ``self`` link does not end in the root's own file
-    name — a ``self`` naming some other file says nothing about this tree.
-    """
-    if root is None:
-        return None
-    raw = root.data.get("links")
-    for link in raw if isinstance(raw, list) else []:
-        if not isinstance(link, dict) or link.get("rel") != "self":
-            continue
-        href = link.get("href")
-        if isinstance(href, str) and is_absolute_href(href):
-            prefix, sep, tail = href.rpartition("/")
-            if tail == root.path.name:
-                return prefix + sep
-    return None
 
 
 def _is_within(path: PurePosixPath, prefix: PurePosixPath) -> bool:
@@ -285,20 +261,38 @@ class CatalogGraph:
         Returns the target node, or None when the href is absolute, escapes
         the catalog root, or does not land on a known STAC object file.
         """
-        resolved = self.resolve_path(from_node, href)
-        if resolved is None:
-            return None
-        return self.nodes.get(resolved)
+        resolved = self.local_path(from_node, href)
+        return self.nodes.get(resolved) if resolved is not None else None
 
     def resolve_path(self, from_node: Node, href: str) -> PurePosixPath | None:
-        """Normalize a relative href to a root-relative POSIX path."""
-        if not href or is_absolute_href(href):
-            return None
-        base = from_node.path.parent
-        joined = posixpath.normpath(posixpath.join(str(base), href))
-        if joined == "." or joined.startswith(".."):
-            return None
-        return PurePosixPath(joined)
+        """Normalize a relative href without decoding its document identity."""
+        resolved = relative_path(str(self.href_path(from_node).parent), href)
+        return PurePosixPath(resolved) if resolved is not None else None
+
+    def href_path(self, node: Node) -> PurePosixPath:
+        """URI spelling of a local filename or an already-encoded mirror name."""
+        return (
+            node.path
+            if self.base_url is not None
+            else PurePosixPath(quote(str(node.path), safe="/"))
+        )
+
+    def local_path(self, from_node: Node, href: str) -> PurePosixPath | None:
+        """Path in the local tree: decoded filenames, or encoded mirror names."""
+        if self.base_url is not None:
+            return self.resolve_path(from_node, href)
+        resolved = local_path(str(self.href_path(from_node).parent), href)
+        return PurePosixPath(resolved) if resolved is not None else None
+
+    def resolve_structural_link(self, node: Node, href: str) -> tuple[bool, Node | None]:
+        """Resolve structural links using the language tree's published prefix."""
+        if not is_absolute_href(href):
+            return True, self.resolve_link(node, href)
+        root = self.language_root_of(node)
+        relative = structural_prefix(href, self_link_base(root))
+        if relative is None:
+            return False, None
+        return True, self.resolve_link(root, relative) if root is not None else None
 
     def parent_of(self, node: Node) -> Node | None:
         """The object containing ``node``: the nearest ancestor-directory object.
@@ -350,11 +344,14 @@ class CatalogGraph:
     def children_of(self, node: Node) -> list[Node]:
         """Objects whose containment parent is ``node``."""
         if self._children is None:
-            self._children = {}
+            # Built aside and assigned whole: the data pass reads this from
+            # many threads, and none may see a half-filled index.
+            children: dict[PurePosixPath, list[Node]] = {}
             for n in self.iter():
                 parent = self.parent_of(n)
                 if parent is not None:
-                    self._children.setdefault(parent.path, []).append(n)
+                    children.setdefault(parent.path, []).append(n)
+            self._children = children
         return list(self._children.get(node.path, [])) if self._owns(node) else []
 
     def items_of(self, node: Node) -> list[Node]:
@@ -368,11 +365,13 @@ class CatalogGraph:
         upward.
         """
         if self._items is None:
-            self._items = {}
+            # Built aside and assigned whole, as in children_of.
+            items: dict[PurePosixPath, list[Node]] = {}
             for n in self.iter("item"):
                 collection = self.enclosing_collection_of(n)
                 if collection is not None:
-                    self._items.setdefault(collection.path, []).append(n)
+                    items.setdefault(collection.path, []).append(n)
+            self._items = items
         return list(self._items.get(node.path, [])) if self._owns(node) else []
 
     def _owns(self, node: Node) -> bool:

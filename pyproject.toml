@@ -8,25 +8,24 @@ version = "0.3.0"
 description = "Validator and linter for Portolan catalogs"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "Portolan contributors" }]
 # The data pass reads asset bytes to verify checksum, size, format, and extent —
 # the core of what a catalog validator is for — so its geospatial stack is a
 # core dependency and the pass runs by default. The import-linter contracts
 # keep `import rashid` cheap: the heavy imports stay confined to
-# rashid.data.checks and load only when the pass runs.
+# rashid.data check modules and load only when the pass runs.
 #
-# Floors sit at the newest release that still resolves on Python 3.10; rasterio,
-# rio-cogeo, and pyproj all dropped 3.10 in their latest majors, and 3.11+ picks
-# those up through the lock. pyarrow is the exception: 21 is the oldest release
-# whose reader exposes native GeospatialStatistics (checks._native_bboxes
+# Floors stay at releases that resolved on Python 3.10, the previous minimum.
+# Raising them is a separate change. pyarrow is the exception: 21 is the
+# oldest release whose reader exposes native GeospatialStatistics (geoparquet._native_bboxes
 # feature-detects it either way), and consumers cap pyarrow below 25 over an
 # abseil ABI break, so a >=25 floor would make rashid uninstallable next to them
 # (#36; also fixed on main by #49 — the floors agree whichever merges first).
 # shapely joins the stack for the item-mirror comparison in
-# checks._geometry_agrees, which decodes the mirror's WKB and the item's GeoJSON
+# mirror._geometry_agrees, which decodes the mirror's WKB and the item's GeoJSON
 # and compares them structurally. Its floor follows the same rule: 2.1 is the
-# newest series shapely ships, and it still resolves on Python 3.10.
+# newest series shapely ships.
 # jsonschema-rs screens each object before jsonschema sees it
 # (rashid._jsonschema.screened), and its registry needs the meta-schemas that
 # jsonschema-specifications carries; jsonschema already depends on it, so
@@ -44,6 +43,7 @@ dependencies = [
     "shapely>=2.1",
     "orjson>=3.11",
     "obstore>=0.9",
+    "tzdata; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -63,20 +63,17 @@ dev = [
     "pytest-cov>=7",
     "pytest-xdist>=3.8",
     "diff-cover>=10.4",
-    "ruff>=0.16",
+    "ruff>=0.17.3",
     "mypy>=2.3",
     "import-linter>=2.13",
     "pre-commit>=4.6",
     "commitizen>=4.16",
     "codespell>=2.4.3",
     "vulture>=2.16",
-    "radon>=6.0.1",
-    "xenon>=0.9.3",
     "deptry>=0.25",
     "bandit>=1.9",
     "pip>=26.1",
     "pip-audit>=2.10",
-    "mutmut>=3.6",
     "trustme>=1.2.1",
 ]
 
@@ -85,18 +82,55 @@ packages = ["src/rashid"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "C4", "UP"]
 ignore = ["E501"]
+preview = true
+explicit-preview-rules = true
+extend-select = [
+    "C901",
+    "PLR0911", "PLR0912", "PLR0913", "PLR0914",
+    "PLR0915", "PLR0916", "PLR0917", "PLR1702",
+    "SIM", "FURB", "PIE", "RET", "ARG", "ERA",
+    "PT011", "PT012", "PT017", "PT030", "PLW0129",
+    "TID251", "PERF", "RUF015", "PGH004", "RUF100",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-branches = 12
+max-statements = 50
+max-nested-blocks = 4
+max-args = 5
+max-positional-args = 5
+max-bool-expr = 5
+max-locals = 15
+max-returns = 6
 
 [tool.ruff.lint.isort]
 known-first-party = ["rashid"]
 
+[tool.ruff.lint.per-file-ignores]
+# Rules share check(node, graph); many rules do not need the graph context.
+"src/rashid/rules/*.py" = ["ARG002"]
+# Test doubles retain protocol method and callback signatures. Keep ARG001 on for fixtures.
+"tests/**" = ["ARG002", "ARG005"]
+# Dedicated owners; reasons and live matches are checked in guardrail_exemptions.json.
+"src/rashid/_href.py" = ["TID251"]
+"src/rashid/_store.py" = ["TID251"]
+"src/rashid/_json.py" = ["TID251"]
+"src/rashid/data/_files.py" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"pytest.xfail" = { msg = "use @pytest.mark.xfail(strict=True) keyed to an open issue and listed in the ledger" }
+
 [tool.mypy]
 strict = true
-python_version = "3.10"
+python_version = "3.11"
 files = ["src/rashid"]
 
 # jsonschema and jsonschema-specifications ship no py.typed marker.
@@ -150,18 +184,19 @@ source_modules = [
     "rashid.rules",
     "rashid.live",
     "rashid.api",
+    "rashid._trace",
 ]
 forbidden_modules = ["click"]
 
-# Only rashid.data.checks may touch the geospatial stack; the core validator and
+# The data check modules own the geospatial stack; the core validator and
 # the data-pass glue (entry point, byte reader) stay stdlib-only, so `import
 # rashid` never pulls pyarrow/rasterio/pyproj. The lazy rashid.data -> checks edge is
 # severed here because it fires only inside default_validator(), on demand; the
 # runner -> rashid.data chain then still catches any direct geo import in the glue.
 # rashid.data itself is not a source module: it is a package, so listing it would
-# pull in rashid.data.checks (the one module allowed to import the stack).
+# pull in all the data check modules that import the stack.
 [[tool.importlinter.contracts]]
-name = "only rashid.data.checks may import the geospatial stack"
+name = "core and data readers must not import the geospatial stack"
 type = "forbidden"
 source_modules = [
     "rashid.model",
@@ -176,9 +211,39 @@ source_modules = [
     "rashid.live",
     "rashid.data.reader",
     "rashid.api",
+    "rashid._trace",
 ]
 forbidden_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"]
 ignore_imports = ["rashid.data -> rashid.data.checks"]
+
+[[tool.importlinter.contracts]]
+id = "rules-no-network"
+name = "metadata rules must not import network passes or transport"
+type = "forbidden"
+source_modules = ["rashid.rules"]
+forbidden_modules = ["rashid.live", "rashid.remote", "rashid._store"]
+
+[[tool.importlinter.contracts]]
+id = "rules-no-data"
+name = "metadata rules must not import data checks"
+type = "forbidden"
+source_modules = ["rashid.rules"]
+forbidden_modules = ["rashid.data"]
+
+[[tool.importlinter.contracts]]
+id = "data-files-owner"
+name = "only data checks may import the file-handle owner"
+type = "protected"
+protected_modules = ["rashid.data._files"]
+as_packages = false
+# T9 split data/checks.py into these concern modules. No package-wide wildcard.
+allowed_importers = [
+    "rashid.data.checks",
+    "rashid.data.geoparquet",
+    "rashid.data.raster",
+    "rashid.data.mirror",
+    "rashid.data.partitions",
+]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
@@ -196,14 +261,14 @@ changelog_file = "CHANGELOG.md"
 major_version_zero = true
 
 [tool.codespell]
-skip = ".git,uv.lock,.venv,.mypy_cache,.ruff_cache,.pytest_cache,mutants"
+skip = ".git,uv.lock,.venv,.mypy_cache,.ruff_cache,.pytest_cache,.cache"
 # "unparseable" is a valid English variant used in rule messages
 ignore-words-list = "unparseable"
 check-filenames = true
 
 [tool.vulture]
 min_confidence = 80
-paths = ["src/rashid", "tests"]
+paths = ["src/rashid", "tests", "scripts"]
 sort_by_size = true
 
 [tool.bandit]
@@ -211,18 +276,13 @@ exclude_dirs = ["tests", ".venv"]
 
 [tool.deptry]
 known_first_party = ["rashid"]
-# .claude holds Claude Code worktrees, each with its own .venv. Like mutants,
-# it is generated, not this project's dependency surface.
-exclude = [".venv", "tests", "mutants", ".claude"]
+# .claude holds generated Claude Code worktrees, each with its own .venv.
+exclude = [".venv", "tests", ".claude", ".cache"]
 
 [tool.deptry.package_module_name_map]
 # rio-cogeo installs as the `rio_cogeo` import package.
 rio-cogeo = ["rio_cogeo"]
 
-[tool.mutmut]
-source_paths = ["src/rashid/"]
-# --no-cov drops the coverage overhead and the global --cov-fail-under gate
-# from addopts; mutmut 3 runs pytest in-process, so extra args must go here
-# rather than in a `runner` setting (which mutmut 3 ignores).
-pytest_add_cli_args = ["--no-cov", "--tb=short"]
-pytest_add_cli_args_test_selection = ["tests/"]
+[tool.deptry.per_rule_ignores]
+# zoneinfo loads tzdata implicitly when Windows has no system IANA database.
+DEP002 = ["tzdata"]

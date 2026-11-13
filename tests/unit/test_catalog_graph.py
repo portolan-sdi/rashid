@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
 import pytest
 
-from rashid.catalog import CatalogGraph
+from rashid.catalog import CatalogGraph, Node
 from tests.conftest import (
     CatalogBuilder,
     mutate_json,
@@ -132,6 +135,40 @@ def test_items_of_reaches_items_under_an_organizing_catalog(catalog: CatalogBuil
     # direct containment stops at the organizing catalog and never sees the item
     assert graph.children_of(collection) == [organizing]
     assert graph.items_of(collection) == [item]
+
+
+@pytest.mark.parametrize("index", ["items_of", "children_of"])
+def test_index_built_by_one_thread_is_whole_for_another(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch, index: str
+) -> None:
+    """The data pass reads these indexes from many threads at once.
+
+    A slow parent lookup holds the first build open. A second thread that
+    arrives meanwhile must build or wait for the whole index, never read a
+    half-filled one.
+    """
+    roads = catalog.collection("roads")
+    for i in range(30):
+        roads.item(f"seg{i}")
+    graph = _graph(catalog)
+    collection = graph.nodes[PurePosixPath("roads/collection.json")]
+    parent_of = graph.parent_of
+
+    def slow_parent_of(node: Node) -> Node | None:
+        time.sleep(0.002)
+        return parent_of(node)
+
+    monkeypatch.setattr(graph, "parent_of", slow_parent_of)
+    start = threading.Barrier(4)
+
+    def read() -> int:
+        start.wait()
+        return len(getattr(graph, index)(collection))
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        sizes = list(pool.map(lambda _: read(), range(4)))
+
+    assert sizes == [30] * 4
 
 
 def test_items_of_leaves_a_nested_collections_items_to_that_collection(

@@ -21,6 +21,7 @@ from click.testing import CliRunner
 
 import rashid.cli as cli_mod
 import rashid.data.reader as reader_mod
+from rashid import ValidationOptions
 from rashid.catalog import CatalogGraph, Node
 from rashid.cli import main
 from rashid.data import DataDefect, Validator, validate_data
@@ -87,7 +88,7 @@ def _streaming_validator(consumed: dict[str, int | None]) -> Validator:
 def _stub_server(payload: bytes) -> Any:
     """A stand-in for the reader's remote stream that answers every URL with ``payload``."""
 
-    def fake_stream(url: str) -> Iterator[bytes]:
+    def fake_stream(url: str) -> Iterator[bytes]:  # noqa: ARG001 - replacement HTTP stream accepts a URL
         yield payload
 
     return fake_stream
@@ -201,8 +202,15 @@ def test_explicit_default_factory_matches_the_default(
 
 
 def _reader_recorder(seen: list[str]) -> Validator:
+    """Record whether the reader the validator gets would read a remote asset.
+
+    The pass hands the validator its reader behind a wrapper, so the
+    reader's answer, not its class, shows which factory built it.
+    """
+
     def check(node: Node, reader: AssetReader) -> list[DataDefect]:
-        seen.append(type(reader).__name__)
+        located = reader.locate(node, _REMOTE_HREF)
+        seen.append("remote" if located is not None else "local only")
         return []
 
     return check
@@ -215,12 +223,14 @@ def test_runner_threads_the_factory_through(catalog: CatalogBuilder) -> None:
 
     validate(
         root,
-        structural=False,
-        data_validator=_reader_recorder(seen),
-        data_reader_factory=LocalOnlyReader,
+        options=ValidationOptions(
+            structural=False,
+            data_validator=_reader_recorder(seen),
+            data_reader_factory=LocalOnlyReader,
+        ),
     )
 
-    assert set(seen) == {"LocalOnlyReader"}
+    assert set(seen) == {"local only"}
 
 
 def test_runner_defaults_to_the_filesystem_http_reader(catalog: CatalogBuilder) -> None:
@@ -228,9 +238,11 @@ def test_runner_defaults_to_the_filesystem_http_reader(catalog: CatalogBuilder) 
     root = catalog.write()
     seen: list[str] = []
 
-    validate(root, structural=False, data_validator=_reader_recorder(seen))
+    validate(
+        root, options=ValidationOptions(structural=False, data_validator=_reader_recorder(seen))
+    )
 
-    assert set(seen) == {"FilesystemHttpReader"}
+    assert set(seen) == {"remote"}
 
 
 # --- the CLI option ---------------------------------------------------------
@@ -240,8 +252,8 @@ def _capture_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Record what the CLI asks the runner for, without running a pass."""
     captured: dict[str, Any] = {}
 
-    def fake_validate(catalog_path: Path | str, **kwargs: Any) -> Report:
-        captured.update(kwargs)
+    def fake_validate(catalog_path: Path | str, *, options: ValidationOptions) -> Report:  # noqa: ARG001 - CLI runner callback accepts a catalog path and options
+        captured.update(vars(options))
         return Report(findings=[])
 
     monkeypatch.setattr(cli_mod, "validate", fake_validate)

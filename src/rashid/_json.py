@@ -23,6 +23,8 @@ from typing import Any
 
 import orjson
 
+from rashid import _trace
+
 
 def loads(raw: bytes | str) -> Any:
     """Parse ``raw`` as :func:`json.loads` parses it.
@@ -30,7 +32,9 @@ def loads(raw: bytes | str) -> Any:
     Raises :class:`ValueError` as :func:`json.loads` does, including
     :class:`UnicodeDecodeError` for bytes in no encoding JSON allows.
     """
+    _trace.count("json.parses")
     try:
         return orjson.loads(raw)
     except orjson.JSONDecodeError:
+        _trace.count("json.stdlib_fallbacks")
         return json.loads(raw)

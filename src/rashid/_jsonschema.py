@@ -23,18 +23,23 @@ same verdict on every fixture.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from rashid import _json
+from rashid import _json, _trace
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity, json_pointer
 
 if TYPE_CHECKING:
     from importlib.abc import Traversable
 
     from referencing import Registry
+
+log = logging.getLogger(__name__)
 
 STAC_VERSION = "1.1.0"
 _STAC_HOST = "https://schemas.stacspec.org/"
@@ -67,12 +72,116 @@ def fetch_schema(schema_uri: str) -> dict[str, Any]:
 
     if not schema_uri.startswith("https://"):
         raise ValueError(f"schema URI must be an https URL, got: {schema_uri!r}")
+    _trace.count("schema.fetches")
+    log.debug("fetching schema %s", schema_uri)
     schema: dict[str, Any] = _json.loads(_store.get(schema_uri))
     return schema
 
 
 # One object's raw JSON in, its schema errors out; empty when it is valid.
 Validator = Callable[[dict[str, Any]], list[SchemaError]]
+ExtensionValidator = Callable[[dict[str, Any], str], list[SchemaError]]
+
+
+@dataclass(frozen=True)
+class SchemaTarget:
+    """One object and the schema label used in its findings."""
+
+    node: Node
+    label: str
+    schema_uri: str | None = None
+
+
+def schema_nodes(graph: CatalogGraph) -> Iterator[Node]:
+    """The parsed STAC objects shared by all three schema passes."""
+    return (
+        node for node in graph.iter("catalog", "collection", "item") if node.parse_error is None
+    )
+
+
+def schema_targets(graph: CatalogGraph, label: str) -> Iterator[SchemaTarget]:
+    """One core or profile schema applies to every parsed STAC object."""
+    return (SchemaTarget(node, label) for node in schema_nodes(graph))
+
+
+@dataclass(frozen=True)
+class SchemaPassResult:
+    """Findings so far, and whether per-schema summaries can be emitted."""
+
+    findings: list[Finding]
+    completed: bool
+
+
+@dataclass(frozen=True)
+class SchemaPass:
+    """Schema-pass shell, with explicit initialization and recovery policies.
+
+    All passes report a missing package once. Only the profile pass catches
+    other initialization errors. A recoverable failure belongs to one extension
+    URI; every other validator failure stops the pass, retaining prior findings.
+    """
+
+    name: str
+    invalid_rule: str
+    unavailable_rule: str
+    initialization_errors: tuple[type[Exception], ...] = ()
+
+    def _warning(self, message: str) -> Finding:
+        return Finding(
+            rule_id=self.unavailable_rule,
+            severity=Severity.WARNING,
+            message=f"{self.name} validation {message}",
+            path=".",
+        )
+
+    def run(
+        self,
+        validator: Validator | ExtensionValidator | None,
+        factory: Callable[[], Validator | ExtensionValidator],
+        targets: Iterable[SchemaTarget],
+        *,
+        recover: Callable[[SchemaTarget, Exception], bool] | None = None,
+    ) -> SchemaPassResult:
+        """Initialize once, validate in target order, and stop on systemic failure.
+
+        ``recover`` records a URI-specific failure and returns True to continue.
+        Two-argument extension validators receive the declared URI unchanged.
+        """
+        if validator is None:
+            try:
+                validator = factory()
+            except ImportError:
+                return SchemaPassResult(
+                    [self._warning("skipped: the 'jsonschema' package is not installed")], False
+                )
+            except self.initialization_errors as exc:
+                return SchemaPassResult([self._warning(f"could not run: {exc}")], False)
+
+        findings: list[Finding] = []
+        for target in targets:
+            node = target.node
+            try:
+                if target.schema_uri is None:
+                    errors = cast(Validator, validator)(node.data)
+                else:
+                    errors = cast(ExtensionValidator, validator)(node.data, target.schema_uri)
+            except Exception as exc:  # any unrecovered validator failure is systemic
+                if recover is not None and recover(target, exc):
+                    continue
+                findings.append(self._warning(f"could not run: {exc}"))
+                return SchemaPassResult(findings, False)
+            findings.extend(
+                Finding(
+                    rule_id=self.invalid_rule,
+                    severity=Severity.ERROR,
+                    message=f"{target.label} validation failed: {error.message}",
+                    path=str(node.path),
+                    object_id=node.id,
+                    json_pointer=error.json_pointer,
+                )
+                for error in errors
+            )
+        return SchemaPassResult(findings, True)
 
 
 def _iter_vendored(node: Traversable, prefix: str = "") -> list[tuple[str, str]]:
@@ -143,14 +252,18 @@ def _stac_trees() -> tuple[tuple[Traversable, str], ...]:
 def _extension_trees() -> tuple[tuple[Traversable, str], ...]:
     schemas = resources.files("rashid").joinpath("_schemas")
     trees: list[tuple[Traversable, str]] = [(schemas.joinpath("geojson"), _GEOJSON_BASE)]
-    for version_dir in schemas.joinpath("stac").iterdir():
-        if version_dir.is_dir():
-            trees.append((version_dir, f"{_STAC_HOST}v{version_dir.name}/"))
+    trees.extend(
+        (version_dir, f"{_STAC_HOST}v{version_dir.name}/")
+        for version_dir in schemas.joinpath("stac").iterdir()
+        if version_dir.is_dir()
+    )
     extensions = schemas.joinpath("extensions")
     if extensions.is_dir():
-        for host_dir in extensions.iterdir():
-            if host_dir.is_dir():
-                trees.append((host_dir, f"https://{host_dir.name}/"))
+        trees.extend(
+            (host_dir, f"https://{host_dir.name}/")
+            for host_dir in extensions.iterdir()
+            if host_dir.is_dir()
+        )
     return tuple(trees)
 
 
@@ -189,9 +302,11 @@ def compile_rust(schema: dict[str, Any], registry: Any, *, draft7: bool = False)
     import jsonschema_rs
 
     build = jsonschema_rs.Draft7Validator if draft7 else jsonschema_rs.validator_for
+    _trace.count("schema.rust_compiles")
     try:
         return build(schema, registry=registry, validate_formats=False, offline=True)
-    except Exception:  # noqa: BLE001 - any compile failure falls back to jsonschema
+    except Exception as exc:  # any compile failure falls back to jsonschema
+        log.debug("jsonschema-rs cannot compile %s: %s", schema.get("$id", "<no $id>"), exc)
         return None
 
 
@@ -205,7 +320,9 @@ def screened(python_validator: Any, rust_validator: Any | None) -> Validator:
 
     def _validate(data: dict[str, Any]) -> list[SchemaError]:
         if rust_validator is not None and rust_validator.is_valid(data):
+            _trace.count("schema.rust_passes")
             return []
+        _trace.count("schema.python_validations")
         return [describe(error) for error in sorted(python_validator.iter_errors(data), key=str)]
 
     return _validate
@@ -328,7 +445,7 @@ def describe(error: Any) -> SchemaError:
     while error.context:
         error = best_match(_matched_branch(error.context))
     # RFC 6901 JSON pointer: "" at the document root, "/links/0/type" below.
-    pointer = "".join(f"/{part}" for part in error.absolute_path)
+    pointer = json_pointer(*error.absolute_path)
     message = error.message
     if error.validator == "contains":
         requirement = _contains_requirement(error.validator_value)

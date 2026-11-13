@@ -25,7 +25,7 @@ _URL = "https://raw.githubusercontent.com/portolan-sdi/rashid/312ff6e/README.md"
 
 def _require_reachable(url: str) -> None:
     try:
-        with urlopen(url, timeout=30) as response:  # noqa: S310 - literal https URL
+        with urlopen(url, timeout=30) as response:  # literal https URL
             if response.status != 200:
                 pytest.skip(f"{url} returned {response.status}")
     except OSError as exc:  # pragma: no cover - network dependent; URLError is an OSError

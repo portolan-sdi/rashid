@@ -1,7 +1,7 @@
 # rashid
 
 [![PyPI](https://img.shields.io/pypi/v/rashid.svg)](https://pypi.org/project/rashid/)
-[![Python versions](https://img.shields.io/pypi/pyversions/rashid.svg)](https://pypi.org/project/rashid/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml/badge.svg)](https://github.com/portolan-sdi/rashid/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -17,7 +17,7 @@ The name comes from the Arabic root ر ش د. Its participles رَاشِدٌ and
 uv tool install rashid
 ```
 
-rashid requires Python 3.10 or later.
+rashid requires Python 3.11 or later.
 
 ## Check a Catalog
 
@@ -90,7 +90,7 @@ For transfer details and every rule ID, see [the rule reference](docs/rules.md).
 ## Use rashid from Python
 
 ```python
-from rashid import validate
+from rashid import ValidationOptions, validate
 
 report = validate("path/to/catalog")
 published = validate("https://data.example.org/my-catalog/catalog.json")
@@ -99,19 +99,19 @@ for finding in report.errors:
     print(finding.message)
 ```
 
-`validate()` uses the same default passes as the command-line interface. Set `schema=True` or `live=True` to add those passes. For a URL, `live` is on unless you pass `live=False`. Set `extensions=False` to skip the extension pass.
+`validate()` uses the same default passes as the command-line interface. Pass settings through the frozen, keyword-only `ValidationOptions` dataclass. Use `validate(path, options=ValidationOptions(schema=True))` to enable the profile schema pass. For a URL, `live` is on unless the options set `live=False`. Set `extensions=False` to skip the extension pass.
 
 Use `RulesConfig` to disable rules or change their severity.
 
 ```python
-from rashid import RulesConfig, Severity, validate
+from rashid import RulesConfig, Severity, ValidationOptions, validate
 
 config = RulesConfig(
     disabled=frozenset({"PTL-VIZ-004"}),
     severity_overrides={"PTL-TTL-002": Severity.ERROR},
 )
 
-report = validate("path/to/catalog", config=config)
+report = validate("path/to/catalog", options=ValidationOptions(config=config))
 ```
 
 The public `rashid.api` module also provides helpers for tools that repair catalogs. Names from this module remain available across 0.x releases. Other internal modules can change in a patch release.
@@ -119,7 +119,8 @@ The public `rashid.api` module also provides helpers for tools that repair catal
 ## Documentation
 
 - [Rule reference](docs/rules.md) describes every validation pass, rule group, and degraded-pass code.
-- [Contributing guide](docs/contributing.md) covers development setup, tests, and repository checks.
+- [Contributing guide](https://github.com/portolan-sdi/portolan-ops/blob/main/policies/CONTRIBUTING.md) explains how to propose a change to a Portolan project.
+- [Development guide](docs/development.md) covers setup, tests, repository checks, profiling, and logs.
 - [Portolan specification](https://github.com/portolan-sdi/portolan-spec) defines the requirements that rashid implements.
 
 ## License

@@ -1,13 +1,13 @@
 # Two-stage strategy:
 #   commit stage  — fast, file-scoped checks (formatting, hygiene, spelling,
-#                   workflow lint). Must stay sub-second-ish.
-#   pre-push stage — whole-project gates (types, dead code, complexity,
-#                   dependency hygiene, import contracts). CI runs both
+#                   workflow lint, duplicate code).
+#   pre-push stage — whole-project gates (types, dead code,
+#                   dependency hygiene, import contracts, security). CI runs both
 #                   stages via `pre-commit run --all-files [--hook-stage
 #                   pre-push]`, so nothing here is skippable by accident.
 repos:
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.16.5
+    rev: v4.19.3
     hooks:
       - id: commitizen
         stages: [commit-msg]
@@ -25,7 +25,7 @@ repos:
       - id: mixed-line-ending
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.0
+    rev: v0.17.3
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -54,7 +54,7 @@ repos:
       - id: actionlint
 
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
-    rev: v1.28.0
+    rev: v1.32.0
     hooks:
       - id: zizmor
         args: [--no-online-audits]
@@ -62,12 +62,28 @@ repos:
   # Relative links and anchors, with the org rules. No network access.
   # CI checks external links weekly. See portolan-ops norms/ci.md.
   - repo: https://github.com/portolan-sdi/portolan-ops
-    rev: v1.12.0
+    rev: v1.14.0
     hooks:
       - id: lychee
 
   - repo: local
     hooks:
+      - id: jscpd
+        name: duplicate code (jscpd, baseline-gated)
+        # renovate: datasource=npm depName=jscpd
+        entry: uvx jscpd@5.2.1 src/rashid tests --baseline .jscpd-baseline.json --fail-on-new-clones 0
+        language: system
+        files: '^(src/rashid/.*\.py|tests/.*\.py|\.jscpd(-baseline)?\.json)$'
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: bandit
+        name: bandit (security)
+        entry: uv run bandit -r src/rashid -c pyproject.toml
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
       - id: deptry
         name: deptry (dependency hygiene)
         entry: uv run deptry .
@@ -89,13 +105,6 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
-      - id: xenon
-        name: xenon (complexity ceiling)
-        entry: uv run xenon --max-absolute=D --max-modules=C --max-average=B src/rashid tests
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-
       - id: import-linter
         name: import-linter (layer contracts)
         entry: uv run lint-imports
@@ -105,7 +114,7 @@ repos:
 
       - id: fast-tests
         name: fast tests (opt-in via ENABLE_PRE_PUSH_TESTS=1)
-        entry: bash -c 'if [ "${ENABLE_PRE_PUSH_TESTS:-0}" = "1" ]; then uv run pytest -n auto --tb=short; fi'
+        entry: bash -c 'if [ "${ENABLE_PRE_PUSH_TESTS:-0}" = "1" ]; then uv run pytest -n 8 --tb=short; fi'
         language: system
         pass_filenames: false
         stages: [pre-push]

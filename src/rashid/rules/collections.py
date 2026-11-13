@@ -22,11 +22,11 @@ import re
 from collections.abc import Iterable
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import TIFF_SUFFIXES, is_raster_data_asset, roles_of
-from rashid.rules.assets import _assets_of
+from rashid.rules._common import TIFF_SUFFIXES, assets_of, is_raster_data_asset, roles_of
 from rashid.rules.item_mirror import mirror_assets
+from rashid.rules.partitions import is_partitioned
 
 _HAS_DATA_ASSET = "has-data-asset"
 _NO_DATA_ASSET = "no-data-asset"
@@ -72,16 +72,16 @@ class SingleFileCollectionRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        if _is_partitioned(node):
+        if is_partitioned(node):
             return
         if _data_asset_state(node) is not _NO_DATA_ASSET:
             return
-        items = [child for child in graph.children_of(node) if child.kind == "item"]
+        items = graph.items_of(node)
         if len(items) != 1:
             return
         item = items[0]
         data_assets = [
-            (key, asset) for _p, key, asset in _assets_of(item) if "data" in roles_of(asset)
+            (key, asset) for _p, key, asset in assets_of(item) if "data" in roles_of(asset)
         ]
         if len(data_assets) != 1:
             return
@@ -90,7 +90,7 @@ class SingleFileCollectionRule(Rule):
             node,
             f"collection holds a single data file, but item {item.id or item.path!s} wraps it"
             f" as asset '{key}'; single-file collections carry their data at collection level",
-            json_pointer="/assets",
+            json_pointer=json_pointer("assets"),
             fix_hint=f"move the item's '{key}' asset into the collection's assets, then delete"
             f" the item JSON, its directory, and the collection's rel:'item' link to it",
         )
@@ -138,7 +138,7 @@ class RasterSceneItemRule(Rule):
                 node,
                 f"collection lists {len(keys)} scene COGs as collection-level assets"
                 f" ({listed}); each raster scene belongs on its own item",
-                json_pointer="/assets",
+                json_pointer=json_pointer("assets"),
                 fix_hint="create one item per scene, move each COG onto its item as an"
                 " item-level asset with that scene's geometry and datetime, and link the"
                 " items from the collection with rel:'item'",
@@ -146,11 +146,7 @@ class RasterSceneItemRule(Rule):
             return
         if not keys:
             return
-        scene_items = [
-            item
-            for item in graph.children_of(node)
-            if item.kind == "item" and _raster_asset_keys(item)
-        ]
+        scene_items = [item for item in graph.items_of(node) if _raster_asset_keys(item)]
         if not scene_items:
             return
         names = ", ".join(str(item.id or item.path) for item in scene_items[:3])
@@ -159,7 +155,7 @@ class RasterSceneItemRule(Rule):
             f"collection exposes COG asset '{keys[0]}' at collection level while items"
             f" ({names}) carry scene COGs; a collection-level COG is only for a"
             " single-COG collection, which has no item directory",
-            json_pointer=f"/assets/{keys[0]}",
+            json_pointer=json_pointer("assets", keys[0]),
             fix_hint=f"move the '{keys[0]}' asset onto an item of its own alongside the"
             " other scenes",
         )
@@ -211,7 +207,7 @@ class MissingItemTreeRule(Rule):
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         # A partitioned collection MAY leave its parts off items
         # (PORTO-CORE-021), so partition files are not scenes.
-        if _is_partitioned(node):
+        if is_partitioned(node):
             return
         # items_of, not children_of: the spec lets a catalog below a
         # collection organize its items, and those items still count.
@@ -225,7 +221,7 @@ class MissingItemTreeRule(Rule):
                 f" ({_name_some(scenes)}) but the collection publishes no items:"
                 " no item JSON, no item directory, and no rel:'item' link"
                 " (PORTO-CORE-015, PORTO-CORE-032, PORTO-CORE-071)",
-                json_pointer="/links",
+                json_pointer=json_pointer("links"),
                 fix_hint="create one item per scene, each in its own subdirectory,"
                 " carrying that scene's COG as an item-level asset with its own"
                 " geometry and datetime, and add a rel:'item' link to each",
@@ -305,7 +301,7 @@ class CollectionIdRule(Rule):
                 node,
                 f"collection id '{node.id}' does not follow the naming convention"
                 " (lowercase letters, numbers, hyphens, underscores; starts with a letter)",
-                json_pointer="/id",
+                json_pointer=json_pointer("id"),
                 fix_hint="rename the id to lowercase, replacing spaces and other characters"
                 " with hyphens, e.g. 'road-centerlines-2024'",
                 actual=node.id,
@@ -321,7 +317,7 @@ class CollectionIdRule(Rule):
                     node,
                     f"collection id '{node.id}' is not unique within the catalog"
                     f" (also used by '{other.path}')",
-                    json_pointer="/id",
+                    json_pointer=json_pointer("id"),
                     fix_hint="give this collection a distinct id, e.g. prefix it with its"
                     " parent catalog's name",
                     actual=node.id,
@@ -345,7 +341,7 @@ def _declared_filenames(node: Node) -> set[str]:
     legitimate, and a wrong role is PTL-AST-001's finding, not this one.
     """
     declared: set[str] = set()
-    for _pointer, _key, asset in _assets_of(node):
+    for _pointer, _key, asset in assets_of(node):
         href = asset.get("href")
         if isinstance(href, str) and href:
             declared.add(href.rsplit("/", 1)[-1])
@@ -361,22 +357,14 @@ def _undeclared_scene_files(node: Node, graph: CatalogGraph) -> list[str]:
     )
 
 
-def _is_partitioned(node: Node) -> bool:
-    return any(key.startswith("partition:") for key in node.data)
-
-
 def _raster_asset_keys(node: Node) -> list[str]:
     """Keys of the node's primary raster assets, in declaration order."""
-    keys: list[str] = []
-    for _pointer, key, asset in _assets_of(node):
-        if is_raster_data_asset(asset):
-            keys.append(key)
-    return keys
+    return [key for _pointer, key, asset in assets_of(node) if is_raster_data_asset(asset)]
 
 
 def _data_asset_state(node: Node) -> str:
     """Whether the collection exposes its data itself, and whether that is knowable."""
-    for _pointer, _key, asset in _assets_of(node):
+    for _pointer, _key, asset in assets_of(node):
         roles = roles_of(asset)
         if not roles:
             return _UNKNOWN

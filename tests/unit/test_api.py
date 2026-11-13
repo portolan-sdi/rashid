@@ -9,13 +9,20 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import inspect
+import json
+from collections.abc import Iterable
 from datetime import timedelta
 from pathlib import Path, PurePosixPath
 
 import pytest
 
-from rashid import api
-from rashid.catalog import Node
+import rashid
+from rashid import api, validate
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity
+from rashid.rule import Rule
+from tests.conftest import CatalogBuilder
 
 pytestmark = pytest.mark.unit
 
@@ -25,10 +32,11 @@ EXPORTS = {
     "SHA2_256": "rashid._multihash",
     "SPDX_LICENSE_IDS": "rashid._spdx",
     "STRUCTURAL_RELS": "rashid.rules._common",
+    "ValidationOptions": "rashid.runner",
     "canonical_spdx_id": "rashid._spdx",
     "decode_multihash": "rashid._multihash",
     "encode_multihash": "rashid._multihash",
-    "has_cog": "rashid.rules.item_mirror",
+    "has_cog": "rashid.rules._common",
     "is_cog_media_type": "rashid.rules._common",
     "is_well_formed_multihash": "rashid._multihash",
     "links_of": "rashid.rules._common",
@@ -49,6 +57,43 @@ def _node(data: dict[str, object]) -> Node:
 
 def test_all_lists_every_documented_export() -> None:
     assert sorted(api.__all__) == sorted(EXPORTS)
+
+
+@pytest.mark.parametrize("module", [api, rashid], ids=["rashid.api", "rashid"])
+def test_public_api_snapshot(module: object) -> None:
+    snapshot = json.loads(Path(__file__).with_name("api_snapshot.json").read_text(encoding="utf-8"))
+    expected = snapshot[module.__name__]
+    assert sorted(module.__all__) == expected["exports"]
+    assert {
+        name: str(inspect.signature(getattr(module, name)))
+        for name in sorted(module.__all__)
+        # Enum's constructor belongs to Python and changes between Python versions.
+        if callable(getattr(module, name)) and name != "Severity"
+    } == expected["signatures"]
+
+
+@pytest.mark.parametrize("include_rule", [True, False])
+def test_options_use_the_custom_rule_set(catalog: CatalogBuilder, include_rule: bool) -> None:
+    class CustomRule(Rule):
+        id = "CUSTOM-001"
+        default_severity = Severity.INFO
+        description = "custom catalog check"
+
+        def check_graph(self, graph: CatalogGraph) -> Iterable[Finding]:
+            assert graph.root is not None
+            yield self.finding(graph.root, "custom rule ran")
+
+    report = validate(
+        catalog.write(),
+        options=api.ValidationOptions(
+            rules=[CustomRule()] if include_rule else [],
+            structural=False,
+            extensions=False,
+            data=False,
+        ),
+    )
+
+    assert [f.rule_id for f in report.findings] == (["CUSTOM-001"] if include_rule else [])
 
 
 @pytest.mark.parametrize("name", sorted(EXPORTS))
