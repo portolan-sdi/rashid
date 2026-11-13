@@ -23,6 +23,8 @@ from rashid.model import json_pointer
 STRUCTURAL_RELS = ("root", "parent", "child", "item", "collection")
 
 PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
+PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
+COPC_MEDIA_TYPE = "application/vnd.laszip+copc"
 
 # core.md, Assets: Portolan raster data is COG, declared with this media type.
 # A plain GeoTIFF may appear only as an upstream source, not as primary data.
