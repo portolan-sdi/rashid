@@ -139,6 +139,14 @@ def is_raster_data_asset(asset: dict[str, Any]) -> bool:
     return parsed is not None and parsed.path.lower().endswith(TIFF_SUFFIXES)
 
 
+def is_overview_asset(asset: dict[str, Any]) -> bool:
+    """formats.md, Raster: an overview is a COG with the visual and overview roles.
+
+    The ``overview`` role alone is STAC's generic preview image, often a PNG.
+    """
+    return {"visual", "overview"} <= set(roles_of(asset)) and is_cog_media_type(asset.get("type"))
+
+
 def has_cog(node: Node) -> bool:
     """Whether any asset declares a COG, regardless of its roles or href."""
     return any(is_cog_media_type(asset.get("type")) for _pointer, _key, asset in assets_of(node))

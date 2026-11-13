@@ -557,9 +557,19 @@ def test_mosaic_with_overview_passes(catalog: CatalogBuilder) -> None:
     assert findings_for(report, "PTL-VIZ-008") == []
 
 
-def test_overview_needs_both_roles(catalog: CatalogBuilder) -> None:
-    _mosaic(catalog, overview=_cog("./overview.tif", "overview"))
-    assert len(findings_for(validate(catalog.write()), "PTL-VIZ-007")) == 1
+_PNG_OVERVIEW = {**thumbnail_asset(), "href": "./overview.png", "roles": ["visual", "overview"]}
+
+
+@pytest.mark.parametrize(
+    "overview",
+    [_cog("./overview.tif", "overview"), _PNG_OVERVIEW],
+    ids=["overview-role-only", "png"],
+)
+def test_overview_is_a_cog_with_both_roles(catalog: CatalogBuilder, overview: dict) -> None:
+    _mosaic(catalog, overview=overview)
+    report = validate(catalog.write())
+    assert len(findings_for(report, "PTL-VIZ-007")) == 1
+    assert findings_for(report, "PTL-VIZ-008") == []
 
 
 @pytest.mark.parametrize(
@@ -593,15 +603,6 @@ def test_vector_items_are_not_a_mosaic(catalog: CatalogBuilder) -> None:
     for index in range(3):
         collection.item(f"roads-{index}", bbox=[4.0 + index / 2, 50.0, 4.5 + index / 2, 50.5])
     assert findings_for(validate(catalog.write()), "PTL-VIZ-007") == []
-
-
-def test_overview_not_typed_as_cog_warns(catalog: CatalogBuilder) -> None:
-    overview = {**_overview(datetime="2024-01-01T00:00:00Z"), "type": "image/png"}
-    catalog.collection("roads", assets={**_mosaic_free_assets(), "overview": overview})
-    findings = findings_for(validate(catalog.write()), "PTL-VIZ-007")
-    assert len(findings) == 1
-    assert findings[0].json_pointer == "/assets/overview/type"
-    assert findings[0].actual == "image/png"
 
 
 def _mosaic_free_assets() -> dict:

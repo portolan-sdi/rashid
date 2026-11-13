@@ -37,7 +37,7 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   count, ids, geometry, datetime, or bbox (MUST, formats.md, Raster § Item
   mirror). A mirror runs the GeoParquet checks above as well: the spec binds
   it to them like any other spatial table.
-- ``PTL-DAT-018`` a collection asset with the ``overview`` role is not 8-bit
+- ``PTL-DAT-018`` a collection overview COG (``visual`` and ``overview`` roles) is not 8-bit
   RGB with an optional alpha band (SHOULD, formats.md, Raster)
 - ``PTL-DAT-019`` an imagery scene, an item-level data COG with three or more
   bands and no mask role, has no nodata value, alpha band, or mask (SHOULD,

@@ -823,8 +823,9 @@ def test_overview_must_be_8bit_rgb(tmp_path: Path, cog: dict, flagged: bool) -> 
     assert all(d.severity is Severity.WARNING for d in defects)
 
 
-def test_non_overview_collection_raster_is_not_judged(tmp_path: Path) -> None:
-    assert _display(tmp_path, "collection", ["data"], count=1, dtype="uint16") == []
+@pytest.mark.parametrize("roles", [["data"], ["overview"]])
+def test_non_overview_collection_raster_is_not_judged(tmp_path: Path, roles: list[str]) -> None:
+    assert _display(tmp_path, "collection", roles, count=1, dtype="uint16") == []
 
 
 @pytest.mark.parametrize(

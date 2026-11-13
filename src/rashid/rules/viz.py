@@ -23,13 +23,13 @@ from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import (
-    COG_MEDIA_TYPE,
     COPC_MEDIA_TYPE,
     PMTILES_MEDIA_TYPE,
     assets_of,
     declares_geometry,
     indexed_links_of,
     is_cog_media_type,
+    is_overview_asset,
     is_pmtiles_asset,
     is_raster_data_asset,
     is_tiff_media_type,
@@ -48,7 +48,6 @@ _LARGE_VECTOR_BYTES = 100_000_000
 # formats.md leaves "much larger" open: a mosaic here is this many raster items,
 # each covering at most 1/ratio of the collection's extent. Deliberately conservative.
 _MOSAIC_MIN_ITEMS, _MOSAIC_AREA_RATIO = 3, 2.0
-_OVERVIEW_ROLES = {"visual", "overview"}
 
 
 def _has_spatial_media_type(node: Node) -> bool:
@@ -463,28 +462,13 @@ class MosaicOverviewRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        overviews = [
-            (pointer, key, asset)
-            for pointer, key, asset in assets_of(node)
-            if set(roles_of(asset)) >= _OVERVIEW_ROLES
-        ]
-        for pointer, key, asset in overviews:
-            if not is_cog_media_type(asset.get("type")):
-                yield self.finding(
-                    node,
-                    f"overview asset '{key}' has type {asset.get('type')!r}, not the COG"
-                    " media type",
-                    json_pointer=json_pointer("type", prefix=pointer),
-                    fix_hint=f"publish the overview as a COG and set its type to '{COG_MEDIA_TYPE}'",
-                    expected=COG_MEDIA_TYPE,
-                    actual=asset.get("type"),
-                )
-        tiles = 0 if overviews else _mosaic_items(node, graph)
+        has_overview = any(is_overview_asset(asset) for _p, _k, asset in assets_of(node))
+        tiles = 0 if has_overview else _mosaic_items(node, graph)
         if tiles:
             yield self.finding(
                 node,
                 f"collection's {tiles} raster items tile an extent much larger than any one"
-                " of them, but no collection asset has the 'visual' and 'overview' roles",
+                " of them, but no collection asset is a COG with the 'visual' and 'overview' roles",
                 json_pointer=json_pointer("assets"),
                 fix_hint="add an 8-bit RGB overview COG of the mosaic as a collection asset"
                 ' with roles ["visual", "overview"] and a datetime',
@@ -492,7 +476,7 @@ class MosaicOverviewRule(Rule):
 
 
 class OverviewDatetimeRule(Rule):
-    """Each overview asset carries a datetime or a start/end interval."""
+    """Each overview COG carries a datetime or a start/end interval."""
 
     id = "PTL-VIZ-008"
     spec_ids = ("PORTO-FMT-072",)
@@ -502,7 +486,7 @@ class OverviewDatetimeRule(Rule):
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         for pointer, key, asset in assets_of(node):
-            if "overview" in roles_of(asset) and not has_datetime(asset):
+            if is_overview_asset(asset) and not has_datetime(asset):
                 yield self.finding(
                     node,
                     f"overview asset '{key}' has no datetime and no complete"

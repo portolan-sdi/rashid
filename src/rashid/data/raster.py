@@ -26,7 +26,7 @@ from rashid.registry import (
     DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
 )
-from rashid.rules._common import roles_of
+from rashid.rules._common import is_overview_asset, roles_of
 
 # geotiff-stats-headers.md — the embedded per-band statistics a COG MUST carry.
 _COG_STAT_KEYS = (
@@ -263,7 +263,7 @@ def check_display(
     three 8-bit bands as undefined unless PHOTOMETRIC=RGB is set.
     """
     roles = set(roles_of(asset))
-    overview = node.kind == "collection" and "overview" in roles
+    overview = node.kind == "collection" and is_overview_asset(asset)
     scene = node.kind == "item" and "data" in roles and not roles & _MASK_ROLES
     if not (overview or scene):
         return []
