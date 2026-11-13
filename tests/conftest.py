@@ -67,6 +67,8 @@ def mirror_providers() -> list[dict[str, Any]]:
 def default_asset() -> dict[str, Any]:
     return {
         "href": "./data.parquet",
+        "title": "Data",
+        "description": "The collection's data file.",
         "type": "application/vnd.apache.parquet",
         "roles": ["data"],
         "file:size": 1234,
@@ -77,6 +79,8 @@ def default_asset() -> dict[str, Any]:
 def thumbnail_asset() -> dict[str, Any]:
     return {
         "href": "./thumbnail.png",
+        "title": "Thumbnail",
+        "description": "A preview image of the data.",
         "type": "image/png",
         "roles": ["thumbnail"],
         "file:size": 2048,
@@ -506,6 +510,15 @@ def mutate_json(path: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
 
 def rule_ids(report: Report) -> set[str]:
     return {finding.rule_id for finding in report.findings}
+
+
+def resolve_pointer(document: Any, pointer: str) -> Any:
+    """The value an RFC 6901 pointer names; raises KeyError or IndexError when none."""
+    target = document
+    for token in pointer.split("/")[1:]:
+        token = token.replace("~1", "/").replace("~0", "~")
+        target = target[int(token)] if isinstance(target, list) else target[token]
+    return target
 
 
 def findings_for(report: Report, rule_id: str) -> list[Any]:

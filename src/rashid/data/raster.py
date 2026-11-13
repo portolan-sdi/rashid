@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterator
 from fractions import Fraction
 from typing import Any
 
@@ -16,8 +18,9 @@ from rashid.data import DataDefect
 from rashid.data._files import AssetFiles
 from rashid.data.reader import Locator
 from rashid.data.spatial import Geo
-from rashid.model import Severity
+from rashid.model import Severity, json_pointer
 from rashid.registry import (
+    DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
     DAT_OVERVIEW_FORMAT,
@@ -27,6 +30,7 @@ from rashid.registry import (
     DAT_VALID_PERCENT,
 )
 from rashid.rules._common import is_overview_asset, roles_of
+from rashid.rules.classification import asset_class_lists, band_count, is_integer
 
 # geotiff-stats-headers.md — the embedded per-band statistics a COG MUST carry.
 _COG_STAT_KEYS = (
@@ -44,11 +48,13 @@ _VALID_PERCENT_KEY = "STATISTICS_VALID_PERCENT"
 _MASK_ROLES = {"data-mask", "date", "snow-ice", "land-water", "water-mask", "cloud", "cloud-shadow"}
 
 
-def check_raster(key: str, located: Locator, files: AssetFiles) -> list[DataDefect]:
+def check_raster(
+    key: str, asset: dict[str, Any], located: Locator, files: AssetFiles
+) -> list[DataDefect]:
     """A raster asset MUST be a valid COG (formats.md:91) with embedded band stats.
 
     ``cog_validate`` takes a path, not a dataset, so it opens the file itself.
-    The other three checks share the one dataset in ``files``.
+    The other checks share the one dataset in ``files``.
     """
     defects: list[DataDefect] = []
     try:
@@ -80,7 +86,130 @@ def check_raster(key: str, located: Locator, files: AssetFiles) -> list[DataDefe
         defects.extend(_check_cog_stats(key, files))
         defects.extend(_check_overviews(key, files))
         defects.extend(_check_tile_size(key, files))
+        defects.extend(_check_class_placement(key, asset, files))
+        defects.extend(_check_class_colors(key, asset, files))
     return defects
+
+
+_COLOR_HINT = re.compile(r"^[0-9A-Fa-f]{6}$")
+
+
+def _hinted_classes(key: str, asset: dict[str, Any]) -> Iterator[tuple[int | None, int, str, str]]:
+    """(file band, class value, JSON pointer, hint) for each class with a color_hint.
+
+    A band list's classes describe the file band at the same position. An
+    asset-level list has no band (None) and describes the asset's only band.
+    A malformed value or hint is left to the metadata rules.
+    """
+    for found in asset_class_lists(json_pointer("assets", key), asset):
+        band = None if found.band_index is None else found.band_index + 1
+        for pointer, entry in found.entries():
+            value, hint = entry.get("value"), entry.get("color_hint")
+            if is_integer(value) and isinstance(hint, str) and _COLOR_HINT.match(hint):
+                yield band, value, pointer, hint.upper()
+
+
+def _color_table(src: Any, band: int) -> dict[int, tuple[int, ...]] | None:
+    try:
+        table: dict[int, tuple[int, ...]] = src.colormap(band)
+    except ValueError:  # the band has no color table
+        return None
+    return table
+
+
+def _check_class_colors(key: str, asset: dict[str, Any], files: AssetFiles) -> list[DataDefect]:
+    """A class color_hint SHOULD match the band's color table entry (PORTO-FMT-054).
+
+    formats.md: "When a classified band has a color table, the
+    ``color_hint`` for each class SHOULD correspond to the red, green, and
+    blue components of the color table entry for that class value."
+    """
+    hinted = list(_hinted_classes(key, asset))
+    if not hinted:
+        return []
+    try:
+        src = files.raster()
+        tables: dict[int, dict[int, tuple[int, ...]] | None] = {}
+        defects: list[DataDefect] = []
+        for band, value, pointer, hint in hinted:
+            if band is None:
+                band = 1 if src.count == 1 else None
+            if band is None or band > src.count:
+                continue  # placement, which _check_class_placement reports
+            if band not in tables:
+                tables[band] = _color_table(src, band)
+            entry = (tables[band] or {}).get(value)
+            if entry is None:
+                continue
+            actual = "{:02X}{:02X}{:02X}".format(*entry[:3])
+            if actual != hint:
+                defects.append(
+                    DataDefect(
+                        DAT_CLASS_COLORS,
+                        Severity.WARNING,
+                        f"asset '{key}' class value {value} has color_hint '{hint}', but band"
+                        f" {band}'s embedded color table draws it as '{actual}'",
+                        key,
+                        json_pointer=json_pointer("color_hint", prefix=pointer),
+                        expected=actual,
+                        actual=hint,
+                    )
+                )
+    except Exception as exc:
+        return [
+            DataDefect(
+                DAT_CLASS_COLORS,
+                Severity.INFO,
+                f"asset '{key}' color table could not be read ({exc})",
+                key,
+            )
+        ]
+    return defects
+
+
+def _check_class_placement(key: str, asset: dict[str, Any], files: AssetFiles) -> list[DataDefect]:
+    """A class list MUST be placed for the file's band count (PORTO-FMT-050).
+
+    ``PTL-CLS-005`` judges placement by the band count the metadata declares.
+    When that disagrees with the file, the file decides: a multi-band file
+    needs the list on a band in ``bands``, a single-band file on the asset,
+    and no list may describe a band the file lacks, since formats.md asks
+    that it "accompany the band it describes".
+    """
+    every = asset_class_lists(json_pointer("assets", key), asset)
+    lists = [found for found in every if found.band_field != "raster:bands"]
+    if not every:
+        return []
+    try:
+        count = files.raster().count
+    except Exception:  # unreadable raster: the COG check owns reporting it
+        return []
+    declared = band_count(asset)
+    on_asset = [found for found in lists if found.band_index is None]
+    on_band = [found for found in lists if found.band_index is not None]
+    # A legacy raster:bands list, too, cannot describe a band the file lacks.
+    beyond = [
+        found for found in every if found.band_index is not None and found.band_index >= count
+    ]
+    # Where the metadata agrees with the file, PTL-CLS-005 reports misplacement.
+    if count > 1 and on_asset and declared <= 1:
+        where, misplaced = "on the asset instead of on the band it describes in bands", on_asset
+    elif count == 1 and on_band and declared > 1:
+        where, misplaced = "on a band instead of on the asset", on_band
+    elif beyond:
+        where, misplaced = f"on band {beyond[0].band_index} in bands, which the file lacks", beyond
+    else:
+        return []
+    return [
+        DataDefect(
+            DAT_CLASS_COLORS,
+            Severity.ERROR,
+            f"asset '{key}' file has {count} band{'s' if count > 1 else ''},"
+            f" but its class list is {where}",
+            key,
+            json_pointer=misplaced[0].pointer,
+        )
+    ]
 
 
 # OGC 21-026 /req/optimized_geotiff/small-sizes: square internal tiles "sized

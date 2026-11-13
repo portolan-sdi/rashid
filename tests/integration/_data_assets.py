@@ -295,6 +295,7 @@ def write_cog(  # noqa: PLR0913 - keyword-only fixture settings vary independent
     dtype: str = "uint8",
     alpha: bool = False,
     mask: bool = False,
+    colormap: dict[int, tuple[int, int, int, int]] | None = None,
 ) -> None:
     """A valid COG (COG driver) with, by default, embedded per-band statistics.
 
@@ -303,7 +304,8 @@ def write_cog(  # noqa: PLR0913 - keyword-only fixture settings vary independent
     carries no internal overviews. ``blocksize`` overrides the internal tile
     size (default: 512, clamped to the image). ``count`` repeats the band, and
     ``alpha`` marks the last band as alpha, and ``mask`` adds an internal mask. Only band 1
-    gets statistics.
+    gets statistics. ``colormap`` embeds a color table (TIFF ``ColorMap`` tag)
+    on band 1, as a classified raster has.
     """
     band = (np.arange(size * size, dtype="uint8") % 251).reshape(1, size, size)
     arr = np.repeat(band, count, axis=0).astype(dtype)
@@ -330,6 +332,8 @@ def write_cog(  # noqa: PLR0913 - keyword-only fixture settings vary independent
             dst.colorinterp = [*dst.colorinterp[:-1], ColorInterp.alpha]
         if mask:
             dst.write_mask(np.full((size, size), 255, dtype="uint8"))
+        if colormap is not None:
+            dst.write_colormap(1, colormap)
         if stats:
             band = arr[0]
             tags = {

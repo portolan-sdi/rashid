@@ -35,6 +35,7 @@ from rashid.data._files import AssetFiles
 from rashid.data.reader import Locator
 from rashid.model import Severity
 from rashid.registry import (
+    DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
     DAT_COLUMN_DESCRIPTIONS,
@@ -52,7 +53,7 @@ from rashid.registry import (
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
 )
-from tests.conftest import CatalogBuilder
+from tests.conftest import CatalogBuilder, resolve_pointer
 from tests.integration import _data_assets as assets
 
 pytestmark = pytest.mark.integration
@@ -385,8 +386,14 @@ def test_the_row_group_floor_is_one_constant(
     assert [d.severity for d in _gpq(path)] == [Severity.WARNING]
 
 
-def _raster(path: Path) -> list:
-    return raster.check_raster("data", _loc(path), _files(path))
+def _raster(path: Path, asset: dict | None = None) -> list:
+    asset = asset or {}
+    defects = raster.check_raster("data", asset, _loc(path), _files(path))
+    # Every class finding's pointer resolves in a document that has the asset.
+    for defect in defects:
+        if defect.rule_id == DAT_CLASS_COLORS:
+            resolve_pointer({"assets": {"data": asset}}, defect.json_pointer)
+    return defects
 
 
 # --- GeoParquet ------------------------------------------------------------
@@ -1938,3 +1945,148 @@ def test_non_data_roles_are_not_vector(tmp_path: Path) -> None:
     assets.write_geoparquet(path)
     asset = {"href": "./data.parquet", "roles": ["metadata"]}
     assert geoparquet.check_vector_columns(_tabular_collection(), "data", asset, _files(path)) == []
+
+
+# --- Classification color table (PTL-DAT-021) ------------------------------
+
+# The geohazards-tep flood COG's color table: nodata 0 transparent, then
+# black, blue, green and cyan.
+_FLOOD_TABLE = {
+    0: (0, 0, 0, 0),
+    1: (0, 0, 0, 255),
+    2: (0, 0, 255, 255),
+    3: (0, 255, 0, 255),
+    4: (0, 255, 255, 255),
+}
+
+
+def _classified_asset(**hints: str) -> dict:
+    classes = [{"value": 0, "name": "no-data", "title": "No data", "nodata": True}]
+    for value, name in enumerate(("unchanged", "permanent-water", "flood", "receded"), start=1):
+        entry = {"value": value, "name": name, "title": name.replace("-", " ").capitalize()}
+        if name in hints:
+            entry["color_hint"] = hints[name]
+        classes.append(entry)
+    return {"bands": [{"nodata": 0, "data_type": "uint8", "classification:classes": classes}]}
+
+
+def test_class_colors_matching_the_color_table_are_clean(tmp_path: Path) -> None:
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    asset = _classified_asset(unchanged="000000", flood="00ff00", receded="00FFFF")
+    assert _raster(path, asset) == []
+
+
+def test_class_color_differing_from_the_color_table_is_a_warning(tmp_path: Path) -> None:
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    defects = _raster(path, _classified_asset(**{"permanent-water": "1E90FF"}))
+    assert [d.rule_id for d in defects] == [DAT_CLASS_COLORS]
+    assert defects[0].severity is Severity.WARNING
+    assert defects[0].json_pointer == "/assets/data/bands/0/classification:classes/2/color_hint"
+    assert (defects[0].expected, defects[0].actual) == ("0000FF", "1E90FF")
+
+
+def test_asset_level_classes_compare_against_a_single_band(tmp_path: Path) -> None:
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    classes = [{"value": 3, "name": "flood", "color_hint": "FF0000"}]
+    defects = _raster(path, {"nodata": 0, "classification:classes": classes})
+    assert [d.json_pointer for d in defects] == ["/assets/data/classification:classes/0/color_hint"]
+
+
+def test_class_colors_without_a_color_table_have_nothing_to_compare(tmp_path: Path) -> None:
+    path = tmp_path / "plain.tif"
+    assets.write_cog(path, nodata=0)
+    assert _raster(path, _classified_asset(flood="FF0000")) == []
+
+
+def test_nodata_class_hint_is_compared_too(tmp_path: Path) -> None:
+    # PORTO-FMT-054 names each class, the nodata class included.
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    asset = _classified_asset()
+    asset["bands"][0]["classification:classes"][0]["color_hint"] = "FFFFFF"
+    defects = _raster(path, asset)
+    assert [d.json_pointer for d in defects] == [
+        "/assets/data/bands/0/classification:classes/0/color_hint"
+    ]
+
+
+def test_unmarked_nodata_class_is_left_to_the_metadata_rule(tmp_path: Path) -> None:
+    # PTL-CLS-003 compares the class with the metadata nodata (PORTO-FMT-057).
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    asset = _classified_asset()
+    del asset["bands"][0]["classification:classes"][0]["nodata"]
+    assert _raster(path, asset) == []
+
+
+def test_malformed_hint_is_left_to_the_metadata_rule(tmp_path: Path) -> None:
+    # PTL-CLS-002 reports a '#'-prefixed hint, so the data pass does not.
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    assert _raster(path, _classified_asset(flood="#FF0000")) == []
+
+
+def test_asset_classes_on_a_multi_band_file_are_an_error(tmp_path: Path) -> None:
+    path = tmp_path / "three.tif"
+    assets.write_cog(path, count=3)
+    classes = [{"value": 1, "name": "urban", "title": "Urban"}]
+    defects = _raster(path, {"classification:classes": classes})
+    assert [
+        (d.rule_id, d.severity, d.json_pointer) for d in defects if d.rule_id == DAT_CLASS_COLORS
+    ] == [(DAT_CLASS_COLORS, Severity.ERROR, "/assets/data/classification:classes")]
+
+
+def test_band_classes_on_a_multi_band_file_are_placed(tmp_path: Path) -> None:
+    path = tmp_path / "three.tif"
+    assets.write_cog(path, count=3)
+    classes = [{"value": 1, "name": "urban", "title": "Urban"}]
+    bands = [{"classification:classes": classes}, {}, {}]
+    assert [d for d in _raster(path, {"bands": bands}) if d.rule_id == DAT_CLASS_COLORS] == []
+
+
+def test_band_classes_on_a_single_band_file_belong_on_the_asset(tmp_path: Path) -> None:
+    # The metadata declares two bands, but the file has one.
+    path = tmp_path / "one.tif"
+    assets.write_cog(path)
+    classes = [{"value": 1, "name": "urban", "title": "Urban"}]
+    bands = [{"classification:classes": classes}, {}]
+    defects = [d for d in _raster(path, {"bands": bands}) if d.rule_id == DAT_CLASS_COLORS]
+    assert [(d.severity, d.json_pointer) for d in defects] == [
+        (Severity.ERROR, "/assets/data/bands/0/classification:classes")
+    ]
+
+
+def test_classes_on_a_band_the_file_lacks_are_an_error(tmp_path: Path) -> None:
+    path = tmp_path / "three.tif"
+    assets.write_cog(path, count=2)
+    classes = [{"value": 1, "name": "urban", "title": "Urban"}]
+    bands = [{}, {}, {"classification:classes": classes}]
+    defects = [d for d in _raster(path, {"bands": bands}) if d.rule_id == DAT_CLASS_COLORS]
+    assert [(d.severity, d.json_pointer) for d in defects] == [
+        (Severity.ERROR, "/assets/data/bands/2/classification:classes")
+    ]
+
+
+def test_legacy_classes_on_a_band_the_file_lacks_are_an_error(tmp_path: Path) -> None:
+    path = tmp_path / "one.tif"
+    assets.write_cog(path)
+    classes = [{"value": 1, "name": "urban", "title": "Urban"}]
+    asset = {
+        "classification:classes": classes,
+        "raster:bands": [{"classification:classes": classes}, {"classification:classes": classes}],
+    }
+    defects = [d for d in _raster(path, asset) if d.rule_id == DAT_CLASS_COLORS]
+    assert [d.json_pointer for d in defects] == [
+        "/assets/data/raster:bands/1/classification:classes"
+    ]
+
+
+def test_unreadable_color_table_is_info(tmp_path: Path) -> None:
+    path = tmp_path / "broken.tif"
+    path.write_bytes(b"II*\x00not a tiff")
+    files = _files(path)
+    defects = raster._check_class_colors("data", _classified_asset(flood="FF0000"), files)
+    assert [(d.rule_id, d.severity) for d in defects] == [(DAT_CLASS_COLORS, Severity.INFO)]

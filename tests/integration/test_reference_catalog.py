@@ -56,10 +56,19 @@ def _schema_map_for_catalog(
 
 def test_reference_catalog_metadata_pass_is_clean() -> None:
     report = validate(CATALOG, options=ValidationOptions(structural=False, schema=False))
-    blocking = [f for f in report.findings if f.severity is not Severity.INFO]
+    # The spec's reference catalog does not yet meet PORTO-CORE-088
+    # (https://github.com/portolan-sdi/portolan-spec/pull/240); remove this allowance when it does.
+    missing_text = [f for f in report.findings if f.rule_id == "PTL-AST-010"]
+    assert all(
+        f.severity is Severity.WARNING
+        and f.message.endswith(("has no title", "has no description"))
+        for f in missing_text
+    )
+    findings = [f for f in report.findings if f.rule_id != "PTL-AST-010"]
+    blocking = [f for f in findings if f.severity is not Severity.INFO]
     assert blocking == [], [(f.rule_id, f.path) for f in blocking]
     # the only findings a conformant catalog may raise are the mirror INFOs
-    assert {f.rule_id for f in report.findings} <= {"PTL-PRO-002"}
+    assert {f.rule_id for f in findings} <= {"PTL-PRO-002"}
     assert report.passed
 
 
