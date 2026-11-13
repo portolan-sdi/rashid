@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from dataclasses import replace
 from fractions import Fraction
 from typing import Any
 
@@ -31,7 +32,12 @@ from rashid.registry import (
     DAT_VALID_PERCENT,
 )
 from rashid.rules._common import is_overview_asset, roles_of
-from rashid.rules.classification import BAND_FIELDS, asset_class_lists
+from rashid.rules.classification import (
+    BAND_FIELDS,
+    CLASSES_FIELD,
+    asset_class_lists,
+    band_count,
+)
 
 # geotiff-stats-headers.md — the embedded per-band statistics a COG MUST carry.
 _COG_STAT_KEYS = (
@@ -87,6 +93,7 @@ def check_raster(
         defects.extend(_check_cog_stats(key, files))
         defects.extend(_check_overviews(key, files))
         defects.extend(_check_tile_size(key, files))
+        defects.extend(_check_class_placement(key, asset, files))
         defects.extend(_check_class_colors(key, asset, files))
         defects.extend(_check_palette_classes(key, asset, files))
     return defects
@@ -151,7 +158,7 @@ def _class_color_defect(  # noqa: PLR0913, PLR0917 - one drawn class against its
             f"asset '{key}' class value {value} is band {band}'s nodata in the file,"
             " so readers hide it, but the class is not marked nodata",
             key,
-            json_pointer=json_pointer("nodata", prefix=pointer),
+            json_pointer=pointer,  # the class; its nodata flag may be absent
             expected=True,
         )
     if table is None:
@@ -173,7 +180,7 @@ def _class_color_defect(  # noqa: PLR0913, PLR0917 - one drawn class against its
             f"asset '{key}' class value {value} is fully transparent in band {band}'s"
             " embedded color table, so readers hide it like nodata",
             key,
-            json_pointer=json_pointer("nodata", prefix=pointer),
+            json_pointer=pointer,  # the class; its nodata flag may be absent
             expected=True,
         )
     actual = "{:02X}{:02X}{:02X}".format(*entry[:3])
@@ -299,6 +306,8 @@ def _check_palette_classes(key: str, asset: dict[str, Any], files: AssetFiles) -
         ]
     except Exception:
         return []
+    declared = asset.get("bands")
+    declared = declared if isinstance(declared, list) else []
     return [
         DataDefect(
             DAT_PALETTE_CLASSES,
@@ -306,9 +315,59 @@ def _check_palette_classes(key: str, asset: dict[str, Any], files: AssetFiles) -
             f"asset '{key}' band {index + 1} draws through an embedded color table but"
             " declares no classification:classes",
             key,
-            json_pointer=json_pointer("assets", key, "bands", index),
+            json_pointer=json_pointer("assets", key, "bands", index)
+            # Point at the band only when the metadata lists it.
+            if index < len(declared)
+            else json_pointer("assets", key),
         )
         for index in palette
+    ]
+
+
+def _check_class_placement(key: str, asset: dict[str, Any], files: AssetFiles) -> list[DataDefect]:
+    """A multi-band file MUST have its class list on a band in ``bands`` (PORTO-FMT-050).
+
+    ``PTL-CLS-005`` judges placement by the band count the metadata declares.
+    An asset that declares no band list but points at a multi-band file passes
+    it with the list on the asset, so the file's own band count decides here.
+    """
+    on_asset = [found for found in asset_class_lists("", asset) if found.band_index is None]
+    if not on_asset or band_count(asset) > 1:
+        return []
+    try:
+        count = files.raster().count
+    except Exception:  # unreadable raster: the COG check owns reporting it
+        return []
+    if count <= 1:
+        return []
+    return [
+        DataDefect(
+            DAT_CLASS_COLORS,
+            Severity.ERROR,
+            f"asset '{key}' file has {count} bands, but its class list is on the asset"
+            " instead of on the band it describes in bands",
+            key,
+            json_pointer=json_pointer("assets", key, CLASSES_FIELD),
+        )
+    ]
+
+
+def from_item_assets(key: str, defects: list[DataDefect]) -> list[DataDefect]:
+    """Relocate class findings for classes an item takes from ``item_assets``.
+
+    The list is in the collection, not the item the finding is reported on,
+    so the finding points at the item's asset, which exists, and says where
+    the classes come from.
+    """
+    return [
+        replace(
+            defect,
+            json_pointer=json_pointer("assets", key),
+            message=f"{defect.message} (classes from the collection's item_assets/{key})",
+        )
+        if defect.rule_id in {DAT_CLASS_COLORS, DAT_PALETTE_CLASSES}
+        else defect
+        for defect in defects
     ]
 
 

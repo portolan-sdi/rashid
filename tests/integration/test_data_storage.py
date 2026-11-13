@@ -53,7 +53,7 @@ from rashid.registry import (
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
 )
-from tests.conftest import CatalogBuilder, mutate_json
+from tests.conftest import CatalogBuilder, mutate_json, resolve_pointer
 from tests.integration import _data_assets as assets
 
 pytestmark = pytest.mark.integration
@@ -96,7 +96,13 @@ def _gpq(path: Path) -> list:
 
 
 def _raster(path: Path, asset: dict | None = None) -> list:
-    return raster.check_raster("data", asset or {}, _loc(path), _files(path))
+    asset = asset or {}
+    defects = raster.check_raster("data", asset, _loc(path), _files(path))
+    # Every class finding's pointer resolves in a document that has the asset.
+    for defect in defects:
+        if defect.rule_id in {DAT_CLASS_COLORS, DAT_PALETTE_CLASSES}:
+            resolve_pointer({"assets": {"data": asset}}, defect.json_pointer)
+    return defects
 
 
 # --- GeoParquet ------------------------------------------------------------
@@ -1517,7 +1523,7 @@ def test_class_drawn_transparent_must_be_marked_nodata(tmp_path: Path) -> None:
     del asset["bands"][0]["classification:classes"][0]["nodata"]
     defects = _raster(path, asset)
     assert [(d.rule_id, d.severity, d.json_pointer) for d in defects] == [
-        (DAT_CLASS_COLORS, Severity.WARNING, "/assets/data/bands/0/classification:classes/0/nodata")
+        (DAT_CLASS_COLORS, Severity.WARNING, "/assets/data/bands/0/classification:classes/0")
     ]
 
 
@@ -1528,7 +1534,7 @@ def test_class_equal_to_file_nodata_without_a_table_is_a_warning(tmp_path: Path)
     classes = [{"value": 0, "name": "no-data"}, {"value": 4, "name": "vegetation"}]
     defects = _raster(path, {"bands": [{"nodata": 0, "classification:classes": classes}]})
     assert [(d.rule_id, d.json_pointer) for d in defects] == [
-        (DAT_CLASS_COLORS, "/assets/data/bands/0/classification:classes/0/nodata")
+        (DAT_CLASS_COLORS, "/assets/data/bands/0/classification:classes/0")
     ]
 
 
@@ -1577,6 +1583,57 @@ def test_palette_band_without_classes_is_an_info_hint(tmp_path: Path) -> None:
     assert [(d.rule_id, d.severity, d.json_pointer) for d in defects] == [
         (DAT_PALETTE_CLASSES, Severity.INFO, "/assets/data/bands/0")
     ]
+
+
+def test_palette_hint_points_at_the_asset_without_bands(tmp_path: Path) -> None:
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    defects = _raster(path, {"nodata": 0})
+    assert [(d.rule_id, d.json_pointer) for d in defects] == [(DAT_PALETTE_CLASSES, "/assets/data")]
+
+
+def test_asset_classes_on_a_multi_band_file_are_an_error(tmp_path: Path) -> None:
+    path = tmp_path / "three.tif"
+    assets.write_cog(path, count=3)
+    classes = [{"value": 1, "name": "urban", "title": "Urban"}]
+    defects = _raster(path, {"classification:classes": classes})
+    assert [
+        (d.rule_id, d.severity, d.json_pointer) for d in defects if d.rule_id == DAT_CLASS_COLORS
+    ] == [(DAT_CLASS_COLORS, Severity.ERROR, "/assets/data/classification:classes")]
+
+
+def test_band_classes_on_a_multi_band_file_are_placed(tmp_path: Path) -> None:
+    path = tmp_path / "three.tif"
+    assets.write_cog(path, count=3)
+    classes = [{"value": 1, "name": "urban", "title": "Urban"}]
+    bands = [{"classification:classes": classes}, {}, {}]
+    assert [d for d in _raster(path, {"bands": bands}) if d.rule_id == DAT_CLASS_COLORS] == []
+
+
+def test_inherited_class_findings_point_into_the_item(
+    catalog: CatalogBuilder, tmp_path: Path
+) -> None:
+    catalog.collection("flood").item("scene-1")
+    root = catalog.write()
+    mutate_json(
+        root / "flood" / "collection.json",
+        lambda data: data.update(item_assets={"data": _classified_asset(flood="FF0000")}),
+    )
+    own = {"href": "./flood.tif", "type": _COG_TYPE, "roles": ["data"]}
+    for item_path in (root / "flood").rglob("scene-1.json"):
+        mutate_json(item_path, lambda data: data.update(assets={"data": own}))
+    path = tmp_path / "flood.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    graph = CatalogGraph.load(root)
+    item = next(graph.iter("item"))
+    defects = [
+        d
+        for d in checks.check_node(item, _FileReader("./flood.tif", path), graph)
+        if d.rule_id == DAT_CLASS_COLORS
+    ]
+    assert [d.json_pointer for d in defects] == ["/assets/data"]
+    assert "item_assets/data" in defects[0].message
+    assert resolve_pointer(item.data, defects[0].json_pointer) == own
 
 
 def test_palette_band_described_by_bitfields_is_clean(tmp_path: Path) -> None:

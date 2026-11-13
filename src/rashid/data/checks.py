@@ -50,6 +50,8 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   table. The color table is authoritative for rendering and the hint only
   mirrors it, so a difference is a WARNING (PORTO-FMT-054). A class at the
   file's nodata that is not marked nodata is a WARNING too (PORTO-FMT-057).
+  A class list on the asset of a file with more than one band, when the
+  metadata lists no bands, is an ERROR (PORTO-FMT-050).
 - ``PTL-DAT-022`` a COG band drawn through an embedded color table declares no
   ``classification:classes`` (INFO, uncited). A palette is only a hint, since
   continuous rasters ship one too. An item asset with no classes of its own is
@@ -100,7 +102,13 @@ from rashid.data.geoparquet import (
 )
 from rashid.data.mirror import check_mirror
 from rashid.data.partitions import check_partitions
-from rashid.data.raster import check_display, check_raster, classified_asset, geo_from_raster
+from rashid.data.raster import (
+    check_display,
+    check_raster,
+    classified_asset,
+    from_item_assets,
+    geo_from_raster,
+)
 from rashid.data.reader import AssetReader
 from rashid.data.spatial import (
     Geo,
@@ -239,7 +247,10 @@ def _check_asset(
             defects.extend(check_mirror(node, key, files, graph))
         if expected == "tiff":
             classed = classified_asset(node, key, asset, graph)
-            defects.extend(check_raster(key, classed, located, files))
+            raster_defects = check_raster(key, classed, located, files)
+            if classed is not asset:
+                raster_defects = from_item_assets(key, raster_defects)
+            defects.extend(raster_defects)
             defects.extend(check_display(node, key, asset, files))
         if expected == "parquet":
             defects.extend(check_geoparquet(key, files))
