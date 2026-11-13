@@ -130,6 +130,7 @@
       "href": "./eurostat-electricity-prices.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "Eurostat Electricity Prices for Household Consumers (Parquet)",
+      "description": "The primary data file for this collection.",
       "roles": [
         "data"
       ],

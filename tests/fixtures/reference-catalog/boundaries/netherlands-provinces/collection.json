@@ -114,6 +114,7 @@
       "href": "./netherlands-provinces.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "Netherlands Provinces (GeoParquet)",
+      "description": "The primary data file for this collection.",
       "roles": [
         "data"
       ],
@@ -125,6 +126,7 @@
       "href": "https://service.pdok.nl/kadaster/brk-bestuurlijke-gebieden/atom/downloads/BestuurlijkeGebieden_2026.gpkg",
       "type": "application/geopackage+sqlite3",
       "title": "PDOK Bestuurlijke Gebieden 2026 (GeoPackage)",
+      "description": "The original upstream file this collection was converted from.",
       "roles": [
         "source"
       ],
@@ -135,6 +137,7 @@
       "href": "./netherlands-provinces.pmtiles",
       "type": "application/vnd.pmtiles",
       "title": "Netherlands Provinces (PMTiles)",
+      "description": "Vector tiles of the data for web maps.",
       "roles": [
         "visual"
       ],
@@ -190,6 +193,7 @@
       "href": "./thumbnail.png",
       "type": "image/png",
       "title": "Preview thumbnail over a light basemap. © OpenStreetMap contributors © CARTO.",
+      "description": "A preview image of the data.",
       "roles": [
         "thumbnail"
       ],
@@ -200,6 +204,7 @@
       "href": "./iso19115.xml",
       "type": "application/vnd.iso.19139+xml",
       "title": "ISO 19115 metadata record, BRK Bestuurlijke Gebieden (Nationaal Georegister)",
+      "description": "The upstream ISO 19115 metadata record.",
       "roles": [
         "metadata",
         "iso-19115"

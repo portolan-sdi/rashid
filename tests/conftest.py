@@ -67,6 +67,8 @@ def mirror_providers() -> list[dict[str, Any]]:
 def default_asset() -> dict[str, Any]:
     return {
         "href": "./data.parquet",
+        "title": "Data",
+        "description": "The collection's data file.",
         "type": "application/vnd.apache.parquet",
         "roles": ["data"],
         "file:size": 1234,
@@ -77,6 +79,8 @@ def default_asset() -> dict[str, Any]:
 def thumbnail_asset() -> dict[str, Any]:
     return {
         "href": "./thumbnail.png",
+        "title": "Thumbnail",
+        "description": "A preview image of the data.",
         "type": "image/png",
         "roles": ["thumbnail"],
         "file:size": 2048,

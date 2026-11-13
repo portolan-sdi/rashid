@@ -735,3 +735,26 @@ def test_glob_href_on_a_non_data_asset_passes(catalog: CatalogBuilder) -> None:
     thumbnail["href"] = "./thumb-*.png"
     catalog.collection("roads", assets={"data": _asset(), "thumbnail": thumbnail})
     assert findings_for(validate(catalog.write()), "PTL-AST-012") == []
+@pytest.mark.parametrize("field", ["title", "description"])
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_asset_without_title_or_description_warns(
+    catalog: CatalogBuilder, field: str, value: str | None
+) -> None:
+    asset = default_asset()
+    if value is None:
+        del asset[field]
+    else:
+        asset[field] = value
+    catalog.collection("roads", assets={"data": asset})
+    report = validate(catalog.write())
+    findings = findings_for(report, "PTL-AST-010")
+    assert [(f.severity, f.json_pointer) for f in findings] == [
+        (Severity.WARNING, f"/assets/data/{field}")
+    ]
+
+
+def test_item_asset_templates_need_no_title_or_description(catalog: CatalogBuilder) -> None:
+    catalog.collection(
+        "roads", item_assets={"data": {"type": "application/vnd.apache.parquet", "roles": ["data"]}}
+    )
+    assert findings_for(validate(catalog.write()), "PTL-AST-010") == []

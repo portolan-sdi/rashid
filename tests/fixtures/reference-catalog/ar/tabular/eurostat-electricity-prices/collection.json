@@ -130,6 +130,7 @@
       "href": "../../../tabular/eurostat-electricity-prices/eurostat-electricity-prices.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "البيانات",
+      "description": "ملف البيانات الأساسي لهذه المجموعة.",
       "roles": [
         "data"
       ],

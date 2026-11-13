@@ -645,6 +645,7 @@
       "href": "./natural-earth-populated-places.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "Natural Earth Populated Places (1:50m) (GeoParquet)",
+      "description": "The primary data file for this collection.",
       "roles": [
         "data"
       ],
@@ -656,6 +657,7 @@
       "href": "https://naciscdn.org/naturalearth/50m/cultural/ne_50m_populated_places.zip",
       "type": "application/zip",
       "title": "Natural Earth 50m Populated Places (zipped Shapefile)",
+      "description": "The original upstream file this collection was converted from.",
       "roles": [
         "source"
       ],
@@ -722,6 +724,7 @@
       "href": "./thumbnail.png",
       "type": "image/png",
       "title": "Preview thumbnail over a light basemap. © OpenStreetMap contributors © CARTO.",
+      "description": "A preview image of the data.",
       "roles": [
         "thumbnail"
       ],

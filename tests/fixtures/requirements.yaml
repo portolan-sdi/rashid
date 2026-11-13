@@ -279,6 +279,13 @@ requirements:
     quote: >-
       Every asset MUST also have a `type` and at least one role.
 
+  - id: PORTO-CORE-088
+    severity: SHOULD
+    enforcement: validator
+    file: specs/portolan/core.md
+    quote: >-
+      Every asset SHOULD have a `title` and a `description`.
+
   - id: PORTO-CORE-026
     severity: MUST
     enforcement: validator

@@ -61,6 +61,7 @@
       "href": "./sample-cog.tif",
       "type": "image/tiff; application=geotiff; profile=cloud-optimized",
       "title": "Sample Raster COG (COG)",
+      "description": "The primary data file for this collection.",
       "roles": [
         "data"
       ],
@@ -104,6 +105,7 @@
       "href": "https://raw.githubusercontent.com/rasterio/rasterio/main/tests/data/RGB.byte.tif",
       "type": "image/tiff",
       "title": "rasterio RGB.byte.tif test fixture (GeoTIFF)",
+      "description": "The original upstream file this collection was converted from.",
       "roles": [
         "source"
       ],
@@ -114,6 +116,7 @@
       "href": "./thumbnail.png",
       "type": "image/png",
       "title": "Preview thumbnail over a light basemap. © OpenStreetMap contributors © CARTO.",
+      "description": "A preview image of the data.",
       "roles": [
         "thumbnail"
       ],

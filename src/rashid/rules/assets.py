@@ -195,6 +195,31 @@ def _is_https_url(href: object) -> bool:
     return True
 
 
+class AssetTitleDescriptionRule(Rule):
+    """Every asset has a non-empty title and description.
+
+    ``item_assets`` entries are templates, not assets, so they are exempt.
+    """
+
+    id = "PTL-AST-010"
+    spec_ids = ("PORTO-CORE-088",)
+    default_severity = Severity.WARNING
+    description = "every asset should have a non-empty title and description"
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in assets_of(node):
+            for field in ("title", "description"):
+                value = asset.get(field)
+                if not isinstance(value, str) or not value.strip():
+                    yield self.finding(
+                        node,
+                        f"asset '{key}' has no {field}",
+                        json_pointer=json_pointer(field, prefix=pointer),
+                        fix_hint=f"add a '{field}' that tells a reader what this file holds",
+                    )
+
+
 class CogMediaTypeRule(Rule):
     """Primary raster data declares the required COG media type.
 

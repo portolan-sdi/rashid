@@ -645,6 +645,7 @@
       "href": "../../../reference/natural-earth-populated-places/natural-earth-populated-places.parquet",
       "type": "application/vnd.apache.parquet",
       "title": "البيانات",
+      "description": "ملف البيانات الأساسي لهذه المجموعة.",
       "roles": [
         "data"
       ],
@@ -656,6 +657,7 @@
       "href": "https://naciscdn.org/naturalearth/50m/cultural/ne_50m_populated_places.zip",
       "type": "application/zip",
       "title": "ملف المصدر الأصلي",
+      "description": "الملف الأصلي الذي حُوّلت منه هذه المجموعة.",
       "roles": [
         "source"
       ],
@@ -722,6 +724,7 @@
       "href": "../../../reference/natural-earth-populated-places/thumbnail.png",
       "type": "image/png",
       "title": "صورة مصغرة",
+      "description": "صورة معاينة للبيانات.",
       "roles": [
         "thumbnail"
       ],
