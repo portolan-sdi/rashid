@@ -599,8 +599,9 @@ _TILE_A, _TILE_B, _TILE_C = [4.0, 50.0, 5.0, 51.0], [5.0, 51.0, 6.0, 52.0], [4.0
         ([_TILE_A, _TILE_A, _TILE_A, _TILE_B], False),
         ([_TILE_A, _TILE_B] * 3, False),
         ([_TILE_A, _TILE_A, _TILE_B, _TILE_C], True),
+        ([[4.0, 50.0, 0.0, 5.0, 51.0, 10.0], [4.0, 50.0, 1.0, 5.0, 51.0, 11.0], _TILE_B], False),
     ],
-    ids=["one-site-revisited-plus-one", "two-sites-revisited", "three-sites"],
+    ids=["one-site-revisited-plus-one", "two-sites-revisited", "three-sites", "3d-elevations"],
 )
 def test_mosaic_needs_three_distinct_footprints(
     catalog: CatalogBuilder, footprints: list[list[float]], warns: bool

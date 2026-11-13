@@ -444,7 +444,8 @@ def _mosaic_items(node: Node, graph: CatalogGraph) -> int:
     if any(area is None or area * _MOSAIC_AREA_RATIO > extent for area in areas):
         return 0
     # Places, not items: a site revisited on many dates is a time series.
-    if len({tuple(box) for box in boxes}) < _MOSAIC_MIN_ITEMS:
+    places = {(box[0], box[1], box[len(box) // 2], box[len(box) // 2 + 1]) for box in boxes}
+    if len(places) < _MOSAIC_MIN_ITEMS:
         return 0
     return len(boxes)
 
