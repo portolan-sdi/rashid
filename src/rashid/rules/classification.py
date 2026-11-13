@@ -3,28 +3,25 @@
 A categorical raster names what each pixel value means with
 ``classification:classes``. A single-band raster puts its class list on the
 data asset; a multi-band raster puts it on the band it describes, in the STAC
-1.1 ``bands`` array. Either way the list sits next to the ``nodata`` and
-``data_type`` it is read against (PORTO-FMT-050).
+1.1 ``bands`` array. Either way the list is next to the ``nodata`` it is read
+against (PORTO-FMT-050).
 
 The classification extension's own schema (v2.0.0) applies its class object
-only to an object's top level, to ``raster:bands``, and to ``mlm:output``. A
-class list inside core ``bands`` is never reached, and the extension is not in
-the profile's registry, so ``PTL-EXT-001`` does not validate it either. These
-rules check every class list wherever it sits, legacy ``raster:bands``
-included:
+only to an object's top level, to ``raster:bands``, and to ``mlm:output``, and
+``PTL-EXT-001`` validates those places. A class list inside core ``bands`` is
+never reached, so ``PTL-CLS-002`` applies the class object there. A legacy
+``raster:bands`` list that mirrors a list in ``bands`` or on the asset is left
+to the list it mirrors, so one mistake earns one finding.
 
 - ``PTL-CLS-001`` the object declares the classification extension.
-- ``PTL-CLS-002`` the list follows the extension's class object: an integer
-  ``value`` and a ``name`` of letters, digits, ``-`` and ``_``, each unique
-  within the list, a ``title``, and a ``color_hint`` of six hex digits
-  without ``#``.
+- ``PTL-CLS-002`` every class has a ``title``; under core ``bands``, each
+  class also follows the extension's class object.
 - ``PTL-CLS-003`` a class is marked ``nodata`` if and only if its value is
   the band's ``nodata``.
-- ``PTL-CLS-004`` every class value fits the band's ``data_type``.
-- ``PTL-CLS-005`` the list sits on a single-band data asset, or on its band
-  in STAC 1.1 ``bands`` for a multi-band asset.
-- ``PTL-CLS-006`` a collection of scene items repeats its items' class lists
-  in ``item_assets``.
+- ``PTL-CLS-005`` the list is on a single-band data asset, or on its band in
+  STAC 1.1 ``bands`` for a multi-band asset.
+- ``PTL-CLS-006`` a collection of scene items has its items' class lists in
+  the same place in ``item_assets``.
 
 Whether a ``color_hint`` agrees with the colour table embedded in the COG
 (``PTL-DAT-021``) is a bytes question, so it lives in the data pass, which
@@ -54,74 +51,73 @@ BAND_FIELDS = ("bands", "raster:bands")
 _EXTENSION_PREFIX = "https://stac-extensions.github.io/classification/"
 _EXTENSION_URI = f"{_EXTENSION_PREFIX}v2.0.0/schema.json"
 
-# The class object's patterns in the extension's v2.0.0 schema.
-_NAME_PATTERN = re.compile(r"^[0-9A-Za-z\-_]+$")
-_COLOR_HINT_PATTERN = re.compile(r"^[0-9A-Fa-f]{6}$")
-
-# STAC common metadata data types with an integer range. Floating-point and
-# complex types hold every class value a catalog would plausibly declare.
-_INTEGER_RANGES: dict[str, tuple[int, int]] = {
-    "int8": (-(2**7), 2**7 - 1),
-    "int16": (-(2**15), 2**15 - 1),
-    "int32": (-(2**31), 2**31 - 1),
-    "int64": (-(2**63), 2**63 - 1),
-    "uint8": (0, 2**8 - 1),
-    "uint16": (0, 2**16 - 1),
-    "uint32": (0, 2**32 - 1),
-    "uint64": (0, 2**64 - 1),
-}
-
 _ABSENT = object()
 
 _CLASS_SCHEMA = "_schemas/extensions/stac-extensions.github.io/classification/v2.0.0/schema.json"
-# Fields the rules above check with their own messages.
-_HAND_CHECKED = frozenset({"value", "name", "title", "color_hint", "nodata"})
-_JSON_TYPES: dict[str, type | tuple[type, ...]] = {
-    "string": str,
-    "number": (int, float),
-    "integer": int,
-    "boolean": bool,
-}
 
 
 @lru_cache(maxsize=1)
-def _class_properties() -> dict[str, dict[str, Any]]:
-    """The field schemas of the vendored extension's class object."""
+def _list_schema() -> dict[str, Any]:
+    """The vendored extension's schema for a ``classification:classes`` array."""
     schema = _json.loads(resources.files("rashid").joinpath(_CLASS_SCHEMA).read_bytes())
-    properties: dict[str, dict[str, Any]] = schema["definitions"]["class_object"]["properties"]
-    return properties
+    definitions: dict[str, Any] = schema["definitions"]
+    listed: dict[str, Any] = dict(definitions["fields"]["properties"][CLASSES_FIELD])
+    listed["items"] = definitions["class_object"]
+    return listed
 
 
-def _optional_field_errors(entry: dict[str, Any]) -> Iterator[tuple[str, str]]:
-    """(field, reason) for each other class field the extension's schema rejects.
+# shortcut: reads only the keywords the v2.0.0 class list uses (type,
+# required, pattern, minimum, maximum, minItems); extend it if a later schema
+# adds others. The jsonschema validator PTL-EXT-001 uses is not loaded in the
+# metadata pass.
+_JSON_TYPES: dict[str, type | tuple[type, ...]] = {
+    "string": str,
+    "number": (int, float),
+    "boolean": bool,
+    "object": dict,
+    "array": list,
+}
 
-    shortcut: reads only type, minimum and maximum, the keywords those fields
-    use in v2.0.0; extend it if a later schema adds others.
-    """
-    for field, rule in _class_properties().items():
-        if field in _HAND_CHECKED or field not in entry:
+
+def _type_error(value: Any, kind: str) -> bool:
+    if kind == "integer":
+        return not is_integer(value)
+    # JSON true is a Python int; only the boolean type admits it.
+    return not isinstance(value, _JSON_TYPES[kind]) or (
+        isinstance(value, bool) and kind != "boolean"
+    )
+
+
+def class_object_errors(entry: Any) -> Iterator[tuple[str | None, str]]:
+    """(field or None for the class, reason) for each way a class breaks the class object."""
+    rule = _list_schema()["items"]
+    if _type_error(entry, "object"):
+        yield None, "is not an object"
+        return
+    for field in rule["required"]:
+        if field not in entry:
+            yield None, f"has no {field}"
+    for field, limits in rule["properties"].items():
+        if field not in entry:
             continue
-        value, kind = entry[field], rule.get("type", "")
-        # Draft-07 counts an integral float such as 40.0 as an integer.
-        integral = isinstance(value, float) and value.is_integer()
-        if (
-            not isinstance(value, _JSON_TYPES.get(kind, object))
-            and not (kind == "integer" and integral)
-        ) or (isinstance(value, bool) and kind != "boolean"):
-            yield field, f"is not a JSON {kind}"
-        elif "minimum" in rule and value < rule["minimum"]:
-            yield field, f"is below the minimum of {rule['minimum']}"
-        elif "maximum" in rule and value > rule["maximum"]:
-            yield field, f"is above the maximum of {rule['maximum']}"
+        value = entry[field]
+        if _type_error(value, limits["type"]):
+            yield field, f"is not a JSON {limits['type']}"
+        elif "pattern" in limits and not re.search(limits["pattern"], value):
+            yield field, f"does not match {limits['pattern']}"
+        elif "minimum" in limits and value < limits["minimum"]:
+            yield field, f"is below the minimum of {limits['minimum']}"
+        elif "maximum" in limits and value > limits["maximum"]:
+            yield field, f"is above the maximum of {limits['maximum']}"
 
 
 @dataclass(frozen=True)
 class ClassList:
     """One ``classification:classes`` array and the band facts that bind it.
 
-    ``nodata`` and ``data_type`` are the band's own values, or the enclosing
-    asset's when the band leaves them out, as STAC 1.1 inherits them.
-    ``_ABSENT`` marks a value declared at neither level. ``band_field`` and
+    ``nodata`` is the band's own value, or the enclosing asset's when the
+    band leaves it out, as STAC 1.1 inherits it. ``_ABSENT`` marks a value
+    declared at neither level. ``band_field`` and
     ``band_index`` locate the band in its asset's band list, so the data pass
     can pair it with the band of the same position in the file; both are None
     for a list declared outside a band list.
@@ -130,7 +126,6 @@ class ClassList:
     pointer: str
     classes: Any
     nodata: Any
-    data_type: Any
     band_field: str | None = None
     band_index: int | None = None
     # On a source asset, which PORTO-FMT-045 exempts from Portolan's own
@@ -147,36 +142,43 @@ class ClassList:
 
 
 def asset_class_lists(pointer: str, asset: dict[str, Any]) -> list[ClassList]:
-    """Every class list on one asset: its own, and each band's."""
+    """Every class list on one asset: its own, and each band's.
+
+    A legacy ``raster:bands`` list is left out where it mirrors a list in
+    ``bands`` or, for the asset's only band, on the asset.
+    """
     nodata = asset.get("nodata", _ABSENT)
-    data_type = asset.get("data_type", _ABSENT)
     found: list[ClassList] = []
     if CLASSES_FIELD in asset:
         found.append(
-            ClassList(
-                json_pointer(CLASSES_FIELD, prefix=pointer),
-                asset[CLASSES_FIELD],
-                nodata,
-                data_type,
-            )
+            ClassList(json_pointer(CLASSES_FIELD, prefix=pointer), asset[CLASSES_FIELD], nodata)
         )
     for field in BAND_FIELDS:
         bands = asset.get(field)
         if not isinstance(bands, list):
             continue
         for index, band in enumerate(bands):
-            if isinstance(band, dict) and CLASSES_FIELD in band:
-                found.append(
-                    ClassList(
-                        json_pointer(field, index, CLASSES_FIELD, prefix=pointer),
-                        band[CLASSES_FIELD],
-                        band.get("nodata", nodata),
-                        band.get("data_type", data_type),
-                        field,
-                        index,
-                    )
+            if not isinstance(band, dict) or CLASSES_FIELD not in band:
+                continue
+            if field == "raster:bands" and _mirrors(asset, index):
+                continue
+            found.append(
+                ClassList(
+                    json_pointer(field, index, CLASSES_FIELD, prefix=pointer),
+                    band[CLASSES_FIELD],
+                    band.get("nodata", nodata),
+                    field,
+                    index,
                 )
+            )
     return found
+
+
+def _mirrors(asset: dict[str, Any], index: int) -> bool:
+    """Whether the legacy ``raster:bands`` entry ``index`` has a copy of another list."""
+    if _has_classes(asset, index):
+        return True
+    return index == 0 and band_count(asset) == 1 and CLASSES_FIELD in asset
 
 
 def _containers(node: Node) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -221,15 +223,9 @@ def _field_at(pointer: str, entry: dict[str, Any], field: str) -> str:
     return json_pointer(field, prefix=pointer) if field in entry else pointer
 
 
-def _title_problem(entry: dict[str, Any], *, source: bool) -> bool:
-    """Whether a class lacks the title it needs.
-
-    PORTO-FMT-052 requires a readable title, but a source asset is exempt
-    (PORTO-FMT-045) and needs only the extension's string type when present.
-    """
+def _title_problem(entry: dict[str, Any]) -> bool:
+    """Whether a class lacks the readable title PORTO-FMT-052 requires."""
     title = entry.get("title")
-    if source:
-        return "title" in entry and not isinstance(title, str)
     return not isinstance(title, str) or not title.strip()
 
 
@@ -242,10 +238,15 @@ def is_integer(value: Any) -> TypeGuard[int]:
 
 
 class ClassificationExtensionRule(Rule):
-    """An object that carries class lists declares the classification extension."""
+    """An object with class lists declares the classification extension.
+
+    The profile's extension registry (``stac/README.md``) lists the
+    extension's schema URI for classified rasters with
+    ``classification:classes``, at SHOULD.
+    """
 
     id = "PTL-CLS-001"
-    default_severity = Severity.ERROR
+    default_severity = Severity.WARNING
     description = "an object with classification:classes declares the classification extension"
     kinds = ("collection", "item")
 
@@ -263,29 +264,39 @@ class ClassificationExtensionRule(Rule):
 
 
 class ClassListRule(Rule):
-    """Every class list follows the extension's class object.
+    """Every class has a title, and a list in core ``bands`` follows the class object.
 
-    The schema's ``uniqueItems`` compares whole objects, so two classes with
-    the same value and different names pass it. A class value is a pixel
-    value, and a pixel cannot belong to two classes, so values must be unique;
-    names identify classes to machines, so they must be unique too.
+    The title is Portolan's (PORTO-FMT-052). The extension's own rules are
+    reported here only for a list in core ``bands``, which its schema never
+    reaches; ``PTL-EXT-001`` reports them everywhere else.
     """
 
     id = "PTL-CLS-002"
     default_severity = Severity.ERROR
     description = (
-        "each classification:classes entry has a unique integer value, a unique"
-        " name of letters, digits, '-' and '_', a title, and a six-hex-digit color_hint"
+        "each classification:classes entry has a title, and a list in core bands"
+        " follows the classification extension's class object"
     )
     kinds = ("collection", "item")
     spec_ids = ("PORTO-FMT-052",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         for found in class_lists(node):
-            yield from self._check_list(node, found)
+            if found.band_field == "bands":
+                yield from self._check_class_object(node, found)
+            # PORTO-FMT-045 exempts a source asset from Portolan's own title.
+            for pointer, entry in [] if found.source else found.entries():
+                if _title_problem(entry):
+                    yield self.finding(
+                        node,
+                        f"class {pointer} has no title",
+                        json_pointer=_field_at(pointer, entry, "title"),
+                        fix_hint="set title to the class's human-readable label,"
+                        " e.g. 'Permanent water'",
+                    )
 
-    def _check_list(self, node: Node, found: ClassList) -> Iterator[Finding]:
-        if not isinstance(found.classes, list) or not found.classes:
+    def _check_class_object(self, node: Node, found: ClassList) -> Iterator[Finding]:
+        if _type_error(found.classes, "array") or len(found.classes) < _list_schema()["minItems"]:
             yield self.finding(
                 node,
                 f"{found.pointer} is not a non-empty array of class objects",
@@ -293,122 +304,19 @@ class ClassListRule(Rule):
                 fix_hint="list one object per class, each with a value and a name",
             )
             return
-        values: dict[int, str] = {}
-        names: dict[str, str] = {}
         for index, entry in enumerate(found.classes):
             pointer = json_pointer(index, prefix=found.pointer)
-            if not isinstance(entry, dict):
+            for field, reason in class_object_errors(entry):
+                if field == "title" and not found.source:
+                    continue  # the title check below reports it
                 yield self.finding(
                     node,
-                    f"class {pointer} is not an object",
-                    json_pointer=pointer,
-                    fix_hint="replace the entry with an object carrying value and name",
+                    f"class {pointer}{'' if field is None else ' ' + field} {reason}",
+                    json_pointer=pointer if field is None else json_pointer(field, prefix=pointer),
+                    fix_hint="correct the class as the classification extension's class"
+                    " object defines it",
+                    actual=entry if field is None else entry[field],
                 )
-                continue
-            yield from self._check_value(node, pointer, entry, values)
-            yield from self._check_name(node, pointer, entry, names)
-            if _title_problem(entry, source=found.source):
-                yield self.finding(
-                    node,
-                    f"class {pointer} has no title",
-                    json_pointer=_field_at(pointer, entry, "title"),
-                    fix_hint="set title to the class's human-readable label, e.g. 'Permanent water'",
-                )
-            yield from self._check_color_hint(node, pointer, entry)
-            yield from self._check_fields(
-                node, pointer, entry, in_bands=found.band_field == "bands"
-            )
-
-    def _check_fields(
-        self, node: Node, pointer: str, entry: dict[str, Any], *, in_bands: bool
-    ) -> Iterator[Finding]:
-        if "nodata" in entry and not isinstance(entry["nodata"], bool):
-            yield self.finding(
-                node,
-                f"class {pointer} has a nodata flag that is not a boolean",
-                json_pointer=json_pointer("nodata", prefix=pointer),
-                fix_hint="set nodata to true or false",
-            )
-        # The extension's schema checks these fields on assets and raster:bands
-        # (PTL-EXT-001) but never reaches core bands.
-        if not in_bands:
-            return
-        for field, reason in _optional_field_errors(entry):
-            yield self.finding(
-                node,
-                f"class {pointer} {field} {reason}",
-                json_pointer=json_pointer(field, prefix=pointer),
-                fix_hint=f"correct {field} as the classification extension's class object defines it",
-                actual=entry[field],
-            )
-
-    def _check_value(
-        self, node: Node, pointer: str, entry: dict[str, Any], seen: dict[int, str]
-    ) -> Iterator[Finding]:
-        value = entry.get("value")
-        if not is_integer(value):
-            yield self.finding(
-                node,
-                f"class {pointer} has no integer value",
-                json_pointer=_field_at(pointer, entry, "value"),
-                fix_hint="set value to the integer pixel value the class covers",
-                actual=value,
-            )
-            return
-        if value in seen:
-            yield self.finding(
-                node,
-                f"class {pointer} repeats value {value} of class {seen[value]}",
-                json_pointer=json_pointer("value", prefix=pointer),
-                fix_hint="give each class its own pixel value, or merge the two classes",
-                actual=value,
-            )
-            return
-        seen[value] = pointer
-
-    def _check_name(
-        self, node: Node, pointer: str, entry: dict[str, Any], seen: dict[str, str]
-    ) -> Iterator[Finding]:
-        name = entry.get("name")
-        if not isinstance(name, str) or not _NAME_PATTERN.match(name):
-            yield self.finding(
-                node,
-                f"class {pointer} has no name of letters, digits, '-' and '_'",
-                json_pointer=_field_at(pointer, entry, "name"),
-                fix_hint="set name to a short machine-readable id such as 'permanent-water',"
-                " and put the readable label in title",
-                actual=name,
-            )
-            return
-        if name in seen:
-            yield self.finding(
-                node,
-                f"class {pointer} repeats name '{name}' of class {seen[name]}",
-                json_pointer=json_pointer("name", prefix=pointer),
-                fix_hint="give each class its own name",
-                actual=name,
-            )
-            return
-        seen[name] = pointer
-
-    def _check_color_hint(
-        self, node: Node, pointer: str, entry: dict[str, Any]
-    ) -> Iterator[Finding]:
-        if "color_hint" not in entry:
-            return
-        hint = entry["color_hint"]
-        if isinstance(hint, str) and _COLOR_HINT_PATTERN.match(hint):
-            return
-        fix = "write color_hint as six hex digits with no '#', e.g. '0000FF'"
-        if isinstance(hint, str) and _COLOR_HINT_PATTERN.match(hint.lstrip("#")):
-            fix = f"drop the '#': '{hint.lstrip('#').upper()}'"
-        yield self.finding(
-            node,
-            f"class {pointer} has a color_hint that is not six hex digits",
-            json_pointer=json_pointer("color_hint", prefix=pointer),
-            fix_hint=fix,
-            actual=hint,
-        )
 
 
 def _same_number(nodata: Any, value: int) -> bool:
@@ -475,46 +383,6 @@ class NodataClassRule(Rule):
                     )
 
 
-class ClassValueRangeRule(Rule):
-    """Every class value is a value the band's integer data type can hold.
-
-    A class outside the range describes pixels the file cannot contain, which
-    usually means the value or the data type is wrong.
-    """
-
-    id = "PTL-CLS-004"
-    default_severity = Severity.ERROR
-    description = "every class value fits the range of its band's data_type"
-    kinds = ("collection", "item")
-    # A value the band cannot hold is not the integer pixel value the class
-    # object requires.
-    spec_ids = ("PORTO-FMT-052",)
-
-    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        for found in class_lists(node):
-            if found.source:
-                continue
-            limits = (
-                _INTEGER_RANGES.get(found.data_type) if isinstance(found.data_type, str) else None
-            )
-            if limits is None:
-                continue
-            low, high = limits
-            for pointer, entry in found.entries():
-                value = entry.get("value")
-                if is_integer(value) and not low <= value <= high:
-                    yield self.finding(
-                        node,
-                        f"class {pointer} has value {value}, outside the {found.data_type}"
-                        f" range {low}..{high}",
-                        json_pointer=json_pointer("value", prefix=pointer),
-                        fix_hint=f"use a value between {low} and {high}, or correct the"
-                        " band's data_type",
-                        expected=[low, high],
-                        actual=value,
-                    )
-
-
 def _has_classes(asset: dict[str, Any], index: int | None) -> bool:
     """Whether the asset (index None) or its band ``index`` in ``bands`` has classes."""
     if index is None:
@@ -539,23 +407,14 @@ def _misplaced(asset: dict[str, Any], found: ClassList) -> str | None:
     """Where a class list on an asset belongs, or None when it is already there.
 
     A single-band asset has the list itself; a multi-band asset has it on the
-    band it describes in ``bands``. A legacy ``raster:bands`` list passes when
-    that place has the classes too, since it then only mirrors them.
+    band it describes in ``bands``.
     """
     multi = band_count(asset) > 1
     if multi and found.band_index is None:
         return "the band it describes in bands"
-    home = found.band_index if multi else None
     if found.band_field == ("bands" if multi else None):
         return None
-    # A single-band mirror is legacy band 0, the asset's only band.
-    if (
-        found.band_field == "raster:bands"
-        and _has_classes(asset, home)
-        and (multi or found.band_index == 0)
-    ):
-        return None
-    return f"bands/{home}" if multi else "the asset"
+    return f"bands/{found.band_index}" if multi else "the asset"
 
 
 class BandPlacementRule(Rule):
@@ -594,38 +453,22 @@ class BandPlacementRule(Rule):
                 )
 
 
-def _legend(classes: Any) -> dict[int, tuple[Any, ...]]:
-    """Class value -> what a legend shows for it, for each class with an integer value."""
-    if not isinstance(classes, list):
-        return {}
-    return {
-        entry["value"]: (
-            entry.get("name"),
-            entry.get("title"),
-            hint.upper() if isinstance(hint := entry.get("color_hint"), str) else hint,
-            entry.get("nodata") is True,
-        )
-        for entry in classes
-        if isinstance(entry, dict) and is_integer(entry.get("value"))
-    }
-
-
 def _same_place(template: ClassList, found: ClassList) -> bool:
     return template.band_field != "raster:bands" and template.band_index == found.band_index
 
 
 class ItemAssetClassesRule(Rule):
-    """A collection of scene items repeats the class lists in ``item_assets``.
+    """A collection of scene items has its items' class lists in ``item_assets``.
 
     A client builds a legend from the collection alone, without opening an
-    item, only when the collection's ``item_assets`` template has the classes
-    its items' assets declare, in the same place, with the same values and
-    names.
+    item, only when the collection's ``item_assets`` template has a class list
+    in the same place as its items' assets (PORTO-FMT-051). An item list in
+    the wrong place is ``PTL-CLS-005``'s.
     """
 
     id = "PTL-CLS-006"
     default_severity = Severity.WARNING
-    description = "a collection repeats its items' class lists in item_assets"
+    description = "a collection has its items' class lists in the same place in item_assets"
     kinds = ("collection",)
     spec_ids = ("PORTO-FMT-051",)
 
@@ -642,64 +485,43 @@ class ItemAssetClassesRule(Rule):
                 if not isinstance(asset, dict) or is_source_asset(asset):
                     continue
                 for found in asset_class_lists("", asset):
-                    if found.band_field == "raster:bands" or (key, found.band_index) in reported:
+                    place = (key, found.band_index)
+                    if place in reported or _misplaced(asset, found) is not None:
                         continue
-                    finding = self._compare(node, item, key, found, templates)
-                    if finding is not None:
-                        reported.add((key, found.band_index))
-                        yield finding
+                    if not self._in_template(key, found, templates):
+                        reported.add(place)
+                        yield self._missing(node, item, key, found, templates)
 
-    def _compare(
+    @staticmethod
+    def _in_template(key: str, found: ClassList, templates: dict[str, Any] | None) -> bool:
+        template = templates.get(key) if templates is not None else None
+        if not isinstance(template, dict):
+            return False
+        return any(_same_place(listed, found) for listed in asset_class_lists("", template))
+
+    def _missing(
         self,
         node: Node,
         item: Node,
         key: str,
         found: ClassList,
         templates: dict[str, Any] | None,
-    ) -> Finding | None:
-        """The finding for one item list against its template, if they disagree."""
-        template = templates.get(key) if templates is not None else None
+    ) -> Finding:
         place = f"asset '{key}'"
+        target = ""
         if found.band_index is not None:
             place = f"band {found.band_index} of {place}"
-        example = item.path.as_posix()
-        matches = [
-            listed
-            for listed in (
-                asset_class_lists(json_pointer("item_assets", key), template)
-                if isinstance(template, dict)
-                else []
-            )
-            if _same_place(listed, found)
-        ]
-        if not matches:
-            target = "" if found.band_index is None else f"bands/{found.band_index}/"
-            if isinstance(template, dict):
-                pointer = json_pointer("item_assets", key)
-            elif templates is not None:
-                pointer = json_pointer("item_assets")
-            else:
-                pointer = ""
-            return self.finding(
-                node,
-                f"items such as {example} have classes on {place}, but item_assets/{key} does not",
-                json_pointer=pointer,
-                fix_hint=f"copy the class list into item_assets/{key}/{target}{CLASSES_FIELD}",
-            )
-        ours, theirs = _legend(found.classes), _legend(matches[0].classes)
-        differing = sorted(
-            value
-            for value in ours.keys() | theirs.keys()
-            if ours.get(value, _ABSENT) != theirs.get(value, _ABSENT)
-        )
-        if not differing:
-            return None
+            target = f"bands/{found.band_index}/"
+        if templates is not None and isinstance(templates.get(key), dict):
+            pointer = json_pointer("item_assets", key)
+        elif templates is not None:
+            pointer = json_pointer("item_assets")
+        else:
+            pointer = ""
         return self.finding(
             node,
-            f"item_assets/{key} classes differ from those on {place} of items such as"
-            f" {example} at values {differing}",
-            json_pointer=matches[0].pointer,
-            fix_hint="give the template the same classes as the items: values, names, titles,"
-            " color hints and nodata flags",
-            actual=differing,
+            f"items such as {item.path.as_posix()} have classes on {place},"
+            f" but item_assets/{key} does not",
+            json_pointer=pointer,
+            fix_hint=f"copy the class list into item_assets/{key}/{target}{CLASSES_FIELD}",
         )

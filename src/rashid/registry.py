@@ -32,7 +32,6 @@ from rashid.rules.classification import (
     BandPlacementRule,
     ClassificationExtensionRule,
     ClassListRule,
-    ClassValueRangeRule,
     ItemAssetClassesRule,
     NodataClassRule,
 )
@@ -222,7 +221,6 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     ClassificationExtensionRule(),
     ClassListRule(),
     NodataClassRule(),
-    ClassValueRangeRule(),
     BandPlacementRule(),
     ItemAssetClassesRule(),
     SingleFileCollectionRule(),
@@ -240,7 +238,8 @@ _METADATA_SPEC_NOTES = {
     "PTL-CNF-004": "The extension registry pin sentence has no manifest ID.",
     "PTL-VER-001": "The delegated version extension navigation semantics have no manifest ID.",
     "PTL-PRO-004": "The official-catalog upstream-link sentence has no RFC 2119 keyword.",
-    "PTL-CLS-001": "Declaring the extension a field belongs to is a STAC rule with no manifest ID.",
+    "PTL-CLS-001": "The extension registry row for Classification, a SHOULD for classified"
+    " rasters with classification:classes, has no manifest ID.",
 }
 
 _PASS_CHECKS: tuple[CheckInfo, ...] = (
