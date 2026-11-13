@@ -31,8 +31,10 @@ def _raster_asset() -> dict[str, Any]:
         "href": "./flood.tif",
         "type": "image/tiff; application=geotiff; profile=cloud-optimized",
         "roles": ["data"],
+        # Two bands, so the class list belongs on the band it describes.
         "bands": [
             {"nodata": 0, "data_type": "uint8", "classification:classes": _flood_classes()},
+            {"name": "confidence", "data_type": "uint8"},
         ],
     }
 
@@ -278,14 +280,42 @@ def test_asset_level_classes_are_checked(catalog: CatalogBuilder) -> None:
 # --- PTL-CLS-005 -------------------------------------------------------------
 
 
-def test_asset_level_classes_belong_on_a_band(catalog: CatalogBuilder) -> None:
+def test_multi_band_asset_level_classes_belong_on_a_band(catalog: CatalogBuilder) -> None:
+    def hoist(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["classification:classes"] = asset["bands"][0].pop("classification:classes")
+
+    findings = findings_for(validate(_built(catalog, hoist)), "PTL-CLS-005")
+    assert [f.json_pointer for f in findings] == ["/assets/data/classification:classes"]
+    assert findings[0].severity.value == "error"
+
+
+def _single_band(data: dict[str, Any]) -> None:
+    data["assets"]["data"]["bands"].pop()
+
+
+def test_single_band_classes_on_the_asset_pass(catalog: CatalogBuilder) -> None:
     def flatten(data: dict[str, Any]) -> None:
         asset = data["assets"]["data"]
         asset.update(asset.pop("bands")[0])
 
-    findings = findings_for(validate(_built(catalog, flatten)), "PTL-CLS-005")
-    assert [f.json_pointer for f in findings] == ["/assets/data/classification:classes"]
-    assert findings[0].severity.value == "error"
+    report = validate(_built(catalog, flatten))
+    assert [f for rule in _ALL for f in findings_for(report, rule)] == []
+
+
+def test_single_band_classes_belong_on_the_asset(catalog: CatalogBuilder) -> None:
+    findings = findings_for(validate(_built(catalog, _single_band)), "PTL-CLS-005")
+    assert [f.json_pointer for f in findings] == [_POINTER]
+    assert "onto the asset" in findings[0].fix_hint
+
+
+def test_object_level_classes_belong_on_the_data_asset(catalog: CatalogBuilder) -> None:
+    def top(data: dict[str, Any]) -> None:
+        data["classification:classes"] = _flood_classes()
+
+    findings = findings_for(validate(_built(catalog, top)), "PTL-CLS-005")
+    assert [f.json_pointer for f in findings] == ["/classification:classes"]
+    assert "the data asset" in findings[0].fix_hint
 
 
 def test_legacy_raster_bands_alone_are_flagged(catalog: CatalogBuilder) -> None:
@@ -349,6 +379,29 @@ def test_item_assets_without_the_band_classes_warn(catalog: CatalogBuilder) -> N
     assert len(findings) == 1
 
 
-def test_item_assets_carrying_the_classes_pass(catalog: CatalogBuilder) -> None:
+def test_item_assets_with_the_classes_pass(catalog: CatalogBuilder) -> None:
     report = validate(_scene_catalog(catalog, _raster_asset()))
+    assert [f for rule in _ALL for f in findings_for(report, rule)] == []
+
+
+def _single_band_asset() -> dict[str, Any]:
+    asset = _raster_asset()
+    asset.update(asset.pop("bands")[0])
+    return asset
+
+
+def test_single_band_item_classes_missing_from_item_assets_warn(catalog: CatalogBuilder) -> None:
+    root = _scene_catalog(catalog, None)
+    for path in (root / "flood").rglob("scene-*.json"):
+        mutate_json(path, lambda data: data.update(assets={"data": _single_band_asset()}))
+    findings = findings_for(validate(root), "PTL-CLS-006")
+    assert len(findings) == 1
+    assert "item_assets/data/classification:classes" in findings[0].fix_hint
+
+
+def test_single_band_item_assets_with_the_classes_pass(catalog: CatalogBuilder) -> None:
+    root = _scene_catalog(catalog, _single_band_asset())
+    for path in (root / "flood").rglob("scene-*.json"):
+        mutate_json(path, lambda data: data.update(assets={"data": _single_band_asset()}))
+    report = validate(root)
     assert [f for rule in _ALL for f in findings_for(report, rule)] == []

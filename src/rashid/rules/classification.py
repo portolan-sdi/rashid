@@ -1,9 +1,10 @@
 """Classification rules (STAC classification extension, categorical rasters).
 
 A categorical raster names what each pixel value means with
-``classification:classes``. STAC 1.1 moved per-band metadata into the core
-``bands`` array, and that is where a Portolan raster carries its class list,
-next to the band's ``nodata`` and ``data_type`` (portolan-spec#41).
+``classification:classes``. A single-band raster puts its class list on the
+data asset; a multi-band raster puts it on the band it describes, in the STAC
+1.1 ``bands`` array. Either way the list sits next to the ``nodata`` and
+``data_type`` it is read against (PORTO-FMT-050).
 
 The classification extension's own schema (v2.0.0) applies its class object
 only to an object's top level, to ``raster:bands``, and to ``mlm:output``. A
@@ -19,7 +20,8 @@ included:
   without ``#``.
 - ``PTL-CLS-003`` a class marked ``nodata`` has the band's ``nodata`` value.
 - ``PTL-CLS-004`` every class value fits the band's ``data_type``.
-- ``PTL-CLS-005`` the list sits on a band in STAC 1.1 ``bands``.
+- ``PTL-CLS-005`` the list sits on a single-band data asset, or on its band
+  in STAC 1.1 ``bands`` for a multi-band asset.
 - ``PTL-CLS-006`` a collection of scene items repeats its items' class lists
   in ``item_assets``.
 
@@ -407,7 +409,10 @@ class ClassValueRangeRule(Rule):
                     )
 
 
-def _band_has_classes(asset: dict[str, Any], index: int) -> bool:
+def _has_classes(asset: dict[str, Any], index: int | None) -> bool:
+    """Whether the asset (index None) or its band ``index`` in ``bands`` has classes."""
+    if index is None:
+        return CLASSES_FIELD in asset
     bands = asset.get("bands")
     if not isinstance(bands, list) or index >= len(bands):
         return False
@@ -415,37 +420,64 @@ def _band_has_classes(asset: dict[str, Any], index: int) -> bool:
     return isinstance(band, dict) and CLASSES_FIELD in band
 
 
-class BandPlacementRule(Rule):
-    """A class list sits on the band it describes, in STAC 1.1 ``bands``.
+def _band_count(asset: dict[str, Any]) -> int:
+    """How many bands the asset declares; one when it lists none."""
+    for field in BAND_FIELDS:
+        bands = asset.get(field)
+        if isinstance(bands, list):
+            return len(bands)
+    return 1
 
-    The band carries the ``nodata`` and ``data_type`` the classes are read
-    against, and a multi-band asset needs to say which band is classified. A
-    legacy ``raster:bands`` list passes when the same band in ``bands`` carries
-    the classes too, since it then only mirrors them for older readers.
+
+def _misplaced(asset: dict[str, Any], found: ClassList) -> str | None:
+    """Where a class list on an asset belongs, or None when it is already there.
+
+    A single-band asset has the list itself; a multi-band asset has it on the
+    band it describes in ``bands``. A legacy ``raster:bands`` list passes when
+    that place has the classes too, since it then only mirrors them.
+    """
+    multi = _band_count(asset) > 1
+    if multi and found.band_index is None:
+        return "the band it describes in bands"
+    home = found.band_index if multi else None
+    if found.band_field == ("bands" if multi else None):
+        return None
+    if found.band_field == "raster:bands" and _has_classes(asset, home):
+        return None
+    return f"bands/{home}" if multi else "the asset"
+
+
+class BandPlacementRule(Rule):
+    """A class list sits on a single-band data asset, or on its band in ``bands``.
+
+    The list is read against the ``nodata`` and ``data_type`` of the object
+    it sits on. A single-band asset states them once, on the asset; a
+    multi-band asset states them per band and has to say which band is
+    classified. A list on the object itself rather than on an asset describes
+    no file.
     """
 
     id = "PTL-CLS-005"
     default_severity = Severity.ERROR
-    description = "a classification:classes list sits on its band in the STAC 1.1 bands array"
+    description = (
+        "a classification:classes list sits on a single-band data asset, or on its band"
+        " in the STAC 1.1 bands array of a multi-band one"
+    )
     kinds = ("collection", "item")
     spec_ids = ("PORTO-FMT-050",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         for pointer, container in _containers(node):
+            is_asset = container is not node.data and container is not node.data.get("properties")
             for found in asset_class_lists(pointer, container):
-                if found.band_field == "bands":
+                target = _misplaced(container, found) if is_asset else "the data asset"
+                if target is None:
                     continue
-                if found.band_index is not None:
-                    if _band_has_classes(container, found.band_index):
-                        continue
-                    target = f"bands/{found.band_index}"
-                else:
-                    target = "the band it describes in bands"
                 yield self.finding(
                     node,
-                    f"{found.pointer} is not on a band in the STAC 1.1 bands array",
+                    f"{found.pointer} is not on {target}",
                     json_pointer=found.pointer,
-                    fix_hint=f"move the list onto {target}, next to that band's nodata",
+                    fix_hint=f"move the list onto {target}, next to its nodata",
                 )
 
 
@@ -453,20 +485,20 @@ class ItemAssetClassesRule(Rule):
     """A collection of scene items repeats the class lists in ``item_assets``.
 
     A client builds a legend from the collection alone, without opening an
-    item, only when the collection's ``item_assets`` template carries the
-    classes its items' bands declare.
+    item, only when the collection's ``item_assets`` template has the classes
+    its items' assets declare, in the same place.
     """
 
     id = "PTL-CLS-006"
     default_severity = Severity.WARNING
-    description = "a collection carries its items' band class lists in item_assets"
+    description = "a collection repeats its items' class lists in item_assets"
     kinds = ("collection",)
     spec_ids = ("PORTO-FMT-051",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         templates = node.data.get("item_assets")
         templates = templates if isinstance(templates, dict) else {}
-        missing: dict[tuple[str, int], str] = {}
+        missing: dict[tuple[str, int | None], str] = {}
         for item in graph.items_of(node):
             assets = item.data.get("assets")
             if not isinstance(assets, dict):
@@ -475,20 +507,21 @@ class ItemAssetClassesRule(Rule):
                 if not isinstance(asset, dict):
                     continue
                 for found in asset_class_lists("", asset):
-                    if found.band_field != "bands" or found.band_index is None:
+                    if found.band_field == "raster:bands":
                         continue
                     template = templates.get(key)
                     if (key, found.band_index) in missing or (
-                        isinstance(template, dict) and _band_has_classes(template, found.band_index)
+                        isinstance(template, dict) and _has_classes(template, found.band_index)
                     ):
                         continue
                     missing[(key, found.band_index)] = item.path.as_posix()
         for (key, index), example in missing.items():
+            where = "the asset" if index is None else f"band {index}"
+            place = "" if index is None else f"bands/{index}/"
             yield self.finding(
                 node,
-                f"items such as {example} carry classes on asset '{key}' band {index},"
+                f"items such as {example} have classes on asset '{key}' {where},"
                 f" but item_assets/{key} does not",
                 json_pointer=json_pointer("item_assets", key),
-                fix_hint=f"copy the class list into item_assets/{key}/bands/{index}"
-                f"/{CLASSES_FIELD}",
+                fix_hint=f"copy the class list into item_assets/{key}/{place}{CLASSES_FIELD}",
             )
