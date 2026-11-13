@@ -45,6 +45,7 @@ from rashid import _json
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
+from rashid.rules._common import is_source_asset
 
 CLASSES_FIELD = "classification:classes"
 BAND_FIELDS = ("bands", "raster:bands")
@@ -553,6 +554,8 @@ class BandPlacementRule(Rule):
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         for pointer, container in _containers(node):
             is_asset = container is not node.data and container is not node.data.get("properties")
+            if is_asset and is_source_asset(container):
+                continue  # PORTO-FMT-045: format rules skip upstream source files
             for found in asset_class_lists(pointer, container):
                 target = _misplaced(container, found) if is_asset else "the data asset"
                 if target is None:

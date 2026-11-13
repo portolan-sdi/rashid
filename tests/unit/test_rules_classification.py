@@ -363,6 +363,15 @@ def test_single_band_classes_belong_on_the_asset(catalog: CatalogBuilder) -> Non
     assert "onto the asset" in findings[0].fix_hint
 
 
+def test_source_asset_classes_are_exempt_from_placement(catalog: CatalogBuilder) -> None:
+    def source(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["roles"] = ["source"]
+        asset["raster:bands"] = asset.pop("bands")
+
+    assert findings_for(validate(_built(catalog, source)), "PTL-CLS-005") == []
+
+
 def test_object_level_classes_belong_on_the_data_asset(catalog: CatalogBuilder) -> None:
     def top(data: dict[str, Any]) -> None:
         data["classification:classes"] = _flood_classes()
