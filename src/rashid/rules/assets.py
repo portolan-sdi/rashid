@@ -116,7 +116,7 @@ class AssetHrefSchemeRule(Rule):
             ):
                 yield self.finding(
                     node,
-                    f"asset '{key}' href uses {scheme}://; absolute hrefs should use https",
+                    f"asset '{key}' href uses the '{scheme}' scheme; absolute hrefs should use https",
                     severity=Severity.WARNING,
                     json_pointer=json_pointer("href", prefix=pointer),
                     fix_hint=f"make the https alternate the href and move the {scheme} URL"
@@ -127,7 +127,7 @@ class AssetHrefSchemeRule(Rule):
             else:
                 yield self.finding(
                     node,
-                    f"asset '{key}' href uses {scheme}:// and has no https alternate",
+                    f"asset '{key}' href uses the '{scheme}' scheme and has no https alternate",
                     json_pointer=json_pointer("href", prefix=pointer),
                     fix_hint="use the https URL that serves this file as the href, or add it"
                     " to the asset's alternate field",
