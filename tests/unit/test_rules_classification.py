@@ -165,6 +165,14 @@ def test_malformed_class_is_flagged(catalog: CatalogBuilder, change: Any, pointe
     assert findings[0].fix_hint
 
 
+def test_integral_float_value_is_an_integer(catalog: CatalogBuilder) -> None:
+    def as_float(data: dict[str, Any]) -> None:
+        _classes(data)[1]["value"] = 1.0
+
+    report = validate(_built(catalog, as_float))
+    assert [f for rule in _ALL for f in findings_for(report, rule)] == []
+
+
 def test_hash_prefixed_color_hint_suggests_the_bare_digits(catalog: CatalogBuilder) -> None:
     root = _built(catalog, lambda d: _classes(d)[2].update(color_hint="#0000ff"))
     (finding,) = findings_for(validate(root), "PTL-CLS-002")

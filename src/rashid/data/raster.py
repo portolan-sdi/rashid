@@ -37,6 +37,7 @@ from rashid.rules.classification import (
     CLASSES_FIELD,
     asset_class_lists,
     band_count,
+    is_integer,
 )
 
 # geotiff-stats-headers.md — the embedded per-band statistics a COG MUST carry.
@@ -131,7 +132,7 @@ def _drawn_classes(
         band = None if found.band_index is None else found.band_index + 1
         for pointer, entry in found.entries():
             value, hint = entry.get("value"), entry.get("color_hint")
-            if entry.get("nodata") is True or isinstance(value, bool) or not isinstance(value, int):
+            if entry.get("nodata") is True or not is_integer(value):
                 continue
             valid = hint.upper() if isinstance(hint, str) and _COLOR_HINT.match(hint) else None
             yield band, value, pointer, valid

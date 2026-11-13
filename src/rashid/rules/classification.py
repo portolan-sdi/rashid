@@ -215,8 +215,11 @@ def _field_at(pointer: str, entry: dict[str, Any], field: str) -> str:
     return json_pointer(field, prefix=pointer) if field in entry else pointer
 
 
-def _is_integer(value: Any) -> TypeGuard[int]:
+def is_integer(value: Any) -> TypeGuard[int]:
+    """A JSON integer as draft-07 reads it: 1 or 1.0, but neither true nor 1.5."""
     # JSON true is a Python int; the schema's integer type excludes it.
+    if isinstance(value, float):
+        return value.is_integer()
     return isinstance(value, int) and not isinstance(value, bool)
 
 
@@ -325,7 +328,7 @@ class ClassListRule(Rule):
         self, node: Node, pointer: str, entry: dict[str, Any], seen: dict[int, str]
     ) -> Iterator[Finding]:
         value = entry.get("value")
-        if not _is_integer(value):
+        if not is_integer(value):
             yield self.finding(
                 node,
                 f"class {pointer} has no integer value",
@@ -417,7 +420,7 @@ class NodataClassRule(Rule):
         for found in class_lists(node):
             for pointer, entry in found.entries():
                 value = entry.get("value")
-                if not _is_integer(value):
+                if not is_integer(value):
                     continue
                 if entry.get("nodata") is not True:
                     if _same_number(found.nodata, value):
@@ -477,7 +480,7 @@ class ClassValueRangeRule(Rule):
             low, high = limits
             for pointer, entry in found.entries():
                 value = entry.get("value")
-                if _is_integer(value) and not low <= value <= high:
+                if is_integer(value) and not low <= value <= high:
                     yield self.finding(
                         node,
                         f"class {pointer} has value {value}, outside the {found.data_type}"
@@ -569,7 +572,7 @@ def _legend(classes: Any) -> dict[int, Any]:
     return {
         entry["value"]: entry.get("name")
         for entry in classes
-        if isinstance(entry, dict) and _is_integer(entry.get("value"))
+        if isinstance(entry, dict) and is_integer(entry.get("value"))
     }
 
 
