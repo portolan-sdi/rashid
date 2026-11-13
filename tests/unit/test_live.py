@@ -1682,7 +1682,9 @@ def test_a_metadata_only_publish_host_without_cors_is_an_error(catalog: CatalogB
     assert finding.path == "catalog.json"
     index = _link_index(graph, "catalog.json", "agents", "./AGENTS.md")
     assert finding.json_pointer == f"/links/{index}/href"
-    assert "data.example.org" in finding.message
+    assert finding.message == (
+        "host 'data.example.org': no Access-Control-Allow-Origin on a GET carrying an Origin header"
+    )
 
 
 def test_the_metadata_cors_probe_skips_link_targets_that_fail(catalog: CatalogBuilder) -> None:
@@ -1757,8 +1759,10 @@ def test_a_whole_file_carries_cors_when_no_partial_read_asset_stays_on_https(
     assert prober.preflight_calls == [_URL]
     assert _ids(findings) == [LIV_OFF_HTTPS, LIV_CORS_ORIGIN, LIV_UNAVAILABLE]
     assert findings[1].json_pointer == "/assets/thumbnail/href"
-    assert findings[2].message.startswith("range probes against host 'data.example.com'")
-    assert "every partial-read asset on it redirects off https" in findings[2].message
+    assert findings[2].message == (
+        "range probes against host 'data.example.com' did not run:"
+        " every partial-read asset on it redirects off https"
+    )
 
 
 def test_a_whole_file_stand_in_off_https_skips_range_and_cors(catalog: CatalogBuilder) -> None:
