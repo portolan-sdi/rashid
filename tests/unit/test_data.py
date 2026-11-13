@@ -27,6 +27,7 @@ from rashid.registry import (
     DAT_CHECKSUM,
     DAT_COG,
     DAT_COG_STATS,
+    DAT_COLUMN_DESCRIPTIONS,
     DAT_CONSISTENCY,
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
@@ -364,6 +365,7 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
             DAT_VECTOR_COLUMNS,
             DAT_OVERVIEW_FORMAT,
             DAT_SCENE_MASK,
+            DAT_COLUMN_DESCRIPTIONS,
         }
     )
     validate(
