@@ -30,7 +30,6 @@ reads the lists through :func:`asset_class_lists`.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
@@ -87,6 +86,15 @@ def _type_error(value: Any, kind: str) -> bool:
     return not isinstance(value, _JSON_TYPES[kind]) or (
         isinstance(value, bool) and kind != "boolean"
     )
+
+
+def _json_key(value: Any) -> Any:
+    """A hashable key equal for equal JSON values: 1 equals 1.0, but not true."""
+    if isinstance(value, dict):
+        return frozenset((key, _json_key(item)) for key, item in value.items())
+    if isinstance(value, list):
+        return tuple(_json_key(item) for item in value)
+    return (type(value) is bool, value)
 
 
 def class_object_errors(entry: Any) -> Iterator[tuple[str | None, str]]:
@@ -317,13 +325,11 @@ class ClassListRule(Rule):
                 fix_hint="list one object per class, each with a value and a name",
             )
             return
-        seen: set[str] = set()
+        seen: set[Any] = set()
         for index, entry in enumerate(found.classes):
             pointer = json_pointer(index, prefix=found.pointer)
-            # The schema's uniqueItems compares whole classes. Python's == calls
-            # false and 0 equal, so compare the JSON text. shortcut: 1 and 1.0
-            # then differ, which only misses a repeat; normalise numbers if it matters.
-            text = json.dumps(entry, sort_keys=True)
+            # The schema's uniqueItems compares whole classes as JSON values.
+            text = _json_key(entry)
             if text in seen:
                 yield self.finding(
                     node,

@@ -251,6 +251,11 @@ def test_repeated_band_class_is_flagged(catalog: CatalogBuilder) -> None:
     assert _schema_and_class_findings(root) == [f"{_POINTER}/5"]
 
 
+def test_integral_float_repeat_is_flagged(catalog: CatalogBuilder) -> None:
+    root = _built(catalog, lambda d: _classes(d).append({**_classes(d)[1], "value": 1.0}))
+    assert _schema_and_class_findings(root) == [f"{_POINTER}/5"]
+
+
 def test_classes_differing_only_in_json_type_are_not_repeats(catalog: CatalogBuilder) -> None:
     def extra(data: dict[str, Any]) -> None:
         _classes(data).append({**_classes(data)[1], "x": 0})
