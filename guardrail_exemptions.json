@@ -1,0 +1,39 @@
+{
+  "ruff": {
+    "src/rashid/_href.py": {
+      "TID251": "Owns URL interpretation and containment policies (#266)."
+    },
+    "src/rashid/_store.py": {
+      "TID251": "Owns HTTPStore construction and urllib requests with HTTPS and User-Agent policy (#266)."
+    },
+    "src/rashid/_json.py": {
+      "TID251": "Owns counted JSON parsing and the stdlib fallback (#266)."
+    },
+    "src/rashid/data/_files.py": {
+      "TID251": "Owns counted reader construction and partition glob enumeration (#266)."
+    },
+    "tests/**": {
+      "ARG002": "#264: test doubles preserve the uniform check(node, graph) and protocol signatures.",
+      "ARG005": "Test callbacks retain the signatures of the production callbacks they replace."
+    },
+    "src/rashid/rules/*.py": {
+      "ARG002": "#264: rules preserve the uniform check(node, graph) signature even when a rule does not need graph."
+    }
+  },
+  "import-linter": {
+    "core and data readers must not import the geospatial stack": {
+      "rashid.data -> rashid.data.checks": "The lazy default_validator import loads the data stack only when validation runs."
+    }
+  },
+  "allowed-importers": {
+    "rashid.data.checks": "Owns asset dispatch and shares one file handle across checks (#266).",
+    "rashid.data.geoparquet": "T9 extracted GeoParquet checks from data/checks.py; consumes shared handles (#266).",
+    "rashid.data.raster": "T9 extracted raster checks from data/checks.py; consumes shared handles (#266).",
+    "rashid.data.mirror": "T9 extracted mirror checks from data/checks.py; consumes shared handles (#266).",
+    "rashid.data.partitions": "T9 extracted partition checks from data/checks.py; owns per-partition shared handles (#266)."
+  },
+  "jscpd": {
+    ".jscpd-baseline.json": "Existing clones at guardrail adoption (#266); fingerprint count is pinned and may only shrink."
+  },
+  "xfail": {}
+}

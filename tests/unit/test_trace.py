@@ -20,7 +20,7 @@ import time
 import tracemalloc
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 import pytest
 
@@ -66,9 +66,12 @@ def test_counting_yields_only_what_changed_inside() -> None:
 
 
 def test_counting_records_the_delta_when_the_block_raises() -> None:
-    with pytest.raises(RuntimeError), _trace.counting() as delta:
+    def count_then_raise() -> None:
         _trace.count("x")
-        raise RuntimeError
+        raise RuntimeError("counted x")
+
+    with pytest.raises(RuntimeError, match="counted x"), _trace.counting() as delta:
+        count_then_raise()
     assert delta == {"x": 1}
 
 
@@ -111,8 +114,8 @@ def test_span_records_times_thread_and_attrs() -> None:
 
 def test_span_is_recorded_when_the_block_raises() -> None:
     _trace.enable("on")
-    with pytest.raises(ValueError), _trace.span("boom"):
-        raise ValueError
+    with pytest.raises(ValueError, match="span failure"), _trace.span("boom"):
+        raise ValueError("span failure")
     assert [s.name for s in _trace.spans()] == ["boom"]
 
 
@@ -346,9 +349,10 @@ def test_meta_holds_version_run_id_timings_counters_and_rss() -> None:
     json.dumps(meta)
 
 
-def test_chrome_trace_has_complete_events_and_thread_names(tmp_path: Path) -> None:
+@pytest.mark.parametrize("path", [Path("a/b"), PurePosixPath("a/b"), PureWindowsPath("a/b")])
+def test_chrome_trace_has_complete_events_and_thread_names(tmp_path: Path, path: PurePath) -> None:
     _trace.enable("on")
-    with _trace.span("outer", path=Path("a/b")):
+    with _trace.span("outer", path=path):
 
         def work() -> None:
             with _trace.span("worker"):
@@ -367,7 +371,7 @@ def test_chrome_trace_has_complete_events_and_thread_names(tmp_path: Path) -> No
     assert named == {"pool-1", threading.current_thread().name}
     outer = next(e for e in complete if e["name"] == "outer")
     assert outer["cat"] == "rashid"
-    assert outer["args"] == {"path": "a/b"}
+    assert outer["args"] == {"path": str(path)}
     assert outer["dur"] > 0
     assert outer["ts"] >= 0
 
@@ -534,7 +538,7 @@ def test_stderr_handler_follows_a_swapped_stream(monkeypatch: pytest.MonkeyPatch
     assert swapped.getvalue().endswith("INFO rashid.example: late\n")
 
 
-def test_stderr_handler_ignores_an_assigned_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stderr_handler_ignores_an_assigned_stream() -> None:
     handler = _trace._Stderr()
     handler.setStream(io.StringIO())
     assert handler.stream is sys.stderr
@@ -655,6 +659,4 @@ def test_the_module_imports_only_the_standard_library() -> None:
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             imported.add(node.module.split(".")[0])
-    # A mutmut sweep runs this test against its mutated copy of the file,
-    # which imports mutmut's trampoline. The real file never imports it.
-    assert imported - {"__future__", "mutmut"} <= sys.stdlib_module_names
+    assert imported - {"__future__"} <= sys.stdlib_module_names

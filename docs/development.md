@@ -20,11 +20,10 @@ Hooks run checks at commit and push time. CI runs both sets.
 
 ```bash
 # On commit: ruff, ruff-format, codespell,
-# actionlint, zizmor, and file hygiene checks
+# actionlint, zizmor, jscpd, and file hygiene checks
 uv run pre-commit run --all-files
 
-# On push: deptry, strict mypy, vulture,
-# xenon complexity checks, and import-linter
+# On push: bandit, deptry, strict mypy, vulture, and import-linter
 uv run pre-commit run --all-files --hook-stage pre-push
 ```
 
@@ -35,24 +34,55 @@ CI uses [prek](https://github.com/j178/prek) to run the same `.pre-commit-config
 Tests require at least 90% coverage overall and on lines changed by a pull request.
 
 ```bash
-uv run pytest                 # Full suite
-uv run pytest -n auto         # In parallel, as in CI
-uv run pytest -m unit         # Fast, isolated tests
+uv run pytest -n 8             # Full suite, as in CI
+uv run pytest -n 8 -m unit     # Fast, isolated tests
 ```
 
 Tests use the `unit`, `integration`, and `network` markers. Network tests check live servers for the live pass and remote data validation, and skip when offline. Structural and schema validation use the schema closures vendored in `src/rashid/_schemas/` and require no network access.
 
 Set `ENABLE_PRE_PUSH_TESTS=1` to include fast tests in the pre-push hook.
 
-## Mutation testing
+## Consolidation guardrails
 
-Mutation testing checks whether tests catch changes to the code, beyond measuring which lines they run.
+These gates keep each consolidated concept at its owner ([#266](https://github.com/portolan-sdi/rashid/issues/266)).
+
+| Gate | Enforced boundary |
+|---|---|
+| Ruff `TID251` | URL interpretation belongs to `_href.py`; urllib requests and HTTPStore construction to `_store.py`; JSON loading to `_json.py`; raw readers and glob enumeration to `data/_files.py`. |
+| import-linter | Metadata rules cannot import live checks, the crawler, transport, or the data pass. The `data-files-owner` contract lists the modules allowed to import `data/_files.py`. |
+| jscpd 5.2.1 | New Python clones in `src/rashid` and `tests` fail the commit hook. Fixtures and virtual environments are excluded. An empty scan fails. |
+| API snapshot | `test_api.py` pins `rashid.api` and `rashid.__all__`, their defining objects, and callable signatures. Python defines the enum constructor signature. |
+| Registry checks | Duplicate IDs fail registry construction. An AST scan compares emitted IDs with `CHECKS` and checks that pass declarations reuse the ID constants. |
+| Pointer construction | An AST scan rejects hand-built pointers outside `model.py`: f-strings, addition, percent formatting, `.format`, and slash joins. Generic slash prefixes are checked in values assigned or passed as `pointer` or `json_pointer`. |
+| Exemption ledger | `guardrail_exemptions.json` lists every Ruff per-file ignore code (including the #264 signature exemptions), import ignore, allowed file-owner importer, baseline, and strict xfail issue, with reasons. Tests pin their counts and reject stale entries. |
+| Strict xfails | Tests for unresolved defects must reference an open issue that the PR does not close and use `strict=True`. After a fix, the test fails with XPASS until its xfail marker is removed. Ruff bans imperative `pytest.xfail`, including imported aliases, in tests too. |
+
+T9 split `data/checks.py` into concern modules. The file-owner contract allows those exact modules, without a package wildcard.
+`_href.py` also owns wire encoding. The rules-to-network contract has no import exemptions.
+`remote.py` has no banned API use, so it needs no Ruff ignore. Production-only API bans live in `src/ruff.toml`; tests and developer scripts can construct raw fixtures without a blanket TID251 exemption.
+
+The committed jscpd baseline accepts existing clones. Its fingerprint and clone counts may only decrease; `test_quality_config.py` pins the counts without running external tools. The archive self-test checks live fingerprints and rejects stale entries.
+Because `origin/main` has no baseline yet, the fingerprint membership comparison becomes active after this PR merges.
+After deleting duplication, regenerate it and lower the pinned counts in the same commit:
 
 ```bash
-uv run mutmut run
+uvx jscpd@5.2.1 src/rashid tests --baseline .jscpd-baseline.json --update-baseline
 ```
 
-CI runs mutation tests nightly and checks the score against `.mutation-baseline`, currently 72%. Raise the minimum as tests improve. If you lower it, explain why in the pull request.
+The commit hook and CI run the same command with `--fail-on-new-clones 0` instead of `--update-baseline`.
+CI also runs `scripts/gate_selftest.py` in a Linux job after installing the locked dependencies.
+The pinned reusable workflow runs both pre-commit stages; `test_quality_config.py` pins that caller and the jscpd hook.
+
+After committing, prove the gates against injected faults:
+
+```bash
+uv run python scripts/gate_selftest.py
+uv run python scripts/gate_selftest.py --fault duplicate-block
+```
+
+The script extracts `HEAD` with `git archive`, runs each gate on a clean copy, then injects its fault.
+It checks banned APIs, all three layer contracts, duplication, API exports and signatures, duplicate and missing IDs, pointer variants, baseline growth, loose and bare xfails, CI wiring, and exemption growth.
+The self-test pins its fault count so dropping a case fails. Each fault must produce its specific diagnostic; syntax errors and clean-copy failures fail the self-test, which runs without modifying the working tree.
 
 ## Measuring performance
 
@@ -93,7 +123,7 @@ The `counts` output includes every operation counter and the time spent in each 
 ```text
 # metadata/small seed=0
 json.parses                           147
-rules.checks                        1,821
+rules.checks                        1,925
 schema.rust_compiles                    3
 schema.rust_passes                    103
 
@@ -194,5 +224,7 @@ Use a pull request for releases. Branch protection blocks direct pushes to `main
 ```bash
 uv run python scripts/vendor_spec_fixtures.py --spec ../portolan-spec
 ```
+
+Released schemas come from final `vX.Y.Z` tags. The vendor stores the test-only draft in `tests/fixtures/draft-profile-schema.json`. The vendor reads the single schema on spec main, or the newest version folder in the old layout. The reference-catalog test maps an unreleased URI to this fixture. The wheel contains only tagged profile schemas.
 
 `spec-sync.yml` checks for spec changes nightly and opens a pull request when it finds them. Review the test results before merging. If `test_schema_uri_invariant` fails, rashid needs a code change as well as a fixture refresh.

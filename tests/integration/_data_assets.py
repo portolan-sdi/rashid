@@ -18,6 +18,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import rasterio
 from pyproj import CRS
+from rasterio.enums import ColorInterp
 from rasterio.transform import from_bounds
 
 BBOX = [4.0, 50.0, 6.0, 52.0]
@@ -107,7 +108,7 @@ def hilbert_sorted(points: list[tuple[float, float]]) -> list[tuple[float, float
     return sorted(points, key=key)
 
 
-def write_geoparquet(
+def write_geoparquet(  # noqa: PLR0913 - keyword-only fixture settings vary independent file properties
     path: Path,
     *,
     points: list[tuple[float, float]] | None = None,
@@ -178,7 +179,7 @@ def write_geoparquet(
     pq.write_table(table, path, row_group_size=row_group_size)
 
 
-def write_item_mirror(
+def write_item_mirror(  # noqa: PLR0913 - keyword-only fixture settings vary independent file properties
     path: Path,
     ids: list[str] | None,
     *,
@@ -224,7 +225,7 @@ def write_item_mirror(
     )
 
 
-def write_cog(
+def write_cog(  # noqa: PLR0913 - keyword-only fixture settings vary independent file properties
     path: Path,
     *,
     stats: bool = True,
@@ -233,31 +234,49 @@ def write_cog(
     overviews: bool = True,
     size: int = 1024,
     blocksize: int | None = None,
+    count: int = 1,
+    dtype: str = "uint8",
+    alpha: bool = False,
+    mask: bool = False,
+    colormap: dict[int, tuple[int, int, int, int]] | None = None,
 ) -> None:
     """A valid COG (COG driver) with, by default, embedded per-band statistics.
 
     ``overviews=False`` sets the COG driver's ``OVERVIEWS=NONE``: the file stays
     a structurally valid COG (cog_validate passes it with only a warning) but
     carries no internal overviews. ``blocksize`` overrides the internal tile
-    size (default: 512, clamped to the image).
+    size (default: 512, clamped to the image). ``count`` repeats the band, and
+    ``alpha`` marks the last band as alpha, and ``mask`` adds an internal mask. Only band 1
+    gets statistics. ``colormap`` embeds a color table (TIFF ``ColorMap`` tag)
+    on band 1, as a classified raster has.
     """
-    arr = (np.arange(size * size, dtype="uint8") % 251).reshape(1, size, size)
-    with rasterio.open(
-        path,
-        "w",
-        driver="COG",
-        height=size,
-        width=size,
-        count=1,
-        dtype="uint8",
-        crs="EPSG:4326",
-        transform=from_bounds(*BBOX, size, size),
-        compress="deflate",
-        blocksize=blocksize if blocksize is not None else min(512, size),
-        nodata=nodata,
-        overviews="AUTO" if overviews else "NONE",
-    ) as dst:
+    band = (np.arange(size * size, dtype="uint8") % 251).reshape(1, size, size)
+    arr = np.repeat(band, count, axis=0).astype(dtype)
+    with (
+        rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True),
+        rasterio.open(
+            path,
+            "w",
+            driver="COG",
+            height=size,
+            width=size,
+            count=count,
+            dtype=dtype,
+            crs="EPSG:4326",
+            transform=from_bounds(*BBOX, size, size),
+            compress="deflate",
+            blocksize=blocksize if blocksize is not None else min(512, size),
+            nodata=nodata,
+            overviews="AUTO" if overviews else "NONE",
+        ) as dst,
+    ):
         dst.write(arr)
+        if alpha:
+            dst.colorinterp = [*dst.colorinterp[:-1], ColorInterp.alpha]
+        if mask:
+            dst.write_mask(np.full((size, size), 255, dtype="uint8"))
+        if colormap is not None:
+            dst.write_colormap(1, colormap)
         if stats:
             band = arr[0]
             tags = {

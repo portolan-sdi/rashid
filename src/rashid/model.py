@@ -25,6 +25,13 @@ class Severity(Enum):
     INFO = "info"
 
 
+def json_pointer(*tokens: str | int, prefix: str = "") -> str:
+    """Build an RFC 6901 pointer, optionally extending an already-encoded prefix."""
+    return prefix + "".join(
+        "/" + str(token).replace("~", "~0").replace("/", "~1") for token in tokens
+    )
+
+
 @dataclass(frozen=True)
 class Finding:
     """A single defect found in a single object.

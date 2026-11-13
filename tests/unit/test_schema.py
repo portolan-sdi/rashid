@@ -8,10 +8,13 @@ reachable.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
-from rashid import RulesConfig, validate, validate_schema
-from rashid._jsonschema import SchemaError
+from rashid import RulesConfig, ValidationOptions, _store, validate, validate_schema
+from rashid._jsonschema import SchemaError, fetch_schema
 from rashid.catalog import CatalogGraph
 from rashid.model import Severity
 from rashid.schema import DEFAULT_SCHEMA_URI, _schema_uri_for, default_validator
@@ -75,7 +78,7 @@ def test_validator_failure_is_a_single_warning(catalog: CatalogBuilder) -> None:
     catalog.collection("b")
     graph = _graph(catalog)
 
-    def boom(data: dict) -> list[str]:
+    def boom(data: dict) -> list[str]:  # noqa: ARG001 - failing schema validator retains its callback signature
         raise RuntimeError("could not reach schemas.portolan-sdi.org")
 
     findings = validate_schema(graph, boom)
@@ -90,7 +93,7 @@ def test_missing_package_is_a_warning(
 ) -> None:
     import rashid.schema as schema
 
-    def raise_import(uri: str, allow_network: bool = False) -> None:
+    def raise_import(uri: str, allow_network: bool = False) -> None:  # noqa: ARG001 - replacement schema factory accepts URI and allow_network by keyword
         raise ImportError("No module named 'jsonschema'")
 
     monkeypatch.setattr(schema, "default_validator", raise_import)
@@ -105,7 +108,7 @@ def test_schema_fetch_failure_is_a_warning(
 ) -> None:
     import rashid.schema as schema
 
-    def raise_fetch(uri: str, allow_network: bool = False) -> None:
+    def raise_fetch(uri: str, allow_network: bool = False) -> None:  # noqa: ARG001 - replacement schema factory accepts URI and allow_network by keyword
         raise OSError("connection refused")
 
     monkeypatch.setattr(schema, "default_validator", raise_fetch)
@@ -154,7 +157,6 @@ def test_schema_uri_falls_back_to_default(catalog: CatalogBuilder) -> None:
 
 
 def test_default_validator_formats_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -162,7 +164,7 @@ def test_default_validator_formats_errors(monkeypatch: pytest.MonkeyPatch) -> No
         "properties": {"links": {"type": "array"}},
         "required": ["id"],
     }
-    monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
+    monkeypatch.setattr(_store, "get", lambda uri: json.dumps(fake_schema).encode())
     validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     assert validate_object({"id": "ok", "links": []}) == []
@@ -173,7 +175,6 @@ def test_default_validator_formats_errors(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_oneof_reports_the_matched_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     """A type-discriminated oneOf failure names the real cause, not the wrong branch."""
-    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -182,7 +183,7 @@ def test_oneof_reports_the_matched_branch(monkeypatch: pytest.MonkeyPatch) -> No
             {"properties": {"type": {"const": "Collection"}}, "required": ["type", "providers"]},
         ],
     }
-    monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
+    monkeypatch.setattr(_store, "get", lambda uri: json.dumps(fake_schema).encode())
     validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     errors = validate_object({"type": "Collection"})
@@ -194,7 +195,6 @@ def test_oneof_reports_the_matched_branch(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_oneof_unknown_type_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     """A type matching no branch still yields a finding rather than crashing."""
-    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -203,7 +203,7 @@ def test_oneof_unknown_type_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
             {"properties": {"type": {"const": "Collection"}}},
         ],
     }
-    monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
+    monkeypatch.setattr(_store, "get", lambda uri: json.dumps(fake_schema).encode())
     validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     errors = validate_object({"type": "Feature"})
@@ -211,14 +211,13 @@ def test_oneof_unknown_type_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_long_messages_are_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
-    import rashid.schema as schema
 
     fake_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {"x": {"const": "A" * 400}},
         "required": ["x"],
     }
-    monkeypatch.setattr(schema, "_fetch_schema", lambda uri: fake_schema)
+    monkeypatch.setattr(_store, "get", lambda uri: json.dumps(fake_schema).encode())
     validate_object = default_validator("https://example.org/schema.json", allow_network=True)
 
     (error,) = validate_object({"x": "B"})
@@ -228,10 +227,8 @@ def test_long_messages_are_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_non_https_schema_uri_is_rejected() -> None:
     """A file:// or other non-https schema URI must not be fetched (CWE-22 / SSRF)."""
-    from rashid.schema import _fetch_schema
-
     with pytest.raises(ValueError, match="https"):
-        _fetch_schema("file:///etc/passwd")
+        fetch_schema("file:///etc/passwd")
 
 
 def test_remote_schema_fetch_sends_a_named_user_agent(https_server: HttpsServer) -> None:
@@ -243,11 +240,9 @@ def test_remote_schema_fetch_sends_a_named_user_agent(https_server: HttpsServer)
     """
     from importlib.metadata import version
 
-    from rashid import schema as schema_mod
-
     https_server.routes["/portolan/v0.1.0/schema.json"] = Route(body=b'{"$id": "x"}')
 
-    fetched = schema_mod._fetch_schema(https_server.url("portolan/v0.1.0/schema.json"))
+    fetched = fetch_schema(https_server.url("portolan/v0.1.0/schema.json"))
 
     assert fetched == {"$id": "x"}
     (seen,) = https_server.seen
@@ -262,14 +257,14 @@ def test_runner_wires_schema_pass(catalog: CatalogBuilder) -> None:
     def check(data: dict) -> list[SchemaError]:
         return [_error("bad root")] if data.get("type") == "Catalog" else []
 
-    report = validate(root, schema=True, schema_validator=check)
+    report = validate(root, options=ValidationOptions(schema=True, schema_validator=check))
     assert not report.passed
     assert any(f.rule_id == "PTL-SCH-001" for f in report.findings)
 
 
 def test_schema_off_by_default(catalog: CatalogBuilder) -> None:
     root = catalog.write()
-    report = validate(root, schema_validator=lambda data: ["never seen"])
+    report = validate(root, options=ValidationOptions(schema_validator=lambda data: ["never seen"]))
     assert all(f.rule_id != "PTL-SCH-001" for f in report.findings)
 
 
@@ -283,9 +278,11 @@ def test_disabling_sch_rule_skips_pass(catalog: CatalogBuilder) -> None:
 
     report = validate(
         root,
-        config=RulesConfig(disabled=frozenset({"PTL-SCH-001"})),
-        schema=True,
-        schema_validator=check,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=frozenset({"PTL-SCH-001"})),
+            schema=True,
+            schema_validator=check,
+        ),
     )
     assert all(f.rule_id != "PTL-SCH-001" for f in report.findings)
     assert calls == []  # the pass was skipped entirely, validator never invoked
@@ -296,13 +293,13 @@ def test_real_schema_accepts_the_builder(catalog: CatalogBuilder) -> None:
     import urllib.request
 
     try:
-        urllib.request.urlopen(DEFAULT_SCHEMA_URI, timeout=5)  # noqa: S310
-    except Exception:  # noqa: BLE001
+        urllib.request.urlopen(DEFAULT_SCHEMA_URI, timeout=5)
+    except Exception:
         pytest.skip(f"{DEFAULT_SCHEMA_URI} unreachable")
 
     collection = catalog.collection("roads")
     collection.item("seg1")
-    report = validate(catalog.write(), schema=True)
+    report = validate(catalog.write(), options=ValidationOptions(schema=True))
     schema_errors = [f for f in report.findings if f.rule_id == "PTL-SCH-001"]
     # Fetching the profile schema can fail after the reachability probe passed.
     skip_if_network_flaked(f.message for f in schema_errors)
@@ -311,12 +308,11 @@ def test_real_schema_accepts_the_builder(catalog: CatalogBuilder) -> None:
 
 def test_bundled_schema_is_used_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """The default URI resolves against the wheel's bundled copy; no fetch happens."""
-    import rashid.schema as schema
 
-    def explode(uri: str) -> dict:
+    def explode(uri: str) -> bytes:
         raise AssertionError(f"network fetch attempted for {uri}")
 
-    monkeypatch.setattr(schema, "_fetch_schema", explode)
+    monkeypatch.setattr(_store, "get", explode)
     validate_object = default_validator(DEFAULT_SCHEMA_URI)
     assert validate_object({"type": "Catalog"}) != []  # real schema, real verdict
 
@@ -348,15 +344,14 @@ def test_unbundled_version_warns_offline(catalog: CatalogBuilder) -> None:
 def test_unbundled_version_fetches_when_allowed(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid.schema as schema
 
     fetched: list[str] = []
 
-    def fake_fetch(uri: str) -> dict:
+    def fake_fetch(uri: str) -> bytes:
         fetched.append(uri)
-        return {"$schema": "http://json-schema.org/draft-07/schema#", "type": "object"}
+        return b'{"$schema": "http://json-schema.org/draft-07/schema#", "type": "object"}'
 
-    monkeypatch.setattr(schema, "_fetch_schema", fake_fetch)
+    monkeypatch.setattr(_store, "get", fake_fetch)
     uri = "https://schemas.portolan-sdi.org/portolan/v99.0.0/schema.json"
     findings = validate_schema(_graph(catalog), schema_uri=uri, allow_network=True)
     assert fetched == [uri]
@@ -384,7 +379,24 @@ def test_root_self_link_passes_both_passes(catalog: CatalogBuilder) -> None:
         ),
     )
 
-    report = validate(root, schema=True, data=False)
+    report = validate(root, options=ValidationOptions(schema=True, data=False))
     errors = [f for f in report.findings if f.severity is Severity.ERROR]
     assert errors == [], errors
     assert _schema_uri_for(CatalogGraph.load(root)) == PORTOLAN_URI
+
+
+def test_injected_validator_leaves_schema_map_unused(catalog: CatalogBuilder) -> None:
+    findings = validate_schema(
+        _graph(catalog),
+        validator=lambda data: [],
+        schema_map={PORTOLAN_URI: {"required": ["never_applied"]}},
+    )
+    assert [f.rule_id for f in findings] == ["PTL-SCH-002"]
+    assert PORTOLAN_URI in findings[0].message
+
+
+def test_empty_graph_does_not_use_a_schema_map(tmp_path: Path) -> None:
+    graph = CatalogGraph(root_path=tmp_path)
+    findings = validate_schema(graph, schema_map={DEFAULT_SCHEMA_URI: {}})
+    assert [f.rule_id for f in findings] == ["PTL-SCH-002"]
+    assert "declared profile URIs: (none)" in findings[0].message

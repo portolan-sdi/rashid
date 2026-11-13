@@ -1,0 +1,8 @@
+{
+  "minTokens": 50,
+  "format": ["python"],
+  "ignore": ["**/tests/fixtures/**", "**/.venv/**"],
+  "reporters": ["console"],
+  "absolute": true,
+  "failOnEmpty": true
+}

@@ -12,6 +12,7 @@ and that one-time cost would make the counts depend on test order.
 
 from __future__ import annotations
 
+import sys
 import tracemalloc
 from collections import Counter
 from collections.abc import Callable
@@ -35,9 +36,9 @@ def cache_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 def _steady_counts(name: str, size: str, cache_dir: Path) -> dict[str, int]:
     with scenarios.target(name, size, cache_dir=cache_dir) as target:
-        rashid.validate(target.location, **target.options)
+        rashid.validate(target.location, options=target.options)
         with _trace.counting() as delta:
-            rashid.validate(target.location, **target.options)
+            rashid.validate(target.location, options=target.options)
     return delta
 
 
@@ -45,7 +46,7 @@ def test_metadata_small_counts(cache_dir: Path) -> None:
     # 1 root + 2 collections + 100 items = 103 STAC documents.
     assert _steady_counts("metadata", "small", cache_dir) == {
         "json.parses": 103,
-        "rules.checks": 1821,
+        "rules.checks": 2542,
         "schema.rust_compiles": 3,
         "schema.rust_passes": 103,
     }
@@ -56,7 +57,7 @@ def test_metadata_large_counts(cache_dir: Path) -> None:
     # at 3: they depend on the schemas in use, not on the object count.
     assert _steady_counts("metadata", "large", cache_dir) == {
         "json.parses": 2021,
-        "rules.checks": 35003,
+        "rules.checks": 49204,
         "schema.rust_compiles": 3,
         "schema.rust_passes": 2021,
     }
@@ -104,10 +105,14 @@ def _remote_data_run(
     with scenarios.target("remote-data", "small", cache_dir=cache_dir) as target:
         if prepare is not None:
             prepare(target.server)
-        report = rashid.validate(target.location, **target.options)
+        report = rashid.validate(target.location, options=target.options)
         return target.server.seen(), target.server.peak_in_flight(), report.findings
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="GDAL's Schannel backend cannot check revocation for the local trustme CA certificates",
+)
 def test_remote_data_requests_per_asset(cache_dir: Path) -> None:
     """Each remote asset costs a fixed number of requests, whatever GDAL defaults to.
 
@@ -161,6 +166,10 @@ def _data_findings(findings: list[Finding]) -> list[tuple[object, ...]]:
     ]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="GDAL's Schannel backend cannot check revocation for the local trustme CA certificates",
+)
 def test_remote_data_raster_open_retries_a_throttled_request(cache_dir: Path) -> None:
     """GDAL retries a 503, so a throttling host does not make a valid COG broken.
 
@@ -178,6 +187,10 @@ def test_remote_data_raster_open_retries_a_throttled_request(cache_dir: Path) ->
     assert len(gdal) >= 3  # two refused, then the one that succeeded
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="GDAL's Schannel backend cannot check revocation for the local trustme CA certificates",
+)
 def test_remote_data_findings_match_local(cache_dir: Path) -> None:
     """Serving the assets over HTTPS changes no data-pass finding."""
     pytest.importorskip("pyarrow")
@@ -217,10 +230,10 @@ def test_metadata_large_traced_memory_ceiling(cache_dir: Path) -> None:
     peaks: dict[str, int] = {}
     for size in scenarios.SIZES:
         root = scenarios.cached("metadata", size, cache_dir=cache_dir)
-        rashid.validate(root, data=False)
+        rashid.validate(root, options=rashid.ValidationOptions(data=False))
         tracemalloc.start()
         try:
-            rashid.validate(root, data=False)
+            rashid.validate(root, options=rashid.ValidationOptions(data=False))
             peaks[size] = tracemalloc.get_traced_memory()[1]
         finally:
             tracemalloc.stop()
@@ -232,7 +245,7 @@ def test_metadata_large_traced_memory_ceiling(cache_dir: Path) -> None:
 def test_timings_cover_every_stage_of_a_url_run(cache_dir: Path) -> None:
     _trace.enable("on")
     with scenarios.target("remote", "small", cache_dir=cache_dir) as target:
-        rashid.validate(target.location, **target.options)
+        rashid.validate(target.location, options=target.options)
     names = [node["name"] for node in _trace.timings()]
     assert names == ["crawl", "load", "rules", "structural", "extensions", "live"]
     crawl = _trace.timings()[0]

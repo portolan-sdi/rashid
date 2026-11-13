@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 from rashid.rules._common import parse_rfc3339
 
@@ -14,6 +14,13 @@ from rashid.rules._common import parse_rfc3339
 def _properties(node: Node) -> dict[str, Any]:
     raw = node.data.get("properties")
     return raw if isinstance(raw, dict) else {}
+
+
+def has_datetime(fields: dict[str, Any]) -> bool:
+    """Whether ``fields`` carry a datetime or both ends of an interval."""
+    return fields.get("datetime") is not None or (
+        fields.get("start_datetime") is not None and fields.get("end_datetime") is not None
+    )
 
 
 class DatetimePresentRule(Rule):
@@ -26,16 +33,11 @@ class DatetimePresentRule(Rule):
     kinds = ("item",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        props = _properties(node)
-        has_datetime = props.get("datetime") is not None
-        has_interval = (
-            props.get("start_datetime") is not None and props.get("end_datetime") is not None
-        )
-        if not has_datetime and not has_interval:
+        if not has_datetime(_properties(node)):
             yield self.finding(
                 node,
                 "item has no datetime and no complete start_datetime/end_datetime interval",
-                json_pointer="/properties",
+                json_pointer=json_pointer("properties"),
                 fix_hint="add properties.datetime, or both properties.start_datetime and"
                 " properties.end_datetime, as RFC 3339 date-times",
             )
@@ -62,7 +64,7 @@ class DatetimeValidRule(Rule):
                 yield self.finding(
                     node,
                     f"'{field}' value {value!r} is not an RFC 3339 date-time",
-                    json_pointer=f"/properties/{field}",
+                    json_pointer=json_pointer("properties", field),
                     fix_hint=f"rewrite '{field}' as an RFC 3339 date-time,"
                     " e.g. '2024-01-01T00:00:00Z'",
                     actual=value,
@@ -73,7 +75,7 @@ class DatetimeValidRule(Rule):
             yield self.finding(
                 node,
                 "start_datetime is after end_datetime",
-                json_pointer="/properties/start_datetime",
+                json_pointer=json_pointer("properties", "start_datetime"),
                 fix_hint="swap the two values, or correct whichever one is wrong, so"
                 " start_datetime is the earlier date-time",
                 expected=props.get("end_datetime"),

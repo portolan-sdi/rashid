@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 
 import pytest
@@ -63,7 +64,7 @@ def test_invalid_json_fails_with_the_stdlib_message(raw: bytes, as_text: bool) -
     document = raw.decode("utf-8") if as_text else raw
     with pytest.raises(json.JSONDecodeError) as expected:
         json.loads(document)
-    with pytest.raises(ValueError) as actual:
+    with pytest.raises(ValueError, match=re.escape(str(expected.value))) as actual:
         _json.loads(document)
     assert str(actual.value) == str(expected.value)
 

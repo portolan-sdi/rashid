@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from rashid import RulesConfig, Severity, validate
+from rashid import RulesConfig, Severity, ValidationOptions, validate
 from rashid.cli import main
 from tests.conftest import CatalogBuilder, findings_for, rule_ids
 
@@ -20,7 +20,7 @@ def test_disable_rule(catalog: CatalogBuilder) -> None:
     root = catalog.write()
     assert "PTL-TTL-002" in rule_ids(validate(root))
     config = RulesConfig(disabled=frozenset({"PTL-TTL-002"}))
-    assert "PTL-TTL-002" not in rule_ids(validate(root, config=config))
+    assert "PTL-TTL-002" not in rule_ids(validate(root, options=ValidationOptions(config=config)))
 
 
 def test_severity_override_promotes_warning_to_error(catalog: CatalogBuilder) -> None:
@@ -28,12 +28,12 @@ def test_severity_override_promotes_warning_to_error(catalog: CatalogBuilder) ->
     root = catalog.write()
     assert validate(root).passed  # TTL-002 is a warning by default
     config = RulesConfig(severity_overrides={"PTL-TTL-002": Severity.ERROR})
-    report = validate(root, config=config)
+    report = validate(root, options=ValidationOptions(config=config))
     assert not report.passed
     assert findings_for(report, "PTL-TTL-002")[0].severity is Severity.ERROR
 
 
-def test_config_from_dict(catalog: CatalogBuilder) -> None:
+def test_config_from_dict() -> None:
     config = RulesConfig.from_dict(
         {"disabled": ["PTL-TTL-002"], "severity": {"PTL-PRO-002": "warning"}}
     )
@@ -106,7 +106,8 @@ def _noisy(catalog: CatalogBuilder, count: int) -> Path:
     the subcatalog fan-out warning, for one finding more.
     """
     for index in range(count):
-        catalog.collection(f"roads_{index}", title=f"road_centerlines_{index}")
+        collection = catalog.collection(f"roads_{index}", title=f"Road centerlines {index}")
+        collection.overrides["title"] = f"road_centerlines_{index}"
     return catalog.write()
 
 
@@ -186,3 +187,28 @@ def test_cli_json_carries_the_summary_and_every_finding(catalog: CatalogBuilder)
     assert rows["PTL-TTL-002"]["file_count"] == 60
     # The root's flat sixty children trip the fan-out warning once.
     assert rows["PTL-CAT-001"]["count"] == 1
+
+
+def test_validation_options_are_frozen_and_keyword_only() -> None:
+    from dataclasses import FrozenInstanceError
+
+    import pytest
+
+    from rashid.api import ValidationOptions as PublicOptions
+
+    assert PublicOptions is ValidationOptions
+    options = ValidationOptions(data=False)
+    with pytest.raises(FrozenInstanceError, match="cannot assign to field 'data'"):
+        options.data = True
+    with pytest.raises(TypeError, match="positional argument"):
+        ValidationOptions(False)
+
+
+def test_validate_requires_options_for_settings(catalog: CatalogBuilder) -> None:
+    import pytest
+
+    root = catalog.write()
+    with pytest.raises(TypeError, match="unexpected keyword argument 'data'"):
+        validate(root, data=False)
+    with pytest.raises(TypeError, match="positional argument"):
+        validate(root, ValidationOptions(data=False))

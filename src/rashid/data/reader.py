@@ -5,12 +5,12 @@ The data pass needs an asset's actual bytes two ways: a whole-object stream
 footer or COG/PMTiles header is a small read at a known offset). This module
 provides both over the two href kinds a conformant catalog uses: relative paths
 resolved against the catalog tree, and absolute ``https`` URLs. Remote reads go
-through :mod:`rashid._store`; the geospatial parsing lives in :mod:`rashid.data.checks`.
+through :mod:`rashid._store`; the format-specific modules in :mod:`rashid.data`
+parse geospatial data.
 
 Non-fetchable hrefs — ``s3``/``http``/``file`` or a relative path that escapes
-the tree — resolve to ``None``; the metadata pass already reports those
-(``PTL-AST-002`` flags ``s3``), so the data pass skips them rather than emitting
-a second finding.
+the tree — resolve to ``None``, and the data pass skips them. ``PTL-AST-002``
+reports a non-https absolute href. The data pass does not follow ``alternate``.
 
 A caller can narrow that further. :class:`LocalOnlyReader` resolves only what
 lives in the tree, which is what a metadata-only mirror needs: the checks that
@@ -25,11 +25,10 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import urlparse
 
 from rashid import _store
-from rashid.catalog import CatalogGraph, Node, is_absolute_href
-from rashid.remote import wire_url
+from rashid._href import href_suffix, is_absolute_href, is_https_href, request_target, wire_url
+from rashid.catalog import CatalogGraph, Node
 
 _CHUNK = 1 << 16  # 64 KiB
 
@@ -73,21 +72,26 @@ class FilesystemHttpReader:
     def __init__(self, graph: CatalogGraph) -> None:
         self._graph = graph
 
-    def locate(self, node: Node, href: str) -> Locator | None:
+    def locate(self, node: Node, href: str) -> Locator | None:  # noqa: PLR0911 - guard clauses distinguish href classes and local or remote locations
         if not href:
             return None
         if is_absolute_href(href):
-            if urlparse(href).scheme.lower() == "https":
+            if is_https_href(href):
                 return Locator(is_remote=True, source=href)
-            return None  # s3/http/file: not browser-fetchable; PTL-AST-002 covers it
-        rel = self._graph.resolve_path(node, href)
+            return None  # s3/http/file: not browser-fetchable; PTL-AST-002 reports it
+        rel = self._graph.local_path(node, href)
         if rel is None:
             return None
         path = self._graph.root_path / Path(*rel.parts)
-        if path.is_file():
+        if not path.is_relative_to(self._graph.root_path):
+            return None
+        if path.is_file() and (
+            self._graph.base_url is None or not href_suffix(href).startswith("?")
+        ):
             return Locator(is_remote=False, source=str(path))
-        if self._graph.base_url is not None:
-            return Locator(is_remote=True, source=wire_url(self._graph.base_url, str(rel)))
+        target = request_target(str(self._graph.href_path(node).parent), href)
+        if self._graph.base_url is not None and target is not None:
+            return Locator(is_remote=True, source=wire_url(self._graph.base_url, target))
         return None
 
     def stream(self, node: Node, href: str) -> Iterator[bytes] | None:

@@ -10,7 +10,7 @@ from typing import Any
 
 from rashid import _json
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 
 SCHEMA_URI_PATTERN = re.compile(
@@ -40,14 +40,14 @@ class SchemaUriDeclaredRule(Rule):
             yield self.finding(
                 node,
                 "stac_extensions declares no Portolan schema URI",
-                json_pointer="/stac_extensions",
+                json_pointer=json_pointer("stac_extensions"),
                 fix_hint=("add e.g. https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"),
             )
         elif len(uris) > 1:
             yield self.finding(
                 node,
                 f"stac_extensions declares {len(uris)} Portolan schema URIs; exactly one expected",
-                json_pointer="/stac_extensions",
+                json_pointer=json_pointer("stac_extensions"),
                 fix_hint="keep the one Portolan schema URI this object conforms to and remove"
                 " the others from stac_extensions",
                 expected=1,
@@ -92,7 +92,7 @@ class SchemaUriConsistencyRule(Rule):
                     ),
                     path=str(node.path),
                     object_id=node.id,
-                    json_pointer="/stac_extensions",
+                    json_pointer=json_pointer("stac_extensions"),
                     fix_hint=(
                         f"replace the declared URI with the root catalog's {root_uri}, or"
                         " migrate the whole catalog to one schema version"
@@ -136,12 +136,12 @@ class VersionExtensionRule(Rule):
         used = [field for field in _VERSION_FIELDS if field in container]
         if not used or _declares_version_extension(node):
             return
-        prefix = "/properties/" if node.kind == "item" else "/"
+        tokens = ("properties",) if node.kind == "item" else ()
         yield self.finding(
             node,
             f"dataset version field(s) {used} used without declaring the STAC"
             " version extension in stac_extensions",
-            json_pointer=f"{prefix}{used[0]}",
+            json_pointer=json_pointer(*tokens, used[0]),
             fix_hint=f"add '{_VERSION_EXTENSION_PREFIX}v1.2.0/schema.json' to stac_extensions",
         )
 
@@ -217,7 +217,7 @@ def registered_at_other_version(uri: str) -> tuple[str, str] | None:
 
 
 class ExtensionVersionRule(Rule):
-    """A registered extension is declared at the version the registry pins.
+    """A registered extension meets the registry pin or a compatible newer version.
 
     The profile's STAC extension registry (the spec's ``stac/README.md``) is
     the normative list of which extensions Portolan uses and which schema URI
@@ -229,7 +229,9 @@ class ExtensionVersionRule(Rule):
 
     The finding is a warning rather than an error. The registry advances after
     catalogs are published, and a catalog that pinned the then-current version
-    is not broken, only behind.
+    is not broken, only behind. For stable extensions, SemVer permits newer
+    minor and patch versions within the same major. Major zero promises no
+    compatibility, so those declarations must still match the pin exactly.
 
     Extensions absent from the registry are ignored: the registry governs what
     it lists, not what a publisher adds. The Portolan schema URI is ignored
@@ -241,7 +243,7 @@ class ExtensionVersionRule(Rule):
     id = "PTL-CNF-004"
     spec_ids = ()
     default_severity = Severity.WARNING
-    description = "declared extension URIs match the versions the profile registry pins"
+    description = "declared extensions meet the registry pin or a compatible newer version"
     kinds = ("catalog", "collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
@@ -261,13 +263,30 @@ class ExtensionVersionRule(Rule):
             name, pinned = entry
             if parsed["version"] == pinned:
                 continue
+            if _compatible_extension_version(parsed["version"], pinned):
+                continue
             expected = f"{parsed['base']}/{pinned}/schema.json"
             yield self.finding(
                 node,
                 f"{name} extension declared at {parsed['version']}, but the Portolan"
                 f" extension registry pins {pinned}",
-                json_pointer=f"/stac_extensions/{index}",
+                json_pointer=json_pointer("stac_extensions", index),
                 fix_hint=f"replace '{uri}' with '{expected}' in stac_extensions",
                 expected=expected,
                 actual=uri,
             )
+
+
+def _compatible_extension_version(declared: str, pinned: str) -> bool:
+    parts = declared[1:].split(".")
+    # Bound untrusted decimal conversion; oversized components retain the warning.
+    if any(len(part) > 18 for part in parts):
+        return False
+    version = tuple(int(part) for part in parts)
+    floor = tuple(int(part) for part in pinned[1:].split("."))
+    return (
+        declared == f"v{'.'.join(map(str, version))}"
+        and version[0] > 0
+        and version[0] == floor[0]
+        and version >= floor
+    )

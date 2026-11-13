@@ -10,172 +10,112 @@ from pathlib import Path
 from typing import Any
 
 from rashid import _trace
+from rashid._href import is_catalog_url, split_catalog_url
 from rashid._jsonschema import SchemaError
 from rashid.catalog import ROOT_CATALOG, CatalogGraph
 from rashid.config import RulesConfig
-from rashid.data import (
-    DAT_CHECKSUM,
-    DAT_COG,
-    DAT_COG_STATS,
-    DAT_CONSISTENCY,
-    DAT_FORMAT,
-    DAT_GEOPARQUET_VERSION,
-    DAT_MIRROR,
-    DAT_ORDERING,
-    DAT_OVERVIEWS,
-    DAT_PARTITION_SCHEMA,
-    DAT_ROWGROUP_SIZE,
-    DAT_ROWGROUP_STATS,
-    DAT_SIZE,
-    DAT_TABULAR,
-    DAT_TILE_SIZE,
-    DAT_VALID_PERCENT,
-    DAT_VECTOR_COLUMNS,
-    validate_data,
-)
 from rashid.data import ReaderFactory as DataReaderFactory
 from rashid.data import Validator as DataValidator
-from rashid.extensions import EXT_INVALID, validate_extensions
-from rashid.live import (
-    LIV_CORS_EXPOSE,
-    LIV_CORS_ORIGIN,
-    LIV_CORS_PREFLIGHT,
-    LIV_HEAD_LENGTH,
-    LIV_LINK_TARGET,
-    LIV_OFF_HTTPS,
-    LIV_RANGE,
-    LIV_SELF_BASE,
-    validate_live,
-)
+from rashid.data import validate_data
+from rashid.extensions import validate_extensions
 from rashid.live import Prober as LiveProber
+from rashid.live import validate_live
 from rashid.model import Finding, Report, Severity
+from rashid.registry import (
+    DEFAULT_RULES,
+    GEN_MISSING_ROOT,
+    GEN_PARTIAL_TREE,
+    GEN_UNPARSEABLE,
+    check_ids,
+)
 from rashid.remote import (
     DEFAULT_MAX_DOCUMENTS,
     Crawl,
     Fetcher,
     FetchError,
     crawl,
-    is_catalog_url,
-    split_catalog_url,
 )
 from rashid.rule import Rule
-from rashid.schema import SCH_INVALID, validate_schema
-from rashid.structural import STR_INVALID, validate_structural
+from rashid.schema import validate_schema
+from rashid.structural import validate_structural
 
 log = logging.getLogger(__name__)
 
-GEN_MISSING_ROOT = "PTL-GEN-000"
-GEN_UNPARSEABLE = "PTL-GEN-001"
-GEN_PARTIAL_TREE = "PTL-GEN-002"
-
-# Requirement IDs from the spec's requirements manifest
-# (specs/portolan/requirements.yaml) enforced by each check;
-# gated by tests/unit/test_spec_coverage.py.
-SPEC_IDS: dict[str, tuple[str, ...]] = {
-    # A missing/invalid root catalog.json breaks the always-required
-    # entrypoint; an unparseable object cannot be a valid STAC catalog.
-    GEN_MISSING_ROOT: ("PORTO-CORE-001", "PORTO-CORE-013"),
-    GEN_UNPARSEABLE: ("PORTO-CORE-001",),
-}
-
-# Every rule the data pass can raise; disabling all of them skips the (networked)
-# pass entirely, while disabling any subset just silences those findings. An id
-# left out is a rule that vanishes when the listed ones are disabled, without
-# anyone having disabled it, so tests/unit/test_runner_data_rules.py derives the
-# membership from the registry rather than trusting this list.
-_DATA_RULE_IDS = frozenset(
-    {
-        DAT_CHECKSUM,
-        DAT_SIZE,
-        DAT_FORMAT,
-        DAT_COG,
-        DAT_CONSISTENCY,
-        DAT_ORDERING,
-        DAT_ROWGROUP_STATS,
-        DAT_ROWGROUP_SIZE,
-        DAT_COG_STATS,
-        DAT_VALID_PERCENT,
-        DAT_OVERVIEWS,
-        DAT_GEOPARQUET_VERSION,
-        DAT_TILE_SIZE,
-        DAT_PARTITION_SCHEMA,
-        DAT_TABULAR,
-        DAT_MIRROR,
-        DAT_VECTOR_COLUMNS,
-    }
-)
-
-# Every rule the live pass can raise; disabling all of them skips the (networked)
-# pass entirely, while disabling any subset just silences those findings.
-_LIVE_RULE_IDS = frozenset(
-    {
-        LIV_RANGE,
-        LIV_HEAD_LENGTH,
-        LIV_CORS_ORIGIN,
-        LIV_CORS_EXPOSE,
-        LIV_CORS_PREFLIGHT,
-        LIV_LINK_TARGET,
-        LIV_SELF_BASE,
-        LIV_OFF_HTTPS,
-    }
-)
 
 # Structural/schema validators map one object's raw JSON to schema errors.
 _Validator = Callable[[dict[str, Any]], list[SchemaError]]
-# The extension validator also takes the schema URI the object declared.
-_ExtensionValidator = Callable[[dict[str, Any], str], list[SchemaError]]
 
 
-@dataclasses.dataclass(frozen=True)
-class _PassOptions:
-    """The caller's choices for the opt-in passes, carried as one value."""
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class ValidationOptions:
+    """Validation settings and optional adapters shared by local and HTTPS inputs.
 
-    structural: bool
-    structural_validator: _Validator | None
-    extensions: bool
-    extensions_validator: _ExtensionValidator | None
-    schema: bool
-    schema_validator: _Validator | None
-    schema_allow_network: bool
-    data: bool
-    data_validator: DataValidator | None
-    data_reader_factory: DataReaderFactory | None
-    live: bool
-    live_prober: LiveProber | None
-    live_base_url: str | None
-    live_known_statuses: Mapping[str, int] | None = None
+    Pass one instance as ``validate(path, options=ValidationOptions(...))``.
+    ``rules=None`` selects the default metadata rules; an empty sequence skips them.
+    ``live=None`` enables hosting checks for URLs and disables them on disk.
+    Validator, reader, prober, and fetcher adapters chiefly support offline tests.
+    """
+
+    config: RulesConfig | None = None
+    rules: Sequence[Rule] | None = None
+    structural: bool = True
+    structural_validator: _Validator | None = None
+    extensions: bool = True
+    schema: bool = False
+    schema_validator: _Validator | None = None
+    schema_allow_network: bool = False
+    schema_map: Mapping[str, dict[str, Any]] | None = None
+    data: bool = True
+    data_validator: DataValidator | None = None
+    data_reader_factory: DataReaderFactory | None = None
+    live: bool | None = None
+    live_prober: LiveProber | None = None
+    live_base_url: str | None = None
+    fetcher: Fetcher | None = None
+    max_documents: int = DEFAULT_MAX_DOCUMENTS
 
 
 def _optional_passes(
-    graph: CatalogGraph, config: RulesConfig, options: _PassOptions
+    graph: CatalogGraph,
+    config: RulesConfig,
+    options: ValidationOptions,
+    *,
+    known_statuses: Mapping[str, int] | None = None,
 ) -> list[Finding]:
     """Run the structural, extension, schema, data, and live passes, honouring disable ids."""
     findings: list[Finding] = []
-    if options.structural and STR_INVALID not in config.disabled:
+    if options.structural and not config.disabled >= check_ids(
+        "structural", enables_pass_only=True
+    ):
         findings.extend(
             _stage("structural", lambda: validate_structural(graph, options.structural_validator))
         )
-    if options.extensions and EXT_INVALID not in config.disabled:
+    if options.extensions and not config.disabled >= check_ids(
+        "extensions", enables_pass_only=True
+    ):
         findings.extend(
             f
             for f in _stage(
                 "extensions",
-                lambda: validate_extensions(
-                    graph, options.extensions_validator, allow_network=options.schema_allow_network
+                lambda: validate_extensions(graph, allow_network=options.schema_allow_network),
+            )
+            if f.rule_id not in config.disabled
+        )
+    if options.schema and not config.disabled >= check_ids("schema", enables_pass_only=True):
+        findings.extend(
+            f
+            for f in _stage(
+                "schema",
+                lambda: validate_schema(
+                    graph,
+                    options.schema_validator,
+                    allow_network=options.schema_allow_network,
+                    schema_map=options.schema_map,
                 ),
             )
             if f.rule_id not in config.disabled
         )
-    if options.schema and SCH_INVALID not in config.disabled:
-        findings.extend(
-            _stage(
-                "schema",
-                lambda: validate_schema(
-                    graph, options.schema_validator, allow_network=options.schema_allow_network
-                ),
-            )
-        )
-    if options.data and not _DATA_RULE_IDS <= config.disabled:
+    if options.data and not config.disabled >= check_ids("data", enables_pass_only=True):
         findings.extend(
             f
             for f in _stage(
@@ -186,7 +126,7 @@ def _optional_passes(
             )
             if f.rule_id not in config.disabled
         )
-    if options.live and not _LIVE_RULE_IDS <= config.disabled:
+    if options.live and not config.disabled >= check_ids("live", enables_pass_only=True):
         findings.extend(
             f
             for f in _stage(
@@ -195,7 +135,7 @@ def _optional_passes(
                     graph,
                     options.live_prober,
                     base_url=options.live_base_url,
-                    known_statuses=options.live_known_statuses,
+                    known_statuses=known_statuses,
                 ),
             )
             if f.rule_id not in config.disabled
@@ -214,26 +154,12 @@ def _stage(name: str, run: Callable[[], Iterable[Finding]]) -> list[Finding]:
 
 def validate(
     catalog_path: Path | str,
-    rules: Sequence[Rule] | None = None,
-    config: RulesConfig | None = None,
     *,
-    structural: bool = True,
-    structural_validator: Callable[[dict[str, Any]], list[SchemaError]] | None = None,
-    extensions: bool = True,
-    extensions_validator: _ExtensionValidator | None = None,
-    schema: bool = False,
-    schema_validator: Callable[[dict[str, Any]], list[SchemaError]] | None = None,
-    schema_allow_network: bool = False,
-    data: bool = True,
-    data_validator: DataValidator | None = None,
-    data_reader_factory: DataReaderFactory | None = None,
-    live: bool | None = None,
-    live_prober: LiveProber | None = None,
-    live_base_url: str | None = None,
-    fetcher: Fetcher | None = None,
-    max_documents: int = DEFAULT_MAX_DOCUMENTS,
+    options: ValidationOptions | None = None,
 ) -> Report:
     """Validate a Portolan catalog tree, on disk or published over https.
+
+    All settings below are fields of :class:`ValidationOptions`.
 
     ``catalog_path`` is the catalog directory, or the root ``catalog.json``
     inside it; both name the same catalog. It may instead be the https URL
@@ -243,15 +169,14 @@ def validate(
     (see :mod:`rashid.remote`), and runs the same passes over that. A tree
     assembled from links holds only what a link names, so the checks that
     look for unlinked files cannot see them; the report says so once, as a
-    ``PTL-GEN-002`` warning. ``fetcher`` injects an alternate document
-    fetcher and ``max_documents`` caps the crawl; both matter chiefly for
-    testing.
+    ``PTL-GEN-002`` warning. ``options.fetcher`` injects an alternate
+    document fetcher, chiefly for testing. ``options.max_documents`` caps the crawl.
 
     The metadata pass always runs. The STAC 1.1.0 structural pass runs by
     default too, against the core schemas shipped in the wheel (see
-    :mod:`rashid.structural`) — fully offline. ``structural=False`` skips it,
-    as does disabling ``PTL-STR-001`` via ``config``.
-    ``structural_validator`` injects an alternate validator, chiefly for
+    :mod:`rashid.structural`) — fully offline. ``options.structural=False`` skips it,
+    as does disabling ``PTL-STR-001`` via ``options.config``.
+    ``options.structural_validator`` injects an alternate validator, chiefly for
     testing.
 
     The extension pass runs by default too, validating every object against
@@ -260,33 +185,34 @@ def validate(
     registry pins, shipped in the wheel. A registered extension declared at
     another version is validated against that version's schema, fetched over
     https. An extension the registry does not list is reported once as
-    ``PTL-EXT-002`` rather than validated, unless ``schema_allow_network`` is
+    ``PTL-EXT-002`` rather than validated, unless ``options.schema_allow_network`` is
     set, which fetches it.
-    ``extensions=False`` skips the pass, as does disabling ``PTL-EXT-001``
-    via ``config``. ``extensions_validator`` injects an alternate validator,
-    chiefly for testing.
+    ``options.extensions=False`` skips the pass, as does disabling ``PTL-EXT-001``
+    via ``options.config``.
 
-    When ``schema`` is true the Portolan profile schema pass runs too, applying
+    When ``options.schema`` is true the Portolan profile schema pass runs too, applying
     the published JSON Schema to every object (see :mod:`rashid.schema`). The
     schema comes from the copies bundled in the wheel, so the pass is offline;
     it is off by default only because it overlaps the metadata pass by design.
     A schema version this build does not carry is fetched over the network when
-    ``schema_allow_network`` is set, and degrades to a ``PTL-SCH-000`` warning
-    otherwise. Disabling ``PTL-SCH-001`` via ``config`` skips the pass.
-    ``schema_validator`` injects an alternate validator, chiefly for testing.
+    ``options.schema_allow_network`` is set, and degrades to a ``PTL-SCH-000`` warning
+    otherwise. Disabling ``PTL-SCH-001`` via ``options.config`` skips the pass.
+    ``options.schema_map`` maps profile URIs to parsed local schema objects, which
+    take precedence over bundled and fetched copies.
+    ``options.schema_validator`` injects an alternate validator, chiefly for testing.
 
     The data pass runs by default too, reading each asset's bytes (local
     files and remote ``https`` URLs) to verify checksum, size, format, and
     spatial metadata (see :mod:`rashid.data`) — byte verification is the core
-    of what a catalog validator is for. ``data=False`` skips it, worth doing
+    of what a catalog validator is for. ``options.data=False`` skips it, worth doing
     when the assets are huge or remote and only the metadata verdict is
-    needed. Disabling every ``PTL-DAT-00x`` rule via ``config`` also skips the
-    pass; disabling a subset just silences those findings. ``data_validator``
+    needed. Disabling every ``PTL-DAT-00x`` rule via ``options.config`` also skips the
+    pass; disabling a subset just silences those findings. ``options.data_validator``
     injects an alternate validator, chiefly for offline testing. If the
     geospatial stack cannot import (broken GDAL, wheel-less platform), the
     pass degrades to a single ``PTL-DAT-000`` warning.
 
-    ``data_reader_factory`` narrows what the pass may read without turning it
+    ``options.data_reader_factory`` narrows what the pass may read without turning it
     off: passing :class:`~rashid.data.reader.LocalOnlyReader` checks the assets
     that live in the tree and treats the rest as unfetchable, which is the
     difference between validating a metadata-only mirror and downloading the
@@ -295,54 +221,35 @@ def validate(
     for a catalog read over https resolves the tree's relative hrefs under
     the catalog URL.
 
-    When ``live`` is true the live-hosting pass runs too, probing the servers
+    When ``options.live`` is true the live-hosting pass runs too, probing the servers
     behind the catalog's assets for HTTP range support and CORS (see
     :mod:`rashid.live`) — absolute ``https`` hrefs as declared, relative hrefs
-    when the publish base is known. That base is ``live_base_url`` (the https
+    when the publish base is known. That base is ``options.live_base_url`` (the https
     URL the catalog root is published under), else the catalog URL when
     ``catalog_path`` is one, else the root catalog's absolute ``self`` link.
     Given a base the pass also HEADs every link target under it, so a
     published tree missing the documents its ``child`` and ``item`` links name
     is reported (``PTL-LIV-006``), and compares the root ``self`` link against
-    the base (``PTL-LIV-007``). With a catalog URL, ``live_base_url`` takes
+    the base (``PTL-LIV-007``). With a catalog URL, ``options.live_base_url`` takes
     precedence over the URL if both are given; the CLI refuses that pair,
-    since the URL is the base. ``live`` is off by default for a tree on disk
+    since the URL is the base. ``options.live`` is off by default for a tree on disk
     because it reaches the network, and on by default for a catalog URL: the
     hosting MUSTs are what a published catalog is checked for, and the
-    network is already in use. ``live=False`` turns it off either way.
-    Disabling every ``PTL-LIV-00x`` rule via ``config`` skips the pass;
-    disabling a subset just silences those findings. ``live_prober`` injects an
+    network is already in use. ``options.live=False`` turns it off either way.
+    Disabling every ``PTL-LIV-00x`` rule via ``options.config`` skips the pass;
+    disabling a subset just silences those findings. ``options.live_prober`` injects an
     alternate prober, chiefly for offline testing. Its ``head`` runs on several
     threads at once (see :class:`rashid.live.Prober`).
     """
-    if rules is None:
-        from rashid.rules import DEFAULT_RULES
-
-        rules = DEFAULT_RULES
-    config = config or RulesConfig()
+    options = options or ValidationOptions()
+    config = options.config or RulesConfig()
     url_mode = isinstance(catalog_path, str) and is_catalog_url(catalog_path)
-    options = _PassOptions(
-        structural=structural,
-        structural_validator=structural_validator,
-        extensions=extensions,
-        extensions_validator=extensions_validator,
-        schema=schema,
-        schema_validator=schema_validator,
-        schema_allow_network=schema_allow_network,
-        data=data,
-        data_validator=data_validator,
-        data_reader_factory=data_reader_factory,
-        # None means the mode's default: on for a URL, off on disk (bool(None)
-        # is False, so a caller that never passed ``live`` sees no change).
-        live=(live is not False) if url_mode else bool(live),
-        live_prober=live_prober,
-        live_base_url=live_base_url,
+    # Resolve the input-dependent default without mutating the caller's options.
+    options = dataclasses.replace(
+        options, live=(options.live is not False) if url_mode else bool(options.live)
     )
-
     if url_mode:
-        return _validate_url(
-            str(catalog_path), rules, config, options, fetcher=fetcher, max_documents=max_documents
-        )
+        return _validate_url(str(catalog_path), config, options)
 
     root = Path(catalog_path)
 
@@ -369,7 +276,7 @@ def validate(
         )
 
     graph = _load(root)
-    return _validate_graph(graph, rules, config, options)
+    return _validate_graph(graph, config, options)
 
 
 def _load(root: Path) -> CatalogGraph:
@@ -381,19 +288,17 @@ def _load(root: Path) -> CatalogGraph:
 
 def _validate_url(
     url: str,
-    rules: Sequence[Rule],
     config: RulesConfig,
-    options: _PassOptions,
-    *,
-    fetcher: Fetcher | None,
-    max_documents: int,
+    options: ValidationOptions,
 ) -> Report:
     """Fetch the published tree under ``url`` into a temporary directory and validate it."""
     base, root_url = split_catalog_url(url)
     with tempfile.TemporaryDirectory(prefix="rashid-") as tmp:
         try:
             with _trace.span("crawl"):
-                crawled = crawl(base, Path(tmp), fetcher, max_documents=max_documents)
+                crawled = crawl(
+                    base, Path(tmp), options.fetcher, max_documents=options.max_documents
+                )
         except FetchError as exc:
             return _missing_root(f"root catalog.json cannot be fetched: {exc}")
         status = crawled.statuses.get(root_url)
@@ -407,9 +312,9 @@ def _validate_url(
         graph.base_url = base
         return _validate_graph(
             graph,
-            rules,
             config,
-            dataclasses.replace(options, live_known_statuses=crawled.statuses),
+            options,
+            known_statuses=crawled.statuses,
             preamble=_partial_tree_findings(crawled, root_url),
         )
 
@@ -501,11 +406,11 @@ def _run_rules(graph: CatalogGraph, rules: Sequence[Rule], config: RulesConfig) 
 
 def _validate_graph(
     graph: CatalogGraph,
-    rules: Sequence[Rule],
     config: RulesConfig,
-    options: _PassOptions,
+    options: ValidationOptions,
     *,
     preamble: Sequence[Finding] = (),
+    known_statuses: Mapping[str, int] | None = None,
 ) -> Report:
     """Run every rule and every requested pass over a loaded graph."""
     findings: list[Finding] = list(preamble)
@@ -529,20 +434,24 @@ def _validate_graph(
             files_checked=len(graph.nodes),
         )
 
-    for node in graph.iter():
-        if node.parse_error is not None:
-            findings.append(
-                Finding(
-                    rule_id=GEN_UNPARSEABLE,
-                    severity=Severity.ERROR,
-                    message=f"file is not valid JSON: {node.parse_error}",
-                    path=str(node.path),
-                )
-            )
+    findings.extend(
+        Finding(
+            rule_id=GEN_UNPARSEABLE,
+            severity=Severity.ERROR,
+            message=f"file is not valid JSON: {node.parse_error}",
+            path=str(node.path),
+        )
+        for node in graph.iter()
+        if node.parse_error is not None
+    )
+
+    rules = options.rules
+    if rules is None:
+        rules = DEFAULT_RULES
 
     findings.extend(_stage("rules", lambda: _run_rules(graph, rules, config)))
 
-    findings.extend(_optional_passes(graph, config, options))
+    findings.extend(_optional_passes(graph, config, options, known_statuses=known_statuses))
 
     if config.severity_overrides:
         findings = [

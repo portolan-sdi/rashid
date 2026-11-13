@@ -53,7 +53,7 @@ def test_pattern_matches_published_schema_id(schema_path: Path) -> None:
 def test_default_schema_uri_tracks_latest_vendored() -> None:
     """The last-resort fallback must not lag the newest published schema."""
     latest = _schema_id(SCHEMAS[-1])
-    assert DEFAULT_SCHEMA_URI == latest, (
+    assert latest == DEFAULT_SCHEMA_URI, (
         f"DEFAULT_SCHEMA_URI {DEFAULT_SCHEMA_URI!r} is not the latest vendored "
         f"schema $id {latest!r}; bump it when adopting a new schema version"
     )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import validate
+from rashid import ValidationOptions, validate
 from tests.conftest import CatalogBuilder, mutate_json, rule_ids
 
 pytestmark = pytest.mark.integration
@@ -20,7 +20,7 @@ def test_kitchen_sink(catalog: CatalogBuilder) -> None:
             {"name": "B", "roles": ["host"]},
         ],
         assets={
-            "data": {  # no roles -> AST-001; s3 -> AST-002; raw digest -> AST-004
+            "data": {  # no roles -> AST-001; s3 -> AST-002; raw digest -> AST-004; no title -> AST-010
                 "href": "s3://bucket/data.parquet",
                 "type": "application/vnd.apache.parquet",
                 "file:size": 10,
@@ -45,7 +45,7 @@ def test_kitchen_sink(catalog: CatalogBuilder) -> None:
 
     # Metadata-pass fixture: structural off so the expected set stays exactly
     # the hand rules (the same mutations legitimately trip STAC core too).
-    report = validate(root, structural=False)
+    report = validate(root, options=ValidationOptions(structural=False))
     assert not report.passed
     assert rule_ids(report) == {
         "PTL-TTL-002",
@@ -55,6 +55,7 @@ def test_kitchen_sink(catalog: CatalogBuilder) -> None:
         "PTL-AST-001",
         "PTL-AST-002",
         "PTL-AST-004",
+        "PTL-AST-010",
         "PTL-TMP-002",
         "PTL-FIL-001",
         "PTL-FIL-002",

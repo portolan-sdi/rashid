@@ -12,37 +12,41 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterator
-from pathlib import Path
+from dataclasses import dataclass, field
 
 import pytest
 
 import rashid.data as data_pass
+from rashid import ValidationOptions
 from rashid.catalog import CatalogGraph, Node
 from rashid.config import RulesConfig
-from rashid.data import (
+from rashid.data import DataDefect, validate_data
+from rashid.data.reader import AssetReader, Locator
+from rashid.model import Severity
+from rashid.registry import (
     DAT_CHECKSUM,
+    DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
+    DAT_COLUMN_DESCRIPTIONS,
     DAT_CONSISTENCY,
     DAT_FORMAT,
     DAT_GEOPARQUET_VERSION,
     DAT_MIRROR,
     DAT_ORDERING,
+    DAT_OVERVIEW_FORMAT,
     DAT_OVERVIEWS,
     DAT_PARTITION_SCHEMA,
     DAT_ROWGROUP_SIZE,
     DAT_ROWGROUP_STATS,
+    DAT_SCENE_MASK,
     DAT_SIZE,
     DAT_TABULAR,
     DAT_TILE_SIZE,
     DAT_UNAVAILABLE,
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
-    DataDefect,
-    validate_data,
 )
-from rashid.data.reader import AssetReader, Locator
-from rashid.model import Severity
 from rashid.runner import validate
 from tests.conftest import CatalogBuilder
 
@@ -57,7 +61,7 @@ def _graph(catalog: CatalogBuilder) -> CatalogGraph:
 def _defect_on_items(
     rule_id: str = DAT_CHECKSUM, field: str | None = "file:checksum"
 ) -> data_pass.Validator:
-    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+    def check(node: Node, _reader: AssetReader) -> list[DataDefect]:
         if node.kind != "item":
             return []
         return [DataDefect(rule_id, Severity.ERROR, "asset 'data' bytes diverge", "data", field)]
@@ -85,15 +89,21 @@ def test_defect_without_field_points_at_asset(catalog: CatalogBuilder) -> None:
     assert findings[0].json_pointer == "/assets/data"
 
 
-def test_no_defects_is_clean(catalog: CatalogBuilder) -> None:
-    def clean(node: Node, reader: AssetReader) -> list[DataDefect]:
+@dataclass
+class _NoOpValidator:
+    seen: list[Node] = field(default_factory=list)
+
+    def __call__(self, node: Node, _reader: AssetReader) -> list[DataDefect]:
+        self.seen.append(node)
         return []
 
-    assert validate_data(_graph(catalog), clean) == []
+
+def test_no_defects_is_clean(catalog: CatalogBuilder) -> None:
+    assert validate_data(_graph(catalog), _NoOpValidator()) == []
 
 
 def test_systemic_failure_reported_once(catalog: CatalogBuilder) -> None:
-    def boom(node: Node, reader: AssetReader) -> list[DataDefect]:
+    def boom(_node: Node, _reader: AssetReader) -> list[DataDefect]:
         raise RuntimeError("reader exploded")
 
     findings = validate_data(_graph(catalog), boom)
@@ -126,7 +136,7 @@ def test_findings_keep_catalog_order_when_objects_finish_out_of_order(
     graph = _items_graph(catalog, 6)
     last_done = threading.Event()
 
-    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+    def check(node: Node, _reader: AssetReader) -> list[DataDefect]:
         if node.id == "seg0" and not last_done.wait(timeout=10):
             raise AssertionError("seg5 never ran while seg0 waited")
         if node.id == "seg5":
@@ -161,7 +171,7 @@ def test_objects_with_a_remote_asset_run_on_the_remote_pool(catalog: CatalogBuil
     graph = CatalogGraph.load(catalog.write())
     pools: dict[str | None, str] = {}
 
-    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+    def check(node: Node, _reader: AssetReader) -> list[DataDefect]:
         pools[node.id] = threading.current_thread().name.rsplit("_", 1)[0]
         return []
 
@@ -203,7 +213,7 @@ def test_systemic_failure_returns_without_waiting_on_running_objects(
     graph = _items_graph(catalog, 2)
     release = threading.Event()
 
-    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+    def check(node: Node, _reader: AssetReader) -> list[DataDefect]:
         if node.id == "seg0":
             raise RuntimeError("reader exploded")
         if node.id == "seg1":
@@ -271,7 +281,7 @@ def test_systemic_failure_keeps_earlier_findings_and_drops_later_ones(
 ) -> None:
     graph = _items_graph(catalog, 3)
 
-    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+    def check(node: Node, _reader: AssetReader) -> list[DataDefect]:
         if node.id == "seg1":
             raise RuntimeError("reader exploded")
         return _flag(node) if node.kind == "item" else []
@@ -287,7 +297,7 @@ def test_systemic_failure_keeps_earlier_findings_and_drops_later_ones(
 def test_missing_geospatial_stack_downgrades_to_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def raise_import(graph: CatalogGraph | None = None) -> data_pass.Validator:
+    def raise_import(_graph: CatalogGraph | None = None) -> data_pass.Validator:
         raise ImportError("No module named 'pyarrow'")
 
     monkeypatch.setattr(data_pass, "default_validator", raise_import)
@@ -303,14 +313,14 @@ def test_missing_geospatial_stack_downgrades_to_warning(
 def test_data_pass_surfaces_by_default(catalog: CatalogBuilder) -> None:
     """The data pass is on by default; an injected defect surfaces without data=True."""
     root = _graph(catalog).root_path
-    report = validate(root, data_validator=_defect_on_items())
+    report = validate(root, options=ValidationOptions(data_validator=_defect_on_items()))
     assert any(f.rule_id == DAT_CHECKSUM for f in report.findings)
 
 
 def test_disabling_one_rule_silences_only_it(catalog: CatalogBuilder) -> None:
     graph_root = _graph(catalog).root_path
 
-    def two_defects(node: Node, reader: AssetReader) -> list[DataDefect]:
+    def two_defects(node: Node, _reader: AssetReader) -> list[DataDefect]:
         if node.kind != "item":
             return []
         return [
@@ -320,9 +330,11 @@ def test_disabling_one_rule_silences_only_it(catalog: CatalogBuilder) -> None:
 
     report = validate(
         graph_root,
-        config=RulesConfig(disabled=frozenset({DAT_SIZE})),
-        data=True,
-        data_validator=two_defects,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=frozenset({DAT_SIZE})),
+            data=True,
+            data_validator=two_defects,
+        ),
     )
     ids = {f.rule_id for f in report.findings}
     assert DAT_CHECKSUM in ids
@@ -331,16 +343,12 @@ def test_disabling_one_rule_silences_only_it(catalog: CatalogBuilder) -> None:
 
 def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
     graph_root = _graph(catalog).root_path
-    called = False
-
-    def spy(node: Node, reader: AssetReader) -> list[DataDefect]:
-        nonlocal called
-        called = True
-        return []
+    validator = _NoOpValidator()
 
     all_ids = frozenset(
         {
             DAT_CHECKSUM,
+            DAT_CLASS_COLORS,
             DAT_SIZE,
             DAT_FORMAT,
             DAT_COG,
@@ -357,33 +365,36 @@ def test_disabling_all_rules_skips_pass(catalog: CatalogBuilder) -> None:
             DAT_TABULAR,
             DAT_MIRROR,
             DAT_VECTOR_COLUMNS,
+            DAT_OVERVIEW_FORMAT,
+            DAT_SCENE_MASK,
+            DAT_COLUMN_DESCRIPTIONS,
         }
     )
-    validate(graph_root, config=RulesConfig(disabled=all_ids), data=True, data_validator=spy)
+    validate(
+        graph_root,
+        options=ValidationOptions(
+            config=RulesConfig(disabled=all_ids), data=True, data_validator=validator
+        ),
+    )
 
-    assert called is False
+    assert validator.seen == []
 
 
-def test_parse_error_nodes_are_skipped(catalog: CatalogBuilder, tmp_path: Path) -> None:
+def test_parse_error_nodes_are_skipped(catalog: CatalogBuilder) -> None:
     root = _graph(catalog).root_path
     # Corrupt the collection JSON so its node carries a parse_error.
     (root / "roads" / "collection.json").write_text("{ not json", encoding="utf-8")
     graph = CatalogGraph.load(root)
 
-    seen: list[str] = []
-
-    def record(node: Node, reader: AssetReader) -> list[DataDefect]:
-        seen.append(node.kind)
-        return []
-
-    validate_data(graph, record)
-    assert "unknown" not in seen  # the unparseable collection is not handed to the validator
+    validator = _NoOpValidator()
+    validate_data(graph, validator)
+    assert "unknown" not in [node.kind for node in validator.seen]
 
 
 def test_defect_with_explicit_pointer_keeps_it(catalog: CatalogBuilder) -> None:
     # Node-level defects (the partition-schema check) bind to no asset and
     # carry their own pointer instead of the /assets/<key> construction.
-    def check(node: Node, reader: AssetReader) -> list[DataDefect]:
+    def check(node: Node, _reader: AssetReader) -> list[DataDefect]:
         if node.kind != "collection":
             return []
         return [
@@ -407,24 +418,18 @@ def test_data_pass_runs_by_default(catalog: CatalogBuilder) -> None:
     """Byte verification is the default; no data=True opt-in required."""
     catalog.collection("roads")
     root = catalog.write()
-    calls: list[object] = []
+    validator = _NoOpValidator()
 
-    def spy(node: object, reader: object) -> list:
-        calls.append(node)
-        return []
-
-    validate(root, structural=False, data_validator=spy)
-    assert calls, "the data pass did not run under the default configuration"
+    validate(root, options=ValidationOptions(structural=False, data_validator=validator))
+    assert validator.seen, "the data pass did not run under the default configuration"
 
 
 def test_data_false_skips_the_pass(catalog: CatalogBuilder) -> None:
     catalog.collection("roads")
     root = catalog.write()
-    calls: list[object] = []
+    validator = _NoOpValidator()
 
-    def spy(node: object, reader: object) -> list:
-        calls.append(node)
-        return []
-
-    validate(root, structural=False, data=False, data_validator=spy)
-    assert calls == []
+    validate(
+        root, options=ValidationOptions(structural=False, data=False, data_validator=validator)
+    )
+    assert validator.seen == []

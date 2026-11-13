@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import socket
+import ssl
 from datetime import timedelta
 from importlib.metadata import version
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pytest
 
 from rashid import _store, _trace
+from rashid._href import object_location
+from rashid.catalog import Node
+from rashid.rules._common import asset_refers_to_self
 from tests._https import HttpsServer, Route
 
 _AGENT = f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
@@ -35,7 +40,7 @@ def test_get_reports_the_status(https_server: HttpsServer, status: int) -> None:
 
 
 def test_a_failure_is_an_os_error(https_server: HttpsServer) -> None:
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="returned 404"):
         _store.get(https_server.url("missing.json"))
 
 
@@ -87,6 +92,29 @@ def test_a_body_without_content_length_is_read_over_urllib(https_server: HttpsSe
     assert {s.headers["user-agent"] for s in https_server.seen} == {_AGENT}
 
 
+@pytest.mark.parametrize("chunk_size", [1, 4, 1 << 16])
+def test_urllib_stream_does_not_read_tls_after_eof(
+    https_server: HttpsServer, monkeypatch: pytest.MonkeyPatch, chunk_size: int
+) -> None:
+    """Windows 3.13 can raise ENOENT on a second TLS read after ragged EOF."""
+    https_server.routes["/stream.bin"] = Route(body=b"body", length=False)
+    exhausted: set[ssl.SSLSocket] = set()
+    original = ssl.SSLSocket.read
+
+    def read(sock: ssl.SSLSocket, *args: Any, **kwargs: Any) -> Any:
+        if sock in exhausted:
+            raise FileNotFoundError(2, "No such file or directory")
+        result = original(sock, *args, **kwargs)
+        if not result and not sock.server_side:
+            exhausted.add(sock)
+        return result
+
+    monkeypatch.setattr(ssl.SSLSocket, "read", read)
+
+    assert b"".join(_store.stream(https_server.url("stream.bin"), chunk_size)) == b"body"
+    assert len(exhausted) == 1
+
+
 def test_urllib_keeps_the_body_cap(https_server: HttpsServer) -> None:
     https_server.routes["/chunked.json"] = Route(body=b"x" * 100, length=False)
 
@@ -116,6 +144,36 @@ def test_a_semicolon_stays_in_the_path(https_server: HttpsServer) -> None:
 
     assert _store.get(https_server.url("a;v=1.json")) == b"{}"
     assert https_server.seen[0].path == "/a;v=1.json"
+
+
+@pytest.mark.parametrize(
+    "left,right,left_request,right_request",
+    [
+        ("/a%3Bv.json", "/a;v.json", "/a;v.json", "/a;v.json"),
+        ("/a%2Fv.json", "/a/v.json", "/a%2Fv.json", "/a/v.json"),
+        ("/a%20v.json", "/a v.json", "/a%20v.json", "/a%20v.json"),
+        ("/a%3Bv.json?x=1", "/a;v.json?x=1", "/a%3Bv.json?x=1", "/a;v.json?x=1"),
+        ("/a%2fv.json", "/a%2Fv.json", "/a%2fv.json", "/a%2Fv.json"),
+    ],
+)
+def test_self_reference_identity_agrees_with_requests(
+    https_server: HttpsServer, left: str, right: str, left_request: str, right_request: str
+) -> None:
+    for path in (left_request, right_request):
+        https_server.routes[path] = Route(body=b"{}")
+    left_url, right_url = https_server.base + left, https_server.base + right
+    assert _store.get(left_url) == _store.get(right_url) == b"{}"
+    assert [request.path for request in https_server.seen] == [left_request, right_request]
+    same_object = left_request == right_request
+    assert (object_location(left_url) == object_location(right_url)) is same_object
+    node = Node(
+        PurePosixPath("collection.json"),
+        Path("/unused/collection.json"),
+        "collection",
+        "roads",
+        {"links": [{"rel": "self", "href": right_url}]},
+    )
+    assert asset_refers_to_self(node, left_url) is same_object
 
 
 @pytest.mark.parametrize("url", ["http://example.org/x.json", "s3://bucket/x.json"])
@@ -251,14 +309,8 @@ def test_one_store_per_host(https_server: HttpsServer) -> None:
     assert _store._store.cache_info().currsize == 1
 
 
-def test_only_the_store_and_the_live_prober_import_urllib_request() -> None:
-    """Every read goes through this module, except the live pass's per-host probes.
-
-    Those probes read CORS and range headers, and send OPTIONS, which obstore
-    does not support. This module sends over urllib what obstore cannot. Any
-    other module that reaches for urllib.request bypasses the connection pool
-    and the shared error handling here.
-    """
+def test_only_the_store_imports_urllib_request() -> None:
+    """Every urllib request, including live probes, belongs to the store."""
     import ast
     from pathlib import Path
 
@@ -277,7 +329,7 @@ def test_only_the_store_and_the_live_prober_import_urllib_request() -> None:
             )
             if any(name.startswith("urllib.request") for name in names):
                 importers.add(path.name)
-    assert importers == {"_store.py", "live.py"}
+    assert importers == {"_store.py"}
 
 
 def test_urllib_follows_a_redirect_to_https(https_server: HttpsServer) -> None:

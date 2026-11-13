@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from rashid import validate
+from rashid import ValidationOptions, validate
 from rashid.model import Finding, Severity
 from tests.conftest import (
     CatalogBuilder,
@@ -71,6 +71,11 @@ _COVERED: frozenset[str] = frozenset(
         "PTL-AST-007",
         "PTL-AST-008",
         "PTL-BBX-001",
+        # PTL-CLS-001 is a WARNING: the extension registry lists Classification
+        # at SHOULD.
+        "PTL-CLS-002",
+        "PTL-CLS-003",
+        "PTL-CLS-005",
         "PTL-CNF-001",
         "PTL-CNF-003",
         "PTL-COL-001",
@@ -212,6 +217,44 @@ def _add_collections(catalog: CatalogBuilder) -> None:
         assets={
             "data": default_asset(),
             "items": _asset(href="./items.parquet", type="application/json", roles=["metadata"]),
+        },
+    )
+
+    # A classified raster band that declares no classification extension, a
+    # malformed class name, a nodata class off the band's nodata, and a legacy
+    # raster:bands list with no class list on the matching STAC 1.1 band.
+    catalog.collection(
+        "classified",
+        assets={
+            "thumbnail": thumbnail_asset(),
+            "data": _asset(
+                href="./flood.tif",
+                type=_COG_TYPE,
+                bands=[
+                    {
+                        "nodata": 255,
+                        "data_type": "uint8",
+                        "classification:classes": [
+                            {"value": 0, "name": "no-data", "title": "No data", "nodata": True},
+                            {"value": 3, "name": "flood water", "title": "Flood"},
+                        ],
+                    }
+                ],
+                **{
+                    "raster:bands": [
+                        {
+                            "classification:classes": [
+                                {"value": 1, "name": "unchanged", "title": "Unchanged"}
+                            ]
+                        },
+                        {
+                            "classification:classes": [
+                                {"value": 2, "name": "water", "title": "Water"}
+                            ]
+                        },
+                    ]
+                },
+            ),
         },
     )
 
@@ -380,10 +423,12 @@ def error_findings(tmp_path: Path) -> list[Finding]:
     Two trees, because a catalog cannot be both present and absent: the broken
     tree for the rules, and an empty directory for the missing-root report.
     """
-    findings = list(validate(broken_tree(tmp_path), structural=False).findings)
+    findings = list(
+        validate(broken_tree(tmp_path), options=ValidationOptions(structural=False)).findings
+    )
     empty = tmp_path / "empty"
     empty.mkdir()
-    findings.extend(validate(empty, structural=False).findings)
+    findings.extend(validate(empty, options=ValidationOptions(structural=False)).findings)
     return [f for f in findings if f.severity is Severity.ERROR]
 
 
