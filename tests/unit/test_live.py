@@ -1727,3 +1727,18 @@ def test_a_metadata_cors_probe_failure_is_a_warning(catalog: CatalogBuilder) -> 
     findings = validate_live(graph, GetFails(), base_url=_BASE)
     assert _ids(findings) == [LIV_UNAVAILABLE, LIV_UNAVAILABLE]
     assert "connection reset" in findings[1].message
+
+
+def test_a_denied_head_on_a_non_partial_asset_still_warns(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"data": _remote_asset(), "thumbnail": _png_asset()})
+    graph = CatalogGraph.load(catalog.write())
+
+    class DeniedThumb(FakeProber):
+        def head(self, url: str) -> ProbeResponse:
+            self.head_calls.append(url)
+            return ProbeResponse(status=403, headers={}) if url == _PNG else _good_head()
+
+    findings = validate_live(graph, DeniedThumb())
+    assert _ids(findings) == [LIV_UNAVAILABLE]
+    assert "asset 'thumbnail'" in findings[0].message
+    assert "403" in findings[0].message

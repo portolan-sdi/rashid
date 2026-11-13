@@ -641,7 +641,7 @@ def _check_heads(
             break
         location = response.off_https()
         if location is None:
-            if target.partial_read:
+            if target.partial_read or response.access_denied():
                 findings.extend(_check_head(target, response))
         elif target is not reported:
             findings.append(
