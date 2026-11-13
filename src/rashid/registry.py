@@ -479,7 +479,7 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         DAT_CLASS_COLORS,
         "a classification class agrees with the COG band it describes",
         Severity.WARNING,
-        ("PORTO-FMT-054", "PORTO-FMT-060"),
+        ("PORTO-FMT-054", "PORTO-FMT-057"),
         stage="data",
     ),
     CheckInfo(

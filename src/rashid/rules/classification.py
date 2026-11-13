@@ -205,7 +205,7 @@ class ClassListRule(Rule):
         " name of letters, digits, '-' and '_', a title, and a six-hex-digit color_hint"
     )
     kinds = ("collection", "item")
-    spec_ids = ("PORTO-FMT-052", "PORTO-FMT-053")
+    spec_ids = ("PORTO-FMT-052",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         for found in class_lists(node):
