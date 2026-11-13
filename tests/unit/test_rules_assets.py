@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from rashid import validate
-from rashid.model import Severity
+from rashid.model import Finding, Severity
 from tests.conftest import (
     VALID_MULTIHASH,
     CatalogBuilder,
@@ -70,6 +70,13 @@ def test_s3_href_without_https_alternate_is_an_error(catalog: CatalogBuilder) ->
 _OK = "https://bucket.example.org/roads/data.parquet"
 
 
+def _s3_findings(catalog: CatalogBuilder, alternate: object) -> list[Finding]:
+    """PTL-AST-002 findings for an s3 data asset with this ``alternate``."""
+    asset = _asset(href="s3://bucket/roads/data.parquet", alternate=alternate)
+    catalog.collection("roads", assets={"data": asset})
+    return findings_for(validate(catalog.write()), "PTL-AST-002")
+
+
 @pytest.mark.parametrize(
     "alternate",
     [
@@ -90,21 +97,13 @@ _OK = "https://bucket.example.org/roads/data.parquet"
 def test_unusable_https_alternate_keeps_the_error(
     catalog: CatalogBuilder, alternate: object
 ) -> None:
-    catalog.collection(
-        "roads",
-        assets={"data": _asset(href="s3://bucket/roads/data.parquet", alternate=alternate)},
-    )
-    findings = findings_for(validate(catalog.write()), "PTL-AST-002")
+    findings = _s3_findings(catalog, alternate)
     assert [f.severity for f in findings] == [Severity.ERROR]
 
 
 def test_s3_href_with_https_alternate_is_a_warning(catalog: CatalogBuilder) -> None:
     alternate = {"https": {"href": _OK}}
-    catalog.collection(
-        "roads",
-        assets={"data": _asset(href="s3://bucket/roads/data.parquet", alternate=alternate)},
-    )
-    findings = findings_for(validate(catalog.write()), "PTL-AST-002")
+    findings = _s3_findings(catalog, alternate)
     assert [f.severity for f in findings] == [Severity.WARNING]
     assert "uses the 's3' scheme" in findings[0].message
     assert "https" in (findings[0].fix_hint or "")
