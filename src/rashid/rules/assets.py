@@ -92,40 +92,45 @@ class AssetFieldsRule(Rule):
 
 
 class AssetHrefSchemeRule(Rule):
-    """Absolute asset hrefs use https, never s3 or plain http."""
+    """Absolute asset hrefs use https, or carry an https ``alternate``.
+
+    Another scheme without an https alternate breaks the MUST
+    (PORTO-CORE-087); with one, only the SHOULD (PORTO-CORE-023) remains.
+    """
 
     id = "PTL-AST-002"
-    spec_ids = ("PORTO-CORE-023",)
+    spec_ids = ("PORTO-CORE-023", "PORTO-CORE-087")
     default_severity = Severity.ERROR
-    description = "absolute asset hrefs must use https (browsers cannot fetch s3 URLs)"
+    description = "absolute asset hrefs should use https; another scheme needs an https alternate"
     kinds = ("collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         for pointer, key, asset in assets_of(node):
-            href = asset.get("href")
-            if not isinstance(href, str) or not href:
-                continue  # PTL-AST-001 reports missing hrefs
-            parsed = split_href(href)
-            if parsed is None:
-                continue  # PTL-LNK-006 reports the malformed URI reference.
-            scheme = parsed.scheme.lower()
-            if not scheme or scheme == "https":
+            scheme = _absolute_scheme(asset.get("href"))
+            if scheme is None or scheme == "https":
                 continue
-            if scheme == "s3":
+            alternates = asset.get("alternate")
+            if isinstance(alternates, dict) and any(
+                isinstance(alt, dict) and _absolute_scheme(alt.get("href")) == "https"
+                for alt in alternates.values()
+            ):
                 yield self.finding(
                     node,
-                    f"asset '{key}' href uses s3://; absolute hrefs must use https",
+                    f"asset '{key}' href uses {scheme}://; absolute hrefs should use https",
+                    severity=Severity.WARNING,
                     json_pointer=json_pointer("href", prefix=pointer),
-                    fix_hint="use the https endpoint; expose s3 URLs via the alternate extension",
+                    fix_hint=f"make the https alternate the href and move the {scheme} URL"
+                    " to alternate",
                     expected="https",
                     actual=scheme,
                 )
             else:
                 yield self.finding(
                     node,
-                    f"asset '{key}' href uses scheme '{scheme}'; absolute hrefs must use https",
+                    f"asset '{key}' href uses {scheme}:// and has no https alternate",
                     json_pointer=json_pointer("href", prefix=pointer),
-                    fix_hint="rewrite the href as the https URL that serves this file",
+                    fix_hint="use the https URL that serves this file as the href, or add it"
+                    " to the asset's alternate field",
                     expected="https",
                     actual=scheme,
                 )
@@ -166,6 +171,14 @@ class DataAssetSingleFileRule(Rule):
                 " on the collection",
                 actual=href,
             )
+def _absolute_scheme(href: object) -> str | None:
+    """The lowercase scheme of an absolute href; None for relative or invalid."""
+    if not isinstance(href, str) or not href:
+        return None  # PTL-AST-001 reports missing hrefs
+    parsed = split_href(href)
+    if parsed is None:
+        return None  # PTL-LNK-006 reports the malformed URI reference.
+    return parsed.scheme.lower() or None
 
 
 class CogMediaTypeRule(Rule):

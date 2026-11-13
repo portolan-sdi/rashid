@@ -9,9 +9,8 @@ through :mod:`rashid._store`; the format-specific modules in :mod:`rashid.data`
 parse geospatial data.
 
 Non-fetchable hrefs — ``s3``/``http``/``file`` or a relative path that escapes
-the tree — resolve to ``None``; the metadata pass already reports those
-(``PTL-AST-002`` flags ``s3``), so the data pass skips them rather than emitting
-a second finding.
+the tree — resolve to ``None``, and the data pass skips them. ``PTL-AST-002``
+reports a non-https absolute href. The data pass does not follow ``alternate``.
 
 A caller can narrow that further. :class:`LocalOnlyReader` resolves only what
 lives in the tree, which is what a metadata-only mirror needs: the checks that
@@ -79,7 +78,7 @@ class FilesystemHttpReader:
         if is_absolute_href(href):
             if is_https_href(href):
                 return Locator(is_remote=True, source=href)
-            return None  # s3/http/file: not browser-fetchable; PTL-AST-002 covers it
+            return None  # s3/http/file: not browser-fetchable; PTL-AST-002 reports it
         rel = self._graph.local_path(node, href)
         if rel is None:
             return None

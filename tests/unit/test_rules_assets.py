@@ -56,11 +56,33 @@ def test_s3_href_is_rejected_with_dedicated_message(catalog: CatalogBuilder) -> 
     assert findings[0].fix_hint is not None
 
 
+def test_s3_href_without_https_alternate_is_an_error(catalog: CatalogBuilder) -> None:
+    s3_alternate = {"s3": {"href": "s3://bucket/roads/data.parquet"}}
+    catalog.collection(
+        "roads",
+        assets={"data": _asset(href="s3://bucket/roads/data.parquet", alternate=s3_alternate)},
+    )
+    findings = findings_for(validate(catalog.write()), "PTL-AST-002")
+    assert [f.severity for f in findings] == [Severity.ERROR]
+    assert "alternate" in findings[0].message
+
+
+def test_s3_href_with_https_alternate_is_a_warning(catalog: CatalogBuilder) -> None:
+    alternate = {"https": {"href": "https://bucket.example.org/roads/data.parquet"}}
+    catalog.collection(
+        "roads",
+        assets={"data": _asset(href="s3://bucket/roads/data.parquet", alternate=alternate)},
+    )
+    findings = findings_for(validate(catalog.write()), "PTL-AST-002")
+    assert [f.severity for f in findings] == [Severity.WARNING]
+    assert "https" in (findings[0].fix_hint or "")
+
+
 def test_plain_http_href_is_rejected(catalog: CatalogBuilder) -> None:
     catalog.collection("roads", assets={"data": _asset(href="http://example.org/data.parquet")})
     findings = findings_for(validate(catalog.write()), "PTL-AST-002")
     assert len(findings) == 1
-    assert "'http'" in findings[0].message
+    assert "http://" in findings[0].message
 
 
 def test_https_and_relative_hrefs_pass(catalog: CatalogBuilder) -> None:
