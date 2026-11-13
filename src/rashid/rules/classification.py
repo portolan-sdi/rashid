@@ -549,7 +549,12 @@ def _misplaced(asset: dict[str, Any], found: ClassList) -> str | None:
     home = found.band_index if multi else None
     if found.band_field == ("bands" if multi else None):
         return None
-    if found.band_field == "raster:bands" and _has_classes(asset, home):
+    # A single-band mirror is legacy band 0, the asset's only band.
+    if (
+        found.band_field == "raster:bands"
+        and _has_classes(asset, home)
+        and (multi or found.band_index == 0)
+    ):
         return None
     return f"bands/{home}" if multi else "the asset"
 

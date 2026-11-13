@@ -402,6 +402,20 @@ def test_source_asset_class_title_must_be_a_string(catalog: CatalogBuilder, titl
     assert [f.json_pointer for f in findings] == [f"{_POINTER}/1/title"]
 
 
+def test_single_band_legacy_mirror_beyond_band_0_is_flagged(catalog: CatalogBuilder) -> None:
+    def legacy(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["classification:classes"] = asset["bands"][0].pop("classification:classes")
+        asset["bands"] = [{}]
+        mirrored = {"classification:classes": asset["classification:classes"]}
+        asset["raster:bands"] = [dict(mirrored), dict(mirrored)]
+
+    findings = findings_for(validate(_built(catalog, legacy)), "PTL-CLS-005")
+    assert [f.json_pointer for f in findings] == [
+        "/assets/data/raster:bands/1/classification:classes"
+    ]
+
+
 def test_object_level_classes_belong_on_the_data_asset(catalog: CatalogBuilder) -> None:
     def top(data: dict[str, Any]) -> None:
         data["classification:classes"] = _flood_classes()
