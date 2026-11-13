@@ -765,6 +765,8 @@ def test_glob_href_on_a_non_data_asset_passes(catalog: CatalogBuilder) -> None:
     thumbnail["href"] = "./thumb-*.png"
     catalog.collection("roads", assets={"data": _asset(), "thumbnail": thumbnail})
     assert findings_for(validate(catalog.write()), "PTL-AST-012") == []
+
+
 @pytest.mark.parametrize("field", ["title", "description"])
 @pytest.mark.parametrize("value", [None, "", "   "])
 def test_asset_without_title_or_description_warns(

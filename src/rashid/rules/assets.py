@@ -171,6 +171,8 @@ class DataAssetSingleFileRule(Rule):
                 " on the collection",
                 actual=href,
             )
+
+
 def _absolute_scheme(href: object) -> str | None:
     """The lowercase scheme of an absolute href; None for relative or invalid."""
     if not isinstance(href, str) or not href:
