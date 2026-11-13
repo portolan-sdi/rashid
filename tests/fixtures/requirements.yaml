@@ -1203,6 +1203,13 @@ requirements:
       overview COG (subject to all the COG requirements in this section) as a
       collection-level asset with the `visual` and `overview` roles.
 
+  - id: PORTO-FMT-068
+    severity: SHOULD
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      The overview SHOULD be an 8-bit RGB image, with an optional alpha band.
+
   - id: PORTO-FMT-069
     severity: SHOULD
     enforcement: process
@@ -1233,6 +1240,15 @@ requirements:
     quote: >-
       Each overview asset SHOULD have a `datetime`, or a `start_datetime` and
       `end_datetime`, so clients can match it to its items.
+
+  - id: PORTO-FMT-073
+    severity: SHOULD
+    enforcement: validator
+    file: specs/portolan/formats.md
+    quote: >-
+      For satellite and aerial imagery, publishers SHOULD declare nodata, or
+      include an alpha band, in each scene, so that clients don't draw empty
+      pixels as black.
 
   - id: PORTO-FMT-074
     severity: SHOULD

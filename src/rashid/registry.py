@@ -141,6 +141,8 @@ DAT_PARTITION_SCHEMA = "PTL-DAT-014"
 DAT_TABULAR = "PTL-DAT-015"
 DAT_MIRROR = "PTL-DAT-016"
 DAT_VECTOR_COLUMNS = "PTL-DAT-017"
+DAT_OVERVIEW_FORMAT = "PTL-DAT-018"
+DAT_SCENE_MASK = "PTL-DAT-019"
 LIV_UNAVAILABLE = "PTL-LIV-000"
 LIV_RANGE = "PTL-LIV-001"
 LIV_HEAD_LENGTH = "PTL-LIV-002"
@@ -430,6 +432,20 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         "a GeoParquet data asset's columns are documented with table:columns",
         Severity.WARNING,
         ("PORTO-FMT-046", "PORTO-FMT-047", "PORTO-FMT-048", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_OVERVIEW_FORMAT,
+        "a collection overview COG is 8-bit RGB with an optional alpha band",
+        Severity.WARNING,
+        ("PORTO-FMT-068",),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_SCENE_MASK,
+        "an imagery scene declares nodata or carries an alpha band or mask",
+        Severity.WARNING,
+        ("PORTO-FMT-073",),
         stage="data",
     ),
     CheckInfo(

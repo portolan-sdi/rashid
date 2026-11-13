@@ -37,6 +37,10 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   count, ids, geometry, datetime, or bbox (MUST, formats.md, Raster § Item
   mirror). A mirror runs the GeoParquet checks above as well: the spec binds
   it to them like any other spatial table.
+- ``PTL-DAT-018`` a collection asset with the ``overview`` role is not 8-bit
+  RGB with an optional alpha band (SHOULD, formats.md, Raster)
+- ``PTL-DAT-019`` an imagery scene, an item-level data COG with three or more
+  bands, has no nodata value, alpha band, or mask (SHOULD, formats.md, Imagery)
 
 The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
 run over an asset and over every file a local relative ``partition:glob``
@@ -79,7 +83,7 @@ from rashid.data.geoparquet import (
 )
 from rashid.data.mirror import check_mirror
 from rashid.data.partitions import check_partitions
-from rashid.data.raster import check_raster, geo_from_raster
+from rashid.data.raster import check_display, check_raster, geo_from_raster
 from rashid.data.reader import AssetReader
 from rashid.data.spatial import (
     Geo,
@@ -217,6 +221,7 @@ def _check_asset(
             defects.extend(check_mirror(node, key, files, graph))
         if expected == "tiff":
             defects.extend(check_raster(key, located, files))
+            defects.extend(check_display(node, key, asset, files))
         if expected == "parquet":
             defects.extend(check_geoparquet(key, files))
             defects.extend(check_tabular(node, key, asset, files))
