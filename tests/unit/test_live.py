@@ -1715,3 +1715,15 @@ def test_a_dead_metadata_host_is_not_asked_for_cors(catalog: CatalogBuilder) -> 
     findings = validate_live(graph, prober, base_url=_BASE)
     assert _ids(findings) == [LIV_UNAVAILABLE, LIV_UNAVAILABLE]
     assert _publish_gets(prober) == []
+
+
+def test_a_metadata_cors_probe_failure_is_a_warning(catalog: CatalogBuilder) -> None:
+    graph = _metadata_only_tree(catalog)
+
+    class GetFails(StatusProber):
+        def get_range(self, url: str) -> ProbeResponse:
+            raise OSError("connection reset")
+
+    findings = validate_live(graph, GetFails(), base_url=_BASE)
+    assert _ids(findings) == [LIV_UNAVAILABLE, LIV_UNAVAILABLE]
+    assert "connection reset" in findings[1].message
