@@ -114,10 +114,15 @@ def store_member_href(href: str, member: str) -> str:
     path such as ``"0/rgba"``, so both sides are trimmed before they join.
     The result keeps the href's class: a relative store href yields a
     relative member href, which the asset reader resolves against the tree.
+
+    The query and fragment move to the end of the result rather than being
+    dropped. A store served from a signed URL carries its signature there, and
+    a member href without it is refused by the host.
     """
     base = containment_href(href).rstrip("/")
     trimmed = member.strip("/")
-    return f"{base}/{trimmed}" if trimmed else base
+    joined = f"{base}/{trimmed}" if trimmed else base
+    return joined + href_suffix(href)
 
 
 def _relative_join(directory: str, path: str) -> str | None:

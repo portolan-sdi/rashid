@@ -125,6 +125,12 @@ _LINK_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
 # Concurrent HEADs against one host.
 _WORKERS = 32
 
+#: Zarr store metadata documents probed per run. A catalog may declare a store
+#: per item, and each probe is a request to somebody's host, so the incubating
+#: check is bounded the way the crawl is. The stores past the cap are reported
+#: as unchecked rather than passed over.
+_MAX_ZARR_PROBES = 64
+
 # An arbitrary origin: a read-permitting CORS policy answers any origin, and a
 # restrictive one will not match this, correctly failing the check.
 _PROBE_ORIGIN = "https://rashid-live-probe.invalid"
@@ -863,29 +869,61 @@ def _zarr_stores(graph: CatalogGraph, base: str | None) -> list[tuple[Node, str,
     return stores
 
 
+def _zarr_unjudged(node: Node, key: str, detail: str) -> Finding:
+    """A store whose cross-origin policy the probe did not settle.
+
+    This is reported under the Zarr check rather than under ``PTL-LIV-000``.
+    The question that went unanswered is an incubating one, so saying so must
+    stay inside the incubating family, where the severity cap applies and
+    where a reader looking at the Zarr findings will see it.
+    """
+    return Finding(
+        rule_id=ZAR_CORS,
+        severity=Severity.INFO,
+        message=f"asset '{key}': {detail}",
+        path=str(node.path),
+        object_id=node.id,
+        json_pointer=json_pointer("assets", key, "href"),
+    )
+
+
 def _check_zarr_cors(graph: CatalogGraph, base: str | None, prober: Prober) -> list[Finding]:
     """PTL-ZAR-003: each Zarr store's host permits a cross-origin metadata read.
 
-    The requirement is incubating, so the finding is a warning however the
-    probe turns out; ``rashid.runner.cap_incubating`` guarantees that even if
-    this builder is changed. A store whose metadata the host will not serve at
-    all cannot be judged, and is reported as a warning that the probe did not
-    settle the question.
+    The requirement is incubating, so a store that fails earns a warning and a
+    store the probe could not settle earns an INFO; both stay in the
+    ``PTL-ZAR`` family, and ``rashid.runner.cap_incubating`` guarantees the
+    ceiling however this builder changes.
+
+    The probes are bounded twice over. At most ``_MAX_ZARR_PROBES`` go out per
+    run, because a catalog may declare thousands of stores and each probe is a
+    request to somebody's host. A host that fails in transport is dropped after
+    its first failure, as :func:`_check_host` drops one, so a dead host costs
+    one wait rather than one per store on it.
     """
     findings: list[Finding] = []
-    for node, key, url in _zarr_stores(graph, base):
+    stores = _zarr_stores(graph, base)
+    failed: dict[str, Exception] = {}
+    for node, key, url in stores[:_MAX_ZARR_PROBES]:
+        host = href_host(url)
+        if host in failed:
+            continue  # the host is dead; it was reported at its first store
         _trace.count("live.zarr_probes")
         try:
             response = prober.get_range(url)
-        except Exception as exc:  # an unreachable store is reported once
-            findings.append(_unavailable(f"Zarr CORS probe of {url} failed: {exc}", str(node.path)))
+        except Exception as exc:  # an unreachable host is reported once
+            failed[host] = exc
+            findings.append(
+                _zarr_unjudged(node, key, f"the Zarr CORS probe of {url} failed: {exc}")
+            )
             continue
         if response.status >= 400 or response.off_https() is not None:
             findings.append(
-                _unavailable(
-                    f"Zarr CORS probe of {url} returned {response.status};"
-                    " the store's cross-origin policy was not checked",
-                    str(node.path),
+                _zarr_unjudged(
+                    node,
+                    key,
+                    f"the Zarr CORS probe of {url} returned {response.status},"
+                    " so the store's cross-origin policy was not checked",
                 )
             )
             continue
@@ -903,6 +941,16 @@ def _check_zarr_cors(graph: CatalogGraph, base: str | None, prober: Prober) -> l
                 object_id=node.id,
                 json_pointer=json_pointer("assets", key, "href"),
                 fix_hint="enable a read-permitting CORS policy on the store's bucket",
+            )
+        )
+    if len(stores) > _MAX_ZARR_PROBES:
+        node, key, _url = stores[_MAX_ZARR_PROBES]
+        findings.append(
+            _zarr_unjudged(
+                node,
+                key,
+                f"the catalog declares {len(stores)} Zarr stores and the pass probes"
+                f" {_MAX_ZARR_PROBES}; the stores after this one were not checked",
             )
         )
     return findings

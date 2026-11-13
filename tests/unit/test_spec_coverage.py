@@ -216,6 +216,12 @@ def test_severity_mapping() -> None:
         if status == _INCUBATING:
             # Outside the conformance surface, so a MUST earns a warning, and a
             # check that emitted an error here would fail a conforming catalog.
+            # The exception table is for MUSTs the spec itself softens inside
+            # the conformance surface, so an incubating entry never needs one;
+            # the floor above already is the softer one.
+            assert req_id not in _SEVERITY_EXCEPTIONS, (
+                f"{req_id} is incubating, so it needs no severity exception"
+            )
             if strongest < incubating_floors[severity]:
                 weak.append(f"{req_id} ({severity}, incubating) is not even warned about")
             continue

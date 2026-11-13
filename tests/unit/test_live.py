@@ -1620,10 +1620,16 @@ def test_a_store_whose_metadata_allows_no_origin_is_reported(catalog: CatalogBui
 
 
 def test_a_store_that_serves_no_metadata_cannot_be_judged(catalog: CatalogBuilder) -> None:
+    """An unsettled incubating question is reported inside the incubating family.
+
+    Reporting it as PTL-LIV-000 would put it under a conformance check, where
+    the severity cap does not reach and a reader looking at the Zarr findings
+    would not see it.
+    """
     missing = ProbeResponse(status=404, headers={})
     findings = validate_live(_graph_with_store(catalog), _ZarrProber(missing))
-    assert ZAR_CORS not in _ids(findings)
-    assert any("Zarr CORS probe" in f.message for f in findings if f.rule_id == LIV_UNAVAILABLE)
+    assert [(f.rule_id, f.severity) for f in findings] == [(ZAR_CORS, Severity.INFO)]
+    assert "was not checked" in findings[0].message
 
 
 def test_a_store_href_with_a_trailing_slash_probes_one_metadata_url(
@@ -1693,8 +1699,9 @@ def test_a_store_whose_host_is_unreachable_is_reported_once(catalog: CatalogBuil
             return super().get_range(url)
 
     findings = validate_live(_graph_with_store(catalog), _Failing(_good_range()))
-    unavailable = [f for f in findings if f.rule_id == LIV_UNAVAILABLE]
-    assert any("connection reset" in f.message for f in unavailable)
+    unjudged = [f for f in findings if f.rule_id == ZAR_CORS]
+    assert [f.severity for f in unjudged] == [Severity.INFO]
+    assert "connection reset" in unjudged[0].message
 
 
 def test_a_store_on_another_host_than_the_publish_base_is_still_probed(
@@ -1728,3 +1735,50 @@ def test_a_source_store_is_not_probed(catalog: CatalogBuilder) -> None:
     prober = _ZarrProber(_good_range())
     validate_live(CatalogGraph.load(catalog.write()), prober)
     assert _STORE_METADATA not in prober.range_calls
+
+
+def test_a_dead_host_costs_one_store_probe(catalog: CatalogBuilder) -> None:
+    """A host that fails in transport is dropped, as the asset probes drop one.
+
+    Without the short-circuit a catalog of a hundred stores on one dead host
+    waits for a hundred timeouts and reports a hundred times.
+    """
+
+    class _Dead(_ZarrProber):
+        def get_range(self, url: str) -> ProbeResponse:
+            self.range_calls.append(url)
+            if url.endswith("/zarr.json"):
+                raise OSError("connection reset")
+            return self.range_response
+
+    zarr = {"type": "application/vnd.zarr; version=3", "roles": ["data"]}
+    catalog.collection(
+        "temps",
+        assets={
+            "a": {"href": f"{_STORE_URL}/one", **zarr},
+            "b": {"href": f"{_STORE_URL}/two", **zarr},
+            "c": {"href": f"{_STORE_URL}/three", **zarr},
+        },
+    )
+    prober = _Dead(_good_range())
+    findings = validate_live(CatalogGraph.load(catalog.write()), prober)
+    probes = [url for url in prober.range_calls if url.endswith("/zarr.json")]
+    assert len(probes) == 1
+    assert len([f for f in findings if f.rule_id == ZAR_CORS]) == 1
+
+
+def test_the_store_probes_are_capped_per_run(catalog: CatalogBuilder) -> None:
+    """A catalog may declare more stores than the pass will probe, and is told so."""
+    zarr = {"type": "application/vnd.zarr; version=3", "roles": ["data"]}
+    assets = {
+        f"s{index:03d}": {"href": f"{_STORE_URL}/{index}", **zarr}
+        for index in range(live_mod._MAX_ZARR_PROBES + 5)
+    }
+    catalog.collection("temps", assets=assets)
+    prober = _ZarrProber(_good_range())
+    findings = validate_live(CatalogGraph.load(catalog.write()), prober)
+    probes = [url for url in prober.range_calls if url.endswith("/zarr.json")]
+    assert len(probes) == live_mod._MAX_ZARR_PROBES
+    capped = [f for f in findings if f.rule_id == ZAR_CORS]
+    assert [f.severity for f in capped] == [Severity.INFO]
+    assert "were not checked" in capped[0].message

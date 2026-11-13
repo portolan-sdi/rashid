@@ -35,7 +35,7 @@ import logging
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeGuard
 
 from rashid import _json, _trace
 from rashid._href import store_member_href
@@ -107,10 +107,6 @@ MAX_READ_FACTOR = 8
 MIN_CHUNK_SAMPLES = 256
 MAX_CHUNK_SAMPLES = 1024
 
-#: Levels SHOULD step by 2; a level's shape is a ceiling division, so the
-#: measured ratio of two small levels lands beside 2 rather than on it.
-_STEP_TOLERANCE = 0.2
-
 #: Metadata documents read per store, and bytes read per document. A store
 #: with consolidated metadata costs one request; one without costs a request
 #: per node the layout and the STAC variable names name. The caps stop a
@@ -124,6 +120,12 @@ _MAX_DEPTH = 8
 #: PTL-ZAR-002 reports the missing declaration on its own.
 _Y_NAMES = frozenset({"y", "lat", "latitude", "northing"})
 _X_NAMES = frozenset({"x", "lon", "long", "longitude", "easting"})
+
+#: Array names that mark a grid-mapping array rather than data. Axis names are
+#: not listed here: an array named after an axis is caught by the rule that an
+#: array naming one of its own dimensions is that dimension's coordinate, and
+#: a real store does publish a data variable called ``z``.
+_COORDINATE_NAMES = frozenset({"spatial_ref", "spatial_reference", "crs", "grid_mapping"})
 
 #: Dimension names that mark a band axis, for the display-range exemption.
 _BAND_NAMES = frozenset({"band", "bands", "channel", "channels", "rgb", "rgba"})
@@ -159,11 +161,17 @@ class _Meta:
         return f"array '{self.path}'" if self.path else "the root array"
 
     @property
+    def named(self) -> bool:
+        """Whether the array declares ``dimension_names`` at all; v3 makes it optional."""
+        return isinstance(self.data.get("dimension_names"), list)
+
+    @property
     def dimensions(self) -> list[str]:
+        """The dimension names, or one placeholder per axis when none are declared."""
         raw = self.data.get("dimension_names")
-        if not isinstance(raw, list):
-            return []
-        return [name if isinstance(name, str) else "" for name in raw]
+        if isinstance(raw, list):
+            return [name if isinstance(name, str) else "" for name in raw]
+        return [f"dim_{index}" for index in range(len(_shape(self)))]
 
 
 @dataclass(frozen=True)
@@ -193,6 +201,7 @@ class _Store:
         self._budget = _MAX_DOCUMENTS
         self.unreadable: str | None = None
         self.root_status: int | None = None
+        self.exhausted = False
 
     def read(self, path: str) -> _Meta | None:
         """The node at ``path``, from consolidated metadata or its own document."""
@@ -204,9 +213,19 @@ class _Store:
             self._absorb(meta, 0)
         return meta
 
+    def unread(self, path: str) -> bool:
+        """Whether ``path`` went unread because the document budget ran out.
+
+        A check that reads an attribute off an ancestor must tell "the group
+        says nothing" from "rashid never asked the group", because the first
+        is a defect and the second is rashid's own limit.
+        """
+        return self.exhausted and self._cache.get(path) is None
+
     def _fetch(self, path: str) -> _Meta | None:
         if self._budget <= 0:
             log.debug("zarr: %s: metadata budget spent before %r", self._href, path)
+            self.exhausted = True
             return None
         self._budget -= 1
         member = store_member_href(self._href, f"{path}/zarr.json" if path else "zarr.json")
@@ -276,35 +295,49 @@ def _read_capped(stream: Iterator[bytes]) -> bytes:
 
 @dataclass(frozen=True)
 class _Level:
-    """One resolution level: its layout entry, its group path, and its arrays."""
+    """One resolution level: its layout entry, its group, and the arrays under it.
+
+    ``arrays`` is every array the level holds; ``variables`` is the subset that
+    carries data rather than describing the grid. Checks read ``variables``.
+    """
 
     entry: dict[str, Any]
     path: str
-    arrays: tuple[_Meta, ...]
+    arrays: tuple[_Meta, ...] = ()
+    variables: tuple[_Meta, ...] = ()
 
     @property
     def extent(self) -> tuple[int, int] | None:
-        shape = _int_pair(self.entry.get("spatial:shape"))
-        if shape is not None:
-            return shape
-        return None
+        return _int_pair(self.entry.get("spatial:shape"))
 
 
 def _layout(root: _Meta) -> list[dict[str, Any]]:
     """The multiscales layout entries declared on the store root.
 
     Only the multiscales convention's own spelling counts: a ``multiscales``
-    object holding a ``layout`` array of entries that name an ``asset``. Stores
-    in the wild also carry an older ``multiscales`` list of ``datasets`` with a
-    ``path`` and a ``factor``, which is a different model; the profile cites
-    the convention, so such a store declares no layout and PTL-ZAR-002 reports
-    the undeclared convention.
+    object holding a ``layout`` array. Stores in the wild also carry an older
+    ``multiscales`` list of ``datasets`` with a ``path`` and a ``factor``,
+    which is a different model; the profile cites the convention, so such a
+    store declares no layout and PTL-ZAR-002 reports the undeclared
+    convention.
+
+    An entry that names no ``asset`` is kept rather than dropped. It is a
+    defect of the layout, which PTL-ZAR-010 reports, not a level to pass over
+    in silence.
     """
     multiscales = root.attributes.get("multiscales")
     raw = multiscales.get("layout") if isinstance(multiscales, dict) else None
     if not isinstance(raw, list):
         return []
-    return [entry for entry in raw if isinstance(entry, dict) and entry.get("asset")]
+    return [entry for entry in raw if isinstance(entry, dict)]
+
+
+def _layout_path(entry: dict[str, Any]) -> str | None:
+    """The group an entry names, or None when it names none."""
+    asset = entry.get("asset")
+    if not isinstance(asset, str) or not asset.strip("/"):
+        return None
+    return asset.strip("/")
 
 
 def _variable_names(asset: dict[str, Any], declarations: list[dict[str, Any]]) -> list[str]:
@@ -323,28 +356,41 @@ def _variable_names(asset: dict[str, Any], declarations: list[dict[str, Any]]) -
         name = band.get("name")
         if isinstance(name, str) and name:
             names.append(name.split("[", 1)[0])
-    return list(dict.fromkeys(name for name in names if name and "/" not in name))
+    # A name is a member of the store, so it may not leave it: "/" would make
+    # the member href absolute, and "." or ".." would walk out of the prefix.
+    return list(
+        dict.fromkeys(
+            name for name in names if name and "/" not in name and name not in {".", ".."}
+        )
+    )
 
 
-def _discover(store: _Store, root: _Meta, names: list[str]) -> list[_Level]:
-    """The store's levels, finest first, with the arrays under each.
+def _discover(
+    store: _Store, root: _Meta, names: list[str], declarations: list[dict[str, Any]]
+) -> list[_Level]:
+    """The store's levels, finest first, with the arrays and variables under each.
 
     Group paths come from the layout; a store with no pyramid has one level at
     the root. Arrays come from consolidated metadata where the root has it, and
-    otherwise from one read per declared variable name under each level.
+    otherwise from one read per declared variable name under each level. A
+    layout entry that names no group contributes a level with no arrays, so the
+    layout check can still report it.
     """
     entries = _layout(root)
-    paths = [str(entry.get("asset", "")).strip("/") for entry in entries] or [""]
+    paths = [_layout_path(entry) for entry in entries] or [""]
     for path in paths:
-        if store.read(path) is None:
+        if path is None or store.read(path) is None:
             continue
         for name in names:
             store.read(f"{path}/{name}" if path else name)
     known = store.known()
-    levels = [
-        _Level(entry, path, tuple(_arrays_under(known, path)))
-        for entry, path in zip(entries or [{}], paths, strict=True)
-    ]
+    levels = []
+    for entry, path in zip(entries or [{}], paths, strict=True):
+        arrays = () if path is None else tuple(_arrays_under(known, path))
+        level = _Level(entry, path or "", arrays)
+        levels.append(
+            _Level(entry, level.path, arrays, tuple(_data_variables(store, level, declarations)))
+        )
     return sorted(levels, key=_level_rank, reverse=True)
 
 
@@ -367,7 +413,9 @@ def _level_rank(level: _Level) -> int:
     extent = level.extent
     if extent is not None:
         return extent[0] * extent[1]
-    shapes = [_spatial_shape(array) for array in level.arrays]
+    shapes = [
+        _spatial_shape(array, axes) for array in level.variables if (axes := _any_axes(array))
+    ]
     return max((shape[0] * shape[1] for shape in shapes if shape is not None), default=0)
 
 
@@ -375,9 +423,19 @@ def _level_rank(level: _Level) -> int:
 
 
 def _numbers(value: object, count: int) -> list[float] | None:
+    """``count`` finite numbers, or None.
+
+    A JSON number literal may overflow to infinity: ``1e999`` parses without
+    complaint and reads as ``inf``, and ``float("nan")`` arrives the same way
+    from a parser that accepts the token. Neither is a coordinate or a shape,
+    and ``int(inf)`` raises, so both are refused here rather than at the
+    arithmetic that would meet them.
+    """
     if not isinstance(value, list) or len(value) != count:
         return None
     if any(isinstance(item, bool) or not isinstance(item, int | float) for item in value):
+        return None
+    if any(not math.isfinite(item) for item in value):
         return None
     return [float(item) for item in value]
 
@@ -399,22 +457,32 @@ def _ancestors(path: str) -> Iterator[str]:
 
 
 def _inherited(store: _Store, array: _Meta, key: str, entry: dict[str, Any]) -> Any:
-    """A ``spatial:`` value for ``array``: its own, its level's, then its ancestors'.
+    """A ``spatial:`` value for ``array``: its own, its level's, then a group's.
 
-    The spatial convention makes a group-level value a default for its child
-    arrays, and its own multiscales example puts ``spatial:dimensions`` on the
-    pyramid root while the arrays sit two levels below, so the search walks the
-    whole ancestor chain rather than stopping at the direct parent.
+    The spatial convention makes a group-level value a default for its direct
+    child arrays, which is where the search stops for every key but
+    ``spatial:dimensions``. That one key walks the whole ancestor chain,
+    because the convention's own multiscales example declares it on the
+    pyramid root while the arrays sit two levels below, and because a level's
+    layout entry never restates it. The per-level values, ``spatial:transform``
+    and ``spatial:shape``, do come from the layout entry, so they need no
+    chain.
     """
     if key in array.attributes:
         return array.attributes[key]
     if key in entry:
         return entry[key]
-    for ancestor in _ancestors(array.path):
+    chain = _ancestors(array.path) if key == "spatial:dimensions" else [_parent(array.path)]
+    for ancestor in chain:
         group = store.read(ancestor)
         if group is not None and key in group.attributes:
             return group.attributes[key]
     return None
+
+
+def _parent(path: str) -> str:
+    """The path of the group that holds ``path``; the root holds itself."""
+    return next(_ancestors(path))
 
 
 def _proj_value(store: _Store, array: _Meta, key: str) -> Any:
@@ -424,17 +492,18 @@ def _proj_value(store: _Store, array: _Meta, key: str) -> Any:
     """
     if key in array.attributes:
         return array.attributes[key]
-    parent = next(_ancestors(array.path))
-    group = store.read(parent)
+    group = store.read(_parent(array.path))
     return group.attributes.get(key) if group is not None else None
 
 
 def _declared_axes(store: _Store, array: _Meta, entry: dict[str, Any]) -> tuple[str, str] | None:
-    """The Y and X dimension names ``spatial:dimensions`` gives, when it matches."""
+    """The Y and X dimension names ``spatial:dimensions`` gives, when it matches.
+
+    One name cannot be both axes, so a repeated name resolves nothing;
+    PTL-ZAR-002 reports it as the malformed declaration it is.
+    """
     raw = _inherited(store, array, "spatial:dimensions", entry)
-    if not isinstance(raw, list) or len(raw) != 2:
-        return None
-    if any(not isinstance(name, str) for name in raw):
+    if not _two_dimension_names(raw):
         return None
     dimensions = array.dimensions
     if raw[0] not in dimensions or raw[1] not in dimensions:
@@ -442,20 +511,117 @@ def _declared_axes(store: _Store, array: _Meta, entry: dict[str, Any]) -> tuple[
     return (raw[0], raw[1])
 
 
+def _two_dimension_names(raw: object) -> TypeGuard[list[str]]:
+    """Whether a value is two distinct dimension names, as the convention requires."""
+    return (
+        isinstance(raw, list)
+        and len(raw) == 2
+        and all(isinstance(name, str) and name for name in raw)
+        and raw[0] != raw[1]
+    )
+
+
 def _guessed_axes(array: _Meta) -> tuple[str, str] | None:
     """The Y and X dimension names read off well-known spellings."""
     dimensions = array.dimensions
     y = next((name for name in dimensions if name.lower() in _Y_NAMES), None)
     x = next((name for name in dimensions if name.lower() in _X_NAMES), None)
-    return (y, x) if y is not None and x is not None else None
+    return (y, x) if y is not None and x is not None and y != x else None
+
+
+def _is_coordinate(store: _Store, array: _Meta) -> bool:
+    """Whether ``array`` describes the grid rather than carrying data on it.
+
+    Three signals, any one of which is enough. The array's name is a
+    well-known axis or coordinate spelling, or equals one of its own dimension
+    names, which is how a 1-D coordinate variable is written. Its parent group,
+    or the group above, names it in the CF ``coordinates`` attribute, which is
+    how a curvilinear store points at its 2-D ``lat`` and ``lon``. Or the
+    enclosing group types it in a way a coordinate carries.
+    """
+    name = array.name
+    lowered = name.lower()
+    if lowered in _Y_NAMES or lowered in _X_NAMES or lowered in _COORDINATE_NAMES:
+        return True
+    if name in array.dimensions and array.named:
+        return True
+    for ancestor in (_parent(array.path), array.path):
+        group = store.read(ancestor)
+        if group is None:
+            continue
+        declared = group.attributes.get("coordinates")
+        if isinstance(declared, str) and name in declared.split():
+            return True
+        if isinstance(declared, list) and name in declared:
+            return True
+    return False
+
+
+def _data_variables(
+    store: _Store, level: _Level, declarations: list[dict[str, Any]]
+) -> list[_Meta]:
+    """The level's renderable arrays that carry data rather than describe the grid.
+
+    ``cube:variables`` gives each variable a ``type``, and the datacube
+    extension reserves ``data`` for the measurements, so an explicit type
+    settles the question either way: it keeps a data variable whose name looks
+    like an axis, and it drops an ``auxiliary`` one however many spatial axes
+    it spans. Without a type the store's own metadata decides.
+    """
+    typed = _variable_types(declarations)
+    kept = []
+    for array in _renderable(store, level):
+        declared = typed.get(array.name)
+        if declared is not None:
+            if declared == "data":
+                kept.append(array)
+            continue
+        if not _is_coordinate(store, array):
+            kept.append(array)
+    return kept
+
+
+def _variable_types(declarations: list[dict[str, Any]]) -> dict[str, str]:
+    """Variable name -> the ``type`` ``cube:variables`` gives it."""
+    types: dict[str, str] = {}
+    for holder in declarations:
+        variables = holder.get("cube:variables")
+        if not isinstance(variables, dict):
+            continue
+        for name, definition in variables.items():
+            declared = definition.get("type") if isinstance(definition, dict) else None
+            if isinstance(name, str) and isinstance(declared, str):
+                types.setdefault(name, declared)
+    return types
+
+
+def _positional_axes(array: _Meta) -> tuple[str, str] | None:
+    """The two trailing axes of an array that names no dimensions at all.
+
+    ``dimension_names`` is optional in Zarr v3. An array without it still has
+    axes, and the profile's grid, chunking, and overview rules still bind
+    them, so reading the last two by position keeps such a store checkable
+    rather than invisible. PTL-ZAR-006 then cannot fail for it, which is
+    right: with no names declared there is no declared order to contradict.
+    """
+    dimensions = array.dimensions
+    if array.named or len(dimensions) < 2:
+        return None
+    return (dimensions[-2], dimensions[-1])
 
 
 def _axes(store: _Store, array: _Meta, entry: dict[str, Any]) -> tuple[str, str] | None:
-    return _declared_axes(store, array, entry) or _guessed_axes(array)
+    return _declared_axes(store, array, entry) or _guessed_axes(array) or _positional_axes(array)
 
 
 def _renderable(store: _Store, level: _Level) -> list[_Meta]:
-    """The level's arrays that carry both spatial dimensions."""
+    """The level's arrays that carry both spatial dimensions.
+
+    This is the axis test alone. A curvilinear store writes ``lat`` and
+    ``lon`` as 2-D arrays over the very axes the data variable uses, so the
+    axis test passes them too; :func:`_data_variables` is what separates data
+    from the grid that describes it.
+    """
     return [array for array in level.arrays if _axes(store, array, level.entry) is not None]
 
 
@@ -503,14 +669,27 @@ def _chunk_shape(array: _Meta) -> list[int]:
     return _shard_shape(array)
 
 
-def _spatial_shape(array: _Meta) -> tuple[int, int] | None:
-    """The array's extent on its two spatial axes, Y then X."""
-    axes = _guessed_axes(array)
+def _spatial_shape(array: _Meta, axes: tuple[str, str]) -> tuple[int, int] | None:
+    """The array's extent on ``axes``, Y then X."""
     shape = _shape(array)
-    if axes is None or len(shape) != len(array.dimensions):
-        return None
     dimensions = array.dimensions
+    if len(shape) != len(dimensions):
+        return None
     return (shape[dimensions.index(axes[0])], shape[dimensions.index(axes[1])])
+
+
+def _any_axes(array: _Meta) -> tuple[str, str] | None:
+    """The array's spatial axes without a store to read a declaration from.
+
+    Measuring a level needs no inherited ``spatial:dimensions``: an array that
+    declares its own, or spells its axes conventionally, or names no
+    dimensions at all is enough, and a level whose arrays give none is ranked
+    by its layout entry instead.
+    """
+    raw = array.attributes.get("spatial:dimensions")
+    if _two_dimension_names(raw) and all(name in array.dimensions for name in raw):
+        return (raw[0], raw[1])
+    return _guessed_axes(array) or _positional_axes(array)
 
 
 def _codec_names(array: _Meta) -> list[str]:
@@ -717,10 +896,10 @@ def _malformed_convention_fields(root: _Meta) -> list[str]:
     """The convention fields the store root declares but spells wrongly."""
     attributes = root.attributes
     problems: list[str] = []
-    if "spatial:dimensions" in attributes:
-        raw = attributes["spatial:dimensions"]
-        if not isinstance(raw, list) or len(raw) != 2 or not all(isinstance(n, str) for n in raw):
-            problems.append("spatial:dimensions is not two dimension names")
+    if "spatial:dimensions" in attributes and not _two_dimension_names(
+        attributes["spatial:dimensions"]
+    ):
+        problems.append("spatial:dimensions is not two distinct dimension names")
     if "spatial:transform" in attributes and _numbers(attributes["spatial:transform"], 6) is None:
         problems.append("spatial:transform is not six numbers")
     if "spatial:bbox" in attributes and _numbers(attributes["spatial:bbox"], 4) is None:
@@ -771,7 +950,9 @@ def _check_crs(key: str, store: _Store, levels: list[_Level]) -> list[DataDefect
     that case is reported as information rather than as a missed SHOULD.
     """
     root = store.read("")
-    arrays = [array for level in levels for array in _renderable(store, level)]
+    arrays = [array for level in levels for array in level.variables]
+    if any(store.unread(_parent(array.path)) for array in arrays):
+        return []  # the groups that would carry the CRS went unread; say nothing
     for field in ("proj:code", "proj:projjson"):
         at_root = root is not None and root.attributes.get(field) is not None
         on_arrays = bool(arrays) and all(_proj_value(store, a, field) is not None for a in arrays)
@@ -814,8 +995,8 @@ def _chunks_to_cover(store: _Store, array: _Meta, entry: dict[str, Any]) -> int 
 
 
 def _level_chunks(store: _Store, level: _Level) -> int | None:
-    """The largest chunk count any renderable array of the level needs."""
-    counts = [_chunks_to_cover(store, a, level.entry) for a in _renderable(store, level)]
+    """The largest chunk count any data variable of the level needs."""
+    counts = [_chunks_to_cover(store, a, level.entry) for a in level.variables]
     sized = [count for count in counts if count is not None]
     return max(sized) if sized else None
 
@@ -854,6 +1035,15 @@ def _check_layout(key: str, levels: list[_Level]) -> list[DataDefect]:
     if len(levels) < 2:
         return []
     defects: list[DataDefect] = []
+    if any(_layout_path(level.entry) is None for level in levels):
+        defects.append(
+            _defect(
+                ZAR_LAYOUT_FIELDS,
+                Severity.ERROR,
+                key,
+                "a multiscales layout entry names no asset, so it names no group",
+            )
+        )
     incomplete = [
         str(level.entry.get("asset", "?"))
         for level in levels
@@ -874,6 +1064,16 @@ def _check_layout(key: str, levels: list[_Level]) -> list[DataDefect]:
     return defects
 
 
+def _halves(fine: int, coarse: int) -> bool:
+    """Whether ``coarse`` is ``fine`` halved, allowing either rounding.
+
+    A shape is a whole number of samples, so halving an odd extent rounds. Both
+    roundings are a factor of 2; anything else is not, which is what keeps a
+    factor-3 step reported.
+    """
+    return coarse in {math.ceil(fine / 2), fine // 2}
+
+
 def _check_steps(key: str, levels: list[_Level]) -> list[DataDefect]:
     """PTL-ZAR-011: consecutive levels differ by a factor of 2 on each spatial axis."""
     offenders: list[str] = []
@@ -881,8 +1081,7 @@ def _check_steps(key: str, levels: list[_Level]) -> list[DataDefect]:
         fine, coarse = finer.extent, coarser.extent
         if fine is None or coarse is None:
             continue
-        ratios = [fine[axis] / coarse[axis] for axis in (0, 1) if coarse[axis]]
-        if any(abs(ratio - 2.0) > _STEP_TOLERANCE for ratio in ratios):
+        if not all(_halves(fine[axis], coarse[axis]) for axis in (0, 1)):
             offenders.append(f"{finer.entry.get('asset', '?')}->{coarser.entry.get('asset', '?')}")
     if not offenders:
         return []
@@ -897,12 +1096,12 @@ def _check_steps(key: str, levels: list[_Level]) -> list[DataDefect]:
 
 
 def _check_variables(
-    key: str, store: _Store, levels: list[_Level], declarations: list[dict[str, Any]]
+    key: str, levels: list[_Level], declarations: list[dict[str, Any]]
 ) -> list[DataDefect]:
     """PTL-ZAR-012: more than one data variable requires ``cube:variables``."""
     if not levels:
         return []
-    variables = sorted({array.name for array in _renderable(store, levels[0])})
+    variables = sorted({array.name for array in levels[0].variables})
     if len(variables) < 2:
         return []
     if any(isinstance(holder.get("cube:variables"), dict) for holder in declarations):
@@ -956,8 +1155,16 @@ def _grid_faults(store: _Store, array: _Meta, entry: dict[str, Any]) -> Iterator
             )
 
 
-def _chunk_faults(store: _Store, array: _Meta, entry: dict[str, Any]) -> Iterator[_Fault]:
-    """PTL-ZAR-015 to PTL-ZAR-018: read amplification, chunk size, and shard span."""
+def _chunk_faults(
+    store: _Store, array: _Meta, entry: dict[str, Any], *, full_resolution: bool
+) -> Iterator[_Fault]:
+    """PTL-ZAR-015 to PTL-ZAR-018: read amplification, chunk size, and shard span.
+
+    PORTO-ZARR-020 bounds what a client reads "for one timestep at full
+    resolution", so the read-amplification fault is raised for the finest
+    level only. PORTO-ZARR-025 carries no such qualifier, so the shard span
+    binds every level: a coarse level a client draws costs its shards too.
+    """
     axes = _axes(store, array, entry)
     dimensions = array.dimensions
     chunk = _chunk_shape(array)
@@ -966,7 +1173,7 @@ def _chunk_faults(store: _Store, array: _Meta, entry: dict[str, Any]) -> Iterato
     spatial = {dimensions.index(axes[0]), dimensions.index(axes[1])}
     extra = [(dimensions[i], chunk[i]) for i in range(len(chunk)) if i not in spatial]
     factor = math.prod(length for _name, length in extra)
-    if factor > MAX_READ_FACTOR:
+    if factor > MAX_READ_FACTOR and full_resolution:
         yield _Fault(
             ZAR_READ_AMPLIFICATION,
             Severity.ERROR,
@@ -1050,24 +1257,26 @@ def _band_axis_length(array: _Meta) -> int:
     return max(lengths, default=0)
 
 
-def _display_exempt(asset: dict[str, Any], arrays: list[_Meta]) -> bool:
-    """Whether the store is 8-bit with three or more bands.
+def _display_exempt(asset: dict[str, Any], array: _Meta) -> bool:
+    """Whether ``array`` is 8-bit with three or more bands.
 
-    The profile exempts such a store because its samples are display values
-    already. "Three or more bands" is read from the STAC ``bands`` array first,
-    and from a band axis of three or more on a renderable array otherwise,
-    since an RGB or RGBA store commonly declares one variable over a band
-    dimension rather than one band entry per channel.
+    The profile exempts such an array because its samples are display values
+    already. "Three or more bands" is read from the STAC ``bands`` array
+    first, and from a band axis of three or more on the array otherwise, since
+    an RGB or RGBA store commonly declares one variable over a band dimension
+    rather than one band entry per channel.
+
+    The test is per array, not per store: a store may hold an 8-bit RGBA array
+    beside a float32 measurement, and only the first is a display value.
     """
-    if not any(str(array.data.get("data_type")) in _EIGHT_BIT for array in arrays):
+    if str(array.data.get("data_type")) not in _EIGHT_BIT:
         return False
-    return len(_bands(asset)) >= 3 or any(_band_axis_length(a) >= 3 for a in arrays)
+    return len(_bands(asset)) >= 3 or _band_axis_length(array) >= 3
 
 
-def _band_faults(
-    array: _Meta, asset: dict[str, Any], *, rescaled: bool, exempt: bool
-) -> Iterator[_Fault]:
+def _band_faults(array: _Meta, asset: dict[str, Any], *, rescaled: bool) -> Iterator[_Fault]:
     """PTL-ZAR-013 and PTL-ZAR-014: a display range, and a declared no-data value."""
+    exempt = _display_exempt(asset, array)
     band = _band_for(asset, array.name)
     statistics = band.get("statistics") if band else None
     ranged = (
@@ -1098,22 +1307,45 @@ def _array_faults(
     asset: dict[str, Any],
     declarations: list[dict[str, Any]],
 ) -> list[_Fault]:
-    """Every per-array complaint, over the renderable arrays of every level."""
+    """Every per-array complaint, over the renderable arrays of every level.
+
+    The read-amplification rule is scoped to the finest level, because
+    PORTO-ZARR-020 bounds what a client reads "for one timestep at full
+    resolution". Every other per-array rule binds every level.
+    """
     rescaled = _has_rescale(declarations)
-    finest = _renderable(store, levels[0]) if levels else []
-    exempt = _display_exempt(asset, finest)
+    finest = list(levels[0].variables) if levels else []
     faults: list[_Fault] = []
     for level in levels:
-        for array in _renderable(store, level):
+        for array in level.variables:
             faults.extend(_grid_faults(store, array, level.entry))
-            faults.extend(_chunk_faults(store, array, level.entry))
+            faults.extend(_chunk_faults(store, array, level.entry, full_resolution=array in finest))
             faults.extend(_codec_faults(array))
     for array in finest:
-        faults.extend(_band_faults(array, asset, rescaled=rescaled, exempt=exempt))
+        faults.extend(_band_faults(array, asset, rescaled=rescaled))
     return faults
 
 
 # --- entry point -----------------------------------------------------------
+
+
+#: What a store's own metadata can make the checks raise. Store metadata is
+#: untrusted input of an arbitrary shape, and the checks read it structurally,
+#: so a shape nobody anticipated reaches arithmetic or indexing rather than a
+#: guard. The data pass treats any exception from a validator as systemic: it
+#: reports one PTL-DAT-000 warning and abandons every object it had not
+#: finished, so one odd store would hide the rest of the catalog's errors. An
+#: incubating check must never cost that much, hence the net below.
+_METADATA_FAULTS = (
+    ValueError,
+    TypeError,
+    OverflowError,
+    KeyError,
+    IndexError,
+    AttributeError,
+    RecursionError,
+    ArithmeticError,
+)
 
 
 def check_zarr(
@@ -1124,6 +1356,10 @@ def check_zarr(
     Returns ``PTL-ZAR-0xx`` defects, every one at WARNING or below. The media
     type is judged from the STAC asset, so it is reported even when the store
     itself cannot be opened; everything else needs the store's metadata.
+
+    A store whose metadata defeats the checks yields one INFO. The checks are
+    incubating, so they may not end the data pass for the objects after this
+    one; see :data:`_METADATA_FAULTS`.
     """
     href = asset.get("href")
     if not isinstance(href, str) or not href:
@@ -1131,18 +1367,46 @@ def check_zarr(
     store = _Store(node, href, reader)
     with _trace.span("data.zarr"):
         defects = _check_media_type(key, asset)
-        root = store.read("")
-        if root is None:
-            return [*defects, _check_missing_root(key, store)]
-        declarations = _declarations(node, asset)
-        levels = _discover(store, root, _variable_names(asset, declarations))
-        defects.extend(_check_root(key, root))
-        defects.extend(_check_pyramid(key, store, levels))
-        pyramid = len(levels) > 1 or any(d.rule_id == ZAR_PYRAMID for d in defects)
-        defects.extend(_check_conventions(key, root, pyramid=pyramid))
-        defects.extend(_check_crs(key, store, levels))
-        defects.extend(_check_layout(key, levels))
-        defects.extend(_check_variables(key, store, levels, declarations))
-        defects.extend(_collapse(key, _array_faults(store, levels, asset, declarations)))
+        try:
+            defects.extend(_check_store(key, store, node=node, asset=asset))
+        except _METADATA_FAULTS as exc:
+            log.debug("zarr: %s asset %r: %s", node.path, key, exc)
+            defects.append(
+                _defect(
+                    ZAR_STORE_VERSION,
+                    Severity.INFO,
+                    key,
+                    f"the profile's checks could not read this store's metadata ({exc});"
+                    " they did not run",
+                )
+            )
     log.debug("zarr: %s asset %r: %d defect(s)", node.path, key, len(defects))
+    return defects
+
+
+def _check_store(key: str, store: _Store, *, node: Node, asset: dict[str, Any]) -> list[DataDefect]:
+    """Every check that needs the store's own metadata."""
+    root = store.read("")
+    if root is None:
+        return [_check_missing_root(key, store)]
+    declarations = _declarations(node, asset)
+    levels = _discover(store, root, _variable_names(asset, declarations), declarations)
+    defects = _check_root(key, root)
+    defects.extend(_check_pyramid(key, store, levels))
+    pyramid = len(levels) > 1 or any(d.rule_id == ZAR_PYRAMID for d in defects)
+    defects.extend(_check_conventions(key, root, pyramid=pyramid))
+    defects.extend(_check_crs(key, store, levels))
+    defects.extend(_check_layout(key, levels))
+    defects.extend(_check_variables(key, levels, declarations))
+    defects.extend(_collapse(key, _array_faults(store, levels, asset, declarations)))
+    if store.exhausted:
+        defects.append(
+            _defect(
+                ZAR_STORE_VERSION,
+                Severity.INFO,
+                key,
+                f"the store holds more than {_MAX_DOCUMENTS} metadata documents;"
+                " the profile's checks ran on part of the store only",
+            )
+        )
     return defects
