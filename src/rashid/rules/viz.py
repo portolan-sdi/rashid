@@ -15,6 +15,7 @@ mistakes "could not tell" for "nothing to fix".
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from typing import Any
 
@@ -409,7 +410,7 @@ class LargeVectorWithoutVisualRule(Rule):
 
 
 def _bbox_area(box: Any) -> float | None:
-    """Area in squared degrees of a 2D or 3D bbox; None when malformed."""
+    """Area in squared degrees of a 2D or 3D bbox; None when malformed or nonfinite."""
     if not isinstance(box, list) or len(box) not in (4, 6):
         return None
     if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in box):
@@ -417,7 +418,8 @@ def _bbox_area(box: Any) -> float | None:
     half = len(box) // 2
     west, south, east, north = (float(box[i]) for i in (0, 1, half, half + 1))
     # A west edge east of the east edge crosses the antimeridian.
-    return (east - west if east >= west else east - west + 360) * (north - south)
+    area = (east - west if east >= west else east - west + 360) * (north - south)
+    return area if math.isfinite(area) else None
 
 
 def _mosaic_items(node: Node, graph: CatalogGraph) -> int:

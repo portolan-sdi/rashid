@@ -637,8 +637,11 @@ def test_overview_with_datetime_passes(catalog: CatalogBuilder, fields: dict) ->
         ([4.0, 50.0, 6.0], None),
         ([4.0, 50.0, "6", 52.0], None),
         (None, None),
+        ([4.0, 50.0, float("inf"), 52.0], None),
+        ([4.0, 50.0, float("nan"), 52.0], None),
+        ([-1.7e308, 50.0, 1.7e308, 52.0], None),
     ],
-    ids=["2d", "3d", "antimeridian", "short", "string", "missing"],
+    ids=["2d", "3d", "antimeridian", "short", "string", "missing", "inf", "nan", "overflow"],
 )
 def test_bbox_area(box: object, area: float | None) -> None:
     assert _bbox_area(box) == area
