@@ -372,6 +372,26 @@ def test_source_asset_classes_are_exempt_from_placement(catalog: CatalogBuilder)
     assert findings_for(validate(_built(catalog, source)), "PTL-CLS-005") == []
 
 
+def test_source_asset_classes_skip_portolan_class_rules(catalog: CatalogBuilder) -> None:
+    def source(data: dict[str, Any]) -> None:
+        asset = data["assets"]["data"]
+        asset["roles"] = ["source"]
+        asset["bands"][0]["nodata"] = 255
+        del _classes(data)[1]["title"]
+
+    report = validate(_built(catalog, source))
+    assert [f for rule in _ALL for f in findings_for(report, rule)] == []
+
+
+def test_source_asset_classes_keep_the_extension_class_object(catalog: CatalogBuilder) -> None:
+    def source(data: dict[str, Any]) -> None:
+        data["assets"]["data"]["roles"] = ["source"]
+        _classes(data)[1]["name"] = "not valid"
+
+    findings = findings_for(validate(_built(catalog, source)), "PTL-CLS-002")
+    assert [f.json_pointer for f in findings] == [f"{_POINTER}/1/name"]
+
+
 def test_object_level_classes_belong_on_the_data_asset(catalog: CatalogBuilder) -> None:
     def top(data: dict[str, Any]) -> None:
         data["classification:classes"] = _flood_classes()

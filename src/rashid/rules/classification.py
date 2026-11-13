@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from importlib import resources
 from typing import Any, TypeGuard
@@ -134,6 +134,9 @@ class ClassList:
     data_type: Any
     band_field: str | None = None
     band_index: int | None = None
+    # On a source asset, which PORTO-FMT-045 exempts from Portolan's own
+    # class requirements; the extension's class object still applies.
+    source: bool = False
 
     def entries(self) -> Iterator[tuple[str, dict[str, Any]]]:
         """(pointer, class object) for each class that is an object."""
@@ -200,7 +203,10 @@ def class_lists(node: Node) -> list[ClassList]:
     """Every class list on a collection or item."""
     found: list[ClassList] = []
     for pointer, container in _containers(node):
-        found.extend(asset_class_lists(pointer, container))
+        source = is_source_asset(container)
+        found.extend(
+            replace(listed, source=source) for listed in asset_class_lists(pointer, container)
+        )
     return found
 
 
@@ -290,7 +296,9 @@ class ClassListRule(Rule):
                 continue
             yield from self._check_value(node, pointer, entry, values)
             yield from self._check_name(node, pointer, entry, names)
-            if not isinstance(entry.get("title"), str) or not entry["title"].strip():
+            if not found.source and (
+                not isinstance(entry.get("title"), str) or not entry["title"].strip()
+            ):
                 yield self.finding(
                     node,
                     f"class {pointer} has no title",
@@ -419,6 +427,8 @@ class NodataClassRule(Rule):
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         for found in class_lists(node):
+            if found.source:
+                continue
             for pointer, entry in found.entries():
                 value = entry.get("value")
                 if not is_integer(value):
@@ -473,6 +483,8 @@ class ClassValueRangeRule(Rule):
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         for found in class_lists(node):
+            if found.source:
+                continue
             limits = (
                 _INTEGER_RANGES.get(found.data_type) if isinstance(found.data_type, str) else None
             )
