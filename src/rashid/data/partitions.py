@@ -26,11 +26,12 @@ from rashid.rules._common import (
 def partition_files(node: Node) -> list[tuple[str, Path]]:
     """Local files the collection's ``partition:glob`` matches, sorted.
 
-    The glob is expanded against the collection's own directory. A remote or
-    absolute pattern (``s3://``, ``https://``, ``/data``) cannot be listed from
-    the local tree, and one that normalizes outside the catalog is not the
-    catalog's to read, so both yield nothing. Each entry pairs the relative
-    match, which names the file in a message, with its path on disk.
+    Only a relative glob is expanded, against the collection's own directory.
+    A conformant glob is an absolute bucket URL (``s3://``), which rashid does
+    not list, so it yields nothing, as does any other absolute pattern or one
+    that normalizes outside the catalog. PTL-PRT-002 reports the relative glob.
+    Each entry pairs the relative match, which names the file in a message,
+    with its path on disk.
     """
     pattern = node.data.get("partition:glob")
     if not isinstance(pattern, str) or not pattern.strip():

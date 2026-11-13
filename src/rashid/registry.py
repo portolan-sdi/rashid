@@ -22,6 +22,7 @@ from rashid.rules.assets import (
     ChecksumMultihashRule,
     CogMediaTypeRule,
     CollectionDataRule,
+    DataAssetSingleFileRule,
     ItemDataRule,
     PMTilesDataRule,
 )
@@ -181,6 +182,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     NoProprietaryLicenseRule(),
     AssetFieldsRule(),
     AssetHrefSchemeRule(),
+    DataAssetSingleFileRule(),
     CogMediaTypeRule(),
     AssetFileFieldsRule(),
     ChecksumMultihashRule(),

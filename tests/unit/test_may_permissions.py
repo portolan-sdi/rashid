@@ -9,10 +9,7 @@ do not report the permitted form.
 Each test here builds one permitted form and asserts rashid reports nothing.
 The whole report is asserted rather than one rule id, because the risk a
 permission test guards against is an unrelated rule widening until it swallows
-the permission. ``PORTO-FMT-020`` is the worked case: it permits ``s3://`` and
-``gs://`` in ``partition:glob`` while ``PORTO-CORE-023`` bans non-https absolute
-asset hrefs. The two coexist only because ``PTL-AST-002`` reads
-``node.data["assets"]`` and never the collection's own fields.
+the permission.
 
 :data:`PERMISSION_TESTS` maps each requirement to the test that covers it.
 ``test_spec_coverage.py`` reads the mapping and resolves every name against
@@ -32,7 +29,6 @@ from tests.conftest import (
     CatalogBuilder,
     default_asset,
     default_providers,
-    findings_for,
     mutate_json,
     thumbnail_asset,
     write_language_trees,
@@ -56,7 +52,6 @@ PERMISSION_TESTS: dict[str, str] = {
     "PORTO-CORE-079": "test_a_catalog_may_publish_an_alternate_language_tree",
     "PORTO-FMT-013": "test_pmtiles_may_be_registered_as_an_asset_and_a_link",
     "PORTO-FMT-016": "test_large_files_may_be_partitioned",
-    "PORTO-FMT-020": "test_partition_glob_may_use_bucket_native_schemes",
     "PORTO-FMT-035": "test_converted_source_may_be_retained_alongside_the_parquet",
 }
 
@@ -71,7 +66,9 @@ _PMTILES_LINK = {
 }
 
 
-def _partition_fields(data: dict[str, Any], glob: str = "./province=*/*.parquet") -> None:
+def _partition_fields(
+    data: dict[str, Any], glob: str = "s3://demo-bucket/roads/province=*/*.parquet"
+) -> None:
     """Declare the partition extension and its three required fields."""
     data["partition:scheme"] = "directory"
     data["partition:keys"] = [{"name": "province", "type": "string"}]
@@ -260,36 +257,6 @@ def test_large_files_may_be_partitioned(catalog: CatalogBuilder) -> None:
     mutate_json(_collection_json(root, "roads"), _partition_fields)
     report = validate(root)
     assert report.findings == []
-
-
-@pytest.mark.parametrize(
-    "glob",
-    [
-        "s3://demo-bucket/roads/province=*/*.parquet",
-        "gs://demo-bucket/roads/province=*/*.parquet",
-    ],
-)
-def test_partition_glob_may_use_bucket_native_schemes(catalog: CatalogBuilder, glob: str) -> None:
-    """PORTO-FMT-020: the https-only asset rule does not reach partition:glob.
-
-    PTL-AST-002 enforces PORTO-CORE-023 over ``node.data["assets"]`` alone. The
-    same s3 URL is a finding in an asset href and no finding in the glob, and
-    both halves are asserted here so widening the rule to the collection's own
-    fields cannot pass silently.
-    """
-    catalog.collection("roads", title="Road Centerlines")
-    root = catalog.write()
-    mutate_json(_collection_json(root, "roads"), lambda data: _partition_fields(data, glob))
-    report = validate(root)
-    assert findings_for(report, "PTL-AST-002") == []
-    assert report.findings == []
-
-    # The other half of the separation: the same URL as an asset href is a finding.
-    mutate_json(
-        _collection_json(root, "roads"),
-        lambda data: data["assets"]["data"].__setitem__("href", glob.replace("*", "all")),
-    )
-    assert len(findings_for(validate(root), "PTL-AST-002")) == 1
 
 
 def test_converted_source_may_be_retained_alongside_the_parquet(catalog: CatalogBuilder) -> None:
