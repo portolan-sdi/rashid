@@ -251,6 +251,14 @@ def test_repeated_band_class_is_flagged(catalog: CatalogBuilder) -> None:
     assert _schema_and_class_findings(root) == [f"{_POINTER}/5"]
 
 
+def test_classes_differing_only_in_json_type_are_not_repeats(catalog: CatalogBuilder) -> None:
+    def extra(data: dict[str, Any]) -> None:
+        _classes(data).append({**_classes(data)[1], "x": 0})
+        _classes(data)[1]["x"] = False
+
+    assert _schema_and_class_findings(_built(catalog, extra)) == []
+
+
 def test_legacy_list_that_differs_from_bands_is_checked(catalog: CatalogBuilder) -> None:
     def differ(data: dict[str, Any]) -> None:
         asset = data["assets"]["data"]
@@ -498,6 +506,20 @@ def test_item_assets_with_other_classes_in_the_same_place_pass(catalog: CatalogB
     template = _raster_asset()
     template["bands"][0]["classification:classes"][2]["title"] = "Open water"
     assert findings_for(validate(_scene_catalog(catalog, template)), "PTL-CLS-006") == []
+
+
+def test_differing_legacy_item_list_needs_no_template_band(catalog: CatalogBuilder) -> None:
+    def legacy(data: dict[str, Any]) -> None:
+        asset = _single_band_asset()
+        mirror = json.loads(json.dumps(asset["classification:classes"]))
+        mirror[1]["title"] = "Same"
+        asset["raster:bands"] = [{"classification:classes": mirror}]
+        data.update(assets={"data": asset})
+
+    root = _scene_catalog(catalog, _single_band_asset())
+    for path in (root / "flood").rglob("scene-*.json"):
+        mutate_json(path, legacy)
+    assert findings_for(validate(root), "PTL-CLS-006") == []
 
 
 def test_misplaced_item_classes_are_left_to_placement(catalog: CatalogBuilder) -> None:

@@ -30,6 +30,7 @@ reads the lists through :func:`asset_class_lists`.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
@@ -316,10 +317,14 @@ class ClassListRule(Rule):
                 fix_hint="list one object per class, each with a value and a name",
             )
             return
-        seen: list[Any] = []
+        seen: set[str] = set()
         for index, entry in enumerate(found.classes):
             pointer = json_pointer(index, prefix=found.pointer)
-            if entry in seen:  # the schema's uniqueItems compares whole classes
+            # The schema's uniqueItems compares whole classes. Python's == calls
+            # false and 0 equal, so compare the JSON text. shortcut: 1 and 1.0
+            # then differ, which only misses a repeat; normalise numbers if it matters.
+            text = json.dumps(entry, sort_keys=True)
+            if text in seen:
                 yield self.finding(
                     node,
                     f"class {pointer} repeats an earlier class",
@@ -327,7 +332,7 @@ class ClassListRule(Rule):
                     fix_hint="remove the repeated class",
                 )
                 continue
-            seen.append(entry)
+            seen.add(text)
             for field, reason in class_object_errors(entry):
                 if field == "title" and not found.source:
                     continue  # the title check below reports it
@@ -511,7 +516,12 @@ class ItemAssetClassesRule(Rule):
                     continue
                 for found in asset_class_lists("", asset):
                     place = (key, found.band_index)
-                    if place in reported or _misplaced(asset, found) is not None:
+                    # A legacy list that passes placement has its home list beside it.
+                    if (
+                        found.band_field == "raster:bands"
+                        or place in reported
+                        or _misplaced(asset, found) is not None
+                    ):
                         continue
                     if not self._in_template(key, found, templates):
                         reported.add(place)
