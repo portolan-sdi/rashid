@@ -210,6 +210,11 @@ def _declares_extension(node: Node) -> bool:
     return any(isinstance(uri, str) and uri.startswith(_EXTENSION_PREFIX) for uri in extensions)
 
 
+def _field_at(pointer: str, entry: dict[str, Any], field: str) -> str:
+    """The pointer to a class field, or to the class when the field is absent."""
+    return json_pointer(field, prefix=pointer) if field in entry else pointer
+
+
 def _is_integer(value: Any) -> TypeGuard[int]:
     # JSON true is a Python int; the schema's integer type excludes it.
     return isinstance(value, int) and not isinstance(value, bool)
@@ -231,7 +236,7 @@ class ClassificationExtensionRule(Rule):
             node,
             f"{lists[0].pointer} uses classification:classes without declaring the"
             " classification extension schema in stac_extensions",
-            json_pointer="/stac_extensions",
+            json_pointer=json_pointer("stac_extensions") if "stac_extensions" in node.data else "",
             fix_hint=f"add '{_EXTENSION_URI}' to stac_extensions",
         )
 
@@ -285,7 +290,7 @@ class ClassListRule(Rule):
                 yield self.finding(
                     node,
                     f"class {pointer} has no title",
-                    json_pointer=json_pointer("title", prefix=pointer),
+                    json_pointer=_field_at(pointer, entry, "title"),
                     fix_hint="set title to the class's human-readable label, e.g. 'Permanent water'",
                 )
             yield from self._check_color_hint(node, pointer, entry)
@@ -324,7 +329,7 @@ class ClassListRule(Rule):
             yield self.finding(
                 node,
                 f"class {pointer} has no integer value",
-                json_pointer=json_pointer("value", prefix=pointer),
+                json_pointer=_field_at(pointer, entry, "value"),
                 fix_hint="set value to the integer pixel value the class covers",
                 actual=value,
             )
@@ -348,7 +353,7 @@ class ClassListRule(Rule):
             yield self.finding(
                 node,
                 f"class {pointer} has no name of letters, digits, '-' and '_'",
-                json_pointer=json_pointer("name", prefix=pointer),
+                json_pointer=_field_at(pointer, entry, "name"),
                 fix_hint="set name to a short machine-readable id such as 'permanent-water',"
                 " and put the readable label in title",
                 actual=name,
@@ -420,7 +425,7 @@ class NodataClassRule(Rule):
                             node,
                             f"class {pointer} has value {value}, its band's nodata, but is not"
                             " marked nodata",
-                            json_pointer=json_pointer("nodata", prefix=pointer),
+                            json_pointer=_field_at(pointer, entry, "nodata"),
                             fix_hint="set nodata to true on the class",
                             expected=True,
                         )
@@ -496,7 +501,7 @@ def _has_classes(asset: dict[str, Any], index: int | None) -> bool:
     return isinstance(band, dict) and CLASSES_FIELD in band
 
 
-def _band_count(asset: dict[str, Any]) -> int:
+def band_count(asset: dict[str, Any]) -> int:
     """How many bands the asset declares; one when it lists none."""
     for field in BAND_FIELDS:
         bands = asset.get(field)
@@ -512,7 +517,7 @@ def _misplaced(asset: dict[str, Any], found: ClassList) -> str | None:
     band it describes in ``bands``. A legacy ``raster:bands`` list passes when
     that place has the classes too, since it then only mirrors them.
     """
-    multi = _band_count(asset) > 1
+    multi = band_count(asset) > 1
     if multi and found.band_index is None:
         return "the band it describes in bands"
     home = found.band_index if multi else None

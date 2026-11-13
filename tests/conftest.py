@@ -508,6 +508,15 @@ def rule_ids(report: Report) -> set[str]:
     return {finding.rule_id for finding in report.findings}
 
 
+def resolve_pointer(document: Any, pointer: str) -> Any:
+    """The value an RFC 6901 pointer names; raises KeyError or IndexError when none."""
+    target = document
+    for token in pointer.split("/")[1:]:
+        token = token.replace("~1", "/").replace("~0", "~")
+        target = target[int(token)] if isinstance(target, list) else target[token]
+    return target
+
+
 def findings_for(report: Report, rule_id: str) -> list[Any]:
     return [finding for finding in report.findings if finding.rule_id == rule_id]
 

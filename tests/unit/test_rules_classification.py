@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from rashid import validate
-from tests.conftest import CatalogBuilder, findings_for, mutate_json
+from rashid import Report
+from rashid import validate as _run
+from tests.conftest import CatalogBuilder, findings_for, mutate_json, resolve_pointer
 
 pytestmark = pytest.mark.unit
+
+
+def validate(root: Path) -> Report:
+    """Validate, and check that every PTL-CLS pointer resolves in its own document."""
+    report = _run(root)
+    for finding in report.findings:
+        if finding.rule_id.startswith("PTL-CLS-") and finding.json_pointer is not None:
+            document = json.loads((root / finding.path).read_text(encoding="utf-8"))
+            resolve_pointer(document, finding.json_pointer)
+    return report
+
 
 _CLASSIFICATION_URI = "https://stac-extensions.github.io/classification/v2.0.0/schema.json"
 
@@ -116,14 +129,14 @@ def test_item_property_bands_need_the_extension(catalog: CatalogBuilder) -> None
 @pytest.mark.parametrize(
     ("change", "pointer"),
     [
-        (lambda c: c[1].pop("value"), "/1/value"),
+        (lambda c: c[1].pop("value"), "/1"),
         (lambda c: c[1].update(value=1.5), "/1/value"),
         (lambda c: c[1].update(value=True), "/1/value"),
         (lambda c: c[2].update(value=1), "/2/value"),
-        (lambda c: c[1].pop("name"), "/1/name"),
+        (lambda c: c[1].pop("name"), "/1"),
         (lambda c: c[1].update(name="permanent water"), "/1/name"),
         (lambda c: c[2].update(name="unchanged"), "/2/name"),
-        (lambda c: c[1].pop("title"), "/1/title"),
+        (lambda c: c[1].pop("title"), "/1"),
         (lambda c: c[1].update(title=" "), "/1/title"),
         (lambda c: c[1].update(color_hint="#000000"), "/1/color_hint"),
         (lambda c: c[1].update(color_hint="00F"), "/1/color_hint"),
@@ -246,7 +259,8 @@ def test_class_at_band_nodata_must_be_marked(catalog: CatalogBuilder) -> None:
         del _classes(data)[0]["nodata"]
 
     findings = findings_for(validate(_built(catalog, unmark)), "PTL-CLS-003")
-    assert [f.json_pointer for f in findings] == [f"{_POINTER}/0/nodata"]
+    # The flag is absent, so the finding points at the class itself.
+    assert [f.json_pointer for f in findings] == [f"{_POINTER}/0"]
     assert findings[0].expected is True
 
 
