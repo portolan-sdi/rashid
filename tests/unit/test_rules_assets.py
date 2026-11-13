@@ -644,3 +644,55 @@ def test_orphan_pmtiles_item_still_reports_errors(tmp_path) -> None:  # type: ig
     findings = list(PMTilesDataRule().check(node, graph))
     assert len(findings) == 2
     assert all(f.path == "tiles.json" and f.severity is Severity.ERROR for f in findings)
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "./parts/*.parquet",
+        "./parts/[0-9].parquet",
+        "https://example.org/parts/*.parquet?token=a",
+        "s3://bucket/**/data.parquet",
+        "./part-?/*.parquet",
+        "https://*.example.org/d.parquet",
+        "s3://bucket-*/data.parquet",
+        "https://example.org/data.parquet?glob=*",
+        "https://example.org/data.parquet?range=[0,1]",
+        "./data.parquet#[x]",
+    ],
+)
+def test_data_asset_href_with_a_glob_is_flagged(catalog: CatalogBuilder, href: str) -> None:
+    catalog.collection("roads", assets={"data": _asset(href=href)})
+    findings = findings_for(validate(catalog.write()), "PTL-AST-012")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+    assert findings[0].json_pointer == "/assets/data/href"
+    assert findings[0].actual == href
+
+
+def test_item_data_asset_href_with_a_glob_is_flagged(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads").item("seg1", assets={"data": _asset(href="./*.parquet")})
+    findings = findings_for(validate(catalog.write()), "PTL-AST-012")
+    assert [f.object_id for f in findings] == ["seg1"]
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "./data.parquet",
+        "https://example.org/data.parquet?token=abc&v=2",
+        "./part%2A%5B0%5D.parquet",
+        "https://[::1]/data.parquet",
+        "https://[::1]:8443/data.parquet?x=1",
+    ],
+)
+def test_single_file_data_href_passes(catalog: CatalogBuilder, href: str) -> None:
+    catalog.collection("roads", assets={"data": _asset(href=href)})
+    assert findings_for(validate(catalog.write()), "PTL-AST-012") == []
+
+
+def test_glob_href_on_a_non_data_asset_passes(catalog: CatalogBuilder) -> None:
+    thumbnail = thumbnail_asset()
+    thumbnail["href"] = "./thumb-*.png"
+    catalog.collection("roads", assets={"data": _asset(), "thumbnail": thumbnail})
+    assert findings_for(validate(catalog.write()), "PTL-AST-012") == []

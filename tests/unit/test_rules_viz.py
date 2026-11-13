@@ -4,6 +4,7 @@ import pytest
 
 from rashid import validate
 from rashid.model import Severity
+from rashid.rules.viz import _bbox_area
 from tests.conftest import (
     CatalogBuilder,
     default_asset,
@@ -511,3 +512,209 @@ def test_pmtiles_suffix_is_spatial(catalog: CatalogBuilder, media_type: object) 
     findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
     assert len(findings) == 1
     assert findings[0].severity is Severity.ERROR
+
+
+_COG = "image/tiff; application=geotiff; profile=cloud-optimized"
+
+
+def _cog(href: str, *roles: str) -> dict:
+    return {**default_asset(), "href": href, "type": _COG, "roles": list(roles)}
+
+
+def _overview(**fields: object) -> dict:
+    return {**_cog("./overview.tif", "visual", "overview"), **fields}
+
+
+def _mosaic(
+    catalog: CatalogBuilder, tiles: int = 3, bbox: list[float] | None = None, **assets: dict
+) -> None:
+    """A raster collection whose items each cover one 1x1 tile of the 2x2 extent."""
+    collection = catalog.collection(
+        "ortho", assets={"thumbnail": thumbnail_asset(), "style": _style_asset(), **assets}
+    )
+    for index in range(tiles):
+        west, south = 4.0 + index % 2, 50.0 + index // 2 % 2
+        collection.item(
+            f"ortho-{index}",
+            bbox=bbox or [west, south, west + 1.0, south + 1.0],
+            assets={"data": _cog(f"./ortho-{index}.tif", "data")},
+        )
+
+
+def test_mosaic_without_overview_warns(catalog: CatalogBuilder) -> None:
+    _mosaic(catalog)
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-007")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.WARNING
+    assert findings[0].json_pointer == "/assets"
+    assert "3 raster items" in findings[0].message
+
+
+def test_mosaic_with_overview_passes(catalog: CatalogBuilder) -> None:
+    _mosaic(catalog, overview=_overview(datetime="2024-01-01T00:00:00Z"))
+    report = validate(catalog.write())
+    assert findings_for(report, "PTL-VIZ-007") == []
+    assert findings_for(report, "PTL-VIZ-008") == []
+
+
+_PNG_OVERVIEW = {**thumbnail_asset(), "href": "./overview.png", "roles": ["visual", "overview"]}
+
+
+@pytest.mark.parametrize(
+    "overview",
+    [_cog("./overview.tif", "overview"), _PNG_OVERVIEW],
+    ids=["overview-role-only", "png"],
+)
+def test_overview_is_a_cog_with_both_roles(catalog: CatalogBuilder, overview: dict) -> None:
+    _mosaic(catalog, overview=overview)
+    report = validate(catalog.write())
+    assert len(findings_for(report, "PTL-VIZ-007")) == 1
+    assert findings_for(report, "PTL-VIZ-008") == []
+
+
+@pytest.mark.parametrize(
+    ("tiles", "bbox"),
+    [
+        (1, None),
+        (3, [4.0, 50.0, 6.0, 52.0]),
+        (3, [4.0, 50.0, 5.5, 51.5]),
+        (2, [4.0, 50.0, 5.5, 51.5]),
+        (3, [4.0, 52.0, 6.0, 50.0]),
+        (3, [5.0, 51.0, 5.0, 51.0]),
+    ],
+    ids=[
+        "one-item",
+        "time-series",
+        "large-scenes",
+        "two-large-scenes",
+        "reversed-latitudes",
+        "points",
+    ],
+)
+def test_non_mosaic_raster_is_silent(
+    catalog: CatalogBuilder, tiles: int, bbox: list[float] | None
+) -> None:
+    _mosaic(catalog, tiles=tiles, bbox=bbox)
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-007") == []
+
+
+_TILE_A, _TILE_B, _TILE_C = [4.0, 50.0, 5.0, 51.0], [5.0, 51.0, 6.0, 52.0], [4.0, 51.0, 5.0, 52.0]
+
+
+@pytest.mark.parametrize(
+    ("footprints", "warns"),
+    [
+        ([_TILE_A, _TILE_A], False),
+        ([_TILE_A, _TILE_A, _TILE_A], False),
+        ([_TILE_A, _TILE_C], True),
+        ([_TILE_A, _TILE_A, _TILE_A, _TILE_B], True),
+        ([_TILE_A, _TILE_B, _TILE_C], True),
+        ([[4.0, 50.0, 0.0, 5.0, 51.0, 10.0], [4.0, 50.0, 1.0, 5.0, 51.0, 11.0]], False),
+    ],
+    ids=[
+        "two-items-one-site",
+        "one-site-revisited",
+        "two-adjacent-tiles",
+        "one-site-revisited-plus-one",
+        "three-sites",
+        "3d-elevations",
+    ],
+)
+def test_mosaic_needs_two_distinct_footprints(
+    catalog: CatalogBuilder, footprints: list[list[float]], warns: bool
+) -> None:
+    collection = catalog.collection("ortho", assets={"thumbnail": thumbnail_asset()})
+    for index, bbox in enumerate(footprints):
+        collection.item(
+            f"ortho-{index}", bbox=bbox, assets={"data": _cog(f"./ortho-{index}.tif", "data")}
+        )
+    assert len(findings_for(validate(catalog.write()), "PTL-VIZ-007")) == int(warns)
+
+
+def test_single_raster_collection_is_silent(catalog: CatalogBuilder) -> None:
+    catalog.collection(
+        "dem",
+        assets={"data": _cog("./dem.tif", "data"), "thumbnail": thumbnail_asset()},
+    )
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-007") == []
+
+
+def test_vector_items_are_not_a_mosaic(catalog: CatalogBuilder) -> None:
+    collection = catalog.collection("roads")
+    for index in range(3):
+        collection.item(f"roads-{index}", bbox=[4.0 + index / 2, 50.0, 4.5 + index / 2, 50.5])
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-007") == []
+
+
+def _mosaic_free_assets() -> dict:
+    return {"data": default_asset(), "thumbnail": thumbnail_asset(), "style": _style_asset()}
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{}, {"start_datetime": "2024-01-01T00:00:00Z"}, {"datetime": None}],
+    ids=["none", "start-only", "null"],
+)
+def test_overview_without_datetime_warns(catalog: CatalogBuilder, fields: dict) -> None:
+    catalog.collection("ortho", assets={**_mosaic_free_assets(), "overview": _overview(**fields)})
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-008")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.WARNING
+    assert findings[0].json_pointer == "/assets/overview"
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"datetime": "2024-01-01T00:00:00Z"},
+        {"start_datetime": "2024-01-01T00:00:00Z", "end_datetime": "2024-12-31T00:00:00Z"},
+    ],
+    ids=["datetime", "interval"],
+)
+def test_overview_with_datetime_passes(catalog: CatalogBuilder, fields: dict) -> None:
+    catalog.collection("ortho", assets={**_mosaic_free_assets(), "overview": _overview(**fields)})
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-008") == []
+
+
+@pytest.mark.parametrize(
+    ("box", "area"),
+    [
+        ([4.0, 50.0, 6.0, 52.0], 4.0),
+        ([4.0, 50.0, 0.0, 6.0, 52.0, 10.0], 4.0),
+        ([179.0, 0.0, -179.0, 1.0], 2.0),
+        ([4.0, 50.0, 6.0], None),
+        ([4.0, 50.0, "6", 52.0], None),
+        (None, None),
+        ([4.0, 50.0, float("inf"), 52.0], None),
+        ([4.0, 50.0, float("nan"), 52.0], None),
+        ([-1.7e308, 50.0, 1.7e308, 52.0], None),
+        ([4.0, 52.0, 6.0, 50.0], None),
+        ([5.0, 51.0, 5.0, 51.0], None),
+        ([4.0, 51.0, 6.0, 51.0], None),
+    ],
+    ids=[
+        "2d",
+        "3d",
+        "antimeridian",
+        "short",
+        "string",
+        "missing",
+        "inf",
+        "nan",
+        "overflow",
+        "reversed-latitudes",
+        "point",
+        "line",
+    ],
+)
+def test_bbox_area(box: object, area: float | None) -> None:
+    assert _bbox_area(box) == area
+
+
+def test_mosaic_with_malformed_bboxes_is_silent(catalog: CatalogBuilder) -> None:
+    _mosaic(catalog)
+    root = catalog.write()
+    mutate_json(root / "ortho" / "ortho-0" / "ortho-0.json", lambda d: d.pop("bbox"))
+    assert findings_for(validate(root), "PTL-VIZ-007") == []
+    mutate_json(root / "ortho" / "collection.json", lambda d: d["extent"]["spatial"].pop("bbox"))
+    assert findings_for(validate(root), "PTL-VIZ-007") == []
