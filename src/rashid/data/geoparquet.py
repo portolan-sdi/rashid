@@ -310,12 +310,11 @@ def check_column_descriptions(node: Node, key: str, asset: dict[str, Any]) -> li
     """Every ``table:columns`` entry of a data asset carries a description.
 
     formats.md, Vector Data: "Every entry in ``table:columns`` SHOULD include a
-    ``description`` when a source defines the column" (PORTO-FMT-077). A name
-    and a type are already in the Parquet footer. When no source defines a
-    column, the publisher leaves the description out and names the column in
-    the collection README (PORTO-FMT-078). The validator cannot tell these
-    columns from undocumented ones, so it reports a warning for both. It checks
-    presence only. It reads no file.
+    ``description``" (PORTO-FMT-077). A name and a type are already in the
+    Parquet footer. A mirror whose source has no descriptions notes this in the
+    collection README (PORTO-FMT-078) and still gets this warning. The check
+    is presence only: it does not detect placeholders (PORTO-FMT-079). It
+    reads no file.
     """
     if "data" not in roles_of(asset):
         return []
@@ -339,8 +338,8 @@ def check_column_descriptions(node: Node, key: str, asset: dict[str, Any]) -> li
             DAT_COLUMN_DESCRIPTIONS,
             Severity.WARNING,
             f"asset '{key}': {len(bare)} of {len(columns)} table:columns entries carry "
-            f"no description ({shown}{more}). If no source defines a column, name it "
-            "in the collection README instead.",
+            f"no description ({shown}{more}). If the dataset is a mirror and the "
+            "source has no descriptions, note this in the collection README.",
             key,
         )
     ]

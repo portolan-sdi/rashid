@@ -1345,16 +1345,22 @@ requirements:
     enforcement: validator
     file: specs/portolan/formats.md
     quote: >-
-      Every entry in `table:columns` SHOULD include a `description` when a source
-      defines the column.
+      Every entry in `table:columns` SHOULD include a `description`.
 
   - id: PORTO-FMT-078
     severity: SHOULD
     enforcement: process
     file: specs/portolan/formats.md
     quote: >-
-      When no source defines a column, publishers SHOULD leave out its
-      `description` and name the column in the collection's `README.md`.
+      When the dataset is a mirror and no descriptions are available for the
+      columns, this SHOULD be noted in the collection's `README.md`.
+
+  - id: PORTO-FMT-079
+    severity: SHOULD
+    enforcement: process
+    file: specs/portolan/formats.md
+    quote: >-
+      Publishers SHOULD NOT include placeholder descriptions.
 
 exclusions:
   # RFC 2119 preamble: keyword mentions, not requirements.

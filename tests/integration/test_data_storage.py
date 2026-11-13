@@ -1313,9 +1313,8 @@ def test_plain_parquet_is_not_vector(tmp_path: Path) -> None:
 
 # --- column descriptions (PTL-DAT-020) --------------------------------------
 #
-# PORTO-FMT-077: every table:columns entry SHOULD carry a description when a
-# source defines the column. PORTO-FMT-078: when no source defines it, the
-# publisher leaves the description out and names the column in the README.
+# PORTO-FMT-077: every table:columns entry SHOULD carry a description.
+# PORTO-FMT-078: a mirror with no source descriptions notes this in the README.
 
 
 def _described(node: Node, **asset_fields: object) -> list:
