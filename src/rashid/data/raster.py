@@ -194,16 +194,6 @@ def _class_color_defect(  # noqa: PLR0913, PLR0917 - one drawn class against its
             key,
             json_pointer=json_pointer("value", prefix=pointer),
         )
-    if len(entry) > 3 and entry[3] == 0:
-        return DataDefect(
-            DAT_CLASS_COLORS,
-            Severity.WARNING,
-            f"asset '{key}' class value {value} is fully transparent in band {band}'s"
-            " embedded color table, so readers hide it like nodata",
-            key,
-            json_pointer=pointer,  # the class; its nodata flag may be absent
-            expected=True,
-        )
     actual = "{:02X}{:02X}{:02X}".format(*entry[:3])
     if hint is None or actual == hint:
         return None
@@ -254,10 +244,9 @@ def _check_class_colors(key: str, asset: dict[str, Any], files: AssetFiles) -> l
       it must be marked ``nodata`` to agree with the file.
     - On a band with an embedded color table (the TIFF ``ColorMap`` tag),
       which any TIFF reader draws and which therefore wins, a class the table
-      cannot draw (a value past a short table), a class drawn fully
-      transparent, and a ``color_hint`` whose red, green and blue differ from
-      the table entry. Alpha is compared only for full transparency, since a
-      hint carries none.
+      cannot draw (a value past a short table), and a ``color_hint`` whose
+      red, green and blue differ from the table entry. Alpha is not compared,
+      since a hint has none.
     """
     drawn = list(_drawn_classes(key, asset))
     if not drawn:
