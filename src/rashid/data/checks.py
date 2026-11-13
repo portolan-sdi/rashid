@@ -42,8 +42,9 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
 - ``PTL-DAT-019`` an imagery scene, an item-level data COG with three or more
   bands and no mask role, has no nodata value, alpha band, or mask (SHOULD,
   formats.md, Imagery)
-- ``PTL-DAT-020`` a ``table:columns`` entry of a data asset has no
-  description (SHOULD, formats.md, Vector Data)
+- ``PTL-DAT-020`` a ``table:columns`` entry of a data asset, or of a
+  partitioned collection with no data asset, has no description (SHOULD,
+  formats.md, Vector Data)
 
 The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
 run over an asset and over every file a local relative ``partition:glob``
@@ -83,6 +84,7 @@ from rashid.data._files import AssetFiles
 from rashid.data.geoparquet import (
     check_column_descriptions,
     check_geoparquet,
+    check_partitioned_column_descriptions,
     check_tabular,
     check_vector_columns,
     geo_from_parquet,
@@ -158,6 +160,7 @@ def check_node(
     schemas, partitions, total = check_partitions(node, reader)
     results.extend(schemas)
     results.extend(partitions, partition_total=total)
+    results.extend(check_partitioned_column_descriptions(node))
     for _pointer, key, asset in assets_of(node):
         href = asset.get("href")
         if not isinstance(href, str) or not href:
