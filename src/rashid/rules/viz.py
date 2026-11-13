@@ -47,7 +47,7 @@ _WEB_MAP_LINKS_PREFIX = "https://stac-extensions.github.io/web-map-links/"
 _LARGE_VECTOR_BYTES = 100_000_000
 # formats.md leaves "much larger" open: a mosaic here is raster items at this many distinct
 # bboxes, each covering at most 1/ratio of the collection's extent. Deliberately conservative.
-_MOSAIC_MIN_ITEMS, _MOSAIC_AREA_RATIO = 3, 2.0
+_MOSAIC_MIN_ITEMS, _MOSAIC_AREA_RATIO = 2, 2.0
 
 
 def _has_spatial_media_type(node: Node) -> bool:

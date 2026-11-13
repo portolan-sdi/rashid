@@ -575,13 +575,13 @@ def test_overview_is_a_cog_with_both_roles(catalog: CatalogBuilder, overview: di
 @pytest.mark.parametrize(
     ("tiles", "bbox"),
     [
-        (2, None),
+        (1, None),
         (3, [4.0, 50.0, 6.0, 52.0]),
         (3, [4.0, 50.0, 5.5, 51.5]),
         (3, [4.0, 52.0, 6.0, 50.0]),
         (3, [5.0, 51.0, 5.0, 51.0]),
     ],
-    ids=["two-items", "time-series", "large-scenes", "reversed-latitudes", "points"],
+    ids=["one-item", "time-series", "large-scenes", "reversed-latitudes", "points"],
 )
 def test_non_mosaic_raster_is_silent(
     catalog: CatalogBuilder, tiles: int, bbox: list[float] | None
@@ -596,14 +596,23 @@ _TILE_A, _TILE_B, _TILE_C = [4.0, 50.0, 5.0, 51.0], [5.0, 51.0, 6.0, 52.0], [4.0
 @pytest.mark.parametrize(
     ("footprints", "warns"),
     [
-        ([_TILE_A, _TILE_A, _TILE_A, _TILE_B], False),
-        ([_TILE_A, _TILE_B] * 3, False),
-        ([_TILE_A, _TILE_A, _TILE_B, _TILE_C], True),
-        ([[4.0, 50.0, 0.0, 5.0, 51.0, 10.0], [4.0, 50.0, 1.0, 5.0, 51.0, 11.0], _TILE_B], False),
+        ([_TILE_A, _TILE_A], False),
+        ([_TILE_A, _TILE_A, _TILE_A], False),
+        ([_TILE_A, _TILE_C], True),
+        ([_TILE_A, _TILE_A, _TILE_A, _TILE_B], True),
+        ([_TILE_A, _TILE_B, _TILE_C], True),
+        ([[4.0, 50.0, 0.0, 5.0, 51.0, 10.0], [4.0, 50.0, 1.0, 5.0, 51.0, 11.0]], False),
     ],
-    ids=["one-site-revisited-plus-one", "two-sites-revisited", "three-sites", "3d-elevations"],
+    ids=[
+        "two-items-one-site",
+        "one-site-revisited",
+        "two-adjacent-tiles",
+        "one-site-revisited-plus-one",
+        "three-sites",
+        "3d-elevations",
+    ],
 )
-def test_mosaic_needs_three_distinct_footprints(
+def test_mosaic_needs_two_distinct_footprints(
     catalog: CatalogBuilder, footprints: list[list[float]], warns: bool
 ) -> None:
     collection = catalog.collection("ortho", assets={"thumbnail": thumbnail_asset()})
