@@ -753,6 +753,7 @@ def test_shared_layout_vectors(name: str) -> None:
     sizes = [float(x) for x in vector["sizes"]] if "sizes" in vector else None
     score = geoparquet._pruning_score([tuple(b) for b in vector["boxes"]], rows, sizes)
     _assert_expected(score, vector["expected"])
+    assert geoparquet._footer_verdict(score) == vector["expected"]["verdict"]
 
 
 @pytest.mark.parametrize("name", sorted(_VECTORS["rows"]))
@@ -763,7 +764,10 @@ def test_shared_row_vectors(name: str) -> None:
     )
     assert [list(c) for c in chunks] == vector["expected_chunks"]
     assert weights == [float(w) for w in vector["chunk_rows"]]
-    _assert_expected(geoparquet._pruning_score(chunks, weights, weights), vector["expected"])
+    score = geoparquet._pruning_score(chunks, weights, weights)
+    _assert_expected(score, vector["expected"])
+    boxed = sum(1 for b in vector["boxes"] if b is not None)
+    assert geoparquet._row_verdict(score, boxed) == vector["expected"]["verdict"]
 
 
 def test_spatial_ordering_fails_below_the_bar() -> None:

@@ -9,7 +9,7 @@ import pytest
 from tests.integration import _data_assets as assets
 from tests.integration._owner_catalog import _catalog, _declare, _findings
 
-pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("zero_ordering_size_floor_fixture")]
+pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize("null_group", [0, 2, 5])

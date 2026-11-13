@@ -171,9 +171,9 @@ def test_matching_mirror_in_fresh_interpreter(catalog_root: Path, tmp_path: Path
         "from rashid.catalog import CatalogGraph\n"
         "from rashid.data import validate_data\n"
         "findings = validate_data(CatalogGraph.load(Path(sys.argv[1])))\n"
-        # The two-row mirror sits under the 5 MB floor (PORTO-FMT-058): the one
-        # INFO saying order is not judged is the expected clean outcome.
-        "findings = [f for f in findings if 'not judged' not in f.message]\n"
+        # The two-row mirror has too few rows for the row check (PORTO-FMT-052):
+        # the one INFO saying so is the expected clean outcome.
+        "findings = [f for f in findings if 'too few rows to judge' not in f.message]\n"
         "assert findings == [], [(f.rule_id, f.message) for f in findings]\n"
     )
     result = subprocess.run(

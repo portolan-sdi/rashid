@@ -367,11 +367,3 @@ def write_plain_tiff(path: Path, *, size: int = 1024) -> None:
         transform=from_bounds(*BBOX, size, size),
     ) as dst:
         dst.write(arr)
-
-
-def zero_ordering_size_floor(monkeypatch) -> None:
-    """Disable the spec's 5 MB ordering floor (PORTO-FMT-058) for a module
-    whose kilobyte fixtures pin judged ordering verdicts."""
-    from rashid.data import geoparquet
-
-    monkeypatch.setattr(geoparquet, "_MIN_ORDERING_FILE_BYTES", 0)

@@ -361,8 +361,6 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
             "PORTO-FMT-053",
             "PORTO-FMT-054",
             "PORTO-FMT-055",
-            "PORTO-FMT-058",
-            "PORTO-FMT-059",
             "PORTO-FMT-060",
             "PORTO-FMT-061",
         ),

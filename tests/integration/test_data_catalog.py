@@ -122,12 +122,12 @@ def _item(root: Path, name: str) -> Path:
 
 
 def _too_small_to_judge(findings: list) -> list:
-    """The pristine GeoParquet fixtures are kilobytes, under the 5 MB size
-    floor, so a clean run carries one INFO per file saying order is not judged
-    (PORTO-FMT-058). Everything else must be silent."""
+    """The pristine GeoParquet fixtures hold fewer than 200 rows, so a clean
+    run carries one INFO per file saying it has too few rows to judge
+    (PORTO-FMT-052). Everything else must be silent."""
     ordering = [f for f in findings if f.rule_id == DAT_ORDERING]
     assert all(f.severity is Severity.INFO for f in ordering)
-    assert all("not judged" in f.message for f in ordering)
+    assert all("too few rows to judge" in f.message for f in ordering)
     return [f for f in findings if f.rule_id != DAT_ORDERING]
 
 

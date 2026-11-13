@@ -60,32 +60,20 @@ _MIN_SKIP_EFFICIENCY = 0.65
 # large as the extent, or an extent with no area. Float noise, not a layout.
 _NO_SKIP = 1e-9
 
-# formats.md:56 — below eight row groups the grid reference is unreliable rather
-# than the bar unreachable: a grid of so few cells is a poor model of what a curve
-# sort achieves, so well-sorted files from several catalogs score 0.60 to 0.88 at
-# five row groups and 0.76 to 0.94 at eight (rashid#174 review, spec point 3).
-# PORTO-FMT-044 withholds only the pass there: a clear failure is plain from
-# three row groups up, where efficiency under _OBVIOUS_FAIL_EFFICIENCY fails
-# (PORTO-FMT-059). Two groups are exempt: the 2026-11 sort control measured
-# sorted two-group copies as low as 0.18, so a clear-fail there would reject
-# files a re-sort cannot improve. No tested sorted copy with three or more
-# groups fell below 0.34.
+# formats.md, the two paths: a file with eight or more row groups takes the
+# footer check on its row-group boxes (PORTO-FMT-050). Below eight the grid
+# reference is a poor model of a curve sort, so well-sorted files from several
+# catalogs score 0.60 to 0.88 at five row groups and 0.76 to 0.94 at eight
+# (rashid#174 review, spec point 3). PORTO-FMT-044 forbids judging such a file
+# by its row-group boxes, so it takes the row check instead.
 _MIN_ORDERING_ROW_GROUPS = 8
-_OBVIOUS_FAIL_EFFICIENCY = 0.25
-
-# formats.md, the size floor (PORTO-FMT-058): under five million compressed
-# bytes, pruning saves a reader almost nothing, so nothing about the file's
-# order is judged and the validator says so. The sum of the row groups'
-# compressed bytes is the spec's measure: footer-only, so a remote validator
-# reads the same number as a local one.
-_MIN_ORDERING_FILE_BYTES = 5_000_000
 
 # Row ordering is a separate rule that applies to every file, whatever its row-group
 # layout (formats.md:30). It is checked by splitting the rows into the groups a
 # conforming writer would have produced and applying the same skip-rate metric
 # to those chunks against a reference of the same count, which works at any
-# row-group count and is the only check available below the floor. Ten chunks
-# keeps the reference above the floor; under _MIN_CHUNK_ROWS rows a chunk's box
+# row-group count and judges every file below eight row groups. Ten chunks
+# keeps the reference above the row-group floor; under _MIN_CHUNK_ROWS rows a chunk's box
 # describes too few points to say anything, so a file needs _MIN_ORDERING_ROWS
 # rows before the row check judges it. Neither number is a spec threshold.
 _ORDERING_CHUNKS = 10
@@ -149,26 +137,14 @@ def check_geoparquet(
 
     bboxes, stat_defects = _rowgroup_stat_defects(key, parquet, geo, subject=subject)
     defects.extend(stat_defects)
+    shape = (sum(row_counts), len(row_counts))
     if bboxes is None:
-        return defects  # without per-row-group boxes, ordering cannot be judged
-
-    sizes = _rowgroup_compressed_sizes(meta)
-    if sum(sizes) < _MIN_ORDERING_FILE_BYTES:
-        # PORTO-FMT-058: under the size floor nothing about order is judged,
-        # and the validator says so rather than staying silent.
-        defects.append(
-            DataDefect(
-                DAT_ORDERING,
-                Severity.INFO,
-                f"{subject} holds {_mb(sum(sizes))} of row-group data, under the "
-                f"{_mb(_MIN_ORDERING_FILE_BYTES)} floor at which spatial ordering "
-                "matters for reads, so its order is not judged",
-                key,
-            )
-        )
+        # Without per-row-group boxes the footer check cannot run, so the
+        # row check judges the file (formats.md, Row check).
+        defects.extend(_row_ordering_defects(key, parquet, geo, shape, subject=subject))
         return defects
 
-    layout = _RowGroupLayout(bboxes, row_counts, sizes)
+    layout = _RowGroupLayout(bboxes, row_counts, _rowgroup_compressed_sizes(meta))
     defects.extend(_ordering_defects(key, parquet, geo, layout, subject=subject))
     return defects
 
@@ -657,10 +633,10 @@ def _column_index(meta: Any) -> dict[str, int]:
 
 
 def _rowgroup_compressed_sizes(meta: Any) -> list[float]:
-    """Each row group's compressed bytes, the spec's measure of file size.
+    """Each row group's compressed bytes, the footer check's byte weights.
 
     The sum over each group's column chunks, so the number is footer-only and
-    a remote validator reads the same value as a local one (PORTO-FMT-058).
+    a remote validator reads the same value as a local one.
     """
     sizes: list[float] = []
     for i in range(meta.num_row_groups):
@@ -669,10 +645,6 @@ def _rowgroup_compressed_sizes(meta: Any) -> list[float]:
             float(sum(group.column(j).total_compressed_size for j in range(group.num_columns)))
         )
     return sizes
-
-
-def _mb(size: float) -> str:
-    return f"{size / 1_000_000:.1f} MB"
 
 
 @dataclass(frozen=True)
@@ -692,24 +664,25 @@ def _ordering_defects(
     *,
     subject: str,
 ) -> list[DataDefect]:
-    """Spatial ordering, judged from the footer wherever the footer can decide
-    (formats.md:30,38; PORTO-FMT-050, PORTO-FMT-059, PORTO-FMT-044).
+    """Spatial ordering, judged on one of the spec's two paths
+    (formats.md:30,38; PORTO-FMT-050, PORTO-FMT-044).
 
-    At eight or more row groups the row-group boxes decide and no row is read.
-    Below eight the footer still settles the clear failure: efficiency under
-    the 0.25 obvious-fail bar at two or more groups means boxes that each
-    cover most of the extent, which is plain at any count. Otherwise the pass
-    is withheld, the layout is reported at INFO, and the rows are judged in
-    file-order chunks by the same metric. One file, one verdict: the fail
-    paths and the row check never both run, so they cannot disagree.
+    At eight or more row groups the footer check decides from the row-group
+    boxes and no row is read. Where those boxes give an undefined efficiency,
+    as with a point extent, the row check decides instead. Below eight row
+    groups the boxes give no verdict: their statistics are reported at INFO,
+    which PORTO-FMT-044 allows, and the row check judges the rows in
+    file-order chunks by the same metric and bar. One file, one verdict: the
+    footer verdict and the row check never both run, so they cannot disagree.
     """
     groups = len(layout.bboxes)
     rows = sum(layout.row_counts)
     weights = [float(n) for n in layout.row_counts]
     score = _pruning_score(layout.bboxes, weights, layout.sizes)
-    if groups >= _MIN_ORDERING_ROW_GROUPS:
-        if not score.below_bar:
-            return []
+    verdict = _footer_verdict(score)
+    if verdict == "pass":
+        return []
+    if verdict == "fail":
         summary = _pruning_summary(score, "row group", judged=True)
         return [
             DataDefect(
@@ -720,32 +693,18 @@ def _ordering_defects(
                 key,
             )
         ]
-    efficiency = score.efficiency
-    if groups >= 3 and efficiency is not None and efficiency < _OBVIOUS_FAIL_EFFICIENCY:
-        # PORTO-FMT-059: the clear failure does not wait for eight row groups,
-        # but it does wait for three -- sorted two-group files can score 0.18.
-        summary = _pruning_summary(score, "row group", judged=True, bar=_OBVIOUS_FAIL_EFFICIENCY)
-        return [
-            DataDefect(
-                DAT_ORDERING,
-                Severity.ERROR,
-                f"{subject} rows are plainly not spatially ordered, at any row-group "
-                f"count: across its {_plural(groups, 'row group')}, {summary}",
-                key,
-            )
-        ]
     defects: list[DataDefect] = []
-    if groups > 1 and rows >= _MIN_ORDERING_ROWS:
+    if 1 < groups < _MIN_ORDERING_ROW_GROUPS and rows >= _MIN_ORDERING_ROWS:
         # One box is the extent itself and has no layout to describe; under the
-        # row floor the row check's own INFO names both floors instead.
+        # row floor the row check's own INFO says why there is no verdict.
         summary = _pruning_summary(score, "row group", judged=False)
         defects.append(
             DataDefect(
                 DAT_ORDERING,
                 Severity.INFO,
                 f"{subject} has {_plural(groups, 'row group')}, under the "
-                f"{_MIN_ORDERING_ROW_GROUPS} a footer pass needs, so its layout is "
-                f"reported and not judged: {summary}",
+                f"{_MIN_ORDERING_ROW_GROUPS} the footer check needs, so its rows are "
+                f"judged instead and its layout is only reported: {summary}",
                 key,
             )
         )
@@ -761,11 +720,12 @@ def _row_ordering_defects(
     *,
     subject: str | None = None,
 ) -> list[DataDefect]:
-    """Judge row order where the footer check does not (PORTO-FMT-006's test).
+    """The row check, PORTO-FMT-006's test: the path for a file with fewer
+    than eight row groups, or without per-row-group spatial statistics.
 
-    formats.md:30 requires spatially ordered rows in every file, and below the
-    row-group floor a validator checks that by splitting them into the ten
-    chunks a conforming writer would have produced. The reference stac-geoparquet
+    formats.md:30 requires spatially ordered rows in every file, and the row
+    check judges them by splitting them into the ten chunks a conforming
+    writer would have produced. The reference stac-geoparquet
     writer shows why that matters. With no schema passed,
     ``parse_stac_items_to_arrow`` returns one contiguous record batch at any
     item count and ``to_parquet`` writes one row group per batch, leaving the
@@ -777,7 +737,9 @@ def _row_ordering_defects(
     defeats, and it disagreed with the row-group check about real files.
 
     Every reason the check cannot run is an INFO rather than silence
-    (PORTO-FMT-052): a validator's silence reads as a pass.
+    (PORTO-FMT-052): a validator's silence reads as a pass. Under 200 rows
+    the file has too few rows to judge, and an undefined efficiency, as with
+    rows all at one point, gives no verdict either.
     """
     rows, groups = shape
     subject = subject or f"asset '{key}'"
@@ -787,17 +749,20 @@ def _row_ordering_defects(
     # Re-apply the floor to the rows that carry a box, not to the row count.
     # Rows without geometry have no position; a file can hold enough rows and
     # still leave too few boxes for a chunk's box to describe anything.
-    boxed = sum(1 for b in row_boxes if b is not None) if row_boxes is not None else 0
-    if row_boxes is None or boxed < _MIN_ORDERING_ROWS:
-        if row_boxes is None:
-            why = " with no bbox covering column to read"
-        else:
-            verb = "carries" if boxed == 1 else "carry"
-            why = f" of which {boxed} {verb} a covering box"
+    if row_boxes is None:
+        why = " with no bbox covering column to read"
         return [_unevaluated(key, subject, rows, groups, why)]
+    boxed = sum(1 for b in row_boxes if b is not None)
     chunks, weights = _chunked_bboxes(row_boxes)
     score = _pruning_score(chunks, weights, weights)
-    if not score.below_bar:
+    verdict = _row_verdict(score, boxed)
+    if verdict == "too-few-rows":
+        verb = "carries" if boxed == 1 else "carry"
+        why = f" of which {boxed} {verb} a covering box{_floors_not_reached()}"
+        return [_unevaluated(key, subject, rows, groups, why)]
+    if verdict == "none":
+        return [_unevaluated(key, subject, rows, groups, _undefined_efficiency())]
+    if verdict == "pass":
         return []
     # n is the number of chunks that carry a box (PORTO-FMT-006's test), so the
     # reference shrinks with them rather than staying at ten cells.
@@ -816,11 +781,36 @@ def _row_ordering_defects(
     ]
 
 
+def _footer_verdict(score: _PruningScore) -> str:
+    """The footer check's verdict on row-group boxes, as PORTO-FMT-054's
+    vectors name it: ``pass`` or ``fail`` from eight boxes with a defined
+    efficiency (PORTO-FMT-050), otherwise ``row-check`` (PORTO-FMT-044)."""
+    if score.count < _MIN_ORDERING_ROW_GROUPS or score.below_bar is None:
+        return "row-check"
+    return "fail" if score.below_bar else "pass"
+
+
+def _row_verdict(score: _PruningScore, boxed_rows: int) -> str:
+    """The row check's verdict on file-order chunks, as PORTO-FMT-054's
+    vectors name it: ``too-few-rows`` under the 200-row floor
+    (PORTO-FMT-052), ``none`` for an undefined efficiency, otherwise ``pass``
+    or ``fail``. The floor counts the rows that carry a box."""
+    if boxed_rows < _MIN_ORDERING_ROWS:
+        return "too-few-rows"
+    if score.below_bar is None:
+        return "none"
+    return "fail" if score.below_bar else "pass"
+
+
 def _floors_not_reached() -> str:
     return (
-        f"; the row-group check needs {_MIN_ORDERING_ROW_GROUPS} row groups and the row "
-        f"check needs {_MIN_ORDERING_ROWS} rows with a bbox covering column"
+        f", too few rows to judge: the row check needs {_MIN_ORDERING_ROWS} rows "
+        "with a bbox covering column"
     )
+
+
+def _undefined_efficiency() -> str:
+    return ", whose chunk boxes leave the pruning efficiency undefined"
 
 
 def _unevaluated(key: str, subject: str, rows: int, groups: int, why: str) -> DataDefect:
