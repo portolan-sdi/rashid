@@ -15,6 +15,7 @@ from rashid.data._files import AssetFiles
 from rashid.data.spatial import Geo, as_bbox, bbox_union, unreadable_spatial_metadata
 from rashid.model import Severity
 from rashid.registry import (
+    DAT_COLUMN_DESCRIPTIONS,
     DAT_GEOPARQUET_VERSION,
     DAT_ORDERING,
     DAT_ROWGROUP_SIZE,
@@ -25,6 +26,7 @@ from rashid.registry import (
 from rashid.rules._common import (
     has_table_columns,
     roles_of,
+    table_declarations,
 )
 
 # formats.md:75 — a GeoParquet row group MUST hold no more than this many rows.
@@ -299,6 +301,46 @@ def check_vector_columns(
             DAT_VECTOR_COLUMNS,
             Severity.WARNING,
             f"vector asset '{key}': {where} with the table extension (table:columns)",
+            key,
+        )
+    ]
+
+
+def check_column_descriptions(node: Node, key: str, asset: dict[str, Any]) -> list[DataDefect]:
+    """Every ``table:columns`` entry of a data asset carries a description.
+
+    formats.md, Vector Data: "Every entry in ``table:columns`` SHOULD include a
+    ``description`` when a source defines the column" (PORTO-FMT-077). A name
+    and a type are already in the Parquet footer. When no source defines a
+    column, the publisher leaves the description out and names the column in
+    the collection README (PORTO-FMT-078). The validator cannot tell these
+    columns from undocumented ones, so it reports a warning for both. It checks
+    presence only. It reads no file.
+    """
+    if "data" not in roles_of(asset):
+        return []
+    for holder in table_declarations(node, asset):
+        columns = holder.get("table:columns")
+        if isinstance(columns, list) and columns:
+            break
+    else:
+        return []  # no declaration: PTL-DAT-015 and PTL-DAT-017 own it
+    bare = [
+        str(column.get("name", "?"))
+        for column in columns
+        if isinstance(column, dict) and not str(column.get("description") or "").strip()
+    ]
+    if not bare:
+        return []
+    shown = ", ".join(bare[:5])
+    more = f", and {len(bare) - 5} more" if len(bare) > 5 else ""
+    return [
+        DataDefect(
+            DAT_COLUMN_DESCRIPTIONS,
+            Severity.WARNING,
+            f"asset '{key}': {len(bare)} of {len(columns)} table:columns entries carry "
+            f"no description ({shown}{more}). If no source defines a column, name it "
+            "in the collection README instead.",
             key,
         )
     ]

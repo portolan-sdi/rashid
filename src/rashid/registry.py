@@ -139,6 +139,7 @@ DAT_PARTITION_SCHEMA = "PTL-DAT-014"
 DAT_TABULAR = "PTL-DAT-015"
 DAT_MIRROR = "PTL-DAT-016"
 DAT_VECTOR_COLUMNS = "PTL-DAT-017"
+DAT_COLUMN_DESCRIPTIONS = "PTL-DAT-020"
 LIV_UNAVAILABLE = "PTL-LIV-000"
 LIV_RANGE = "PTL-LIV-001"
 LIV_HEAD_LENGTH = "PTL-LIV-002"
@@ -426,6 +427,13 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         "a GeoParquet data asset's columns are documented with table:columns",
         Severity.WARNING,
         ("PORTO-FMT-046", "PORTO-FMT-047", "PORTO-FMT-048", "PORTO-FMT-045"),
+        stage="data",
+    ),
+    CheckInfo(
+        DAT_COLUMN_DESCRIPTIONS,
+        "every table:columns entry of a data asset carries a description",
+        Severity.WARNING,
+        ("PORTO-FMT-077",),
         stage="data",
     ),
     CheckInfo(

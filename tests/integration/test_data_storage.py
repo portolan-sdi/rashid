@@ -34,6 +34,7 @@ from rashid.model import Severity
 from rashid.registry import (
     DAT_COG,
     DAT_COG_STATS,
+    DAT_COLUMN_DESCRIPTIONS,
     DAT_GEOPARQUET_VERSION,
     DAT_ORDERING,
     DAT_OVERVIEWS,
@@ -1227,6 +1228,75 @@ def test_plain_parquet_is_not_vector(tmp_path: Path) -> None:
     path = tmp_path / "plain.parquet"
     assets.write_geoparquet(path, geo=False)
     assert _vector(_tabular_collection(), path) == []
+
+
+# --- column descriptions (PTL-DAT-020) --------------------------------------
+#
+# PORTO-FMT-077: every table:columns entry SHOULD carry a description when a
+# source defines the column. PORTO-FMT-078: when no source defines it, the
+# publisher leaves the description out and names the column in the README.
+
+
+def _described(node: Node, **asset_fields: object) -> list:
+    asset = {"href": "./data.parquet", "roles": ["data"], **asset_fields}
+    return geoparquet.check_column_descriptions(node, "data", asset)
+
+
+def test_columns_without_descriptions_flag_dat_020() -> None:
+    columns = [
+        {"name": "value", "type": "int64"},
+        {"name": "label", "type": "string", "description": "a label"},
+    ]
+    defects = _described(_tabular_collection(**{"table:columns": columns}))
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+    assert defects[0].severity is Severity.WARNING
+    assert "1 of 2" in defects[0].message
+    assert "value" in defects[0].message
+    assert "README" in defects[0].message
+
+
+def test_columns_with_descriptions_are_clean() -> None:
+    assert _described(_tabular_collection(**{"table:columns": _COLUMNS})) == []
+
+
+def test_a_blank_description_does_not_count() -> None:
+    # An empty string satisfies the key but documents nothing.
+    columns = [{"name": "value", "type": "int64", "description": "   "}]
+    defects = _described(_tabular_collection(**{"table:columns": columns}))
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_more_than_five_bare_columns_are_summarized() -> None:
+    columns = [{"name": f"c{i}", "type": "int64"} for i in range(7)]
+    defects = _described(_tabular_collection(**{"table:columns": columns}))
+    assert "c0, c1, c2, c3, c4, and 2 more" in defects[0].message
+
+
+def test_asset_level_columns_are_read() -> None:
+    columns = [{"name": "value", "type": "int64"}]
+    defects = _described(_tabular_collection(), **{"table:columns": columns})
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_undeclared_columns_are_not_this_rules_business() -> None:
+    # Declaring nothing at all is PTL-DAT-015 or PTL-DAT-017's finding.
+    assert _described(_tabular_collection()) == []
+
+
+def test_item_column_descriptions_are_read_from_properties() -> None:
+    properties = {
+        "datetime": "2024-01-01T00:00:00Z",
+        "table:columns": [{"name": "value", "type": "int64"}],
+    }
+    defects = _described(_vector_item(properties=properties))
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+
+
+def test_non_data_roles_carry_no_column_finding() -> None:
+    columns = [{"name": "value", "type": "int64"}]
+    node = _tabular_collection(**{"table:columns": columns})
+    asset = {"href": "./x.parquet", "roles": ["metadata"]}
+    assert geoparquet.check_column_descriptions(node, "x", asset) == []
 
 
 def test_non_data_roles_are_not_vector(tmp_path: Path) -> None:

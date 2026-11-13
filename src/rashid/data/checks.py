@@ -72,6 +72,7 @@ from rashid.catalog import CatalogGraph, Node
 from rashid.data import DataDefect, DataResults
 from rashid.data._files import AssetFiles
 from rashid.data.geoparquet import (
+    check_column_descriptions,
     check_geoparquet,
     check_tabular,
     check_vector_columns,
@@ -221,6 +222,7 @@ def _check_asset(
             defects.extend(check_geoparquet(key, files))
             defects.extend(check_tabular(node, key, asset, files))
             defects.extend(check_vector_columns(node, key, asset, files))
+            defects.extend(check_column_descriptions(node, key, asset))
         if expected in {"parquet", "tiff", "pmtiles"}:
             consistency, bounds, complete = _check_consistency(
                 node, key=key, asset=asset, expected=expected, files=files
