@@ -52,7 +52,9 @@ def test_s3_href_is_rejected_with_dedicated_message(catalog: CatalogBuilder) -> 
     catalog.collection("roads", assets={"data": _asset(href="s3://bucket/roads/data.parquet")})
     findings = findings_for(validate(catalog.write()), "PTL-AST-002")
     assert len(findings) == 1
-    assert "uses the 's3' scheme" in findings[0].message
+    assert (
+        findings[0].message == "asset 'data' href uses the 's3' scheme and has no https alternate"
+    )
     assert findings[0].fix_hint is not None
 
 
@@ -105,15 +107,21 @@ def test_s3_href_with_https_alternate_is_a_warning(catalog: CatalogBuilder) -> N
     alternate = {"https": {"href": _OK}}
     findings = _s3_findings(catalog, alternate)
     assert [f.severity for f in findings] == [Severity.WARNING]
-    assert "uses the 's3' scheme" in findings[0].message
-    assert "https" in (findings[0].fix_hint or "")
+    assert findings[0].message == (
+        "asset 'data' href uses the 's3' scheme; absolute hrefs should use https"
+    )
+    assert (
+        findings[0].fix_hint == "make the https alternate the href and move the s3 URL to alternate"
+    )
 
 
 def test_plain_http_href_is_rejected(catalog: CatalogBuilder) -> None:
     catalog.collection("roads", assets={"data": _asset(href="http://example.org/data.parquet")})
     findings = findings_for(validate(catalog.write()), "PTL-AST-002")
     assert len(findings) == 1
-    assert "uses the 'http' scheme" in findings[0].message
+    assert findings[0].message == (
+        "asset 'data' href uses the 'http' scheme and has no https alternate"
+    )
 
 
 def test_scheme_without_slashes_is_named_plainly(catalog: CatalogBuilder) -> None:
