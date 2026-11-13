@@ -218,6 +218,15 @@ def test_band_inherits_nodata_from_its_asset(catalog: CatalogBuilder) -> None:
     assert findings_for(validate(_built(catalog, hoist)), "PTL-CLS-003") == []
 
 
+def test_class_at_band_nodata_must_be_marked(catalog: CatalogBuilder) -> None:
+    def unmark(data: dict[str, Any]) -> None:
+        del _classes(data)[0]["nodata"]
+
+    findings = findings_for(validate(_built(catalog, unmark)), "PTL-CLS-003")
+    assert [f.json_pointer for f in findings] == [f"{_POINTER}/0/nodata"]
+    assert findings[0].expected is True
+
+
 @pytest.mark.parametrize("nodata", [0.0, "nan"])
 def test_band_nodata_compares_as_a_number(catalog: CatalogBuilder, nodata: Any) -> None:
     def set_nodata(data: dict[str, Any]) -> None:

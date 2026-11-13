@@ -18,7 +18,8 @@ included:
   ``value`` and a ``name`` of letters, digits, ``-`` and ``_``, each unique
   within the list, a ``title``, and a ``color_hint`` of six hex digits
   without ``#``.
-- ``PTL-CLS-003`` a class marked ``nodata`` has the band's ``nodata`` value.
+- ``PTL-CLS-003`` a class is marked ``nodata`` if and only if its value is
+  the band's ``nodata``.
 - ``PTL-CLS-004`` every class value fits the band's ``data_type``.
 - ``PTL-CLS-005`` the list sits on a single-band data asset, or on its band
   in STAC 1.1 ``bands`` for a multi-band asset.
@@ -330,16 +331,17 @@ def _same_number(nodata: Any, value: int) -> bool:
 
 
 class NodataClassRule(Rule):
-    """A class marked ``nodata`` names the band's own nodata value.
+    """A class is marked ``nodata`` if and only if its value is the band's nodata.
 
     A viewer draws nodata pixels as empty and leaves them out of the legend.
     A nodata class whose value is not the band's nodata contradicts the band,
-    and no viewer can honour both.
+    and so does a class at the band's nodata that is not marked, which the
+    legend lists but the map never draws.
     """
 
     id = "PTL-CLS-003"
     default_severity = Severity.ERROR
-    description = "a class marked nodata has the value of its band's nodata"
+    description = "a class is marked nodata if and only if its value is its band's nodata"
     kinds = ("collection", "item")
     spec_ids = ("PORTO-FMT-057",)
 
@@ -347,7 +349,18 @@ class NodataClassRule(Rule):
         for found in class_lists(node):
             for pointer, entry in found.entries():
                 value = entry.get("value")
-                if entry.get("nodata") is not True or not _is_integer(value):
+                if not _is_integer(value):
+                    continue
+                if entry.get("nodata") is not True:
+                    if _same_number(found.nodata, value):
+                        yield self.finding(
+                            node,
+                            f"class {pointer} has value {value}, its band's nodata, but is not"
+                            " marked nodata",
+                            json_pointer=json_pointer("nodata", prefix=pointer),
+                            fix_hint="set nodata to true on the class",
+                            expected=True,
+                        )
                     continue
                 if found.nodata is _ABSENT:
                     yield self.finding(
