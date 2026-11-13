@@ -465,10 +465,13 @@ def test_item_assets_with_the_classes_pass(catalog: CatalogBuilder) -> None:
         ("title", "Open water", True),
         ("color_hint", "1E90FF", True),
         ("color_hint", "0000ff", False),
+        ("nodata", True, True),
+        # An absent nodata flag compares equal to false.
+        ("nodata", False, False),
     ],
 )
 def test_item_assets_with_another_legend_warn(
-    catalog: CatalogBuilder, field: str, value: str, flagged: bool
+    catalog: CatalogBuilder, field: str, value: Any, flagged: bool
 ) -> None:
     template = _raster_asset()
     template["bands"][0]["classification:classes"][2][field] = value
