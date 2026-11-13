@@ -102,17 +102,37 @@ def check_raster(
 def classified_asset(
     node: Node, key: str, asset: dict[str, Any], graph: CatalogGraph | None
 ) -> dict[str, Any]:
-    """The asset whose class lists describe this file.
+    """The asset whose class lists and bitfields describe this file.
 
-    An item asset that declares no classes inherits the ones its collection's
+    An item asset that declares neither inherits the ones its collection's
     ``item_assets`` template declares for the same key.
     """
-    if asset_class_lists("", asset) or node.kind != "item" or graph is None:
+    if _described_bands(asset) or node.kind != "item" or graph is None:
         return asset
     collection = graph.enclosing_collection_of(node)
     templates = collection.data.get("item_assets") if collection is not None else None
     template = templates.get(key) if isinstance(templates, dict) else None
-    return template if isinstance(template, dict) and asset_class_lists("", template) else asset
+    return template if isinstance(template, dict) and _described_bands(template) else asset
+
+
+def _described_bands(asset: dict[str, Any]) -> set[int]:
+    """Zero-based bands that classes or bitfields name; asset-level ones name band 0."""
+    described = {
+        0 if found.band_index is None else found.band_index
+        for found in asset_class_lists("", asset)
+    }
+    # A bit-packed band names its values with classification:bitfields.
+    if _BITFIELDS in asset:
+        described.add(0)  # the asset's own bitfields describe its only band
+    for field in BAND_FIELDS:
+        bands = asset.get(field)
+        if isinstance(bands, list):
+            described.update(
+                index
+                for index, band in enumerate(bands)
+                if isinstance(band, dict) and _BITFIELDS in band
+            )
+    return described
 
 
 def _drawn_classes(
@@ -284,21 +304,7 @@ def _check_palette_classes(key: str, asset: dict[str, Any], files: AssetFiles) -
     occurrence is a continuous percentage with one), and only the producer
     can declare a raster classified (PORTO-FMT-049), so this is an INFO hint.
     """
-    described = {
-        0 if found.band_index is None else found.band_index
-        for found in asset_class_lists("", asset)
-    }
-    # A bit-packed band names its values with classification:bitfields.
-    if _BITFIELDS in asset:
-        described.add(0)  # the asset's own bitfields describe its only band
-    for field in BAND_FIELDS:
-        bands = asset.get(field)
-        if isinstance(bands, list):
-            described.update(
-                index
-                for index, band in enumerate(bands)
-                if isinstance(band, dict) and _BITFIELDS in band
-            )
+    described = _described_bands(asset)
     try:
         src = files.raster()
         palette = [
@@ -334,12 +340,9 @@ def _check_class_placement(key: str, asset: dict[str, Any], files: AssetFiles) -
     needs the list on a band in ``bands``, a single-band file on the asset,
     and no list may describe a band the file lacks.
     """
-    lists = [
-        found
-        for found in asset_class_lists(json_pointer("assets", key), asset)
-        if found.band_field != "raster:bands"
-    ]
-    if not lists:
+    every = asset_class_lists(json_pointer("assets", key), asset)
+    lists = [found for found in every if found.band_field != "raster:bands"]
+    if not every:
         return []
     try:
         count = files.raster().count
@@ -348,8 +351,9 @@ def _check_class_placement(key: str, asset: dict[str, Any], files: AssetFiles) -
     declared = band_count(asset)
     on_asset = [found for found in lists if found.band_index is None]
     on_band = [found for found in lists if found.band_index is not None]
+    # A legacy raster:bands list, too, cannot describe a band the file lacks.
     beyond = [
-        found for found in on_band if found.band_index is not None and found.band_index >= count
+        found for found in every if found.band_index is not None and found.band_index >= count
     ]
     # Where the metadata agrees with the file, PTL-CLS-005 reports misplacement.
     if count > 1 and on_asset and declared <= 1:

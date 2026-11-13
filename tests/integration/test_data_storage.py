@@ -1633,6 +1633,55 @@ def test_classes_on_a_band_the_file_lacks_are_an_error(tmp_path: Path) -> None:
     ]
 
 
+def test_legacy_classes_on_a_band_the_file_lacks_are_an_error(tmp_path: Path) -> None:
+    path = tmp_path / "one.tif"
+    assets.write_cog(path)
+    classes = [{"value": 1, "name": "urban", "title": "Urban"}]
+    asset = {
+        "classification:classes": classes,
+        "raster:bands": [{"classification:classes": classes}, {"classification:classes": classes}],
+    }
+    defects = [d for d in _raster(path, asset) if d.rule_id == DAT_CLASS_COLORS]
+    assert [d.json_pointer for d in defects] == [
+        "/assets/data/raster:bands/1/classification:classes"
+    ]
+
+
+_BITS = [{"offset": 0, "length": 1, "classes": [{"value": 1, "name": "cloud"}]}]
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        {"classification:bitfields": _BITS},
+        {"bands": [{"classification:bitfields": _BITS}]},
+        {"nodata": 0},
+    ],
+    ids=["asset-bitfields", "band-bitfields", "no-bitfields"],
+)
+def test_item_inherits_bitfields_from_item_assets(
+    catalog: CatalogBuilder, tmp_path: Path, template: dict
+) -> None:
+    catalog.collection("qa").item("scene-1")
+    root = catalog.write()
+    mutate_json(
+        root / "qa" / "collection.json",
+        lambda data: data.update(item_assets={"data": template}),
+    )
+    own = {"href": "./qa.tif", "type": _COG_TYPE, "roles": ["data"]}
+    for item_path in (root / "qa").rglob("scene-1.json"):
+        mutate_json(item_path, lambda data: data.update(assets={"data": own}))
+    path = tmp_path / "qa.tif"
+    assets.write_cog(path, nodata=0, colormap=_FLOOD_TABLE)
+    graph = CatalogGraph.load(root)
+    item = next(graph.iter("item"))
+    defects = checks.check_node(item, _FileReader("./qa.tif", path), graph)
+    hints = [d for d in defects if d.rule_id == DAT_PALETTE_CLASSES]
+    assert len(hints) == (1 if "nodata" in template else 0)
+    for hint in hints:
+        resolve_pointer(item.data, hint.json_pointer)
+
+
 def test_inherited_class_findings_point_into_the_item(
     catalog: CatalogBuilder, tmp_path: Path
 ) -> None:
