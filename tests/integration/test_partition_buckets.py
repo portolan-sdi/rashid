@@ -18,7 +18,7 @@ pytest.importorskip("pyarrow")
 from rashid import _store, _trace, validate
 from rashid._href import bucket_glob
 from rashid.catalog import CatalogGraph, Node
-from rashid.data import partitions
+from rashid.data import _reads_remote, partitions
 from rashid.data._files import glob_regex, listing_prefix
 from rashid.data.reader import Locator
 from rashid.model import Severity
@@ -423,3 +423,85 @@ def test_bucket_region_is_none_without_an_answer(monkeypatch: pytest.MonkeyPatch
     assert _store.bucket_region("bkt") is None
     monkeypatch.setattr(_store, "probe", lambda *_: _Answer({}))
     assert _store.bucket_region("bkt") is None
+
+
+# --- review fixes ------------------------------------------------------------------
+
+
+def test_an_az_glob_uses_an_ms_azure_entry_that_names_no_container() -> None:
+    """Storage v2.0.0's ms-azure entry has a platform and an account, and no bucket."""
+    entry = {
+        "type": "ms-azure",
+        "platform": "https://{account}.blob.core.windows.net",
+        "account": "acct",
+    }
+    node = _node(**{"storage:schemes": {"azure": entry}})
+    access = partitions._bucket_access(node, None, "az", "container", _Remote())
+    assert isinstance(access, partitions._Bucket)
+    assert access.base == "https://acct.blob.core.windows.net/container/"
+
+
+def test_an_entry_that_names_the_container_wins() -> None:
+    schemes = {
+        "any": {"type": "ms-azure", "account": "other"},
+        "named": {"type": "ms-azure", "account": "acct", "container": "container"},
+    }
+    access = partitions._bucket_access(
+        _node(**{"storage:schemes": schemes}), None, "az", "container", _Remote()
+    )
+    assert isinstance(access, partitions._Bucket)
+    assert access.config == {"account_name": "acct"}
+
+
+def test_an_unnamed_azure_entry_is_not_used_for_an_s3_glob(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_store, "bucket_region", lambda bucket: "eu-west-1")
+    node = _node(**{"storage:schemes": {"azure": {"type": "ms-azure", "account": "acct"}}})
+    access = partitions._bucket_access(node, None, "s3", "bkt", _Remote())
+    assert isinstance(access, partitions._Bucket)
+    assert access.config == {"region": "eu-west-1"}  # Amazon S3, not the Azure entry
+
+
+def test_a_bucket_named_like_the_platform_host_stays_path_style() -> None:
+    access = _access("s3", {"type": "custom-s3", "platform": "https://bkt.example.org"})
+    assert access.config == {"endpoint": "https://bkt.example.org"}
+    assert access.base == "https://bkt.example.org/bkt/"
+
+
+def test_an_invalid_glob_pattern_warns_before_any_request(
+    https_server: HttpsServer, tmp_path: Path
+) -> None:
+    root = _bucket_catalog(
+        tmp_path, https_server.base, **{"partition:glob": "s3://bkt/parts/[z-a].parquet"}
+    )
+    notes = [f for f in _dat(root) if f.rule_id == DAT_UNAVAILABLE]
+    assert [(f.severity, f.json_pointer) for f in notes] == [(Severity.WARNING, "/partition:glob")]
+    assert notes[0].message.startswith("partition:glob: the glob is not a valid pattern:")
+    assert https_server.seen == []
+
+
+def test_a_key_with_url_characters_reads_its_own_object(
+    https_server: HttpsServer, tmp_path: Path
+) -> None:
+    path = tmp_path / "a.parquet"
+    assets.write_geoparquet(path, version="1.0.0")
+    body = path.read_bytes()
+    https_server.buckets["/bkt"] = [("parts/50%?#x.parquet", len(body))]
+    https_server.routes["/bkt/parts/50%25%3F%23x.parquet"] = Route(body=body)
+    root = _bucket_catalog(tmp_path, https_server.base)
+    version = [f for f in _dat(root) if f.rule_id == DAT_GEOPARQUET_VERSION]
+    assert len(version) == 1
+    assert "parts/50%?#x.parquet" in version[0].message
+
+
+def test_a_bucket_glob_sends_the_collection_to_the_remote_pool() -> None:
+    node = _node(**{"partition:glob": "s3://bkt/parts/*.parquet"})
+    assert _reads_remote(node, _Remote())
+    assert not _reads_remote(_node(**{"partition:glob": "parts/*.parquet"}), _Remote())
+
+    class _Local(_Remote):
+        def locate(self, _node: Node, _href: str) -> None:
+            return None
+
+    assert not _reads_remote(node, _Local())

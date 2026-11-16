@@ -7,14 +7,15 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
+from urllib.parse import quote
 
 from rashid import _store
-from rashid._href import bucket_glob, is_absolute_href, is_https_href, wire_url
+from rashid._href import bucket_glob, is_absolute_href, is_https_href, split_href
 from rashid.catalog import CatalogGraph, Node
 from rashid.data import DataDefect, _files
 from rashid.data._files import AssetFiles
 from rashid.data.geoparquet import check_geoparquet, partitioned_vector_columns
-from rashid.data.reader import AssetReader, Locator
+from rashid.data.reader import BUCKET_PROBE, AssetReader, Locator
 from rashid.model import Severity, json_pointer
 from rashid.registry import (
     DAT_ORDERING,
@@ -170,6 +171,8 @@ def _check_bucket_glob(
     except _store.StoreError as exc:
         why = {401: "denied", 403: "denied", 404: "not found"}.get(exc.status or 0, "failed")
         return [_glob_note(Severity.WARNING, f"listing the glob {why}: {exc}")], []
+    except re.error as exc:
+        return [_glob_note(Severity.WARNING, f"the glob is not a valid pattern: {exc}")], []
     if not matched:
         return [
             _glob_note(
@@ -201,7 +204,7 @@ def _check_sample(
             )
         )
     sources = [
-        (key, Locator(is_remote=True, source=wire_url(access.base, key), size=size), False)
+        (key, Locator(is_remote=True, source=access.base + quote(key, safe="/"), size=size), False)
         for key, size in footers
     ]
     collection, found = _read_partitions(node, sources, rows=rows)
@@ -221,9 +224,9 @@ def _bucket_access(
     with no value, an unsupported type) is an info. None when ``reader`` reads
     no remote file, such as with ``--data-scope local``; then no request goes out.
     """
-    if reader.locate(node, "https://bucket.invalid/") is None:
+    if reader.locate(node, BUCKET_PROBE) is None:
         return None
-    entry = _storage_scheme(node, graph, bucket)
+    entry = _storage_scheme(node, graph, scheme, bucket)
     kind = entry.get("type") if entry else _DEFAULT_TYPES.get(scheme)
     if entry and entry.get("requester_pays") is True:
         return _glob_note(Severity.INFO, "not listed: the bucket is requester pays")
@@ -276,8 +279,8 @@ def _custom_s3(entry: dict[str, Any], bucket: str) -> _Bucket | DataDefect:
     config: dict[str, Any] = {"endpoint": endpoint}
     if isinstance(region, str):
         config["region"] = region
-    host = endpoint.split("://", 1)[1].split("/", 1)[0]
-    if bucket in host:  # the template put the bucket in the host name
+    template = split_href(str(platform))
+    if template is not None and "{bucket}" in template.netloc:
         config["virtual_hosted_style_request"] = True
         return _Bucket(config, f"{endpoint}/")
     return _Bucket(config, f"{endpoint}/{bucket}/")
@@ -294,17 +297,28 @@ _ACCESS = {
 }
 
 
-def _storage_scheme(node: Node, graph: CatalogGraph | None, bucket: str) -> dict[str, Any] | None:
-    """The first ``storage:schemes`` entry naming ``bucket``, on ``node`` or an ancestor."""
+def _storage_scheme(
+    node: Node, graph: CatalogGraph | None, scheme: str, bucket: str
+) -> dict[str, Any] | None:
+    """The ``storage:schemes`` entry for ``bucket``, on ``node`` or an ancestor.
+
+    An entry that names the bucket (or Azure container) wins. A Storage
+    v2.0.0 ``ms-azure`` entry names only its account, so for an ``az`` glob
+    the first such entry without a bucket is the fallback.
+    """
+    fallback = None
     current: Node | None = node
     while current is not None:
         schemes = current.data.get("storage:schemes")
-        if isinstance(schemes, dict):
-            for entry in schemes.values():
-                if isinstance(entry, dict) and entry.get("bucket") == bucket:
-                    return entry
+        entries = schemes.values() if isinstance(schemes, dict) else ()
+        for entry in (e for e in entries if isinstance(e, dict)):
+            if bucket in (entry.get("bucket"), entry.get("container")):
+                return entry
+            unnamed = "bucket" not in entry and "container" not in entry
+            if fallback is None and scheme == "az" and unnamed and entry.get("type") == "ms-azure":
+                fallback = entry
         current = graph.parent_of(current) if graph is not None else None
-    return None
+    return fallback
 
 
 def _evenly_spaced(items: list[_T], count: int) -> list[_T]:

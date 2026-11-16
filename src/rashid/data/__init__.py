@@ -41,8 +41,9 @@ from functools import partial
 from typing import Any
 
 from rashid import _trace
+from rashid._href import bucket_glob
 from rashid.catalog import CatalogGraph, Kind, Node
-from rashid.data.reader import AssetReader, FilesystemHttpReader, Locator
+from rashid.data.reader import BUCKET_PROBE, AssetReader, FilesystemHttpReader, Locator
 from rashid.model import Finding, Severity, json_pointer
 from rashid.registry import DAT_UNAVAILABLE
 from rashid.rules._common import assets_of, read_target
@@ -288,7 +289,7 @@ class _EndableReader:
 
 
 def _reads_remote(node: Node, reader: AssetReader) -> bool:
-    """Whether any asset on ``node`` resolves to a remote URL under ``reader``.
+    """Whether any asset on ``node``, or its bucket ``partition:glob``, is remote under ``reader``.
 
     Locating is the reader's own answer, so a narrowed reader such as
     :class:`~rashid.data.reader.LocalOnlyReader` sends every object to the
@@ -296,8 +297,11 @@ def _reads_remote(node: Node, reader: AssetReader) -> bool:
     too, where the validator meets the same failure and the pass reports it
     as a systemic one.
     """
-    for _pointer, _key, asset in assets_of(node):
-        href = read_target(asset)
+    hrefs = [read_target(asset) for _pointer, _key, asset in assets_of(node)]
+    glob = node.data.get("partition:glob")
+    if isinstance(glob, str) and bucket_glob(glob) is not None:
+        hrefs.append(BUCKET_PROBE)  # the listing and the sampled reads are remote
+    for href in hrefs:
         if href is not None:
             try:
                 located = reader.locate(node, href)

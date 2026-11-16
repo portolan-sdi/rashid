@@ -34,6 +34,11 @@ from rashid.catalog import CatalogGraph, Node
 _CHUNK = 1 << 16  # 64 KiB
 
 
+# An https URL to ask a reader whether it reads remote files at all, as it
+# must before a bucket partition:glob is listed.
+BUCKET_PROBE = "https://bucket.invalid/"
+
+
 @dataclass(frozen=True)
 class Locator:
     """Where an asset's bytes live: a local path string, or an ``https`` URL."""

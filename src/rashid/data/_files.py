@@ -171,11 +171,11 @@ def remote_partition_files(
 
     Also returns how many objects the listing returned, and whether it
     stopped at ``limit`` with more to come. A listing failure is a
-    :class:`rashid._store.StoreError`.
+    :class:`rashid._store.StoreError`; an invalid pattern is a ``re.error``.
     """
+    regex = glob_regex(pattern)  # a bad pattern fails before any request
     listed, truncated = _store.list_objects(
         scheme, bucket, listing_prefix(pattern), limit=limit, config=config
     )
-    regex = glob_regex(pattern)
     matched = sorted((key, size) for key, size in listed if regex.fullmatch(key))
     return matched, len(listed), truncated
