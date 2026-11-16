@@ -6,12 +6,16 @@ schema pass can ask which version is newest without loading a schema.
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from importlib import resources
 
 from rashid import _json
 
 PROFILE_URI_PREFIX = "https://schemas.portolan-sdi.org/portolan/"
+_PROFILE_URI = re.compile(
+    r"https://schemas\.portolan-sdi\.org/portolan/(v[0-9]+\.[0-9]+\.[0-9]+)/schema\.json"
+)
 
 
 def version_key(version: str) -> tuple[int, ...]:
@@ -26,14 +30,8 @@ def profile_uri(version: str) -> str:
 
 def profile_version(uri: str) -> str | None:
     """The ``vX.Y.Z`` in a profile schema URI, or None for another URI."""
-    if not uri.startswith(PROFILE_URI_PREFIX):
-        return None
-    version = uri.removeprefix(PROFILE_URI_PREFIX).split("/", 1)[0]
-    try:
-        version_key(version)
-    except ValueError:
-        return None
-    return version if version.startswith("v") else None
+    match = _PROFILE_URI.fullmatch(uri)
+    return match.group(1) if match else None
 
 
 @lru_cache(maxsize=1)

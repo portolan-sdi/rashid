@@ -126,9 +126,15 @@ class AppliedProfileVersionRule(Rule):
             return  # PTL-CNF-001 reports a missing or ambiguous declaration
         declared = profile_version(uris[0])
         newest = newest_version()
-        if declared is None or declared == newest:
+        if declared is None or version_key(declared) == version_key(newest):
             return
-        relation = "older than" if version_key(declared) < version_key(newest) else "newer than"
+        older = version_key(declared) < version_key(newest)
+        relation = "older than" if older else "newer than"
+        fix_hint = (
+            f"declare {profile_uri(newest)} after you check the catalog against it"
+            if older
+            else f"upgrade rashid to a release that bundles Portolan {declared}"
+        )
         yield Finding(
             rule_id=self.id,
             severity=self.default_severity,
@@ -139,7 +145,7 @@ class AppliedProfileVersionRule(Rule):
             path=str(root.path),
             object_id=root.id,
             json_pointer=json_pointer("stac_extensions"),
-            fix_hint=f"declare {profile_uri(newest)} after you check the catalog against it",
+            fix_hint=fix_hint,
             expected=newest,
             actual=declared,
         )

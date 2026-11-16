@@ -330,6 +330,11 @@ def test_a_root_declaring_another_profile_version_gets_one_info(
     ]
     assert relation in findings[0].message
     assert findings[0].expected == newest_version()
+    hint = findings[0].fix_hint
+    if relation == "newer than":
+        assert hint == f"upgrade rashid to a release that bundles Portolan {version}"
+    else:
+        assert hint.startswith(f"declare {profile_uri(newest_version())}")
 
 
 def test_a_root_declaring_the_newest_profile_version_gets_no_info(
@@ -337,6 +342,15 @@ def test_a_root_declaring_the_newest_profile_version_gets_no_info(
 ) -> None:
     catalog.collection("roads")
     assert findings_for(validate(catalog.write()), "PTL-CNF-005") == []
+
+
+def test_a_zero_padded_newest_version_is_the_newest_version(catalog: CatalogBuilder) -> None:
+    """Versions compare by number, so v0.02.0 is v0.2.0."""
+    major, minor, patch = (int(part) for part in newest_version().removeprefix("v").split("."))
+    padded = f"v{major}.{minor:02d}.{patch}"
+    root = catalog.write()
+    _declare_root(root, profile_uri(padded))
+    assert findings_for(validate(root), "PTL-CNF-005") == []
 
 
 def test_only_the_root_declaration_counts(catalog: CatalogBuilder) -> None:

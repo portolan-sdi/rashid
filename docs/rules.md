@@ -129,7 +129,7 @@ A `PTL-ZAR` check gives a warning at most, also for a MUST requirement. `rashid.
 
 rashid checks every catalog against the requirements of the newest Portolan profile version that it bundles. `rashid --version` lists the bundled versions and the portolan-spec commit they come from. A root catalog can declare an older or a newer version. Then `PTL-CNF-005` gives one information finding on the root. The finding states the declared version and the version that rashid applies.
 
-The `validator` block of the `--json` report gives the same facts. Its fields are `bundled_profiles`, `applied_profile`, `declared_profile`, `spec_commit`, and `passes`. The `$schema` field names the JSON Schema of the report, and `report_version` gives its version. Each GitHub release of rashid carries that schema as `rashid-report-v1.0.0.schema.json`.
+The `validator` block of the `--json` report gives the same facts. Its fields are `bundled_profiles`, `applied_profile`, `declared_profile`, `spec_commit`, and `passes`. The `$schema` field names the JSON Schema of the report, and `report_version` gives its version. Each GitHub release of rashid carries that schema as `rashid-report-v1.0.0.schema.json`, and the wheel carries it too. The `$schema` URI resolves only after the specification site publishes the schema.
 
 The `--schema` pass is different. It validates each object against the schema of the version that the root declares. It uses a bundled copy when one exists. Otherwise it fetches the schema with `--schema-allow-network`, or it uses a schema from `--schema-map`.
 

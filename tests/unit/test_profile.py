@@ -29,6 +29,13 @@ def test_the_default_schema_is_the_newest_bundled_version() -> None:
         ("https://schemas.portolan-sdi.org/portolan/latest/schema.json", None),
         ("https://schemas.portolan-sdi.org/portolan/0.3.0/schema.json", None),
         ("https://example.org/portolan/v0.3.0/schema.json", None),
+        ("https://schemas.portolan-sdi.org/portolan/v1/schema.json", None),
+        ("https://schemas.portolan-sdi.org/portolan/v0.2/schema.json", None),
+        ("https://schemas.portolan-sdi.org/portolan/v+1.0.0/schema.json", None),
+        ("https://schemas.portolan-sdi.org/portolan/v 1.0.0/schema.json", None),
+        ("https://schemas.portolan-sdi.org/portolan/v\u0661.0.0/schema.json", None),
+        ("https://schemas.portolan-sdi.org/portolan/v0.3.0/other.json", None),
+        ("https://schemas.portolan-sdi.org/portolan/v0.3.0/schema.json#", None),
     ],
 )
 def test_profile_version_reads_only_a_versioned_profile_uri(uri: str, version: str | None) -> None:
