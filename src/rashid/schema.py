@@ -46,7 +46,7 @@ from rashid.registry import SCH_INVALID, SCH_UNAVAILABLE, SCH_UNUSED_MAP
 from rashid.rules.conformance import declared_schema_uris
 
 # The newest bundled profile schema, used when the root declares no single URI.
-DEFAULT_SCHEMA_URI = _profile.profile_uri(_profile.newest_version())
+DEFAULT_SCHEMA_URI = _profile.profile_uri(_profile.newest_profile_version())
 
 _PASS = SchemaPass("schema", SCH_INVALID, SCH_UNAVAILABLE, initialization_errors=(Exception,))
 
@@ -88,7 +88,7 @@ def _bundled_schemas() -> dict[str, dict[str, Any]]:
 
 def bundled_schema_versions() -> tuple[str, ...]:
     """The profile schema versions this build carries, e.g. ``("v0.1.0",)``."""
-    return _profile.bundled_versions()
+    return _profile.bundled_profile_versions()
 
 
 def bundled_schema(schema_uri: str) -> dict[str, Any] | None:

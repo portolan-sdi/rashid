@@ -9,7 +9,12 @@ from importlib import resources
 from typing import Any
 
 from rashid import _json
-from rashid._profile import newest_version, profile_uri, profile_version, version_key
+from rashid._profile import (
+    newest_profile_version,
+    profile_uri,
+    profile_version,
+    profile_version_key,
+)
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
@@ -43,7 +48,7 @@ class SchemaUriDeclaredRule(Rule):
                 node,
                 "stac_extensions declares no Portolan schema URI",
                 json_pointer=json_pointer("stac_extensions"),
-                fix_hint=f"add e.g. {profile_uri(newest_version())}",
+                fix_hint=f"add e.g. {profile_uri(newest_profile_version())}",
             )
         elif len(uris) > 1:
             yield self.finding(
@@ -125,10 +130,10 @@ class AppliedProfileVersionRule(Rule):
         if root is None or len(uris) != 1:
             return  # PTL-CNF-001 reports a missing or ambiguous declaration
         declared = profile_version(uris[0])
-        newest = newest_version()
-        if declared is None or version_key(declared) == version_key(newest):
+        newest = newest_profile_version()
+        if declared is None or profile_version_key(declared) == profile_version_key(newest):
             return
-        older = version_key(declared) < version_key(newest)
+        older = profile_version_key(declared) < profile_version_key(newest)
         relation = "older than" if older else "newer than"
         fix_hint = (
             f"declare {profile_uri(newest)} after you check the catalog against it"

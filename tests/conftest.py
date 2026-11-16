@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from rashid import _store, _trace
-from rashid._profile import newest_version, profile_uri
+from rashid._profile import newest_profile_version, profile_uri
 from rashid.model import Report
 
 # The local HTTPS server that the obstore tests read from.
@@ -40,7 +40,7 @@ def _trace_isolation() -> Iterator[None]:
     _trace.reset()
 
 
-PORTOLAN_URI = profile_uri(newest_version())
+PORTOLAN_URI = profile_uri(newest_profile_version())
 
 
 _LOOPBACK = ("localhost", "127.0.0.1", "::1")

@@ -18,7 +18,7 @@ _PROFILE_URI = re.compile(
 )
 
 
-def version_key(version: str) -> tuple[int, ...]:
+def profile_version_key(version: str) -> tuple[int, ...]:
     """Sort key for a ``vX.Y.Z`` version: numeric, so v0.10.0 follows v0.9.0."""
     return tuple(int(part) for part in version.removeprefix("v").split("."))
 
@@ -35,16 +35,16 @@ def profile_version(uri: str) -> str | None:
 
 
 @lru_cache(maxsize=1)
-def bundled_versions() -> tuple[str, ...]:
+def bundled_profile_versions() -> tuple[str, ...]:
     """The profile schema versions in the wheel, oldest first."""
     root = resources.files("rashid").joinpath("_schemas/portolan")
     found = [d.name for d in root.iterdir() if d.joinpath("schema.json").is_file()]
-    return tuple(sorted(found, key=version_key))
+    return tuple(sorted(found, key=profile_version_key))
 
 
-def newest_version() -> str:
+def newest_profile_version() -> str:
     """The newest bundled profile version: the requirements rashid applies."""
-    return bundled_versions()[-1]
+    return bundled_profile_versions()[-1]
 
 
 @lru_cache(maxsize=1)

@@ -237,4 +237,4 @@ rashid applies the requirements of the newest profile version it bundles. A spec
 2. The spec tags `vX.Y.Z`. Confirm that the profile URI of that version serves the tagged schema.
 3. Run the sync: `gh workflow run spec-sync.yml -R portolan-sdi/rashid`. The new schema directory makes the pull request a feature, `feat(schema): bundle the Portolan vX.Y.Z profile schema`, with auto-merge off. `DEFAULT_SCHEMA_URI`, `rashid --version`, the JSON report, and `PTL-CNF-005` follow the newest bundled version. The pull request needs no code change. Review it and merge it.
 4. Release rashid again, so that the wheel on PyPI applies `vX.Y.Z`.
-5. Update the downstream pins. Tools read the newest version from `rashid.api.newest_version()`.
+5. Update the downstream pins. Tools read the newest version from `rashid.api.newest_profile_version()`.

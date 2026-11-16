@@ -12,12 +12,12 @@ pytestmark = pytest.mark.unit
 
 def test_versions_sort_numerically() -> None:
     versions = ["v0.10.0", "v0.2.0", "v0.9.1"]
-    assert sorted(versions, key=_profile.version_key) == ["v0.2.0", "v0.9.1", "v0.10.0"]
+    assert sorted(versions, key=_profile.profile_version_key) == ["v0.2.0", "v0.9.1", "v0.10.0"]
 
 
 def test_the_default_schema_is_the_newest_bundled_version() -> None:
-    newest = _profile.newest_version()
-    assert newest == _profile.bundled_versions()[-1]
+    newest = _profile.newest_profile_version()
+    assert newest == _profile.bundled_profile_versions()[-1]
     assert _profile.profile_uri(newest) == DEFAULT_SCHEMA_URI
     assert bundled_schema(DEFAULT_SCHEMA_URI) is not None
 
@@ -63,6 +63,6 @@ def test_version_lists_the_bundled_profiles_and_the_spec_commit() -> None:
     assert result.exit_code == 0
     lines = result.output.splitlines()
     assert lines[0].startswith("rashid, version ")
-    versions = _profile.bundled_versions()
+    versions = _profile.bundled_profile_versions()
     assert lines[1] == f"Portolan profiles: {', '.join(versions)} (applies {versions[-1]})"
     assert lines[2] == f"portolan-spec commit: {_profile.spec_commit()}"

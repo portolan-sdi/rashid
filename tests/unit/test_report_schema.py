@@ -67,14 +67,14 @@ def test_the_validator_block_names_the_versions_and_the_passes(catalog: CatalogB
     options = ValidationOptions(structural=False, extensions=False, data=False, schema=True)
     block = validate(catalog.write(), options=options).to_dict()["validator"]
     assert block["declared_profile"] == PORTOLAN_URI
-    assert block["applied_profile"] == _profile.newest_version()
-    assert block["bundled_profiles"] == list(_profile.bundled_versions())
+    assert block["applied_profile"] == _profile.newest_profile_version()
+    assert block["bundled_profiles"] == list(_profile.bundled_profile_versions())
     assert block["spec_commit"] == _profile.spec_commit()
     assert block["passes"] == ["metadata", "schema"]
 
 
 def test_a_root_with_two_profile_uris_declares_none(catalog: CatalogBuilder) -> None:
     root = catalog.write()
-    second = _profile.profile_uri(_profile.bundled_versions()[0])
+    second = _profile.profile_uri(_profile.bundled_profile_versions()[0])
     mutate_json(root / "catalog.json", lambda d: d["stac_extensions"].append(second))
     assert validate(root).to_dict()["validator"]["declared_profile"] is None

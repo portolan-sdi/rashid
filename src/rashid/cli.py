@@ -96,7 +96,7 @@ def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> 
         return
     from importlib.metadata import version
 
-    versions = _profile.bundled_versions()
+    versions = _profile.bundled_profile_versions()
     click.echo(f"rashid, version {version('rashid')}")
     click.echo(f"Portolan profiles: {', '.join(versions)} (applies {versions[-1]})")
     click.echo(f"portolan-spec commit: {_profile.spec_commit() or 'unknown'}")

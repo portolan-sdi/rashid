@@ -8,7 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from rashid import ValidationOptions, validate
-from rashid._profile import bundled_versions, newest_version, profile_uri
+from rashid._profile import bundled_profile_versions, newest_profile_version, profile_uri
 from rashid.cli import main
 from rashid.model import Severity
 from rashid.rules.conformance import _registry
@@ -316,7 +316,7 @@ def _declare_root(root: Any, uri: str) -> None:
 
 @pytest.mark.parametrize(
     ("version", "relation"),
-    [(bundled_versions()[0], "older than"), ("v99.0.0", "newer than")],
+    [(bundled_profile_versions()[0], "older than"), ("v99.0.0", "newer than")],
 )
 def test_a_root_declaring_another_profile_version_gets_one_info(
     catalog: CatalogBuilder, version: str, relation: str
@@ -329,12 +329,12 @@ def test_a_root_declaring_another_profile_version_gets_one_info(
         (Severity.INFO, "catalog.json", version)
     ]
     assert relation in findings[0].message
-    assert findings[0].expected == newest_version()
+    assert findings[0].expected == newest_profile_version()
     hint = findings[0].fix_hint
     if relation == "newer than":
         assert hint == f"upgrade rashid to a release that bundles Portolan {version}"
     else:
-        assert hint.startswith(f"declare {profile_uri(newest_version())}")
+        assert hint.startswith(f"declare {profile_uri(newest_profile_version())}")
 
 
 def test_a_root_declaring_the_newest_profile_version_gets_no_info(
@@ -346,7 +346,9 @@ def test_a_root_declaring_the_newest_profile_version_gets_no_info(
 
 def test_a_zero_padded_newest_version_is_the_newest_version(catalog: CatalogBuilder) -> None:
     """Versions compare by number, so v0.02.0 is v0.2.0."""
-    major, minor, patch = (int(part) for part in newest_version().removeprefix("v").split("."))
+    major, minor, patch = (
+        int(part) for part in newest_profile_version().removeprefix("v").split(".")
+    )
     padded = f"v{major}.{minor:02d}.{patch}"
     root = catalog.write()
     _declare_root(root, profile_uri(padded))
@@ -359,7 +361,7 @@ def test_only_the_root_declaration_counts(catalog: CatalogBuilder) -> None:
     root = catalog.write()
     mutate_json(
         root / "roads" / "collection.json",
-        lambda d: d.__setitem__("stac_extensions", [profile_uri(bundled_versions()[0])]),
+        lambda d: d.__setitem__("stac_extensions", [profile_uri(bundled_profile_versions()[0])]),
     )
     assert findings_for(validate(root), "PTL-CNF-005") == []
 
