@@ -8,29 +8,30 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
 - ``PTL-DAT-001`` recomputed multihash ≠ ``file:checksum`` (MUST)
 - ``PTL-DAT-002`` byte length ≠ ``file:size`` (MUST)
 - ``PTL-DAT-003`` magic bytes ≠ declared media type (MUST)
-- ``PTL-DAT-004`` a raster asset is not a valid COG (MUST, formats.md:91)
+- ``PTL-DAT-004`` a raster asset is not a valid COG (MUST, PORTO-FMT-023)
 - ``PTL-DAT-005`` actual bbox/CRS inconsistent with the declared metadata
   (advisory). A ``proj:epsg`` the asset declares itself is faulted on the asset;
   one inherited from the enclosing collection or item is faulted at the field
   that declares it, once, however many assets read it.
-- ``PTL-DAT-006`` GeoParquet rows are not spatially ordered (MUST, formats.md:30)
-- ``PTL-DAT-007`` no per-row-group spatial statistics (MUST, formats.md:64)
-- ``PTL-DAT-008`` a row group exceeds 150,000 rows (MUST, formats.md:75)
-- ``PTL-DAT-009`` COG bands lack embedded statistics (MUST, formats.md:95)
+- ``PTL-DAT-006`` GeoParquet rows are not spatially ordered (PORTO-FMT-006;
+  a WARNING while the incubating method measures it)
+- ``PTL-DAT-007`` no per-row-group spatial statistics (MUST, PORTO-FMT-007)
+- ``PTL-DAT-008`` a row group exceeds 150,000 rows (MUST, PORTO-FMT-009)
+- ``PTL-DAT-009`` COG bands lack embedded statistics (MUST, PORTO-FMT-026)
 - ``PTL-DAT-010`` a band lacks embedded valid percent (SHOULD; MUST — and thus
-  an ERROR — when the band has a nodata value, formats.md:121)
+  an ERROR — when the band has a nodata value, PORTO-FMT-031)
 - ``PTL-DAT-011`` a raster larger than its own internal tile has no internal
   overviews. OGC 21-026 makes overviews optional in base COG but a SHALL in
   its Optimized GeoTIFF conformance class (/req/optimized_geotiff) — the class
   Portolan's efficient-range-request mandate targets. ``cog_validate`` checks
   base COG, so it accepts such a file with only a warning; without overviews a
   zoomed-out render reads every full-resolution byte.
-- ``PTL-DAT-012`` GeoParquet version is not 1.1 or 2.x (MUST, formats.md:25);
+- ``PTL-DAT-012`` GeoParquet version is not 1.1 or 2.x (MUST, PORTO-FMT-004);
   a pre-release, or a stale ``geo`` key on a native-geo file, is a WARNING
 - ``PTL-DAT-013`` internal tiles are not square or exceed 512px (MUST,
-  OGC 21-026 /req/optimized_geotiff/small-sizes via formats.md:121)
+  OGC 21-026 /req/optimized_geotiff/small-sizes via PORTO-FMT-024)
 - ``PTL-DAT-014`` partition files diverge in Parquet schema (MUST,
-  formats.md:91: "validated by tooling reading file footers")
+  PORTO-FMT-021)
 - ``PTL-DAT-015`` a tabular (plain Parquet) collection is missing the SHOULDs
   of formats.md, Tabular Data: ``table:columns`` documenting the columns, and
   ``extent.temporal`` when the file carries a temporal column (WARNING)

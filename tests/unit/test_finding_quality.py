@@ -98,7 +98,7 @@ _COVERED: frozenset[str] = frozenset(
         "PTL-MIR-002",
         "PTL-PRO-001",
         "PTL-PRO-003",
-        "PTL-PRO-004",
+        # PTL-PRO-004 is a WARNING: its core.md sentence carries no RFC 2119 keyword.
         "PTL-PRT-001",
         "PTL-PRV-001",
         "PTL-PRV-002",
