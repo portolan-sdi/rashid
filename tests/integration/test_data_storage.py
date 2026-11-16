@@ -23,6 +23,7 @@ pytest.importorskip("rio_cogeo")
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import rasterio
 from click.testing import CliRunner
 from pyproj import CRS
 
@@ -1137,13 +1138,97 @@ def test_compliant_cog_is_clean(tmp_path: Path) -> None:
     assert _raster(path) == []
 
 
-def test_missing_band_stats_flags_dat_009(tmp_path: Path) -> None:
-    path = tmp_path / "no_stats.tif"
-    assets.write_cog(path, stats=False)
+# --- embedded statistics: where clients need them, on every band or none ------
+
+
+def _stats(defects: list) -> list[tuple[str, Severity]]:
+    return [
+        (d.rule_id, d.severity) for d in defects if d.rule_id in (DAT_COG_STATS, DAT_VALID_PERCENT)
+    ]
+
+
+def test_an_8_bit_rgb_cog_without_stats_is_a_warning(tmp_path: Path) -> None:
+    """PORTO-FMT-083: an 8-bit COG displays without rescaling, so stats are a SHOULD."""
+    path = tmp_path / "rgb.tif"
+    assets.write_cog(path, stats=False, count=3, nodata=0)
     defects = _raster(path)
-    assert {d.rule_id for d in defects} == {DAT_COG_STATS, DAT_VALID_PERCENT}
-    dat_009 = next(d for d in defects if d.rule_id == DAT_COG_STATS)
-    assert dat_009.severity is Severity.ERROR
+    assert _stats(defects) == [
+        (DAT_COG_STATS, Severity.WARNING),
+        # No statistics needed or given: the nodata valid-percent MUST does not apply.
+        (DAT_VALID_PERCENT, Severity.WARNING),
+    ]
+    assert "PORTO-FMT-083" in defects[0].message
+
+
+def test_an_8_bit_rgb_cog_with_stats_on_every_band_passes(tmp_path: Path) -> None:
+    path = tmp_path / "rgb.tif"
+    assets.write_cog(path, count=3)
+    assert _stats(_raster(path)) == []
+
+
+@pytest.mark.parametrize("dtype", ["uint16", "int16", "float32"])
+def test_a_wide_band_without_stats_is_an_error(tmp_path: Path, dtype: str) -> None:
+    """PORTO-FMT-026: clients rescale a band over 8 bits from its min and max."""
+    path = tmp_path / "dem.tif"
+    assets.write_cog(path, stats=False, dtype=dtype, nodata=0)
+    defects = _raster(path)
+    assert _stats(defects) == [
+        (DAT_COG_STATS, Severity.ERROR),
+        (DAT_VALID_PERCENT, Severity.ERROR),
+    ]
+    assert "PORTO-FMT-026" in defects[0].message
+
+
+def test_a_wide_band_with_stats_passes(tmp_path: Path) -> None:
+    path = tmp_path / "dem.tif"
+    assets.write_cog(path, dtype="uint16")
+    assert _stats(_raster(path)) == []
+
+
+def test_a_classified_wide_raster_without_stats_is_a_warning(tmp_path: Path) -> None:
+    """A classified raster renders from its classes, so PORTO-FMT-026 exempts it."""
+    path = tmp_path / "classes.tif"
+    assets.write_cog(path, stats=False, dtype="uint16", nodata=0)
+    asset = _classified_asset()
+    asset["bands"][0]["data_type"] = "uint16"
+    assert _stats(_raster(path, asset)) == [
+        (DAT_COG_STATS, Severity.WARNING),
+        (DAT_VALID_PERCENT, Severity.WARNING),
+    ]
+
+
+def test_a_color_table_alone_does_not_make_a_raster_classified(tmp_path: Path) -> None:
+    path = tmp_path / "cover.tif"
+    assets.write_cog(path, stats=False, dtype="uint16")
+    assert _stats(_raster(path)) == [
+        (DAT_COG_STATS, Severity.ERROR),
+        (DAT_VALID_PERCENT, Severity.WARNING),
+    ]
+
+
+@pytest.mark.parametrize("dtype", ["uint8", "uint16"])
+def test_partial_band_stats_are_an_error(tmp_path: Path, dtype: str) -> None:
+    """PORTO-FMT-084: clients ignore statistics that cover only some bands."""
+    path = tmp_path / "partial.tif"
+    assets.write_cog(path, count=3, stats_bands=1, dtype=dtype)
+    defects = _raster(path)
+    assert _stats(defects) == [
+        (DAT_COG_STATS, Severity.ERROR),
+        (DAT_VALID_PERCENT, Severity.WARNING),
+    ]
+    assert "band(s) [2, 3]" in defects[0].message
+    assert "PORTO-FMT-084" in defects[0].message
+
+
+def test_a_band_with_some_of_the_four_stats_is_partial(tmp_path: Path) -> None:
+    path = tmp_path / "some.tif"
+    assets.write_cog(path, stats=False)
+    with rasterio.open(path, "r+", IGNORE_COG_LAYOUT_BREAK="YES") as dst:
+        dst.update_tags(1, STATISTICS_MINIMUM="0", STATISTICS_MAXIMUM="250")
+    # Updating the tags moves the header, so only the statistics findings matter here.
+    stats = [d for d in _raster(path) if d.rule_id == DAT_COG_STATS]
+    assert [d.severity for d in stats] == [Severity.ERROR]
+    assert "PORTO-FMT-084" in stats[0].message
 
 
 def test_missing_valid_percent_is_a_warning(tmp_path: Path) -> None:

@@ -43,6 +43,10 @@ _COG_STAT_KEYS = (
 # formats.md:121 — SHOULD per band, MUST when the band has a nodata value.
 _VALID_PERCENT_KEY = "STATISTICS_VALID_PERCENT"
 
+# rasterio's names for the data types of at most 8 bits per sample; every
+# other type (16-bit, 32-bit, 64-bit, complex) needs statistics (PORTO-FMT-026).
+_EIGHT_BIT = frozenset({"uint8", "int8"})
+
 # STAC best-practice and EO roles for per-pixel masks: their zeros are values,
 # not empty pixels, so such an asset is not an imagery scene.
 _MASK_ROLES = {"data-mask", "date", "snow-ice", "land-water", "water-mask", "cloud", "cloud-shadow"}
@@ -83,7 +87,7 @@ def check_raster(
     # GDAL_PAM_ENABLED=NO ignores any .aux.xml sidecar, so only what is
     # embedded in the file counts — as the spec requires.
     with rasterio.Env(GDAL_PAM_ENABLED="NO"):
-        defects.extend(_check_cog_stats(key, files))
+        defects.extend(_check_cog_stats(key, asset, files))
         defects.extend(_check_overviews(key, files))
         defects.extend(_check_tile_size(key, files))
         defects.extend(_check_class_placement(key, asset, files))
@@ -320,26 +324,42 @@ def _check_tile_size(key: str, files: AssetFiles) -> list[DataDefect]:
     return []
 
 
-def _check_cog_stats(key: str, files: AssetFiles) -> list[DataDefect]:
-    """Every COG band MUST carry embedded min/max/mean/stddev (formats.md:95),
-    and SHOULD carry a valid percent — a MUST when the band has a nodata value
-    (formats.md:121).
+def _check_cog_stats(key: str, asset: dict[str, Any], files: AssetFiles) -> list[DataDefect]:
+    """Embedded min/max/mean/stddev where clients need them, and on every band or none.
 
-    Only statistics embedded in the file's GDAL_METADATA tag count, which is
-    why :func:`check_raster` reads the dataset with PAM off.
+    formats.md, Raster statistics:
+
+    - A COG with any band of more than 8 bits per sample MUST include them,
+      unless the raster is classified (PORTO-FMT-026): clients rescale a wide
+      band from its minimum and maximum. A classified raster is one whose
+      asset or band declares ``classification:classes``; a color table alone
+      does not make it classified.
+    - Any other COG, such as 8-bit RGB, SHOULD include them (PORTO-FMT-083).
+    - A COG that includes statistics MUST include them for every band
+      (PORTO-FMT-084): clients ignore partial statistics. A band with only
+      some of the four values is partial too (PORTO-FMT-027).
+
+    The valid percent is one of those statistics: SHOULD per band, and MUST
+    when the band has a nodata value (PORTO-FMT-031), once the file includes
+    or needs statistics. Only statistics embedded in the file's GDAL_METADATA
+    tag count, which is why :func:`check_raster` reads the dataset with PAM off.
     """
     try:
         src = files.raster()
         missing: list[int] = []
+        included = False
         vp_should: list[int] = []  # valid percent absent, no nodata: SHOULD
         vp_must: list[int] = []  # valid percent absent with nodata: MUST
         for bidx in range(1, src.count + 1):
             tags = src.tags(bidx)
-            if not all(stat in tags for stat in _COG_STAT_KEYS):
+            present = [stat in tags for stat in _COG_STAT_KEYS]
+            included = included or any(present)
+            if not all(present):
                 missing.append(bidx)
             if _VALID_PERCENT_KEY not in tags:
                 has_nodata = src.nodatavals[bidx - 1] is not None
                 (vp_must if has_nodata else vp_should).append(bidx)
+        wide = any(dtype not in _EIGHT_BIT for dtype in src.dtypes)
     except Exception as exc:  # unreadable raster is advisory here
         return [
             DataDefect(
@@ -349,16 +369,13 @@ def _check_cog_stats(key: str, files: AssetFiles) -> list[DataDefect]:
                 key,
             )
         ]
+    classified = any(True for _ in asset_class_lists(json_pointer("assets", key), asset))
+    required = wide and not classified
     defects: list[DataDefect] = []
     if missing:
-        defects.append(
-            DataDefect(
-                DAT_COG_STATS,
-                Severity.ERROR,
-                f"asset '{key}' band(s) {missing} lack embedded min/max/mean/stddev statistics",
-                key,
-            )
-        )
+        defects.append(_missing_stats(key, missing, included=included, required=required))
+    if not (included or required):
+        vp_should, vp_must = vp_should + vp_must, []  # no statistics needed or given
     if vp_must:
         defects.append(
             DataDefect(
@@ -374,11 +391,35 @@ def _check_cog_stats(key: str, files: AssetFiles) -> list[DataDefect]:
             DataDefect(
                 DAT_VALID_PERCENT,
                 Severity.WARNING,
-                f"asset '{key}' band(s) {vp_should} lack the embedded valid-percent statistic",
+                f"asset '{key}' band(s) {sorted(vp_should)} lack the embedded valid-percent"
+                " statistic",
                 key,
             )
         )
     return defects
+
+
+def _missing_stats(key: str, missing: list[int], *, included: bool, required: bool) -> DataDefect:
+    stats = "embedded min/max/mean/stddev statistics"
+    if included:
+        message = (
+            f"asset '{key}' band(s) {missing} lack {stats} that other bands carry;"
+            " clients ignore partial statistics (PORTO-FMT-084)"
+        )
+        severity = Severity.ERROR
+    elif required:
+        message = (
+            f"asset '{key}' has a band of more than 8 bits per sample but no {stats};"
+            " clients rescale it from the minimum and maximum (PORTO-FMT-026)"
+        )
+        severity = Severity.ERROR
+    else:
+        message = (
+            f"asset '{key}' has no {stats}; an 8-bit or classified COG should still"
+            " include them (PORTO-FMT-083)"
+        )
+        severity = Severity.WARNING
+    return DataDefect(DAT_COG_STATS, severity, message, key)
 
 
 def check_display(

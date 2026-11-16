@@ -296,6 +296,7 @@ def write_cog(  # noqa: PLR0913 - keyword-only fixture settings vary independent
     alpha: bool = False,
     mask: bool = False,
     colormap: dict[int, tuple[int, int, int, int]] | None = None,
+    stats_bands: int | None = None,
 ) -> None:
     """A valid COG (COG driver) with, by default, embedded per-band statistics.
 
@@ -303,8 +304,8 @@ def write_cog(  # noqa: PLR0913 - keyword-only fixture settings vary independent
     a structurally valid COG (cog_validate passes it with only a warning) but
     carries no internal overviews. ``blocksize`` overrides the internal tile
     size (default: 512, clamped to the image). ``count`` repeats the band, and
-    ``alpha`` marks the last band as alpha, and ``mask`` adds an internal mask. Only band 1
-    gets statistics. ``colormap`` embeds a color table (TIFF ``ColorMap`` tag)
+    ``alpha`` marks the last band as alpha, and ``mask`` adds an internal mask. Every band
+    gets statistics, or only the first ``stats_bands`` bands when it is set. ``colormap`` embeds a color table (TIFF ``ColorMap`` tag)
     on band 1, as a classified raster has.
     """
     band = (np.arange(size * size, dtype="uint8") % 251).reshape(1, size, size)
@@ -334,8 +335,10 @@ def write_cog(  # noqa: PLR0913 - keyword-only fixture settings vary independent
             dst.write_mask(np.full((size, size), 255, dtype="uint8"))
         if colormap is not None:
             dst.write_colormap(1, colormap)
-        if stats:
-            band = arr[0]
+        for bidx in range(1, (stats_bands if stats_bands is not None else count) + 1):
+            if not stats:
+                break
+            band = arr[bidx - 1]
             tags = {
                 "STATISTICS_MINIMUM": str(float(band.min())),
                 "STATISTICS_MAXIMUM": str(float(band.max())),
@@ -344,7 +347,7 @@ def write_cog(  # noqa: PLR0913 - keyword-only fixture settings vary independent
             }
             if valid_percent:
                 tags["STATISTICS_VALID_PERCENT"] = "100"
-            dst.update_tags(1, **tags)
+            dst.update_tags(bidx, **tags)
 
 
 def write_tiled_tiff(path: Path, *, size: int = 1024, blockx: int = 512, blocky: int = 256) -> None:
