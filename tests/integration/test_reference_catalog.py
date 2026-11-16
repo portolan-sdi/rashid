@@ -55,7 +55,9 @@ def _schema_map_for_catalog(
 
 
 def test_reference_catalog_metadata_pass_is_clean() -> None:
-    report = validate(CATALOG, options=ValidationOptions(structural=False, schema=False))
+    report = validate(
+        CATALOG, options=ValidationOptions(structural=False, schema=False, data=False)
+    )
     # The spec's reference catalog does not yet meet PORTO-CORE-088
     # (https://github.com/portolan-sdi/portolan-spec/pull/240); remove this allowance when it does.
     missing_text = [f for f in report.findings if f.rule_id == "PTL-AST-010"]
@@ -82,7 +84,9 @@ def test_reference_catalog_metadata_pass_is_clean() -> None:
 
 def test_single_cog_collection_models_its_raster_the_way_the_spec_prescribes() -> None:
     """raster/sample-cog is the single-COG shape PORTO-CORE-072 prescribes."""
-    report = validate(CATALOG, options=ValidationOptions(structural=False, schema=False))
+    report = validate(
+        CATALOG, options=ValidationOptions(structural=False, schema=False, data=False)
+    )
     assert [f for f in report.findings if f.rule_id == "PTL-COL-004"] == []
 
 
@@ -90,7 +94,7 @@ def test_reference_catalog_schema_pass_is_clean() -> None:
     report = validate(
         CATALOG,
         options=ValidationOptions(
-            structural=False, schema=True, schema_map=_schema_map_for_catalog()
+            structural=False, data=False, schema=True, schema_map=_schema_map_for_catalog()
         ),
     )
     schema_findings = [f for f in report.findings if f.rule_id.startswith("PTL-SCH")]

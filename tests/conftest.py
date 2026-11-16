@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import json
 import shutil
+import socket
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from rashid import _trace
+from rashid import _store, _trace
 from rashid.model import Report
 
 # The local HTTPS server that the obstore tests read from.
@@ -36,6 +37,35 @@ def _trace_isolation() -> Iterator[None]:
     _trace.enable(None)
     _trace.configure_logging(None)
     _trace.reset()
+
+
+_LOOPBACK = ("localhost", "127.0.0.1", "::1")
+_DEAD_PROXY = "http://127.0.0.1:9"
+
+
+@pytest.fixture(autouse=True)
+def _no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep a test off the network unless it is marked ``network``.
+
+    Python lookups of other hosts raise. obstore and GDAL resolve names in
+    native code, so they get a dead proxy for every host except loopback.
+    """
+    if request.node.get_closest_marker("network") is not None:
+        _store.reset()  # drop any client built behind the dead proxy
+        return
+    resolve = socket.getaddrinfo
+
+    def loopback_only(host: Any, *args: Any, **kwargs: Any) -> Any:
+        name = host.decode() if isinstance(host, bytes) else host
+        if name is not None and name not in _LOOPBACK:
+            raise OSError(f"test reached the network: {name}; mark it network")
+        return resolve(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", loopback_only)
+    for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY"):
+        monkeypatch.setenv(name, _DEAD_PROXY)
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, ",".join(_LOOPBACK))
 
 
 PORTOLAN_URI = "https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"

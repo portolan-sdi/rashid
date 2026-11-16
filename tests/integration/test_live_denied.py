@@ -39,6 +39,7 @@ def test_denied_probes_are_inaccessible(
 ) -> None:
     def allow_preflight(handler: _Handler) -> None:
         handler.send_response(204)
+        handler.send_header("Access-Control-Allow-Origin", "*")
         handler.send_header("Access-Control-Allow-Methods", "GET, HEAD")
         handler.send_header("Access-Control-Allow-Headers", "*")
         handler.send_header("Content-Length", "0")
@@ -47,8 +48,9 @@ def test_denied_probes_are_inaccessible(
     monkeypatch.setattr(_Handler, "do_OPTIONS", allow_preflight)
     https_server.routes["/private.bin"] = Route(status=status, body=b"denied", length=length)
     _report, findings = _check_parquet(catalog, https_server.url("private.bin"))
-    assert findings and {f["rule_id"] for f in findings} == {"PTL-LIV-000"}, findings
-    assert all(f["severity"] == "warning" and str(status) in f["message"] for f in findings)
+    warnings = [f for f in findings if f["severity"] != "info"]
+    assert warnings and {f["rule_id"] for f in findings} == {"PTL-LIV-000"}, findings
+    assert all(f["severity"] == "warning" and str(status) in f["message"] for f in warnings)
 
 
 def test_denied_get_still_checks_preflight(
@@ -62,10 +64,10 @@ def test_denied_get_still_checks_preflight(
     monkeypatch.setattr(_Handler, "do_GET", deny_get)
     # HEAD succeeds, while OPTIONS omits the required preflight headers.
     https_server.routes["/data.bin"] = Route(body=b"x" * 1000)
-    report, findings = _check_parquet(catalog, https_server.url("data.bin"))
+    _report, findings = _check_parquet(catalog, https_server.url("data.bin"))
     assert {f["rule_id"] for f in findings} == {"PTL-LIV-000", "PTL-LIV-005"}, findings
-    assert not report["passed"]
-    assert next(f for f in findings if f["rule_id"] == "PTL-LIV-005")["severity"] == "error"
+    # A local tree names no publish base, so a hosting failure warns (PORTO-CORE-073).
+    assert next(f for f in findings if f["rule_id"] == "PTL-LIV-005")["severity"] == "warning"
 
 
 @pytest.mark.parametrize("status", [405, 404, 500])
@@ -95,8 +97,8 @@ def test_non_denied_head_failure_keeps_length_error(
             "Access-Control-Allow-Headers": "*",
         },
     )
-    report, findings = _check_parquet(catalog, https_server.url("data.bin"))
-    assert not report["passed"]
-    assert len(findings) == 1 and findings[0]["rule_id"] == "PTL-LIV-002", findings
-    assert findings[0]["severity"] == "error"
+    _report, findings = _check_parquet(catalog, https_server.url("data.bin"))
+    hosting = [f for f in findings if f["severity"] != "info"]
+    assert len(hosting) == 1 and hosting[0]["rule_id"] == "PTL-LIV-002", findings
+    assert hosting[0]["severity"] == "warning"
     assert {request.method for request in https_server.seen} == {"GET", "OPTIONS"}

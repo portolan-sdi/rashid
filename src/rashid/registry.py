@@ -723,7 +723,7 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
         LIV_OFF_HTTPS,
         "no asset or link target on the probed hosts redirects off https",
         Severity.ERROR,
-        ("PORTO-CORE-023", "PORTO-CORE-035", "PORTO-CORE-073"),
+        ("PORTO-CORE-035", "PORTO-CORE-086", "PORTO-CORE-073"),
         stage="live",
     ),
     CheckInfo(
