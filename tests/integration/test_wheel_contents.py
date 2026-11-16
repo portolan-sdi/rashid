@@ -20,6 +20,8 @@ pytestmark = pytest.mark.integration
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
+# uv may fetch the build backend from PyPI, so the build needs the network.
+@pytest.mark.network
 def test_wheel_ships_marker_and_schemas(tmp_path: Path) -> None:
     uv = shutil.which("uv")
     if uv is None:
