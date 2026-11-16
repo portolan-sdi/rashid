@@ -61,6 +61,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import cache
+from itertools import chain
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -241,6 +242,67 @@ def probe(url: str, method: str, headers: dict[str, str]) -> Any:
     Unlike object reads, probes inspect denied responses and do not retry them.
     """
     return _probe_opener().open(_request(url, method, headers), timeout=_IDLE.total_seconds())
+
+
+def bucket_region(bucket: str) -> str | None:
+    """The AWS region of an S3 bucket, from the ``x-amz-bucket-region`` header.
+
+    S3 sends the header on every answer to a HEAD of the bucket, a 301 or a
+    403 included, so no credentials are needed. None when the header is
+    absent or the host cannot be reached.
+    """
+    url = f"https://s3.amazonaws.com/{quote(bucket, safe='')}"
+    _trace.count("http.heads")
+    try:
+        with _trace.span("http.head"), probe(url, "HEAD", {}) as response:
+            headers = response.headers
+    except HTTPError as exc:
+        with exc:
+            headers = exc.headers
+    except OSError as exc:
+        log.debug("bucket region of %s: %s", bucket, exc)
+        return None
+    region = headers.get("x-amz-bucket-region")
+    return str(region) if region else None
+
+
+def list_objects(
+    scheme: str, bucket: str, prefix: str, *, limit: int, config: dict[str, Any]
+) -> tuple[list[tuple[str, int]], bool]:
+    """List up to ``limit`` objects under ``prefix`` in a bucket, anonymously.
+
+    ``scheme`` is ``s3``, ``gs``, or ``az``; ``config`` is the store's own
+    settings, such as ``region`` and ``endpoint``. Requests are unsigned and
+    share the agent, timeouts, and retries of every other store. Returns
+    ``(key, size)`` pairs in listing order, and whether more objects exist
+    past ``limit``. A failure is a :class:`StoreError` with its status.
+    """
+    with _IMPORT_LOCK:
+        import obstore
+        from obstore.store import AzureStore, GCSStore, S3Store
+
+    stores = {"s3": S3Store, "gs": GCSStore, "az": AzureStore}
+    options = {"user_agent": user_agent(), **CLIENT_OPTIONS}
+    url = f"{scheme}://{bucket}/{prefix}"
+    _trace.count("http.lists")
+    found: list[tuple[str, int]] = []
+    with _trace.span("http.list"):
+        try:
+            store = stores[scheme](
+                bucket,
+                skip_signature=True,
+                client_options=options,
+                retry_config=_RETRY,
+                **config,
+            )
+            stream = obstore.list(store, prefix or None, chunk_size=1000)
+            for meta in chain.from_iterable(stream):
+                if len(found) == limit:
+                    return found, True
+                found.append((meta["path"], int(meta["size"])))
+        except Exception as exc:  # obstore raises its own types; the status is in the text
+            raise _error("LIST", url, exc) from exc
+    return found, False
 
 
 def _send(url: str, method: str, headers: dict[str, str] | None) -> Any:

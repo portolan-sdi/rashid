@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from rashid import validate
+from rashid import ValidationOptions, validate
 from tests.conftest import (
     PORTOLAN_URI,
     CatalogBuilder,
@@ -112,6 +112,10 @@ def test_catalogs_may_nest_into_sub_catalogs(catalog: CatalogBuilder) -> None:
     assert report.findings == []
 
 
+# Partitioned trees name a bucket glob, which the data pass would list.
+_METADATA = ValidationOptions(data=False)
+
+
 def test_partitioned_collection_may_represent_partitions_as_items(
     catalog: CatalogBuilder,
 ) -> None:
@@ -119,7 +123,8 @@ def test_partitioned_collection_may_represent_partitions_as_items(
     catalog.collection("roads", title="Road Centerlines").item("roads-noord-holland")
     root = catalog.write()
     mutate_json(_collection_json(root, "roads"), _partition_fields)
-    with_items = validate(root)
+    # The glob names a bucket the data pass would list; the permission is metadata.
+    with_items = validate(root, options=_METADATA)
     assert with_items.findings == []
 
     # The same collection without the item: the permission runs both ways, so
@@ -132,7 +137,7 @@ def test_partitioned_collection_may_represent_partitions_as_items(
     )
     (root / "roads" / "roads-noord-holland" / "roads-noord-holland.json").unlink()
     (root / "roads" / "roads-noord-holland").rmdir()
-    without_items = validate(root)
+    without_items = validate(root, options=_METADATA)
     assert without_items.findings == []
 
 
@@ -258,7 +263,7 @@ def test_large_files_may_be_partitioned(catalog: CatalogBuilder) -> None:
     catalog.collection("roads", title="Road Centerlines")
     root = catalog.write()
     mutate_json(_collection_json(root, "roads"), _partition_fields)
-    report = validate(root)
+    report = validate(root, options=_METADATA)
     assert report.findings == []
 
 

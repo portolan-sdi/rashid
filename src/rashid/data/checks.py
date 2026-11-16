@@ -51,11 +51,12 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   the wrong place for the file's real band count (ERROR, PORTO-FMT-050)
 
 The four GeoParquet checks — ``PTL-DAT-006``, ``007``, ``008``, and ``012`` —
-run over an asset and over every file a local relative ``partition:glob``
-matches. A partitioned collection publishes its data through the glob and
-declares no ``data`` asset, so the glob is the only place those bytes appear.
-A conformant glob is an absolute bucket URL, which rashid does not list, so
-these checks reach partition files only through a relative glob.
+run over an asset and over the files a ``partition:glob`` matches. A
+partitioned collection publishes its data through the glob and declares no
+``data`` asset, so the glob is the only place those bytes appear. A relative
+glob is matched on disk, and every match is read. A bucket glob (``s3``,
+``gs``, ``az``) is listed anonymously and sampled: the footers of up to 64
+files, and the rows of 4 of them for ``PTL-DAT-006``.
 Each rule reports once per collection, at ``/partition:glob``, naming how many
 partition files failed.
 
@@ -164,9 +165,10 @@ def check_node(
     results = DataResults()
     bounds: list[Wgs84Bounds] = []
     extent_complete = True
-    schemas, partitions, total = check_partitions(node, reader)
-    results.extend(schemas)
-    results.extend(partitions, partition_total=total)
+    collection, partitions = check_partitions(node, reader, graph)
+    results.extend(collection)
+    for defects, total in partitions:
+        results.extend(defects, partition_total=total)
     results.extend(check_collection_column_descriptions(node))
     for _pointer, key, asset in assets_of(node):
         declared = asset.get("href")

@@ -367,3 +367,28 @@ def wire_url(base: str, rel: str) -> str:
         path = parsed.path
     encoded = quote(path, safe="/%:@!$&'()*+,;=")
     return f"{base}{origin}{encoded}{href_suffix(str(rel))}"
+
+
+# Schemes whose globs a client can list anonymously (formats.md, Partitioned
+# Collections): Amazon S3 or an S3-compatible service, Google Cloud Storage,
+# and Azure Blob Storage.
+BUCKET_SCHEMES = ("s3", "gs", "az")
+
+
+def bucket_glob(glob: str) -> tuple[str, str, str] | None:
+    """``(scheme, bucket, key pattern)`` for a listable bucket glob, else None.
+
+    The single owner of "a glob a client can list": an ``s3://``, ``gs://``,
+    or ``az://`` URL with a bucket (or container) and a key pattern.
+    """
+    parsed = split_href(glob)
+    if parsed is None or parsed.scheme.lower() not in BUCKET_SCHEMES:
+        return None
+    try:
+        _ = parsed.port
+    except ValueError:
+        return None
+    key = parsed.path.lstrip("/")
+    if not parsed.hostname or not key or parsed.query or parsed.fragment:
+        return None
+    return parsed.scheme.lower(), parsed.netloc, key
