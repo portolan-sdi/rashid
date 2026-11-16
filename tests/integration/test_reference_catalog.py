@@ -64,7 +64,15 @@ def test_reference_catalog_metadata_pass_is_clean() -> None:
         and f.message.endswith(("has no title", "has no description"))
         for f in missing_text
     )
-    findings = [f for f in report.findings if f.rule_id != "PTL-AST-010"]
+    # The sample-scenes example has no overview COG yet
+    # (https://github.com/portolan-sdi/portolan-spec/issues/263); remove this allowance when it does.
+    overview_gaps = {
+        "raster/sample-scenes/collection.json",
+        "ar/raster/sample-scenes/collection.json",
+    }
+    missing_overview = {f.path for f in report.findings if f.rule_id == "PTL-VIZ-007"}
+    assert missing_overview == overview_gaps
+    findings = [f for f in report.findings if f.rule_id not in ("PTL-AST-010", "PTL-VIZ-007")]
     blocking = [f for f in findings if f.severity is not Severity.INFO]
     assert blocking == [], [(f.rule_id, f.path) for f in blocking]
     # the only findings a conformant catalog may raise are the mirror INFOs

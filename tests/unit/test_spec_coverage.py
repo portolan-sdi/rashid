@@ -22,6 +22,10 @@ This module gates the join in both directions:
   SHOULD by at least one WARNING-or-stronger check, except where the spec
   itself pins a softer severity (the documented exception table);
 - every check that cites spec IDs is exercised by at least one test.
+
+A requirement with ``status: incubating`` comes from a document under
+``specs/incubating/``. The spec says the validator checks it and reports a
+failure as a warning at most, so its floor and its ceiling are WARNING.
 """
 
 from __future__ import annotations
@@ -41,17 +45,29 @@ pytestmark = pytest.mark.unit
 _TESTS_DIR = Path(__file__).resolve().parent.parent
 _MANIFEST = _TESTS_DIR / "fixtures" / "requirements.yaml"
 
-# Manifest entries keep a fixed field order (id, severity, enforcement, file,
-# quote), possibly with comment lines between fields; the spec repo's
+# Manifest entries keep a fixed field order (id, severity, enforcement,
+# optional status, file, quote), possibly with comment lines between fields; the spec repo's
 # check_requirements.py validates the file upstream, so a plain scan is
 # reliable and keeps rashid free of a YAML dependency.
 _COMMENTS = r"(?:\s*#[^\n]*\n)*"
 _ENTRY = re.compile(
-    r"- id: (PORTO-(?:CORE|FMT)-\d{3})\s*\n"
+    r"- id: (PORTO-[A-Z]+-\d{3})\s*\n"
     + _COMMENTS
     + r"\s+severity: (MUST|SHOULD|MAY)\s*\n"
     + _COMMENTS
     + r"\s+enforcement: (validator|process)\s*\n"
+    + r"(?:"
+    + _COMMENTS
+    + r"\s+status: (incubating)\s*\n)?"
+)
+_ID_LINE = re.compile(r"^\s*- id:", re.MULTILINE)
+INCUBATING = "incubating"
+
+# Incubating requirements that no check cites yet. The Zarr checks land in
+# https://github.com/portolan-sdi/rashid/pull/295, which empties this set.
+# An entry that a check cites fails the gate, so the set cannot rot.
+_PENDING_INCUBATING = frozenset(
+    f"PORTO-ZARR-{n:03d}" for n in (*range(1, 15), 16, 17, 18, 20, 21, 23, 24, 25, 26)
 )
 
 # MUST requirements deliberately not enforced by any ERROR-severity check.
@@ -77,9 +93,15 @@ _SEVERITY_EXCEPTIONS: dict[str, str] = {
 _RANK = {Severity.INFO: 0, Severity.WARNING: 1, Severity.ERROR: 2}
 
 
-def _manifest_entries() -> list[tuple[str, str, str]]:
-    """(id, severity, enforcement) triples from the vendored manifest."""
-    entries = _ENTRY.findall(_MANIFEST.read_text(encoding="utf-8"))
+def _manifest_entries() -> list[tuple[str, str, str, str]]:
+    """(id, severity, enforcement, status) from the vendored manifest.
+
+    ``status`` is ``"incubating"`` or empty.
+    """
+    text = _MANIFEST.read_text(encoding="utf-8")
+    entries = _ENTRY.findall(text)
+    # A field-order or ID-family change upstream must fail here, not drop entries.
+    assert len(entries) == len(_ID_LINE.findall(text)), "manifest scan skipped some entries"
     assert len(entries) > 100, "manifest scan found suspiciously few entries"
     return entries
 
@@ -103,6 +125,19 @@ def test_manifest_ids_are_unique() -> None:
     assert len(ids) == len(set(ids))
 
 
+def test_pending_incubating_ids_are_uncited_validator_requirements() -> None:
+    """A pending entry that a check cites, or that left the manifest, is stale."""
+    validator = {
+        entry[0]
+        for entry in _manifest_entries()
+        if entry[2] == "validator" and entry[3] == INCUBATING
+    }
+    cited = _citations()
+    stale = sorted(req_id for req_id in _PENDING_INCUBATING if req_id in cited)
+    assert not stale, f"remove cited IDs from _PENDING_INCUBATING: {stale}"
+    assert validator >= _PENDING_INCUBATING, "pending IDs must be incubating validator IDs"
+
+
 def test_documented_rule_groups_match_the_registry() -> None:
     rules_doc = _TESTS_DIR.parent / "docs" / "rules.md"
     groups = re.findall(
@@ -123,8 +158,11 @@ def test_every_validator_must_and_should_is_cited() -> None:
     cited = _citations()
     missing = [
         f"{req_id} ({severity})"
-        for req_id, severity, enforcement in _manifest_entries()
-        if enforcement == "validator" and severity in ("MUST", "SHOULD") and req_id not in cited
+        for req_id, severity, enforcement, _status in _manifest_entries()
+        if enforcement == "validator"
+        and severity in ("MUST", "SHOULD")
+        and req_id not in cited
+        and req_id not in _PENDING_INCUBATING
     ]
     assert not missing, f"validator requirements cited by no check: {missing}"
 
@@ -133,7 +171,7 @@ def _validator_mays() -> list[str]:
     """Every ``MAY`` requirement the manifest assigns to the validator."""
     return [
         req_id
-        for req_id, severity, enforcement in _manifest_entries()
+        for req_id, severity, enforcement, _status in _manifest_entries()
         if enforcement == "validator" and severity == "MAY"
     ]
 
@@ -148,7 +186,11 @@ def test_every_validator_may_is_cited_or_has_a_permission_test() -> None:
     """
     cited = _citations()
     covered = set(cited) | set(may_permissions.PERMISSION_TESTS)
-    missing = [req_id for req_id in _validator_mays() if req_id not in covered]
+    missing = [
+        req_id
+        for req_id in _validator_mays()
+        if req_id not in covered and req_id not in _PENDING_INCUBATING
+    ]
     assert not missing, (
         "validator MAY requirements with neither a citation nor a permission test: "
         f"{missing}; add one to tests/unit/test_may_permissions.py"
@@ -190,10 +232,20 @@ def test_severity_mapping() -> None:
     cited = _citations()
     floors = {"MUST": _RANK[Severity.ERROR], "SHOULD": _RANK[Severity.WARNING]}
     weak: list[str] = []
-    for req_id, severity, enforcement in _manifest_entries():
-        if enforcement != "validator" or severity not in floors or req_id not in cited:
+    for req_id, severity, enforcement, status in _manifest_entries():
+        if enforcement != "validator" or req_id not in cited:
             continue
         strongest = max(_RANK[s] for _c, s in cited[req_id])
+        if status == INCUBATING:
+            if strongest > _RANK[Severity.WARNING]:
+                weak.append(f"{req_id} is incubating but a citation is above WARNING")
+            elif severity != "MAY" and strongest < _RANK[Severity.WARNING]:
+                weak.append(
+                    f"{req_id} ({severity}, incubating) strongest citation is below WARNING"
+                )
+            continue
+        if severity not in floors:
+            continue
         if req_id in _SEVERITY_EXCEPTIONS:
             # An exception that is no longer needed must be removed.
             assert severity == "MUST", f"{req_id}: exceptions are for MUST entries"
