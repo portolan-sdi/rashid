@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from rashid import ValidationOptions, validate
+from rashid._profile import bundled_versions, newest_version, profile_uri
 from rashid.cli import main
 from rashid.model import Severity
 from rashid.rules.conformance import _registry
@@ -304,3 +305,52 @@ def test_oversized_extension_version_through_cli(catalog: CatalogBuilder, compon
     assert findings[0]["actual"] == uri
     assert findings[0]["json_pointer"] == "/stac_extensions/1"
     assert findings[0]["severity"] == "warning"
+
+
+# --- PTL-CNF-005: the profile version rashid applies ------------------------
+
+
+def _declare_root(root: Any, uri: str) -> None:
+    mutate_json(root / "catalog.json", lambda d: d.__setitem__("stac_extensions", [uri]))
+
+
+@pytest.mark.parametrize(
+    ("version", "relation"),
+    [(bundled_versions()[0], "older than"), ("v99.0.0", "newer than")],
+)
+def test_a_root_declaring_another_profile_version_gets_one_info(
+    catalog: CatalogBuilder, version: str, relation: str
+) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    _declare_root(root, profile_uri(version))
+    findings = findings_for(validate(root), "PTL-CNF-005")
+    assert [(f.severity, f.path, f.actual) for f in findings] == [
+        (Severity.INFO, "catalog.json", version)
+    ]
+    assert relation in findings[0].message
+    assert findings[0].expected == newest_version()
+
+
+def test_a_root_declaring_the_newest_profile_version_gets_no_info(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.collection("roads")
+    assert findings_for(validate(catalog.write()), "PTL-CNF-005") == []
+
+
+def test_only_the_root_declaration_counts(catalog: CatalogBuilder) -> None:
+    """A collection at another version is PTL-CNF-002's concern, not this rule's."""
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(
+        root / "roads" / "collection.json",
+        lambda d: d.__setitem__("stac_extensions", [profile_uri(bundled_versions()[0])]),
+    )
+    assert findings_for(validate(root), "PTL-CNF-005") == []
+
+
+def test_an_unrecognized_root_declaration_gets_no_version_info(catalog: CatalogBuilder) -> None:
+    root = catalog.write()
+    _declare_root(root, "https://schemas.portolan-sdi.org/portolan/latest/schema.json")
+    assert findings_for(validate(root), "PTL-CNF-005") == []

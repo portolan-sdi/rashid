@@ -13,7 +13,7 @@ from typing import Any
 
 import click
 
-from rashid import ValidationOptions, _json, _trace
+from rashid import ValidationOptions, _json, _profile, _trace
 from rashid._href import is_catalog_url, is_uri_reference, split_href
 from rashid.data.reader import LocalOnlyReader
 from rashid.model import Report, Severity
@@ -90,8 +90,28 @@ class SchemaMapping(click.ParamType[tuple[str, dict[str, Any]]]):
         return uri.rstrip("#"), schema
 
 
+def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    """Print the package version, the bundled profile versions, and the spec commit."""
+    if not value or ctx.resilient_parsing:
+        return
+    from importlib.metadata import version
+
+    versions = _profile.bundled_versions()
+    click.echo(f"rashid, version {version('rashid')}")
+    click.echo(f"Portolan profiles: {', '.join(versions)} (applies {versions[-1]})")
+    click.echo(f"portolan-spec commit: {_profile.spec_commit() or 'unknown'}")
+    ctx.exit()
+
+
 @click.group()
-@click.version_option(package_name="rashid")
+@click.option(
+    "--version",
+    is_flag=True,
+    expose_value=False,
+    is_eager=True,
+    callback=_print_version,
+    help="Show the version, the bundled Portolan profile versions, and the spec commit.",
+)
 @click.option(
     "-v",
     "--verbose",

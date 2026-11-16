@@ -9,6 +9,7 @@ from importlib import resources
 from typing import Any
 
 from rashid import _json
+from rashid._profile import newest_version, profile_uri, profile_version, version_key
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
@@ -42,7 +43,7 @@ class SchemaUriDeclaredRule(Rule):
                 node,
                 "stac_extensions declares no Portolan schema URI",
                 json_pointer=json_pointer("stac_extensions"),
-                fix_hint=("add e.g. https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"),
+                fix_hint=f"add e.g. {profile_uri(newest_version())}",
             )
         elif len(uris) > 1:
             yield self.finding(
@@ -101,6 +102,47 @@ class SchemaUriConsistencyRule(Rule):
                     expected=root_uri,
                     actual=uris[0],
                 )
+
+
+class AppliedProfileVersionRule(Rule):
+    """Say which profile version's requirements rashid applies.
+
+    rashid judges every catalog by the newest profile it bundles. A root that
+    declares another version gets one info finding, so the reader knows the
+    findings follow the newest requirements. The schema pass still validates
+    against the declared version's schema.
+    """
+
+    id = "PTL-CNF-005"
+    spec_ids = ()
+    default_severity = Severity.INFO
+    description = "rashid applies the newest bundled profile version's requirements"
+    kinds = ()  # graph-level: the root's declaration only
+
+    def check_graph(self, graph: CatalogGraph) -> Iterable[Finding]:
+        root = graph.root
+        uris = declared_schema_uris(root) if root is not None else []
+        if root is None or len(uris) != 1:
+            return  # PTL-CNF-001 reports a missing or ambiguous declaration
+        declared = profile_version(uris[0])
+        newest = newest_version()
+        if declared is None or declared == newest:
+            return
+        relation = "older than" if version_key(declared) < version_key(newest) else "newer than"
+        yield Finding(
+            rule_id=self.id,
+            severity=self.default_severity,
+            message=(
+                f"the catalog declares Portolan {declared}, which is {relation} {newest};"
+                f" rashid applies the requirements of {newest}, the newest version it bundles"
+            ),
+            path=str(root.path),
+            object_id=root.id,
+            json_pointer=json_pointer("stac_extensions"),
+            fix_hint=f"declare {profile_uri(newest)} after you check the catalog against it",
+            expected=newest,
+            actual=declared,
+        )
 
 
 # The STAC version extension, the one place dataset versioning may live.

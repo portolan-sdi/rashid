@@ -9,6 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from rashid import RulesConfig, ValidationOptions, _trace, validate
+from rashid._profile import bundled_versions, profile_uri
 from rashid.cli import SchemaMapping, main
 from tests._https import HttpsServer, Route
 from tests.conftest import PORTOLAN_URI, CatalogBuilder
@@ -173,7 +174,7 @@ def test_schema_map_requires_the_profile_pass(
     [
         PORTOLAN_URI.replace("https:", "http:"),
         PORTOLAN_URI + "/",
-        PORTOLAN_URI.replace("v0.2.0", "v0.1.0"),
+        profile_uri(bundled_versions()[0]),
     ],
 )
 def test_unused_map_warns_even_when_the_bundled_schema_passes(

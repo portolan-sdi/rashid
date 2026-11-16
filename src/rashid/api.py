@@ -15,6 +15,11 @@ tests and still disagrees with the rule it was written against.
 gates on a license identifier should use both rather than keep a shorter list,
 which would reject real identifiers the rule accepts.
 
+``newest_version`` names the profile version whose requirements rashid
+applies, and ``bundled_versions`` lists every profile schema the wheel
+carries, oldest first. Compare versions with ``version_key``; a string sort
+puts v0.10.0 before v0.9.0.
+
 To run validation, use the top-level package:
 
     from rashid import validate
@@ -27,6 +32,14 @@ from rashid._multihash import (
     decode_multihash,
     encode_multihash,
     is_well_formed_multihash,
+)
+from rashid._profile import (
+    bundled_versions,
+    newest_version,
+    profile_uri,
+    profile_version,
+    spec_commit,
+    version_key,
 )
 from rashid._spdx import SPDX_LICENSE_IDS, canonical_spdx_id
 from rashid.rules._common import (
@@ -44,6 +57,7 @@ __all__ = [
     "SPDX_LICENSE_IDS",
     "STRUCTURAL_RELS",
     "ValidationOptions",
+    "bundled_versions",
     "canonical_spdx_id",
     "decode_multihash",
     "encode_multihash",
@@ -51,6 +65,11 @@ __all__ = [
     "is_cog_media_type",
     "is_well_formed_multihash",
     "links_of",
+    "newest_version",
     "parse_rfc3339",
+    "profile_uri",
+    "profile_version",
     "roles_of",
+    "spec_commit",
+    "version_key",
 ]

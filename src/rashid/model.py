@@ -124,16 +124,26 @@ class RuleSummary:
         }
 
 
+# The JSON Schema of Report.to_dict(), shipped at _schemas/report/<version>/.
+REPORT_VERSION = "1.0.0"
+REPORT_SCHEMA_URI = f"https://schemas.portolan-sdi.org/rashid/report/v{REPORT_VERSION}/schema.json"
+
 # Loudest first: errors before warnings before infos.
 _SEVERITY_RANK = {Severity.ERROR: 0, Severity.WARNING: 1, Severity.INFO: 2}
 
 
 @dataclass
 class Report:
-    """Aggregate of all findings from one validation run."""
+    """Aggregate of all findings from one validation run.
+
+    ``declared_profile`` is the Portolan schema URI the root catalog declares,
+    when it declares exactly one. ``passes`` names the passes that ran.
+    """
 
     findings: list[Finding] = field(default_factory=list)
     files_checked: int = 0
+    declared_profile: str | None = None
+    passes: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -181,8 +191,26 @@ class Report:
         return summaries
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to a JSON-serializable dict for machine output."""
+        """Convert to a JSON-serializable dict for machine output.
+
+        The shape follows the JSON Schema at ``REPORT_SCHEMA_URI``.
+        """
+        from importlib.metadata import version
+
+        from rashid import _profile
+
         return {
+            "$schema": REPORT_SCHEMA_URI,
+            "report_version": REPORT_VERSION,
+            "validator": {
+                "name": "rashid",
+                "version": version("rashid"),
+                "spec_commit": _profile.spec_commit(),
+                "bundled_profiles": list(_profile.bundled_versions()),
+                "applied_profile": _profile.newest_version(),
+                "declared_profile": self.declared_profile,
+                "passes": list(self.passes),
+            },
             "passed": self.passed,
             "files_checked": self.files_checked,
             "error_count": len(self.errors),

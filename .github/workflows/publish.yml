@@ -75,7 +75,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # Attach each --json report schema under a name that carries its version.
+          assets=()
+          for schema in src/rashid/_schemas/report/v*/schema.json; do
+            version_dir=$(basename "$(dirname "$schema")")
+            asset="$RUNNER_TEMP/rashid-report-${version_dir}.schema.json"
+            cp "$schema" "$asset"
+            assets+=("$asset")
+          done
           gh release create "v$VERSION" \
             --repo "$GITHUB_REPOSITORY" \
             --title "v$VERSION" \
-            --notes "See [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/main/CHANGELOG.md) for details."
+            --notes "See [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/main/CHANGELOG.md) for details." \
+            "${assets[@]}"

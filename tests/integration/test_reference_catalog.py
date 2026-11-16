@@ -101,6 +101,32 @@ def test_reference_catalog_schema_pass_is_clean() -> None:
     assert schema_findings == [], [(f.rule_id, f.path, f.message) for f in schema_findings]
 
 
+def test_reference_catalog_passes_against_the_draft_profile(tmp_path: Path) -> None:
+    """Rehearse the next profile release on the reference catalog.
+
+    The tree is rewritten to declare the draft's URI, and the schema pass
+    validates it against the draft from spec main. The metadata pass must stay
+    free of errors, and the schema pass free of findings, before that draft
+    is released and bundled.
+    """
+    draft = json.loads(DRAFT_SCHEMA.read_bytes())
+    draft_uri = str(draft["$id"]).rstrip("#")
+    graph = CatalogGraph.load(CATALOG)
+    assert graph.root is not None
+    (declared,) = declared_schema_uris(graph.root)
+    rehearsal = tmp_path / "catalog"
+    shutil.copytree(CATALOG, rehearsal)
+    for path in rehearsal.rglob("*.json"):
+        path.write_text(path.read_text(encoding="utf-8").replace(declared, draft_uri))
+    options = ValidationOptions(
+        structural=False, data=False, schema=True, schema_map={draft_uri: draft}
+    )
+    report = validate(rehearsal, options=options)
+    schema_findings = [f for f in report.findings if f.rule_id.startswith("PTL-SCH")]
+    assert schema_findings == [], [(f.rule_id, f.path, f.message) for f in schema_findings]
+    assert report.errors == [], [(f.rule_id, f.path) for f in report.errors]
+
+
 @pytest.mark.parametrize("single_file", [False, True])
 def test_canary_accepts_main_with_an_unreleased_profile(
     catalog: CatalogBuilder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, single_file: bool
