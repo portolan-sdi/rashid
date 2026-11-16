@@ -284,7 +284,12 @@ class _LinkTarget:
 
 
 def _lower_headers(items: Any) -> dict[str, str]:
-    return {str(name).lower(): str(value) for name, value in items}
+    """Header names lowercased; a repeated name joins its values with ", ", as Fetch does."""
+    headers: dict[str, str] = {}
+    for name, value in items:
+        key = str(name).lower()
+        headers[key] = f"{headers[key]}, {value}" if key in headers else str(value)
+    return headers
 
 
 def _probe_response(url: str, method: str, headers: dict[str, str]) -> ProbeResponse:
@@ -439,19 +444,30 @@ def _pmtiles_links(graph: CatalogGraph) -> Iterator[tuple[Node, int, str]]:
                 yield node, index, href
 
 
-def _unprobeable_assets(graph: CatalogGraph) -> list[str]:
-    """Assets whose absolute href uses another scheme and has no https alternate.
+def _unprobeable_assets(graph: CatalogGraph, base: str | None) -> list[str]:
+    """Assets whose absolute href uses another scheme, with no https alternate
+    on a host the pass probes.
 
-    No browser reads them, so no probe can run (``PTL-AST-002`` reports the
-    href itself). Each is named as ``<path>#/assets/<key>``.
+    No browser reads the href itself (``PTL-AST-002`` reports it). An
+    alternate on a host other than the publish base is skipped as upstream,
+    which may hide the publisher's own https copy, so it is listed too. Each
+    asset is named as ``<path>#/assets/<key>``.
     """
-    return [
-        f"{node.path}#{pointer}"
-        for node in graph.iter(*_LIVE_KINDS)
-        if node.parse_error is None
-        for pointer, _key, asset in assets_of(node)
-        if isinstance(asset.get("href"), str) and asset["href"] and read_target(asset) is None
-    ]
+    unprobeable = []
+    for node in graph.iter(*_LIVE_KINDS):
+        if node.parse_error is not None:
+            continue
+        directory = str(graph.href_path(node).parent)
+        for pointer, _key, asset in assets_of(node):
+            href = asset.get("href")
+            if not isinstance(href, str) or not href:
+                continue
+            target = read_target(asset)
+            if target is None or (
+                target != href and live_host_href(directory, target, base) is None
+            ):
+                unprobeable.append(f"{node.path}#{pointer}")
+    return unprobeable
 
 
 def _link_targets(graph: CatalogGraph, base: str) -> list[_LinkTarget]:
@@ -912,7 +928,9 @@ def _stays_on_https(heads: _HeadCache, url: str) -> bool:
     return response is not None and response.off_https() is None
 
 
-def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> list[Finding]:
+def _check_links(
+    host: str, targets: list[_LinkTarget], heads: _HeadCache, probed: set[str]
+) -> list[Finding]:
     """HEAD every distinct link URL on the publish host; any non-2xx is an error.
 
     Every metadata file MUST allow HEAD (PORTO-CORE-086), so a 405 is reported
@@ -939,6 +957,8 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
         held = heads.response(target.url)
         location = None if held is None else held.off_https()
         if location is not None:
+            if target.url in probed:
+                continue  # the asset or pmtiles target HEAD already reported it
             findings.append(
                 _off_https_finding(
                     target.node,
@@ -1180,9 +1200,9 @@ def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
     ]
 
 
-def _unprobeable_note(graph: CatalogGraph) -> list[Finding]:
+def _unprobeable_note(graph: CatalogGraph, base: str | None) -> list[Finding]:
     """One ``PTL-LIV-000`` note that lists the assets no probe can reach."""
-    unprobeable = _unprobeable_assets(graph)
+    unprobeable = _unprobeable_assets(graph, base)
     if not unprobeable:
         return []
     shown = ", ".join(unprobeable[:10])
@@ -1193,10 +1213,14 @@ def _unprobeable_note(graph: CatalogGraph) -> list[Finding]:
             severity=Severity.INFO,
             message=(
                 f"{len(unprobeable)} asset(s) not probed: the href uses a scheme other"
-                f" than https and the asset has no https alternate: {shown}{more}"
+                f" than https and the asset has no https alternate on a probed host:"
+                f" {shown}{more}"
             ),
             path=".",
-            fix_hint="add the https URL that serves each file to the asset's alternate field",
+            fix_hint=(
+                "add the https URL that serves each file from the publish host"
+                " to the asset's alternate field"
+            ),
         )
     ]
 
@@ -1250,7 +1274,7 @@ def validate_live(
     base, named = resolve_live_base(base_url, graph.base_url, graph.published_base())
     by_host = _targets_by_host(graph, base)
     stores = _zarr_stores(graph, base)
-    findings = _unprobeable_note(graph)
+    findings = _unprobeable_note(graph, base)
     if not by_host and not stores:
         hint = (
             "asset probes skipped: no probeable asset hrefs"
@@ -1275,7 +1299,8 @@ def validate_live(
     if base is not None:
         base_host = href_host(base)
         links = _link_targets(graph, base)
-        findings.extend(_check_links(base_host, links, heads))
+        probed = {target.url for targets in by_host.values() for target in targets}
+        findings.extend(_check_links(base_host, links, heads, probed))
         if base_host not in by_host:
             findings.extend(_check_metadata_host(base_host, links, prober, heads))
         if named:

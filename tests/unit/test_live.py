@@ -2225,3 +2225,50 @@ def test_a_pmtiles_link_to_an_asset_url_is_probed_once(catalog: CatalogBuilder) 
     prober = FakeProber()
     assert validate_live(_with_pmtiles_link(catalog.write()), prober) == []
     assert prober.head_calls == [_TILES]
+
+
+def test_repeated_allow_origin_lines_join_and_fail_the_exact_match(
+    catalog: CatalogBuilder,
+) -> None:
+    # Fetch joins repeated header lines; "https://other, *" permits no origin.
+    headers = live_mod._lower_headers(
+        [
+            ("Access-Control-Allow-Origin", "https://other.example"),
+            ("access-control-allow-origin", "*"),
+        ]
+    )
+    assert headers["access-control-allow-origin"] == "https://other.example, *"
+    response = _good_range(**headers)
+    findings = validate_live(_graph_with_remote(catalog), FakeProber(range_response=response))
+    assert LIV_CORS_ORIGIN in _ids(findings)
+
+
+def test_a_relative_pmtiles_link_off_https_is_reported_once(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    link = {"rel": "pmtiles", "href": "./roads.pmtiles", "type": "application/vnd.pmtiles"}
+    mutate_json(root / "roads" / "collection.json", lambda data: data["links"].append(link))
+    moved = ProbeResponse(status=301, headers={"location": "http://data.example.org/x"})
+    prober = StatusProber()
+    pmtiles = f"{_BASE}/roads/roads.pmtiles"
+    original_head = prober.head
+    prober.head = lambda url: moved if url == pmtiles else original_head(url)  # type: ignore[method-assign]
+    findings = validate_live(CatalogGraph.load(root), prober, base_url=_BASE)
+    redirects = [f for f in findings if f.rule_id == LIV_OFF_HTTPS]
+    assert len(redirects) == 1
+    assert redirects[0].json_pointer is not None and redirects[0].json_pointer.startswith("/links/")
+
+
+def test_an_alternate_off_the_publish_host_is_listed_as_not_probed(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.collection("roads", assets={"data": _s3_asset(_URL)})
+    findings = validate_live(CatalogGraph.load(catalog.write()), StatusProber(), base_url=_BASE)
+    note = next(f for f in findings if f.severity is Severity.INFO)
+    assert note.rule_id == LIV_UNAVAILABLE
+    assert "roads/collection.json#/assets/data" in note.message
+
+
+def test_tests_without_the_network_marker_cannot_resolve_other_hosts() -> None:
+    with pytest.raises(OSError, match="reached the network"):
+        socket.getaddrinfo("example.com", 443)
