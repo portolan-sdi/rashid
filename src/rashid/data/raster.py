@@ -369,11 +369,17 @@ def _check_cog_stats(key: str, asset: dict[str, Any], files: AssetFiles) -> list
                 key,
             )
         ]
-    classified = any(True for _ in asset_class_lists(json_pointer("assets", key), asset))
+    # A declared list with at least one class makes the raster classified.
+    classified = any(
+        any(True for _ in found.entries())
+        for found in asset_class_lists(json_pointer("assets", key), asset)
+    )
     required = wide and not classified
     defects: list[DataDefect] = []
     if missing:
-        defects.append(_missing_stats(key, missing, included=included, required=required))
+        defects.append(
+            _missing_stats(key, missing, included=included, required=required, bands=src.count)
+        )
     if not (included or required):
         vp_should, vp_must = vp_should + vp_must, []  # no statistics needed or given
     if vp_must:
@@ -399,9 +405,17 @@ def _check_cog_stats(key: str, asset: dict[str, Any], files: AssetFiles) -> list
     return defects
 
 
-def _missing_stats(key: str, missing: list[int], *, included: bool, required: bool) -> DataDefect:
+def _missing_stats(
+    key: str, missing: list[int], *, included: bool, required: bool, bands: int
+) -> DataDefect:
     stats = "embedded min/max/mean/stddev statistics"
-    if included:
+    if included and bands == 1:
+        message = (
+            f"asset '{key}' band 1 carries only some of its {stats}; each band needs"
+            " all four (PORTO-FMT-027)"
+        )
+        severity = Severity.ERROR
+    elif included:
         message = (
             f"asset '{key}' band(s) {missing} lack {stats} that other bands carry;"
             " clients ignore partial statistics (PORTO-FMT-084)"

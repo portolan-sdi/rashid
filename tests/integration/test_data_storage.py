@@ -1198,12 +1198,22 @@ def test_a_classified_wide_raster_without_stats_is_a_warning(tmp_path: Path) -> 
 
 
 def test_a_color_table_alone_does_not_make_a_raster_classified(tmp_path: Path) -> None:
+    """formats.md: a continuous raster such as percent tree cover can have a color table."""
     path = tmp_path / "cover.tif"
-    assets.write_cog(path, stats=False, dtype="uint16")
+    assets.write_cog(path, stats=False, dtype="uint16", colormap=_FLOOD_TABLE)
+    with rasterio.open(path) as src:
+        assert src.colormap(1)  # the color table is really there
     assert _stats(_raster(path)) == [
         (DAT_COG_STATS, Severity.ERROR),
         (DAT_VALID_PERCENT, Severity.WARNING),
     ]
+
+
+def test_an_empty_class_list_does_not_make_a_raster_classified(tmp_path: Path) -> None:
+    path = tmp_path / "empty.tif"
+    assets.write_cog(path, stats=False, dtype="uint16")
+    asset = {"bands": [{"data_type": "uint16", "classification:classes": []}]}
+    assert _stats(_raster(path, asset))[0] == (DAT_COG_STATS, Severity.ERROR)
 
 
 @pytest.mark.parametrize("dtype", ["uint8", "uint16"])
@@ -1228,7 +1238,8 @@ def test_a_band_with_some_of_the_four_stats_is_partial(tmp_path: Path) -> None:
     # Updating the tags moves the header, so only the statistics findings matter here.
     stats = [d for d in _raster(path) if d.rule_id == DAT_COG_STATS]
     assert [d.severity for d in stats] == [Severity.ERROR]
-    assert "PORTO-FMT-084" in stats[0].message
+    assert "band 1 carries only some" in stats[0].message
+    assert "PORTO-FMT-027" in stats[0].message
 
 
 def test_missing_valid_percent_is_a_warning(tmp_path: Path) -> None:
