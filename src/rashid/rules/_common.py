@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from rashid._href import (
     is_absolute_href,
+    is_uri_reference,
     local_path,
     object_location,
     split_href,
@@ -25,6 +26,22 @@ STRUCTURAL_RELS = ("root", "parent", "child", "item", "collection")
 PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
 PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
 COPC_MEDIA_TYPE = "application/vnd.laszip+copc"
+
+# incubating/zarr.md, Access: a Zarr store asset carries the Zarr media type
+# with a version parameter, and MAY carry more parameters such as
+# `profile=multiscales`. PTL-ZAR-004 judges the whole declaration.
+ZARR_MEDIA_TYPE = "application/vnd.zarr"
+
+# The filename suffix a Zarr store carries, with or without a trailing slash.
+ZARR_SUFFIX = ".zarr"
+
+# Icechunk is its own format. Its media type is not a Zarr media type, and a
+# repository is not a Zarr store unless it is served as plain Zarr v3 under a
+# Zarr media type, so the word is refused wherever "zarr" is matched loosely.
+_ICECHUNK_MARKER = "icechunk"
+
+# Media types that say nothing about the format, so an href may speak instead.
+_UNTYPED = frozenset({"", "application/octet-stream", "binary/octet-stream"})
 
 # core.md, Assets: Portolan raster data is COG, declared with this media type.
 # A plain GeoTIFF may appear only as an upstream source, not as primary data.
@@ -76,6 +93,46 @@ def assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
     ]
 
 
+def _is_https_url(href: object) -> bool:
+    """A well-formed https URL with a host and a valid port."""
+    if not isinstance(href, str) or not is_uri_reference(href):
+        return False
+    parsed = split_href(href)
+    if parsed is None or parsed.scheme.lower() != "https" or not parsed.hostname:
+        return False
+    try:
+        _ = parsed.port
+    except ValueError:
+        return False
+    return True
+
+
+def https_alternate(asset: dict[str, Any]) -> str | None:
+    """The first https URL in the asset's ``alternate`` field (PORTO-CORE-087)."""
+    alternates = asset.get("alternate")
+    if not isinstance(alternates, dict):
+        return None
+    for alt in alternates.values():
+        if isinstance(alt, dict) and _is_https_url(alt.get("href")):
+            return str(alt["href"])
+    return None
+
+
+def read_target(asset: dict[str, Any]) -> str | None:
+    """The href a client reads the asset through.
+
+    A relative or https href as declared; for another scheme, such as ``s3``,
+    the https alternate that PORTO-CORE-087 requires; None when there is none.
+    """
+    href = asset.get("href")
+    if not isinstance(href, str) or not href:
+        return None
+    parsed = split_href(href)
+    if parsed is not None and parsed.scheme.lower() in ("", "https"):
+        return href
+    return https_alternate(asset)
+
+
 def is_tiff_media_type(
     value: object, *, policy: Literal["base-type", "prefix", "literal-prefix"] = "base-type"
 ) -> bool:
@@ -92,6 +149,59 @@ def is_tiff_media_type(
     if policy == "prefix":
         return value.lower().startswith(_TIFF_MEDIA_TYPE)
     return value.split(";", 1)[0].strip().lower() == _TIFF_MEDIA_TYPE
+
+
+def media_parameters(value: str) -> dict[str, str]:
+    """The parameters of a media type, lowercased, order and spacing ignored."""
+    parameters: dict[str, str] = {}
+    for part in value.split(";")[1:]:
+        name, separator, raw = part.partition("=")
+        if separator:
+            parameters[name.strip().lower()] = raw.strip().strip('"').lower()
+    return parameters
+
+
+def media_base_type(value: object) -> str:
+    """A media type's base type, lowercased and trimmed; empty when there is none."""
+    if not isinstance(value, str):
+        return ""
+    return value.split(";", 1)[0].strip().lower()
+
+
+def names_a_zarr_store(value: object) -> bool:
+    """Whether a media type names a Zarr store, however it is spelled.
+
+    The profile requires ``application/vnd.zarr``, and catalogs in the wild
+    write ``application/vnd+zarr``, ``application/x-zarr`` and
+    ``application/zarr`` for the same thing. Reading the loose spellings as a
+    store is what lets ``PTL-ZAR-004`` report the media type that is wrong; a
+    strict match would make the misspelling hide the rule that governs it.
+    Icechunk is excluded: its media type names a different format.
+    """
+    base = media_base_type(value)
+    return "zarr" in base and _ICECHUNK_MARKER not in base
+
+
+def is_zarr_store_asset(asset: dict[str, Any]) -> bool:
+    """Whether an asset publishes a Zarr store, so the profile's rules bind it.
+
+    The media type decides whenever it names a format at all. An asset that
+    declares none, or declares only that it is bytes, falls back to its href:
+    a ``data`` asset at a ``.zarr`` prefix is a store whatever it forgot to
+    say. A media type that names some other format is believed rather than
+    second-guessed, so a COG or a ``.zarr.zip`` archive is never read as a
+    store. An upstream ``source`` asset is out of scope either way.
+    """
+    media_type = asset.get("type")
+    if names_a_zarr_store(media_type):
+        return True
+    if is_source_asset(asset) or "data" not in roles_of(asset):
+        return False
+    if media_base_type(media_type) not in _UNTYPED:
+        return False
+    href = asset.get("href")
+    parsed = split_href(href) if isinstance(href, str) else None
+    return parsed is not None and parsed.path.rstrip("/").lower().endswith(ZARR_SUFFIX)
 
 
 def is_cog_media_type(value: object) -> bool:

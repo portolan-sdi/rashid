@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from rashid._href import is_uri_reference, split_href
+from rashid._href import split_href
 from rashid._multihash import is_well_formed_multihash
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
@@ -19,9 +19,11 @@ from rashid.rules._common import (
     asset_refers_to_self,
     assets_of,
     declares_geometry,
+    https_alternate,
     is_cog_media_type,
     is_pmtiles_asset,
     is_raster_data_asset,
+    is_zarr_store_asset,
     roles_of,
 )
 
@@ -109,11 +111,7 @@ class AssetHrefSchemeRule(Rule):
             scheme = _absolute_scheme(asset.get("href"))
             if scheme is None or scheme == "https":
                 continue
-            alternates = asset.get("alternate")
-            if isinstance(alternates, dict) and any(
-                isinstance(alt, dict) and _is_https_url(alt.get("href"))
-                for alt in alternates.values()
-            ):
+            if https_alternate(asset) is not None:
                 yield self.finding(
                     node,
                     f"asset '{key}' href uses the '{scheme}' scheme; absolute hrefs should use https",
@@ -181,20 +179,6 @@ def _absolute_scheme(href: object) -> str | None:
     if parsed is None:
         return None  # PTL-LNK-006 reports the malformed URI reference.
     return parsed.scheme.lower() or None
-
-
-def _is_https_url(href: object) -> bool:
-    """A well-formed https URL with a host and a valid port."""
-    if not isinstance(href, str) or not is_uri_reference(href):
-        return False
-    parsed = split_href(href)
-    if parsed is None or parsed.scheme.lower() != "https" or not parsed.hostname:
-        return False
-    try:
-        _ = parsed.port
-    except ValueError:
-        return False
-    return True
 
 
 class AssetTitleDescriptionRule(Rule):
@@ -301,7 +285,11 @@ class AssetFileFieldsRule(Rule):
                     fix_hint="set file:size to the asset's byte count, unquoted and greater than 0",
                     actual=size,
                 )
-            if asset.get("file:checksum") is None:
+            if asset.get("file:checksum") is None and not is_zarr_store_asset(asset):
+                # incubating/zarr.md, Size and checksum: a Zarr store is a key
+                # prefix holding thousands of objects, with no single digest,
+                # so core.md's recommendation does not reach it. file:size
+                # still does: it is the total size of those objects.
                 yield self.finding(
                     node,
                     f"asset '{key}' has no file:checksum",
