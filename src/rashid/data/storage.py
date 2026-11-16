@@ -19,6 +19,7 @@ from rashid.registry import (
 )
 from rashid.rules._common import (
     is_tiff_media_type,
+    read_target,
 )
 
 # Multihash function code -> hashlib algorithm name.
@@ -67,7 +68,8 @@ def check_bytes(
     leaves until it is iterated), which makes asking for one the cheapest
     fetchability test available through the ``AssetReader`` protocol.
     """
-    stream = reader.stream(node, asset["href"])
+    # An s3 href is read through its https alternate (PORTO-CORE-087).
+    stream = reader.stream(node, read_target(asset) or asset["href"])
     if stream is None:
         return []  # not fetchable; metadata pass owns missing/foreign hrefs
 

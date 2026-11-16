@@ -45,7 +45,7 @@ from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.data.reader import AssetReader, FilesystemHttpReader, Locator
 from rashid.model import Finding, Severity, json_pointer
 from rashid.registry import DAT_UNAVAILABLE
-from rashid.rules._common import assets_of
+from rashid.rules._common import assets_of, read_target
 
 # Assets are declared on collections and items; catalogs carry none.
 _DATA_KINDS: tuple[Kind, ...] = ("collection", "item")
@@ -211,7 +211,7 @@ def validate_data(
 
     reader = (reader_factory or FilesystemHttpReader)(graph)
     nodes = [node for node in graph.iter(*_DATA_KINDS) if node.parse_error is None]
-    findings: list[Finding] = []
+    findings = _unreachable_note(nodes)
     ended = threading.Event()
     shared = _EndableReader(reader, ended)
     remote = ThreadPoolExecutor(_REMOTE_WORKERS, thread_name_prefix="data-remote")
@@ -297,8 +297,8 @@ def _reads_remote(node: Node, reader: AssetReader) -> bool:
     as a systemic one.
     """
     for _pointer, _key, asset in assets_of(node):
-        href = asset.get("href")
-        if isinstance(href, str) and href:
+        href = read_target(asset)
+        if href is not None:
             try:
                 located = reader.locate(node, href)
             except Exception:  # the validator reports it
@@ -306,6 +306,36 @@ def _reads_remote(node: Node, reader: AssetReader) -> bool:
             if located is not None and located.is_remote:
                 return True
     return False
+
+
+def _unreachable_note(nodes: list[Node]) -> list[Finding]:
+    """One ``PTL-DAT-000`` info that lists the assets whose bytes no reader can reach.
+
+    Their href uses a scheme other than https, such as ``s3``, and they carry no
+    https alternate (PORTO-CORE-087), so no byte check runs on them.
+    ``PTL-AST-002`` reports the href itself.
+    """
+    unreachable = [
+        f"{node.path}#{pointer}"
+        for node in nodes
+        for pointer, _key, asset in assets_of(node)
+        if isinstance(asset.get("href"), str) and asset["href"] and read_target(asset) is None
+    ]
+    if not unreachable:
+        return []
+    shown = ", ".join(unreachable[:10])
+    more = f", and {len(unreachable) - 10} more" if len(unreachable) > 10 else ""
+    return [
+        Finding(
+            rule_id=DAT_UNAVAILABLE,
+            severity=Severity.INFO,
+            message=(
+                f"{len(unreachable)} asset(s) not read: the href uses a scheme other than"
+                f" https and the asset has no https alternate: {shown}{more}"
+            ),
+            path=".",
+        )
+    ]
 
 
 def _to_findings(node: Node, defects: list[DataDefect]) -> list[Finding]:

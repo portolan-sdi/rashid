@@ -115,6 +115,7 @@ def check_geoparquet(
         return [unreadable_spatial_metadata(key, geo.message, subject=subject)]
     defects: list[DataDefect] = []
     native = _native_geo_columns(parquet)
+    has_geo_key = geo is not None
     if geo is None and native:
         # PORTO-FMT-004: the spec's third accepted form. The missing key is
         # not faulted. The native crs field is held to PORTO-FMT-081 instead,
@@ -122,7 +123,7 @@ def check_geoparquet(
         defects.extend(_check_native_crs(key, parquet, native, subject=subject))
         geo = {"primary_column": _primary_geometry_column(parquet, {})}
     elif isinstance(geo, dict):
-        defects.extend(_check_geoparquet_version(key, geo, subject=subject))
+        defects.extend(_check_geoparquet_version(key, geo, native=bool(native), subject=subject))
     if not isinstance(geo, dict):
         return []  # plain Parquet
     meta = parquet.metadata
@@ -138,7 +139,9 @@ def check_geoparquet(
             )
         )
 
-    bboxes, stat_defects = _rowgroup_stat_defects(key, parquet, geo, subject=subject)
+    bboxes, stat_defects = _rowgroup_stat_defects(
+        key, parquet, geo, recommend_covering=has_geo_key, subject=subject
+    )
     defects.extend(stat_defects)
     shape = (sum(row_counts), len(row_counts))
     if bboxes is None:
@@ -147,33 +150,51 @@ def check_geoparquet(
         defects.extend(_row_ordering_defects(key, parquet, geo, shape, subject=subject))
         return defects
 
-    layout = _RowGroupLayout(bboxes, row_counts, _rowgroup_compressed_sizes(meta))
+    boxes, kept = bboxes
+    sizes = _rowgroup_compressed_sizes(meta)
+    layout = _RowGroupLayout(boxes, [row_counts[i] for i in kept], [sizes[i] for i in kept])
     defects.extend(_ordering_defects(key, parquet, geo, layout, subject=subject))
     return defects
 
 
 def _check_geoparquet_version(
-    key: str, geo: dict[str, Any], *, subject: str | None = None
+    key: str, geo: dict[str, Any], *, native: bool, subject: str | None = None
 ) -> list[DataDefect]:
-    """The ``geo`` metadata MUST declare GeoParquet 1.1 or 2.x.
+    """The ``geo`` metadata MUST declare GeoParquet 1.1 or 2.x (PORTO-FMT-004).
 
-    formats.md:25: "Data MUST be provided in GeoParquet 1.1 or 2.0". A file
-    with ``geo`` metadata but an older version (1.0, the common legacy case)
-    lacks the covering-column machinery the rest of the format MUSTs assume.
+    A file with ``geo`` metadata but an older version (1.0, the common legacy
+    case) lacks the covering-column machinery the rest of the format MUSTs
+    assume. Two cases are warnings. A pre-release such as ``1.1.0-rc.1`` is
+    not the release the rule names. A file with native ``GEOMETRY`` or
+    ``GEOGRAPHY`` columns already meets PORTO-FMT-004 through them, so a stale
+    ``geo`` key misleads readers but does not break the MUST.
     """
     subject = subject or f"asset '{key}'"
     version = geo.get("version")
-    if isinstance(version, str) and (version == "1.1" or version.startswith(("1.1.", "2."))):
+    matched = _GEOPARQUET_VERSION.fullmatch(version) if isinstance(version, str) else None
+    if matched is not None and matched.group("pre") is None:
         return []
     described = repr(version) if version is not None else "no version"
+    if matched is not None:
+        message = f"{subject} geo metadata declares the pre-release {described}"
+        severity = Severity.WARNING
+    else:
+        message = f"{subject} geo metadata declares {described}"
+        severity = Severity.WARNING if native else Severity.ERROR
+    if native:
+        message += "; the native geospatial columns meet the rule, but the geo key is stale"
     return [
         DataDefect(
             DAT_GEOPARQUET_VERSION,
-            Severity.ERROR,
-            f"{subject} geo metadata declares {described}; data must be GeoParquet 1.1 or 2.x",
+            severity,
+            f"{message}; data must be GeoParquet 1.1 or 2.x",
             key,
         )
     ]
+
+
+# GeoParquet 1.1 or 2.x, with an optional semver pre-release suffix.
+_GEOPARQUET_VERSION = re.compile(r"(?:1\.1|2\.\d+)(?:\.\d+)*(?P<pre>-[0-9A-Za-z.-]+)?")
 
 
 def _native_geometry(parquet: Any) -> str | None:
@@ -515,19 +536,55 @@ def check_column_descriptions(node: Node, key: str, asset: dict[str, Any]) -> li
     return _bare_columns(columns, f"asset '{key}'", key)
 
 
-def check_partitioned_column_descriptions(node: Node) -> list[DataDefect]:
-    """PTL-DAT-020 for a collection that publishes through ``partition:glob``.
+def check_collection_column_descriptions(node: Node) -> list[DataDefect]:
+    """PTL-DAT-020 for the ``table:columns`` a collection declares on itself.
 
-    Such a collection declares its columns on itself and has no data asset, so
-    the per-asset check never sees them. With a data asset, that check owns
-    the finding.
+    A collection with no data asset, such as one that publishes through
+    ``partition:glob`` or whose items carry the files, still documents its
+    columns on itself (PORTO-FMT-046), and the per-asset check never sees
+    them. With a data asset, that check reads the collection's columns too
+    and owns the finding.
     """
     columns = node.data.get("table:columns")
-    if not isinstance(node.data.get("partition:glob"), str) or not isinstance(columns, list):
+    if node.kind != "collection" or not isinstance(columns, list):
         return []
-    if any("data" in roles_of(asset) for _pointer, _key, asset in assets_of(node)):
+    if has_data_asset(node):
         return []
-    return _bare_columns(columns, "partitioned collection", "", json_pointer("table:columns"))
+    subject = (
+        "partitioned collection"
+        if isinstance(node.data.get("partition:glob"), str)
+        else "collection"
+    )
+    return _bare_columns(columns, subject, "", json_pointer("table:columns"))
+
+
+def has_data_asset(node: Node) -> bool:
+    """Whether any asset on ``node`` carries the ``data`` role."""
+    return any("data" in roles_of(asset) for _pointer, _key, asset in assets_of(node))
+
+
+def partitioned_vector_columns(node: Node, parquet: Any) -> list[DataDefect]:
+    """PTL-DAT-017 for a partitioned vector collection with no ``table:columns``.
+
+    A partitioned collection has no data asset, so :func:`check_vector_columns`
+    never runs on it. The first readable partition file says whether the
+    data is vector (PORTO-FMT-046).
+    """
+    geo = geo_metadata(parquet)
+    if isinstance(geo, _MalformedGeo) or (geo is None and _native_geometry(parquet) is None):
+        return []  # plain Parquet: the Tabular Data SHOULDs own it
+    if has_data_asset(node) or isinstance(node.data.get("table:columns"), list):
+        return []
+    return [
+        DataDefect(
+            DAT_VECTOR_COLUMNS,
+            Severity.WARNING,
+            "partitioned vector collection: the collection does not document its columns"
+            " with the table extension (table:columns)",
+            "",
+            json_pointer=json_pointer("partition:glob"),
+        )
+    ]
 
 
 def _bare_columns(
@@ -572,10 +629,20 @@ def _has_temporal_extent(node: Node) -> bool:
     )
 
 
+# Row-group boxes, and the index of the row group each one belongs to.
+_Boxes = tuple[list[tuple[float, float, float, float]], list[int]]
+
+
 def _rowgroup_stat_defects(
-    key: str, parquet: Any, geo: dict[str, Any], *, subject: str | None = None
-) -> tuple[list[tuple[float, float, float, float]] | None, list[DataDefect]]:
-    """Per-row-group [minx, miny, maxx, maxy] boxes, plus statistics defects.
+    key: str,
+    parquet: Any,
+    geo: dict[str, Any],
+    *,
+    recommend_covering: bool = True,
+    subject: str | None = None,
+) -> tuple[_Boxes | None, list[DataDefect]]:
+    """Per-row-group [minx, miny, maxx, maxy] boxes with their row-group indexes,
+    plus statistics defects.
 
     formats.md:64 accepts two satisfiers: a 1.1 ``bbox`` covering column whose
     leaf fields carry Parquet min/max, or — for GeoParquet 2.x / Parquet
@@ -584,14 +651,17 @@ def _rowgroup_stat_defects(
     Native statistics alone still satisfy the MUST, but formats.md keeps the
     covering column "RECOMMENDED even where native statistics exist, since it
     adds page-level min/max stats that enable finer-grained pruning" — that
-    SHOULD surfaces as a WARNING.
+    SHOULD surfaces as a WARNING. It binds GeoParquet 2.x, so a native file
+    with no ``geo`` key gets no such warning (PORTO-FMT-008). On the native
+    path the statistics are required on every native geometry column chunk,
+    not only the primary one (PORTO-FMT-007).
     """
     subject = subject or f"asset '{key}'"
     boxes = _covering_bboxes(parquet, geo)
     if boxes is not None:
         return boxes, []
-    boxes = _native_bboxes(parquet, geo)
-    if boxes is None:
+    native = _native_bboxes(parquet, geo)
+    if native is None:
         return None, [
             DataDefect(
                 DAT_ROWGROUP_STATS,
@@ -601,6 +671,25 @@ def _rowgroup_stat_defects(
                 key,
             )
         ]
+    boxes = (native, list(range(len(native))))
+    bare = [
+        name
+        for name in _native_geo_columns(parquet)
+        if name != geo.get("primary_column")
+        and _native_bboxes(parquet, {"primary_column": name}) is None
+    ]
+    if bare:
+        return None, [
+            DataDefect(
+                DAT_ROWGROUP_STATS,
+                Severity.ERROR,
+                f"{subject} has native geospatial column(s) {', '.join(bare)} without "
+                "GeospatialStatistics in every row group",
+                key,
+            )
+        ]
+    if not recommend_covering:
+        return boxes, []
     return boxes, [
         DataDefect(
             DAT_ROWGROUP_STATS,
@@ -654,11 +743,12 @@ def _covering_leaf_indices(parquet: Any, geo: dict[str, Any]) -> dict[str, int] 
     return dict(zip(("xmin", "ymin", "xmax", "ymax"), (index[path] for path in paths), strict=True))
 
 
-def _covering_bboxes(
-    parquet: Any, geo: dict[str, Any]
-) -> list[tuple[float, float, float, float]] | None:
-    """Per-row-group [minx, miny, maxx, maxy] from the bbox covering column's stats.
+def _covering_bboxes(parquet: Any, geo: dict[str, Any]) -> _Boxes | None:
+    """Per-row-group [minx, miny, maxx, maxy] from the bbox covering column's stats,
+    with the index of each row group that has a box.
 
+    A row group whose statistics say every row is null has no box, so the
+    indexes let the caller drop its rows and bytes from the weights too.
     Returns None when the file has no 1.1 ``bbox`` covering column whose leaf
     fields carry Parquet min/max statistics.
     """
@@ -668,6 +758,7 @@ def _covering_bboxes(
     meta = parquet.metadata
 
     boxes: list[tuple[float, float, float, float]] = []
+    kept: list[int] = []
     for i in range(meta.num_row_groups):
         group = meta.row_group(i)
         stats = [group.column(index).statistics for index in leaves.values()]
@@ -686,7 +777,8 @@ def _covering_bboxes(
         if None in (minx, miny, maxx, maxy):
             return None
         boxes.append((float(minx), float(miny), float(maxx), float(maxy)))
-    return boxes or None
+        kept.append(i)
+    return (boxes, kept) if boxes else None
 
 
 def _column_index(meta: Any) -> dict[str, int]:

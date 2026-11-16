@@ -14,6 +14,7 @@ import struct
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 import pytest
 
@@ -237,9 +238,9 @@ def test_footer_verdict_settles_a_file_the_row_check_would_fail(tmp_path: Path) 
     assets.write_geoparquet(path, points=points, row_group_size=rows_per_group)
     parquet = pq.ParquetFile(path)
     geo = geoparquet.geo_metadata(parquet) or {}
-    bboxes, _ = geoparquet._rowgroup_stat_defects("data", parquet, geo)
-    assert bboxes is not None
-    footer = geoparquet._pruning_score(bboxes)
+    found, _ = geoparquet._rowgroup_stat_defects("data", parquet, geo)
+    assert found is not None
+    footer = geoparquet._pruning_score(found[0])
     assert footer.efficiency == pytest.approx(0.92, abs=0.01)
     assert not footer.below_bar
 
@@ -316,9 +317,9 @@ def test_low_footer_efficiency_below_eight_groups_takes_the_row_check(
     )
     parquet = pq.ParquetFile(path)
     assert parquet.metadata.num_row_groups == groups
-    bboxes, _ = geoparquet._rowgroup_stat_defects("data", parquet, geoparquet.geo_metadata(parquet))
-    assert bboxes is not None
-    assert geoparquet._pruning_score(bboxes).efficiency == pytest.approx(0.0)
+    found, _ = geoparquet._rowgroup_stat_defects("data", parquet, geoparquet.geo_metadata(parquet))
+    assert found is not None
+    assert geoparquet._pruning_score(found[0]).efficiency == pytest.approx(0.0)
     errors = _warnings(_gpq(path))
     assert [d.rule_id for d in errors] == [DAT_ORDERING]
     assert "split into 10 chunks in file order" in errors[0].message
@@ -767,7 +768,7 @@ def test_native_geo_statistics_satisfy_dat_007() -> None:
     ordered = [(0.0, 0.0, 1.0, 1.0), (1.0, 1.0, 2.0, 2.0), (2.0, 2.0, 3.0, 3.0)]
     groups = [_FakeRowGroup([_FakeColumn("geometry", _FakeGeoStats(b))]) for b in ordered]
     boxes, defects = geoparquet._rowgroup_stat_defects("data", _FakeParquet(groups), _GEO_2X)
-    assert boxes == ordered
+    assert boxes == (ordered, [0, 1, 2])
     # The MUST is satisfied, but the covering column stays RECOMMENDED for
     # 2.x files even where native statistics exist (formats.md) — a WARNING.
     assert [d.severity for d in defects] == [Severity.WARNING]
@@ -862,14 +863,13 @@ def test_native_geo_unordered_rows_flag_dat_006(tmp_path: Path) -> None:
     assert [d.severity for d in _ordering(defects)] == [Severity.WARNING]
 
 
-def test_native_geo_ordered_rows_keep_only_the_covering_warning(tmp_path: Path) -> None:
+def test_native_geo_ordered_rows_without_a_geo_key_pass(tmp_path: Path) -> None:
+    # PORTO-FMT-008 recommends a covering column for GeoParquet 2.x. A native
+    # file with no geo key is not GeoParquet, so it gets no covering warning.
     path = tmp_path / "native.parquet"
     assets.write_native_geoparquet(path, points=assets.ordered_points(16))
     assert pq.ParquetFile(path).metadata.num_row_groups == 8
-    defects = _gpq(path)
-    assert [d.rule_id for d in defects] == [DAT_ROWGROUP_STATS]
-    assert defects[0].severity is Severity.WARNING
-    assert "covering column" in defects[0].message
+    assert _gpq(path) == []
 
 
 def test_native_geo_missing_geo_key_is_not_a_version_error(tmp_path: Path) -> None:
@@ -1390,7 +1390,7 @@ def _partitioned_collection(directory: Path, glob: str = "parts/*.parquet") -> N
         abs_path=directory / "collection.json",
         kind="collection",
         id="buildings",
-        data={"type": "Collection", "partition:glob": glob},
+        data={"type": "Collection", "partition:glob": glob, "table:columns": _COLUMNS},
     )
 
 
@@ -1880,7 +1880,7 @@ def test_assetless_partitioned_collection_gets_dat_020(tmp_path: Path) -> None:
     node = _partitioned_collection(tmp_path, glob="s3://bucket/parts/*.parquet")
     node.data["table:columns"] = [{"name": "value", "type": "int64"}]
     node.data["assets"] = {"visual": {"href": "./b.pmtiles", "roles": ["visual"]}}
-    defects = geoparquet.check_partitioned_column_descriptions(node)
+    defects = geoparquet.check_collection_column_descriptions(node)
     assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
     assert defects[0].json_pointer == "/table:columns"
     assert "1 of 1" in defects[0].message
@@ -1893,18 +1893,28 @@ def test_partitioned_collection_with_a_data_asset_is_left_to_the_asset_check(
     node = _partitioned_collection(tmp_path)
     node.data["table:columns"] = [{"name": "value", "type": "int64"}]
     node.data["assets"] = {"data": {"href": "./d.parquet", "roles": ["data"]}}
-    assert geoparquet.check_partitioned_column_descriptions(node) == []
+    assert geoparquet.check_collection_column_descriptions(node) == []
 
 
-def test_unpartitioned_or_described_collections_get_no_collection_finding(
-    tmp_path: Path,
-) -> None:
+def test_an_unpartitioned_collection_without_a_data_asset_gets_dat_020() -> None:
+    # PORTO-FMT-077 binds the columns a collection declares on itself, even
+    # when its items, not a collection asset, carry the files.
     bare = [{"name": "value", "type": "int64"}]
-    check = geoparquet.check_partitioned_column_descriptions
-    assert check(_tabular_collection(**{"table:columns": bare})) == []
+    defects = geoparquet.check_collection_column_descriptions(
+        _tabular_collection(**{"table:columns": bare})
+    )
+    assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
+    assert defects[0].message.startswith("collection: 1 of 1")
+
+
+def test_described_collections_and_items_get_no_collection_finding(tmp_path: Path) -> None:
+    check = geoparquet.check_collection_column_descriptions
     described = _partitioned_collection(tmp_path)
     described.data["table:columns"] = _COLUMNS
     assert check(described) == []
+    item = _tabular_collection(**{"table:columns": [{"name": "value", "type": "int64"}]})
+    item.kind = "item"  # type: ignore[misc]
+    assert check(item) == []
 
 
 def test_more_than_five_bare_columns_are_summarized() -> None:
@@ -2090,3 +2100,102 @@ def test_unreadable_color_table_is_info(tmp_path: Path) -> None:
     files = _files(path)
     defects = raster._check_class_colors("data", _classified_asset(flood="FF0000"), files)
     assert [(d.rule_id, d.severity) for d in defects] == [(DAT_CLASS_COLORS, Severity.INFO)]
+
+
+def test_footer_weights_skip_a_null_only_row_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A null-only row group has no box. Its rows and bytes must leave the
+    # weights too, or every later group is weighed by its neighbour's counts.
+    points = assets.interleaved_points()
+    points[4:4] = [(0.0, 0.0), (0.0, 0.0)]
+    path = tmp_path / "nulls.parquet"
+    assets.write_geoparquet(path, points=points, null_rows={4, 5})
+    meta = pq.ParquetFile(path).metadata
+    found = geoparquet._covering_bboxes(
+        pq.ParquetFile(path), geoparquet.geo_metadata(pq.ParquetFile(path))
+    )  # type: ignore[arg-type]
+    assert found is not None
+    boxes, kept = found
+    assert 2 not in kept and len(kept) == len(boxes) == meta.num_row_groups - 1
+    layouts: list[Any] = []
+    real = geoparquet._ordering_defects
+
+    def capture(*args: Any, **kwargs: Any) -> list[DataDefect]:
+        layouts.append(args[3])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(geoparquet, "_ordering_defects", capture)
+    _gpq(path)
+    (layout,) = layouts
+    assert layout.row_counts == [meta.row_group(i).num_rows for i in kept]
+    assert len(layout.sizes) == len(layout.bboxes)
+
+
+def test_every_native_geometry_column_needs_statistics(monkeypatch: pytest.MonkeyPatch) -> None:
+    # PORTO-FMT-007: native GeospatialStatistics per geometry column chunk.
+    box = (0.0, 0.0, 1.0, 1.0)
+    groups = [
+        _FakeRowGroup(
+            [_FakeColumn("geometry", _FakeGeoStats(box)), _FakeColumn("footprint", stats)]
+        )
+        for stats in (_FakeGeoStats(box), None)
+    ]
+    monkeypatch.setattr(geoparquet, "_native_geo_columns", lambda _p: ["geometry", "footprint"])
+    boxes, defects = geoparquet._rowgroup_stat_defects("data", _FakeParquet(groups), _GEO_2X)
+    assert boxes is None
+    assert [(d.rule_id, d.severity) for d in defects] == [(DAT_ROWGROUP_STATS, Severity.ERROR)]
+    assert "footprint" in defects[0].message
+
+
+@pytest.mark.parametrize(
+    ("version", "native", "severity"),
+    [
+        ("1.1.0", False, None),
+        ("2.0.0", True, None),
+        ("1.1.0-rc.1", False, Severity.WARNING),
+        ("2.0.0-beta.1", True, Severity.WARNING),
+        ("1.0.0", False, Severity.ERROR),
+        ("1.0.0", True, Severity.WARNING),
+        (None, True, Severity.WARNING),
+    ],
+)
+def test_geoparquet_version_severity(
+    version: str | None, native: bool, severity: Severity | None
+) -> None:
+    geo = {"primary_column": "geometry"} | ({"version": version} if version else {})
+    defects = geoparquet._check_geoparquet_version("data", geo, native=native)
+    assert [d.severity for d in defects] == ([] if severity is None else [severity])
+    if severity is not None and native:
+        assert "native geospatial columns meet the rule" in defects[0].message
+
+
+def test_a_stale_geo_key_on_a_native_file_warns(tmp_path: Path) -> None:
+    path = tmp_path / "native.parquet"
+    assets.write_native_geoparquet(path)
+    table = pq.read_table(path)
+    geo = {"version": "1.0.0", "primary_column": "geometry", "columns": {"geometry": {}}}
+    pq.write_table(table.replace_schema_metadata({b"geo": json.dumps(geo).encode()}), path)
+    versions = [d for d in _gpq(path) if d.rule_id == DAT_GEOPARQUET_VERSION]
+    assert [d.severity for d in versions] == [Severity.WARNING]
+
+
+@pytest.mark.parametrize(
+    ("geo", "columns", "expected"),
+    [(True, False, [DAT_VECTOR_COLUMNS]), (True, True, []), (False, False, [])],
+)
+def test_partitioned_vector_data_needs_collection_columns(
+    tmp_path: Path, geo: bool, columns: bool, expected: list[str]
+) -> None:
+    # PORTO-FMT-046: a vector collection documents its columns on itself.
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    for name in ("a", "b"):
+        assets.write_geoparquet(parts / f"{name}.parquet", geo=geo)
+    node = _partitioned_collection(tmp_path)
+    if not columns:
+        del node.data["table:columns"]
+    defects = _partition_schemas(node)
+    assert [d.rule_id for d in defects] == expected
+    if expected:
+        assert defects[0].json_pointer == "/partition:glob"

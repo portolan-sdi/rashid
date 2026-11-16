@@ -63,6 +63,7 @@ def test_kitchen_sink(catalog: CatalogBuilder) -> None:
         "PTL-BBX-001",
         "PTL-LNK-001",
         "PTL-VIZ-001",  # geospatial (item has geometry) but no thumbnail asset
+        "PTL-DAT-000",  # info: the s3 asset has no https alternate to read
     }
     # findings are stable-sorted by (path, rule_id)
     keys = [(f.path, f.rule_id) for f in report.findings]

@@ -25,7 +25,8 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   Portolan's efficient-range-request mandate targets. ``cog_validate`` checks
   base COG, so it accepts such a file with only a warning; without overviews a
   zoomed-out render reads every full-resolution byte.
-- ``PTL-DAT-012`` GeoParquet version is not 1.1 or 2.x (MUST, formats.md:25)
+- ``PTL-DAT-012`` GeoParquet version is not 1.1 or 2.x (MUST, formats.md:25);
+  a pre-release, or a stale ``geo`` key on a native-geo file, is a WARNING
 - ``PTL-DAT-013`` internal tiles are not square or exceed 512px (MUST,
   OGC 21-026 /req/optimized_geotiff/small-sizes via formats.md:121)
 - ``PTL-DAT-014`` partition files diverge in Parquet schema (MUST,
@@ -43,8 +44,8 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
   bands and no mask role, has no nodata value, alpha band, or mask (SHOULD,
   formats.md, Imagery)
 - ``PTL-DAT-020`` a ``table:columns`` entry of a data asset, or of a
-  partitioned collection with no data asset, has no description (SHOULD,
-  formats.md, Vector Data)
+  collection with no data asset, has no description (SHOULD, formats.md,
+  Vector Data)
 - ``PTL-DAT-021`` a class ``color_hint`` differs from the embedded color
   table entry for its value (WARNING, PORTO-FMT-054), or a class list is in
   the wrong place for the file's real band count (ERROR, PORTO-FMT-050)
@@ -85,9 +86,9 @@ from rashid.catalog import CatalogGraph, Node
 from rashid.data import DataDefect, DataResults
 from rashid.data._files import AssetFiles
 from rashid.data.geoparquet import (
+    check_collection_column_descriptions,
     check_column_descriptions,
     check_geoparquet,
-    check_partitioned_column_descriptions,
     check_tabular,
     check_vector_columns,
     geo_from_parquet,
@@ -120,6 +121,7 @@ from rashid.rules._common import (
     assets_of,
     is_source_asset,
     is_zarr_store_asset,
+    read_target,
 )
 from rashid.rules.item_mirror import is_mirror_asset
 
@@ -165,10 +167,10 @@ def check_node(
     schemas, partitions, total = check_partitions(node, reader)
     results.extend(schemas)
     results.extend(partitions, partition_total=total)
-    results.extend(check_partitioned_column_descriptions(node))
+    results.extend(check_collection_column_descriptions(node))
     for _pointer, key, asset in assets_of(node):
-        href = asset.get("href")
-        if not isinstance(href, str) or not href:
+        declared = asset.get("href")
+        if not isinstance(declared, str) or not declared:
             media_type = asset.get("type")
             spatial = (
                 not is_source_asset(asset)
@@ -177,9 +179,9 @@ def check_node(
             )
             extent_complete = extent_complete and not spatial
             continue  # PTL-AST-001 reports a missing href
-        if asset_refers_to_self(node, href, graph):
+        if asset_refers_to_self(node, declared, graph):
             continue  # PTL-AST-003 requires both file metadata fields to be absent
-        log.debug("data: %s asset %r: %s", node.path, key, href)
+        log.debug("data: %s asset %r: %s", node.path, key, declared)
         with _trace.span("data.asset"):
             defects, actual, complete = _check_asset(
                 node, key=key, asset=asset, reader=reader, graph=graph
@@ -200,7 +202,9 @@ def _check_asset(
     reader: AssetReader,
     graph: CatalogGraph | None = None,
 ) -> tuple[list[DataDefect], Wgs84Bounds | None, bool]:
-    href = asset["href"]
+    # An s3 href is read through its https alternate (PORTO-CORE-087); with
+    # none, the bytes are unreachable and validate_data lists the asset.
+    href = read_target(asset) or asset["href"]
     _trace.count("data.assets")
     defects: list[DataDefect] = []
     media_type = asset.get("type")
@@ -219,6 +223,9 @@ def _check_asset(
         return (defects + check_zarr(node, key=key, asset=asset, reader=reader), None, True)
 
     defects.extend(check_bytes(key, asset=asset, expected=expected, node=node, reader=reader))
+    if expected == "parquet":
+        # Metadata only: it needs no bytes, so an unreachable file still gets it.
+        defects.extend(check_column_descriptions(node, key, asset))
 
     located = reader.locate(node, href)
     if located is None or is_source_asset(asset):
@@ -252,7 +259,6 @@ def _check_asset(
             defects.extend(check_geoparquet(key, files))
             defects.extend(check_tabular(node, key, asset, files))
             defects.extend(check_vector_columns(node, key, asset, files))
-            defects.extend(check_column_descriptions(node, key, asset))
         if expected in {"parquet", "tiff", "pmtiles"}:
             consistency, bounds, complete = _check_consistency(
                 node, key=key, asset=asset, expected=expected, files=files
