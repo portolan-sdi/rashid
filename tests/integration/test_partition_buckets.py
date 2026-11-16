@@ -79,7 +79,13 @@ def test_listing_prefix_stops_before_the_first_wildcard(pattern: str, prefix: st
         ("parts/*.parquet", None),
         ("s3://bkt/", None),
         ("s3:///parts/*.parquet", None),
-        ("s3://bkt/parts/*.parquet?x=1", None),
+        # ? is a wildcard and # a key character, not a query or a fragment.
+        ("s3://bkt/parts/part-?.parquet", ("s3", "bkt", "parts/part-?.parquet")),
+        ("s3://bkt/parts/*.parquet?x=1", ("s3", "bkt", "parts/*.parquet?x=1")),
+        ("s3://bkt/a#b/*.parquet", ("s3", "bkt", "a#b/*.parquet")),
+        (" s3://bkt/*.parquet", ("s3", "bkt", "*.parquet")),
+        ("s3://user@bkt/*.parquet", None),
+        ("s3://?/*.parquet", None),
         ("s3://bkt:port/parts/*.parquet", None),
     ],
 )
@@ -505,3 +511,25 @@ def test_a_bucket_glob_sends_the_collection_to_the_remote_pool() -> None:
             return None
 
     assert not _reads_remote(node, _Local())
+
+
+@pytest.mark.parametrize(
+    ("glob", "keys", "read"),
+    [
+        ("s3://bkt/parts/p?.parquet", ["parts/p1.parquet", "parts/p22.parquet"], ["p1"]),
+        ("s3://bkt/parts/a#*.parquet", ["parts/a#1.parquet", "parts/b1.parquet"], ["a%231"]),
+    ],
+)
+def test_a_glob_with_a_question_mark_or_a_hash_is_listed(
+    https_server: HttpsServer, tmp_path: Path, glob: str, keys: list[str], read: list[str]
+) -> None:
+    path = tmp_path / "x.parquet"
+    assets.write_geoparquet(path)
+    body = path.read_bytes()
+    https_server.buckets["/bkt"] = [(key, len(body)) for key in keys]
+    for name in read:
+        https_server.routes[f"/bkt/parts/{name}.parquet"] = Route(body=body)
+    root = _bucket_catalog(tmp_path, https_server.base, **{"partition:glob": glob})
+    assert [f for f in _dat(root) if f.rule_id == DAT_UNAVAILABLE] == []
+    got = [s.path for s in https_server.seen if s.path.startswith("/bkt/parts/")]
+    assert got == [f"/bkt/parts/{name}.parquet" for name in read]
