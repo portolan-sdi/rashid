@@ -13,6 +13,7 @@ The checks run through the real data pass, so what these assert is what
 
 from __future__ import annotations
 
+import json
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -638,12 +639,24 @@ def test_a_three_band_variable_carries_no_alpha_band(catalog: CatalogBuilder) ->
     assert ZAR_NODATA in zarr_findings(write_store(catalog, "rgb", asset=asset))
 
 
-def test_four_bands_entries_carry_an_alpha_band(catalog: CatalogBuilder) -> None:
+def test_four_bands_entries_of_one_variable_carry_an_alpha_band(catalog: CatalogBuilder) -> None:
+    """The fourth band of a four-band variable is its alpha band."""
+    asset = zarr_asset(
+        bands=[{"name": f"temp[band={band}]"} for band in ("red", "green", "blue", "alpha2")],
+        **{"cube:variables": {"temp": {"dimensions": ["y", "x"], "type": "data"}}},
+    )
+    assert ZAR_NODATA not in zarr_findings(write_store(catalog, "flat", asset=asset))
+
+
+def test_four_bands_entries_of_other_variables_carry_no_alpha_band(
+    catalog: CatalogBuilder,
+) -> None:
+    """Four entries across four variables do not give ``temp`` an alpha band."""
     asset = zarr_asset(
         bands=[{"name": "temp"}, {"name": "b"}, {"name": "c"}, {"name": "d"}],
         **{"cube:variables": {"temp": {"dimensions": ["y", "x"], "type": "data"}}},
     )
-    assert ZAR_NODATA not in zarr_findings(write_store(catalog, "flat", asset=asset))
+    assert ZAR_NODATA in zarr_findings(write_store(catalog, "flat", asset=asset))
 
 
 def test_an_axis_of_exactly_256_samples_keeps_the_chunk_floor(
@@ -760,3 +773,94 @@ def test_a_store_on_another_scheme_is_read_through_its_https_alternate(
     check_zarr(node, key="data", asset=asset, reader=reader)
     assert reader.hrefs
     assert all(href.startswith(expected) for href in reader.hrefs)
+
+
+# --- review follow-ups -------------------------------------------------------
+
+
+def test_a_store_with_no_discoverable_variable_says_the_array_checks_did_not_run(
+    catalog: CatalogBuilder,
+) -> None:
+    """No consolidated metadata and no declared name leave no array to check.
+
+    ``temp`` declares no nodata, so a silent pass would hide a real defect.
+    """
+    report = zarr_report(write_store(catalog, "flat", asset=zarr_asset(bands=[])))
+    info = [f for f in report.findings if f.rule_id == ZAR_STORE_VERSION]
+    assert [f.severity for f in info] == [Severity.INFO]
+    assert "per-array checks did not run" in info[0].message
+
+
+def test_a_store_with_a_declared_variable_runs_the_array_checks(
+    catalog: CatalogBuilder,
+) -> None:
+    findings = zarr_findings(write_store(catalog, "flat"))
+    assert ZAR_STORE_VERSION not in findings
+
+
+def _local_store(catalog: CatalogBuilder, files: dict[str, str]) -> Path:
+    """A catalog whose store directory holds exactly ``files``."""
+    catalog.collection("temps", title="Daily Temperatures", assets={"data": zarr_asset()})
+    root = catalog.write()
+    store = root / "temps" / "data.zarr"
+    store.mkdir()
+    for name, text in files.items():
+        (store / name).parent.mkdir(parents=True, exist_ok=True)
+        (store / name).write_text(text)
+    return root
+
+
+def test_a_local_zarr_v2_store_is_reported_as_not_v3(catalog: CatalogBuilder) -> None:
+    """A v2 store on disk gets the answer a remote 404 gets: it is not v3."""
+    root = _local_store(
+        catalog,
+        {
+            ".zgroup": '{"zarr_format": 2}',
+            "temp/.zarray": '{"zarr_format": 2, "shape": [8, 8], "chunks": [8, 8]}',
+        },
+    )
+    report = zarr_report(root)
+    finding = next(f for f in report.findings if f.rule_id == ZAR_STORE_VERSION)
+    assert finding.severity is Severity.WARNING
+    assert "not a Zarr v3 store" in finding.message
+
+
+def test_a_local_store_with_no_metadata_at_all_is_not_judged(catalog: CatalogBuilder) -> None:
+    root = _local_store(catalog, {"temp/c/0/0": "bytes"})
+    report = zarr_report(root)
+    finding = next(f for f in report.findings if f.rule_id == ZAR_STORE_VERSION)
+    assert finding.severity is Severity.INFO
+    assert "did not run" in finding.message
+
+
+def _one_level_layout(catalog: CatalogBuilder, drop: str | None) -> Path:
+    """The pyramid store with its layout cut to the finest entry, less ``drop``."""
+    root = write_store(catalog, "pyramid")
+    metadata = root / "temps" / "data.zarr" / "zarr.json"
+    data = json.loads(metadata.read_text())
+    entry = data["attributes"]["multiscales"]["layout"][0]
+    if drop is not None:
+        del entry[drop]
+    data["attributes"]["multiscales"]["layout"] = [entry]
+    metadata.write_text(json.dumps(data))
+    return root
+
+
+@pytest.mark.parametrize("field", ["spatial:shape", "spatial:transform"])
+def test_a_one_entry_layout_missing_a_field_is_reported(
+    catalog: CatalogBuilder, field: str
+) -> None:
+    """PORTO-ZARR-013 binds each layout entry, so one entry is enough."""
+    findings = zarr_findings(_one_level_layout(catalog, field))
+    assert "spatial:transform and spatial:shape" in findings[ZAR_LAYOUT_FIELDS]
+
+
+def test_a_one_entry_layout_missing_its_asset_is_reported(catalog: CatalogBuilder) -> None:
+    findings = zarr_findings(_one_level_layout(catalog, "asset"))
+    assert "names no asset" in findings[ZAR_LAYOUT_FIELDS]
+
+
+def test_a_complete_one_entry_layout_is_accepted(catalog: CatalogBuilder) -> None:
+    findings = zarr_findings(_one_level_layout(catalog, None))
+    assert ZAR_LAYOUT_FIELDS not in findings
+    assert ZAR_LEVEL_STEP not in findings

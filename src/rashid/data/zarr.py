@@ -193,6 +193,10 @@ class _Fault:
     message: str
 
 
+# The root documents of a Zarr v2 store, which has no zarr.json.
+_V2_MARKERS = (".zgroup", ".zarray", ".zmetadata")
+
+
 class _Store:
     """The metadata documents of one store, read once each and cached.
 
@@ -241,7 +245,11 @@ class _Store:
         member = store_member_href(self._href, f"{path}/zarr.json" if path else "zarr.json")
         stream = self._reader.stream(self._node, member)
         if stream is None:
-            self._note(path, "the store is not reachable from this catalog")
+            if not path and self._local_v2():
+                # The local answer a remote host gives as a 404: no zarr.json here.
+                self._note(path, "the store root holds no zarr.json", 404)
+            else:
+                self._note(path, "the store is not reachable from this catalog")
             return None
         _trace.count("zarr.metadata_reads")
         try:
@@ -256,6 +264,14 @@ class _Store:
             self._note(path, "zarr.json is not a JSON object")
             return None
         return _Meta(path, data)
+
+    def _local_v2(self) -> bool:
+        """Whether the store is a local directory holding Zarr v2 metadata."""
+        for marker in _V2_MARKERS:
+            located = self._reader.locate(self._node, store_member_href(self._href, marker))
+            if located is not None and not located.is_remote:
+                return True
+        return False
 
     def _note(self, path: str, reason: str, status: int | None = None) -> None:
         if path or self.unreadable is not None:
@@ -1064,9 +1080,13 @@ def _check_pyramid(key: str, store: _Store, levels: list[_Level]) -> list[DataDe
 
 
 def _check_layout(key: str, levels: list[_Level]) -> list[DataDefect]:
-    """PTL-ZAR-010 and PTL-ZAR-011: layout fields, and the step between levels."""
-    if len(levels) < 2:
-        return []
+    """PTL-ZAR-010 and PTL-ZAR-011: layout fields, and the step between levels.
+
+    The fields bind each entry, so a one-entry layout is checked too; the step
+    needs two levels.
+    """
+    if not any(level.entry for level in levels):
+        return []  # no layout: the store has no pyramid
     defects: list[DataDefect] = []
     if any(_layout_path(level.entry) is None for level in levels):
         defects.append(
@@ -1093,7 +1113,8 @@ def _check_layout(key: str, levels: list[_Level]) -> list[DataDefect]:
                 " spatial:shape: " + ", ".join(incomplete),
             )
         )
-    defects.extend(_check_steps(key, levels))
+    if len(levels) >= 2:
+        defects.extend(_check_steps(key, levels))
     return defects
 
 
@@ -1315,11 +1336,17 @@ def _has_alpha_band(asset: dict[str, Any], array: _Meta) -> bool:
     The profile names two forms: a band called ``alpha``, and the fourth band
     of a four-band variable. The second is what an RGBA store writes, where
     one variable spans a band dimension of four and the fourth position is the
-    alpha channel rather than a separate entry.
+    alpha channel rather than a separate entry. Only the variable's own bands
+    count: its band axis, or the ``bands`` entries named after it.
     """
     if any(band.get("name") == "alpha" for band in _bands(asset)):
         return True
-    return _band_count(asset, array) == _ALPHA_BANDS
+    own = [
+        band
+        for band in _bands(asset)
+        if isinstance(band.get("name"), str) and band["name"].split("[", 1)[0] == array.name
+    ]
+    return max(len(own), _band_axis_length(array)) == _ALPHA_BANDS
 
 
 def _display_exempt(asset: dict[str, Any], array: _Meta) -> bool:
@@ -1465,6 +1492,17 @@ def _check_store(key: str, store: _Store, *, node: Node, asset: dict[str, Any]) 
     defects.extend(_check_layout(key, levels))
     defects.extend(_check_variables(key, levels, declarations))
     defects.extend(_collapse(key, _array_faults(store, levels, asset, declarations)))
+    if not store.exhausted and not any(level.variables for level in levels):
+        defects.append(
+            _defect(
+                ZAR_STORE_VERSION,
+                Severity.INFO,
+                key,
+                "rashid found no data variable in the store, so the per-array checks"
+                " did not run; add consolidated metadata to the root zarr.json, or name"
+                " the variables in cube:variables or bands",
+            )
+        )
     if store.exhausted:
         defects.append(
             _defect(
