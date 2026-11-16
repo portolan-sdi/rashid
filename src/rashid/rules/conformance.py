@@ -235,8 +235,9 @@ class ExtensionVersionRule(Rule):
     compatibility, so those declarations must still match the pin exactly.
 
     Extensions absent from the registry are ignored: the registry governs what
-    it lists, not what a publisher adds. The partition extension is skipped:
-    PTL-PRT-001 reports its version, which formats.md pins to v1.x. The
+    it lists, not what a publisher adds. The partition extension is skipped
+    on a collection, where PTL-PRT-001 reports its version (formats.md pins
+    v1.x); a catalog or item still gets this warning. The
     Portolan schema URI is ignored too, because the version a catalog declares there is owned by PTL-CNF-001
     and PTL-CNF-002, which the spec pins to a warning about the root catalog
     rather than about the registry.
@@ -259,8 +260,8 @@ class ExtensionVersionRule(Rule):
             parsed = _EXTENSION_URI_PATTERN.match(uri)
             if parsed is None:
                 continue  # not a versioned schema URI; nothing to compare
-            if uri.startswith(PARTITION_EXTENSION_PREFIX):
-                continue  # PTL-PRT-001 owns the partition version (PORTO-FMT-017)
+            if node.kind == "collection" and uri.startswith(PARTITION_EXTENSION_PREFIX):
+                continue  # PTL-PRT-001 owns the partition version on a collection
             entry = registry.get(parsed["base"])
             if entry is None:
                 continue  # unregistered extension: out of the registry's scope

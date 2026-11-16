@@ -159,6 +159,9 @@ def test_unlistable_glob_is_rejected(catalog: CatalogBuilder, glob: str) -> None
     [
         "s3://bucket/*.parquet",
         "S3://bucket/*.parquet",
+        # ? is a glob wildcard and # a key character, not a query or a fragment.
+        "s3://bucket/data/part-?.parquet",
+        "s3://bucket/a#b/*.parquet",
         "gs://bucket/*.parquet",
         "az://container/*.parquet",
         " s3://bucket/*.parquet",
@@ -220,3 +223,16 @@ def test_a_partition_extension_other_than_v1_is_an_error(
     ]
     assert findings[0].json_pointer.startswith("/stac_extensions/")
     assert findings_for(report, "PTL-CNF-004") == []
+
+
+@pytest.mark.parametrize("target", ["catalog", "item"])
+def test_a_partition_extension_other_than_v1_off_a_collection_gets_cnf_004(
+    catalog: CatalogBuilder, target: str
+) -> None:
+    """PTL-PRT-001 checks collections only, so CNF-004 keeps the version elsewhere."""
+    root = _built(catalog)
+    path = root / "catalog.json" if target == "catalog" else root / "roads" / "seg1" / "seg1.json"
+    uri = _PARTITION_URI.replace("v1.0.0", "v2.0.0")
+    mutate_json(path, lambda d: d.setdefault("stac_extensions", []).append(uri))
+    findings = findings_for(validate(root), "PTL-CNF-004")
+    assert [f.actual for f in findings] == [uri]
