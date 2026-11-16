@@ -152,7 +152,7 @@ def check_geoparquet(
 
     boxes, kept = bboxes
     sizes = _rowgroup_compressed_sizes(meta)
-    layout = _RowGroupLayout(boxes, [row_counts[i] for i in kept], [sizes[i] for i in kept])
+    layout = _RowGroupLayout(boxes, [row_counts[i] for i in kept], [sizes[i] for i in kept], shape)
     defects.extend(_ordering_defects(key, parquet, geo, layout, subject=subject))
     return defects
 
@@ -661,7 +661,7 @@ def _rowgroup_stat_defects(
     if boxes is not None:
         return boxes, []
     native = _native_bboxes(parquet, geo)
-    if native is None:
+    if native is None or not native[0]:
         return None, [
             DataDefect(
                 DAT_ROWGROUP_STATS,
@@ -671,7 +671,7 @@ def _rowgroup_stat_defects(
                 key,
             )
         ]
-    boxes = (native, list(range(len(native))))
+    boxes = native
     bare = [
         name
         for name in _native_geo_columns(parquet)
@@ -702,14 +702,17 @@ def _rowgroup_stat_defects(
     ]
 
 
-def _native_bboxes(
-    parquet: Any, geo: dict[str, Any]
-) -> list[tuple[float, float, float, float]] | None:
-    """Per-row-group boxes from Parquet native ``GeospatialStatistics``.
+def _native_bboxes(parquet: Any, geo: dict[str, Any]) -> _Boxes | None:
+    """Per-row-group boxes from Parquet native ``GeospatialStatistics``, with
+    the index of each row group that has a box.
 
-    Read from the primary geometry column's chunk metadata (pyarrow >= 21
+    Read from the named geometry column's chunk metadata (pyarrow >= 21
     exposes ``geo_statistics``; older versions have no attribute and fall
     through to None, keeping the covering column as the only satisfier).
+    A chunk whose rows are all null has statistics with no box and no
+    geometry types. It has no position and is prunable without a box, as in
+    :func:`_covering_bboxes`, so it is left out rather than taken for missing
+    statistics. Returns None when a chunk lacks its statistics.
     """
     primary = geo.get("primary_column")
     if not isinstance(primary, str):
@@ -720,15 +723,33 @@ def _native_bboxes(
     if j is None:
         return None
     boxes: list[tuple[float, float, float, float]] = []
+    kept: list[int] = []
     for i in range(meta.num_row_groups):
         stats = getattr(meta.row_group(i).column(j), "geo_statistics", None)
         if stats is None:
             return None
         corners = (stats.xmin, stats.ymin, stats.xmax, stats.ymax)
         if None in corners:
-            return None
+            if stats.geospatial_types or not _all_null(parquet, i, primary):
+                return None
+            continue
         boxes.append(tuple(float(c) for c in corners))  # type: ignore[arg-type]
-    return boxes
+        kept.append(i)
+    return boxes, kept
+
+
+def _all_null(parquet: Any, group: int, column: str) -> bool:
+    """Whether every row of ``column`` in row group ``group`` is null.
+
+    Geometry chunks carry no plain statistics with a null count, so the one
+    chunk is read. This runs only for a chunk whose geospatial statistics are
+    empty.
+    """
+    try:
+        chunk = parquet.read_row_group(group, columns=[column]).column(0)
+    except Exception:  # an unreadable chunk does not prove the statistics
+        return False
+    return bool(chunk.null_count == len(chunk))
 
 
 def _covering_leaf_indices(parquet: Any, geo: dict[str, Any]) -> dict[str, int] | None:
@@ -805,11 +826,17 @@ def _rowgroup_compressed_sizes(meta: Any) -> list[float]:
 
 @dataclass(frozen=True)
 class _RowGroupLayout:
-    """The footer facts the ordering verdict reads: boxes, rows, bytes."""
+    """The footer facts the ordering verdict reads: boxes, rows, bytes.
+
+    ``row_counts`` and ``sizes`` cover the boxed row groups only, so they
+    align with ``bboxes`` for the pruning score. ``shape`` is the file's
+    (rows, row groups), which the messages and the row check report.
+    """
 
     bboxes: list[tuple[float, float, float, float]]
     row_counts: list[int]
     sizes: list[float]
+    shape: tuple[int, int]
 
 
 def _ordering_defects(
@@ -833,8 +860,7 @@ def _ordering_defects(
     file-order chunks by the same metric and bar. One file, one verdict: the
     footer verdict and the row check never both run, so they cannot disagree.
     """
-    groups = len(layout.bboxes)
-    rows = sum(layout.row_counts)
+    rows, groups = layout.shape
     weights = [float(n) for n in layout.row_counts]
     score = _pruning_score(layout.bboxes, weights, layout.sizes)
     verdict = _footer_verdict(score)
@@ -1357,9 +1383,10 @@ def _geo_from_native_parquet(parquet: Any) -> Geo | None:
     primary = _primary_geometry_column(parquet, {})
     if primary is None:
         return None
-    boxes = _native_bboxes(parquet, {"primary_column": primary})
-    if not boxes:
+    found = _native_bboxes(parquet, {"primary_column": primary})
+    if not found or not found[0]:
         return None
+    boxes = found[0]
     bbox = [
         min(box[0] for box in boxes),
         min(box[1] for box in boxes),

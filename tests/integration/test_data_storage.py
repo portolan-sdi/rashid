@@ -2130,6 +2130,8 @@ def test_footer_weights_skip_a_null_only_row_group(
     (layout,) = layouts
     assert layout.row_counts == [meta.row_group(i).num_rows for i in kept]
     assert len(layout.sizes) == len(layout.bboxes)
+    # Messages and the row check still report the whole file.
+    assert layout.shape == (meta.num_rows, meta.num_row_groups)
 
 
 def test_every_native_geometry_column_needs_statistics(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2199,3 +2201,44 @@ def test_partitioned_vector_data_needs_collection_columns(
     assert [d.rule_id for d in defects] == expected
     if expected:
         assert defects[0].json_pointer == "/partition:glob"
+
+
+def _two_native_columns(path: Path, null_first_group: str) -> None:
+    points = assets.ordered_points(20)
+    wkb = [struct.pack("<BIdd", 1, 1, x, y) for x, y in points]
+    g2 = [None] * 10 + wkb[10:] if null_first_group == "g2" else wkb
+    columns: dict[str, list[object]] = {
+        "g2": pa.ExtensionArray.from_storage(  # type: ignore[dict-item]
+            assets._wkb_geometry_type(), pa.array(g2, type=pa.binary())
+        )
+    }
+    assets.write_native_geoparquet(path, points=points, row_group_size=10, columns=columns)
+
+
+def test_an_all_null_native_chunk_is_not_missing_statistics(tmp_path: Path) -> None:
+    # pyarrow writes empty GeospatialStatistics for an all-null chunk.
+    path = tmp_path / "two.parquet"
+    _two_native_columns(path, "g2")
+    assert pq.ParquetFile(path).metadata.row_group(0).column(2).geo_statistics.xmin is None
+    assert DAT_ROWGROUP_STATS not in [d.rule_id for d in _gpq(path)]
+    found = geoparquet._native_bboxes(pq.ParquetFile(path), {"primary_column": "g2"})
+    assert found is not None and found[1] == [1]
+
+
+def test_empty_native_statistics_on_a_chunk_with_rows_are_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "two.parquet"
+    _two_native_columns(path, "g2")
+    monkeypatch.setattr(geoparquet, "_all_null", lambda *_args: False)
+    defects = [d for d in _gpq(path) if d.rule_id == DAT_ROWGROUP_STATS]
+    assert [d.severity for d in defects] == [Severity.ERROR]
+    assert "g2" in defects[0].message
+
+
+def test_an_unreadable_chunk_does_not_prove_all_null() -> None:
+    class Broken:
+        def read_row_group(self, *_args: object, **_kwargs: object) -> object:
+            raise OSError("gone")
+
+    assert geoparquet._all_null(Broken(), 0, "g2") is False
