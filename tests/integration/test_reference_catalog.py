@@ -58,23 +58,7 @@ def test_reference_catalog_metadata_pass_is_clean() -> None:
     report = validate(
         CATALOG, options=ValidationOptions(structural=False, schema=False, data=False)
     )
-    # The spec's reference catalog does not yet meet PORTO-CORE-088
-    # (https://github.com/portolan-sdi/portolan-spec/pull/240); remove this allowance when it does.
-    missing_text = [f for f in report.findings if f.rule_id == "PTL-AST-010"]
-    assert all(
-        f.severity is Severity.WARNING
-        and f.message.endswith(("has no title", "has no description"))
-        for f in missing_text
-    )
-    # The sample-scenes example has no overview COG yet
-    # (https://github.com/portolan-sdi/portolan-spec/issues/263); remove this allowance when it does.
-    overview_gaps = {
-        "raster/sample-scenes/collection.json",
-        "ar/raster/sample-scenes/collection.json",
-    }
-    missing_overview = {f.path for f in report.findings if f.rule_id == "PTL-VIZ-007"}
-    assert missing_overview == overview_gaps
-    findings = [f for f in report.findings if f.rule_id not in ("PTL-AST-010", "PTL-VIZ-007")]
+    findings = report.findings
     blocking = [f for f in findings if f.severity is not Severity.INFO]
     assert blocking == [], [(f.rule_id, f.path) for f in blocking]
     # the only findings a conformant catalog may raise are the mirror INFOs
@@ -117,7 +101,9 @@ def test_reference_catalog_passes_against_the_draft_profile(tmp_path: Path) -> N
     rehearsal = tmp_path / "catalog"
     shutil.copytree(CATALOG, rehearsal)
     for path in rehearsal.rglob("*.json"):
-        path.write_text(path.read_text(encoding="utf-8").replace(declared, draft_uri))
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(declared, draft_uri), encoding="utf-8"
+        )
     options = ValidationOptions(
         structural=False, data=False, schema=True, schema_map={draft_uri: draft}
     )

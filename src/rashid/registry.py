@@ -277,7 +277,6 @@ DEFAULT_RULES: tuple[Rule, ...] = (
 
 _METADATA_SPEC_NOTES = {
     "PTL-CNF-004": "The extension registry pin sentence has no manifest ID.",
-    "PTL-CNF-005": "The spec does not yet say which version's requirements a validator applies.",
     "PTL-VER-001": "The delegated version extension navigation semantics have no manifest ID.",
     "PTL-PRO-004": "The official-catalog upstream-link sentence has no RFC 2119 keyword.",
     "PTL-CLS-001": "The extension registry row for Classification, a SHOULD for classified"

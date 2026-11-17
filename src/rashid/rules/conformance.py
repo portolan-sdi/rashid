@@ -119,7 +119,7 @@ class AppliedProfileVersionRule(Rule):
     """
 
     id = "PTL-CNF-005"
-    spec_ids = ()
+    spec_ids = ("PORTO-CORE-089",)
     default_severity = Severity.INFO
     description = "rashid applies the newest bundled profile version's requirements"
     kinds = ()  # graph-level: the root's declaration only
