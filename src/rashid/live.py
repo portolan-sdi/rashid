@@ -35,16 +35,20 @@ built from who serves an asset rather than from the roles it carries. Given
 in the published tree) or absolute on the publish host; an absolute href on any
 other host is upstream and is skipped. A census.gov ZIP that ignores ``Range``
 says nothing about the catalog citing it. Without ``base_url`` there is no
-publish host to compare against, so every absolute href is probed as declared
-and the PORTO-CORE-073 carve-out cannot be applied — pass ``base_url`` for a
-catalog that cites upstream copies.
+publish host to compare against, so every absolute href is probed as declared.
+Any of those hosts may be upstream, so their findings are warnings, and one
+``PTL-LIV-000`` note asks for a base.
 
 Range and CORS semantics are server properties, so the GET and OPTIONS probes
 run once per distinct host; only the cheap HEAD runs per asset. Absolute
 ``https`` hrefs are probed as declared; relative hrefs are probed when the
 caller supplies ``base_url`` — the URL the catalog root is published under —
-by joining the root-relative asset path onto it. Other absolute schemes
-are ``PTL-AST-002``'s domain, and their ``alternate`` URLs are not probed. The pass needs no geospatial stack and lives in core;
+by joining the root-relative asset path onto it. An href with another scheme
+is probed through its https ``alternate`` (PORTO-CORE-087); one note lists
+the assets that have none. A ``rel: pmtiles`` link that names no asset's URL
+is probed as a partial-read file. A CORS answer permits the read only with
+``Access-Control-Allow-Origin: *`` or the probe's own origin, on the GET and
+on the preflight. The pass needs no geospatial stack and lives in core;
 like every optional pass it degrades to ``PTL-LIV-000`` warnings when it cannot
 probe rather than failing the run.
 
@@ -126,6 +130,7 @@ from rashid.rules._common import (
     is_partial_read_media_type,
     is_source_asset,
     is_zarr_store_asset,
+    read_target,
 )
 
 log = logging.getLogger(__name__)
@@ -235,6 +240,13 @@ class _Target:
     partial_read: bool
     pointer: str  # the href that names the file
     subject: str  # how a message names it
+    # False when no publish base tells the catalog's own hosts from upstream
+    # ones (PORTO-CORE-073): the MUSTs may not bind this host, so it warns.
+    owned: bool = True
+
+    @property
+    def severity(self) -> Severity:
+        return Severity.ERROR if self.owned else Severity.WARNING
 
     def server_finding(
         self,
@@ -249,7 +261,7 @@ class _Target:
         host = href_host(self.url)
         return Finding(
             rule_id=rule_id,
-            severity=Severity.ERROR,
+            severity=self.severity,
             message=f"host '{host}': {message}",
             path=str(self.node.path),
             object_id=self.node.id,
@@ -272,7 +284,12 @@ class _LinkTarget:
 
 
 def _lower_headers(items: Any) -> dict[str, str]:
-    return {str(name).lower(): str(value) for name, value in items}
+    """Header names lowercased; a repeated name joins its values with ", ", as Fetch does."""
+    headers: dict[str, str] = {}
+    for name, value in items:
+        key = str(name).lower()
+        headers[key] = f"{headers[key]}, {value}" if key in headers else str(value)
+    return headers
 
 
 def _probe_response(url: str, method: str, headers: dict[str, str]) -> ProbeResponse:
@@ -368,25 +385,89 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
     """
     base = normalize_live_base(base_url) if base_url is not None else None
     by_host: dict[str, list[_Target]] = {}
-    for node, key, asset in _assets_with_hrefs(graph):
-        if is_zarr_store_asset(asset):
-            continue  # a store href is a key prefix; PTL-ZAR-003 probes its zarr.json
-        url = _probe_url(graph, node, str(asset["href"]), base)
+    seen: set[str] = set()
+
+    def add(node: Node, href: str, *, new_url_only: bool = False, **fields: Any) -> None:
+        url = live_host_href(str(graph.href_path(node).parent), href, base)
         if url is None:
-            continue
-        size = asset.get("file:size")
+            return
+        if not is_absolute_href(href):
+            url = wire_url("", url)
+        if new_url_only and url in seen:
+            return
+        seen.add(url)
         by_host.setdefault(href_host(url), []).append(
-            _Target(
-                node=node,
+            _Target(node=node, url=url, owned=base is not None, **fields)
+        )
+
+    for node in graph.iter(*_LIVE_KINDS):
+        if node.parse_error is not None:
+            continue
+        for _pointer, key, asset in sorted(assets_of(node), key=lambda entry: entry[1]):
+            # A store href is a key prefix; PTL-ZAR-003 probes its zarr.json.
+            href = None if is_zarr_store_asset(asset) else read_target(asset)
+            if href is None:
+                continue
+            size = asset.get("file:size")
+            add(
+                node,
+                href,
                 key=key,
-                url=url,
                 declared_size=size if isinstance(size, int) else None,
                 partial_read=is_partial_read_media_type(asset.get("type")),
                 pointer=json_pointer("assets", key, "href"),
                 subject=f"asset '{key}'",
             )
+    # A rel:pmtiles link that names no asset's URL is a partial-read file of its own.
+    for node, index, href in _pmtiles_links(graph):
+        add(
+            node,
+            href,
+            new_url_only=True,
+            key="",
+            declared_size=None,
+            partial_read=True,
+            pointer=json_pointer("links", index, "href"),
+            subject=f"link rel:'pmtiles' href '{href}'",
         )
     return by_host
+
+
+def _pmtiles_links(graph: CatalogGraph) -> Iterator[tuple[Node, int, str]]:
+    """``rel: pmtiles`` links: a client reads their target in ranges (web-map-links)."""
+    for node in graph.iter(*_LIVE_KINDS):
+        if node.parse_error is not None:
+            continue
+        for index, link in indexed_links_of(node):
+            href = link.get("href")
+            if link.get("rel") == "pmtiles" and isinstance(href, str) and href:
+                yield node, index, href
+
+
+def _unprobeable_assets(graph: CatalogGraph, base: str | None) -> list[str]:
+    """Assets whose absolute href uses another scheme, with no https alternate
+    on a host the pass probes.
+
+    No browser reads the href itself (``PTL-AST-002`` reports it). An
+    alternate on a host other than the publish base is skipped as upstream,
+    which may hide the publisher's own https copy, so it is listed too. Each
+    asset is named as ``<path>#/assets/<key>``.
+    """
+    unprobeable = []
+    for node in graph.iter(*_LIVE_KINDS):
+        if node.parse_error is not None:
+            continue
+        directory = str(graph.href_path(node).parent)
+        for pointer, _key, asset in assets_of(node):
+            href = asset.get("href")
+            if not isinstance(href, str) or not href:
+                continue
+            target = read_target(asset)
+            if target is None or (
+                target != href and live_host_href(directory, target, base) is None
+            ):
+                unprobeable.append(f"{node.path}#{pointer}")
+    return unprobeable
 
 
 def _link_targets(graph: CatalogGraph, base: str) -> list[_LinkTarget]:
@@ -434,11 +515,16 @@ class _ProbeRedirect:
 
 
 def _off_https_finding(
-    node: Node, *, pointer: str, subject: str, result: _ProbeRedirect
+    node: Node,
+    *,
+    pointer: str,
+    subject: str,
+    result: _ProbeRedirect,
+    severity: Severity = Severity.ERROR,
 ) -> Finding:
     return Finding(
         rule_id=LIV_OFF_HTTPS,
-        severity=Severity.ERROR,
+        severity=severity,
         message=f"{subject}: {result.probe} {result.url} redirected off https to {result.location}",
         path=str(node.path),
         object_id=node.id,
@@ -468,8 +554,28 @@ def _check_range(rep: _Target, response: ProbeResponse) -> list[Finding]:
     ]
 
 
+def _allows_origin(response: ProbeResponse) -> bool:
+    """Whether the response lets the probe's origin read it: ``*`` or that exact origin."""
+    allowed = (response.header("access-control-allow-origin") or "").strip()
+    return allowed in ("*", _PROBE_ORIGIN)
+
+
 def _check_cors(rep: _Target, response: ProbeResponse) -> list[Finding]:
-    if response.header("access-control-allow-origin") is None:
+    allowed = response.header("access-control-allow-origin")
+    if allowed is not None and not _allows_origin(response):
+        return [
+            rep.server_finding(
+                LIV_CORS_ORIGIN,
+                message=(
+                    f"Access-Control-Allow-Origin '{allowed}' does not permit the requesting"
+                    f" origin {_PROBE_ORIGIN}"
+                ),
+                fix_hint="allow every origin to read, e.g. Access-Control-Allow-Origin: *",
+                expected="*",
+                actual=allowed,
+            )
+        ]
+    if allowed is None:
         # CORS is off entirely; the exposed-headers MUST is subsumed — one
         # finding for the root cause, not two for the same absent policy.
         return [
@@ -496,8 +602,15 @@ def _check_cors(rep: _Target, response: ProbeResponse) -> list[Finding]:
 
 def _check_preflight(rep: _Target, response: ProbeResponse) -> list[Finding]:
     problems: list[str] = []
-    if response.status >= 400:
-        problems.append(f"preflight returned {response.status}")
+    if not 200 <= response.status < 300:
+        problems.append(f"preflight returned {response.status}, expected 2xx")
+    if not _allows_origin(response):
+        origin = response.header("access-control-allow-origin")
+        problems.append(
+            "no Access-Control-Allow-Origin"
+            if origin is None
+            else f"Access-Control-Allow-Origin '{origin}' does not permit the requesting origin"
+        )
     allowed = _header_set(response.header("access-control-allow-headers"))
     if "*" not in allowed:
         absent = [h for h in _REQUIRED_REQUEST if h.lower() not in allowed]
@@ -510,7 +623,9 @@ def _check_preflight(rep: _Target, response: ProbeResponse) -> list[Finding]:
             LIV_CORS_PREFLIGHT,
             message="CORS preflight failed: " + "; ".join(problems),
             fix_hint=(
-                "allow the " + ", ".join(_REQUIRED_REQUEST) + " request headers in the CORS policy"
+                "answer the preflight with 2xx, allow every origin, and allow the "
+                + ", ".join(_REQUIRED_REQUEST)
+                + " request headers in the CORS policy"
             ),
         )
     ]
@@ -520,19 +635,19 @@ def _check_head(target: _Target, response: ProbeResponse) -> list[Finding]:
     if response.access_denied():
         return [
             _unavailable(
-                f"asset '{target.key}': HEAD {target.url} returned {response.status}; "
+                f"{target.subject}: HEAD {target.url} returned {response.status}; "
                 "asset inaccessible",
                 str(target.node.path),
             )
         ]
     length = response.header("content-length")
-    pointer = json_pointer("assets", target.key)
+    pointer = json_pointer("assets", target.key) if target.key else target.pointer
     if length is None or not length.isdigit():
         return [
             Finding(
                 rule_id=LIV_HEAD_LENGTH,
-                severity=Severity.ERROR,
-                message=f"asset '{target.key}': HEAD returned no usable Content-Length",
+                severity=target.severity,
+                message=f"{target.subject}: HEAD returned no usable Content-Length",
                 path=str(target.node.path),
                 object_id=target.node.id,
                 json_pointer=pointer,
@@ -544,9 +659,9 @@ def _check_head(target: _Target, response: ProbeResponse) -> list[Finding]:
         return [
             Finding(
                 rule_id=LIV_HEAD_LENGTH,
-                severity=Severity.ERROR,
+                severity=target.severity,
                 message=(
-                    f"asset '{target.key}': HEAD Content-Length {length} does not match "
+                    f"{target.subject}: HEAD Content-Length {length} does not match "
                     f"the declared file:size {target.declared_size}"
                 ),
                 path=str(target.node.path),
@@ -688,6 +803,7 @@ def _check_heads(
                     pointer=target.pointer,
                     subject=target.subject,
                     result=_ProbeRedirect("HEAD", target.url, location),
+                    severity=target.severity,
                 )
             )
     return findings
@@ -742,6 +858,7 @@ def _ranged_off_https(rep: _Target, location: str) -> Finding:
         pointer=rep.pointer,
         subject=rep.subject,
         result=_ProbeRedirect("a ranged GET of", rep.url, location),
+        severity=rep.severity,
     )
 
 
@@ -811,7 +928,9 @@ def _stays_on_https(heads: _HeadCache, url: str) -> bool:
     return response is not None and response.off_https() is None
 
 
-def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> list[Finding]:
+def _check_links(
+    host: str, targets: list[_LinkTarget], heads: _HeadCache, probed: set[str]
+) -> list[Finding]:
     """HEAD every distinct link URL on the publish host; any non-2xx is an error.
 
     Every metadata file MUST allow HEAD (PORTO-CORE-086), so a 405 is reported
@@ -838,6 +957,8 @@ def _check_links(host: str, targets: list[_LinkTarget], heads: _HeadCache) -> li
         held = heads.response(target.url)
         location = None if held is None else held.off_https()
         if location is not None:
+            if target.url in probed:
+                continue  # the asset or pmtiles target HEAD already reported it
             findings.append(
                 _off_https_finding(
                     target.node,
@@ -1079,6 +1200,47 @@ def _check_self_base(graph: CatalogGraph, base: str) -> list[Finding]:
     ]
 
 
+def _unprobeable_note(graph: CatalogGraph, base: str | None) -> list[Finding]:
+    """One ``PTL-LIV-000`` note that lists the assets no probe can reach."""
+    unprobeable = _unprobeable_assets(graph, base)
+    if not unprobeable:
+        return []
+    shown = ", ".join(unprobeable[:10])
+    more = f", and {len(unprobeable) - 10} more" if len(unprobeable) > 10 else ""
+    return [
+        Finding(
+            rule_id=LIV_UNAVAILABLE,
+            severity=Severity.INFO,
+            message=(
+                f"{len(unprobeable)} asset(s) not probed: the href uses a scheme other"
+                f" than https and the asset has no https alternate on a probed host:"
+                f" {shown}{more}"
+            ),
+            path=".",
+            fix_hint=(
+                "add the https URL that serves each file from the publish host"
+                " to the asset's alternate field"
+            ),
+        )
+    ]
+
+
+# Without a publish base, every probed host may be upstream (PORTO-CORE-073).
+_NO_BASE_NOTE = Finding(
+    rule_id=LIV_UNAVAILABLE,
+    severity=Severity.INFO,
+    message=(
+        "hosting findings are warnings: without a publish base, the live pass"
+        " cannot tell the catalog's own hosts from upstream copies (PORTO-CORE-073)"
+    ),
+    path=".",
+    fix_hint=(
+        "pass --live-base-url with the URL the catalog is published under,"
+        " or give the root catalog an absolute self link"
+    ),
+)
+
+
 def validate_live(
     graph: CatalogGraph,
     prober: Prober | None = None,
@@ -1112,7 +1274,7 @@ def validate_live(
     base, named = resolve_live_base(base_url, graph.base_url, graph.published_base())
     by_host = _targets_by_host(graph, base)
     stores = _zarr_stores(graph, base)
-    findings: list[Finding] = []
+    findings = _unprobeable_note(graph, base)
     if not by_host and not stores:
         hint = (
             "asset probes skipped: no probeable asset hrefs"
@@ -1129,11 +1291,16 @@ def validate_live(
     heads = _HeadCache(prober, known_statuses)
     for host in sorted(by_host):
         findings.extend(_check_host(host, by_host[host], prober, heads))
+    if base is None and any(
+        f.severity is Severity.WARNING and f.rule_id != LIV_UNAVAILABLE for f in findings
+    ):
+        findings.append(_NO_BASE_NOTE)
     findings.extend(_check_zarr_cors(stores, prober))
     if base is not None:
         base_host = href_host(base)
         links = _link_targets(graph, base)
-        findings.extend(_check_links(base_host, links, heads))
+        probed = {target.url for targets in by_host.values() for target in targets}
+        findings.extend(_check_links(base_host, links, heads, probed))
         if base_host not in by_host:
             findings.extend(_check_metadata_host(base_host, links, prober, heads))
         if named:

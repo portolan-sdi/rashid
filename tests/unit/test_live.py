@@ -120,7 +120,8 @@ def _graph_with_remote(catalog: CatalogBuilder, **asset_kwargs: object) -> Catal
 
 
 def _ids(findings: list) -> list[str]:
-    return [f.rule_id for f in findings]
+    """Rule IDs, without the notes that explain a run (tested on their own)."""
+    return [f.rule_id for f in findings if f.severity is not Severity.INFO]
 
 
 def test_all_good_yields_no_findings(catalog: CatalogBuilder) -> None:
@@ -142,7 +143,8 @@ def test_non_206_is_range_error(catalog: CatalogBuilder) -> None:
     findings = validate_live(graph, prober)
     assert LIV_RANGE in _ids(findings)
     finding = next(f for f in findings if f.rule_id == LIV_RANGE)
-    assert finding.severity is Severity.ERROR
+    # No publish base: the host may be upstream (PORTO-CORE-073), so it warns.
+    assert finding.severity is Severity.WARNING
     assert "206" in finding.message
     assert "data.example.com" in finding.message
 
@@ -162,7 +164,7 @@ def test_missing_allow_origin_is_cors_error(catalog: CatalogBuilder) -> None:
     findings = validate_live(graph, FakeProber(range_response=response))
     assert LIV_CORS_ORIGIN in _ids(findings)
     finding = next(f for f in findings if f.rule_id == LIV_CORS_ORIGIN)
-    assert finding.severity is Severity.ERROR
+    assert finding.severity is Severity.WARNING
 
 
 def test_any_allow_origin_value_passes(catalog: CatalogBuilder) -> None:
@@ -1276,7 +1278,9 @@ def test_default_head_reports_a_dead_host_once(catalog: CatalogBuilder) -> None:
 
     findings = validate_live(graph, HeadsOnly())
 
-    unavailable = [f for f in findings if f.rule_id == LIV_UNAVAILABLE]
+    unavailable = [
+        f for f in findings if f.rule_id == LIV_UNAVAILABLE and f.severity is Severity.WARNING
+    ]
     assert len(unavailable) == 1
     assert "error sending request" in unavailable[0].message
 
@@ -1423,7 +1427,7 @@ def test_live_pass_reports_an_asset_that_redirects_off_https(
 
     redirects = [f for f in findings if f.rule_id == LIV_OFF_HTTPS]
     assert [f.json_pointer for f in redirects] == ["/assets/a/href", "/assets/b/href"]
-    assert all(f.severity is Severity.ERROR for f in redirects)
+    assert all(f.severity is Severity.WARNING for f in redirects)
     assert redirects[0].actual == target
     assert target in redirects[0].message
     # Asset c answers its own HEAD with the declared size, so it passes.
@@ -2060,3 +2064,211 @@ def test_the_store_probes_are_capped_per_run(catalog: CatalogBuilder) -> None:
     capped = [f for f in findings if f.rule_id == ZAR_CORS]
     assert [f.severity for f in capped] == [Severity.INFO]
     assert "were not checked" in capped[0].message
+
+
+# --- CORS origin (PORTO-CORE-086) ------------------------------------------
+
+
+@pytest.mark.parametrize("origin", ["https://example.org", "null", ""])
+def test_an_allow_origin_that_denies_the_probe_origin_is_a_cors_error(
+    catalog: CatalogBuilder, origin: str
+) -> None:
+    graph = _graph_with_remote(catalog)
+    response = _good_range(**{"access-control-allow-origin": origin})
+    findings = validate_live(graph, FakeProber(range_response=response))
+    finding = next(f for f in findings if f.rule_id == LIV_CORS_ORIGIN)
+    assert "does not permit" in finding.message
+    assert finding.actual == origin
+
+
+@pytest.mark.parametrize(
+    ("status", "overrides", "problem"),
+    [
+        (200, {}, None),
+        (301, {}, "preflight returned 301, expected 2xx"),
+        (204, {"access-control-allow-origin": "https://example.org"}, "does not permit"),
+    ],
+)
+def test_a_preflight_needs_2xx_and_a_permitting_origin(
+    catalog: CatalogBuilder, status: int, overrides: dict[str, str], problem: str | None
+) -> None:
+    graph = _graph_with_remote(catalog)
+    preflight = ProbeResponse(status=status, headers=_good_preflight(**overrides).headers)
+    findings = validate_live(graph, FakeProber(preflight_response=preflight))
+    preflights = [f for f in findings if f.rule_id == LIV_CORS_PREFLIGHT]
+    if problem is None:
+        assert preflights == []
+    else:
+        assert len(preflights) == 1 and problem in preflights[0].message
+
+
+def test_a_preflight_without_allow_origin_fails(catalog: CatalogBuilder) -> None:
+    graph = _graph_with_remote(catalog)
+    preflight = _good_preflight()
+    del preflight.headers["access-control-allow-origin"]
+    findings = validate_live(graph, FakeProber(preflight_response=preflight))
+    assert _ids(findings) == [LIV_CORS_PREFLIGHT]
+    assert "no Access-Control-Allow-Origin" in findings[0].message
+
+
+# --- Publish base and severity (PORTO-CORE-073) ----------------------------
+
+
+def test_without_a_publish_base_hosting_findings_warn_with_one_note(
+    catalog: CatalogBuilder,
+) -> None:
+    graph = _graph_with_remote(catalog)
+    prober = FakeProber(
+        range_response=ProbeResponse(status=200, headers={}), head_response=_good_head("1")
+    )
+    findings = validate_live(graph, prober)
+    hosting = [f for f in findings if f.severity is not Severity.INFO]
+    assert {f.rule_id for f in hosting} == {LIV_RANGE, LIV_CORS_ORIGIN, LIV_HEAD_LENGTH}
+    assert all(f.severity is Severity.WARNING for f in hosting)
+    notes = [f for f in findings if f.severity is Severity.INFO]
+    assert [f.rule_id for f in notes] == [LIV_UNAVAILABLE]
+    assert "--live-base-url" in (notes[0].fix_hint or "")
+
+
+def test_a_clean_run_without_a_publish_base_adds_no_note(catalog: CatalogBuilder) -> None:
+    assert validate_live(_graph_with_remote(catalog), FakeProber()) == []
+
+
+def test_with_a_publish_base_hosting_findings_are_errors(catalog: CatalogBuilder) -> None:
+    graph = _graph_with_remote(catalog, url=f"{_BASE}/roads.parquet")
+    prober = StatusProber()
+    prober.range_response = ProbeResponse(status=200, headers={})
+    findings = validate_live(graph, prober, base_url=_BASE)
+    hosting = [f for f in findings if f.rule_id in (LIV_RANGE, LIV_CORS_ORIGIN)]
+    assert {f.rule_id for f in hosting} == {LIV_RANGE, LIV_CORS_ORIGIN}
+    assert all(f.severity is Severity.ERROR for f in hosting)
+    assert not any(f.severity is Severity.INFO for f in findings)
+
+
+# --- Non-https hrefs and their https alternates (PORTO-CORE-087) ----------
+
+
+def _s3_asset(alternate: str | None) -> dict[str, object]:
+    asset = _remote_asset("s3://bucket/roads.parquet")
+    if alternate is not None:
+        asset["alternate"] = {"https": {"href": alternate}}
+    return asset
+
+
+def test_an_s3_href_is_probed_through_its_https_alternate(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"data": _s3_asset(_URL)})
+    prober = FakeProber()
+    findings = validate_live(CatalogGraph.load(catalog.write()), prober)
+    assert findings == []
+    assert prober.range_calls == [_URL]
+    assert prober.preflight_calls == [_URL]
+    assert prober.head_calls == [_URL]
+
+
+def test_an_s3_href_without_an_https_alternate_is_listed_once(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"data": _s3_asset(None), "copy": _s3_asset(None)})
+    findings = validate_live(CatalogGraph.load(catalog.write()), FakeProber())
+    notes = [f for f in findings if f.severity is Severity.INFO]
+    assert len(notes) == 1 and notes[0].rule_id == LIV_UNAVAILABLE
+    assert "2 asset(s) not probed" in notes[0].message
+    assert "#/assets/data" in notes[0].message and "#/assets/copy" in notes[0].message
+
+
+def test_the_unprobeable_list_is_capped(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={f"a{n:02}": _s3_asset(None) for n in range(12)})
+    findings = validate_live(CatalogGraph.load(catalog.write()), FakeProber())
+    note = next(f for f in findings if f.severity is Severity.INFO)
+    assert note.message.endswith(", and 2 more")
+
+
+def test_an_alternate_on_another_host_than_the_base_is_upstream(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads", assets={"data": _s3_asset(_URL)})
+    prober = StatusProber()
+    validate_live(CatalogGraph.load(catalog.write()), prober, base_url=_BASE)
+    assert _URL not in prober.range_calls + prober.head_calls
+
+
+# --- rel:pmtiles links ------------------------------------------------------
+
+
+_TILES = "https://tiles.example.com/roads.pmtiles"
+
+
+def _pmtiles_link(href: str = _TILES) -> dict[str, object]:
+    return {"rel": "pmtiles", "href": href, "type": "application/vnd.pmtiles"}
+
+
+def _with_pmtiles_link(root: Path) -> CatalogGraph:
+    mutate_json(
+        root / "roads" / "collection.json", lambda data: data["links"].append(_pmtiles_link())
+    )
+    return CatalogGraph.load(root)
+
+
+def test_a_pmtiles_link_is_a_partial_read_target(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    prober = FakeProber(head_response=ProbeResponse(status=200, headers={}))
+    findings = validate_live(_with_pmtiles_link(catalog.write()), prober)
+    assert prober.range_calls == [_TILES]
+    assert prober.preflight_calls == [_TILES]
+    lengths = [f for f in findings if f.rule_id == LIV_HEAD_LENGTH]
+    assert len(lengths) == 1
+    assert lengths[0].json_pointer is not None
+    assert lengths[0].json_pointer.startswith("/links/")
+    assert "link rel:'pmtiles'" in lengths[0].message
+
+
+def test_a_pmtiles_link_to_an_asset_url_is_probed_once(catalog: CatalogBuilder) -> None:
+    asset = _remote_asset(_TILES)
+    asset["type"] = "application/vnd.pmtiles"
+    catalog.collection("roads", assets={"tiles": asset})
+    prober = FakeProber()
+    assert validate_live(_with_pmtiles_link(catalog.write()), prober) == []
+    assert prober.head_calls == [_TILES]
+
+
+def test_repeated_allow_origin_lines_join_and_fail_the_exact_match(
+    catalog: CatalogBuilder,
+) -> None:
+    # Fetch joins repeated header lines; "https://other, *" permits no origin.
+    headers = live_mod._lower_headers(
+        [
+            ("Access-Control-Allow-Origin", "https://other.example"),
+            ("access-control-allow-origin", "*"),
+        ]
+    )
+    assert headers["access-control-allow-origin"] == "https://other.example, *"
+    response = _good_range(**headers)
+    findings = validate_live(_graph_with_remote(catalog), FakeProber(range_response=response))
+    assert LIV_CORS_ORIGIN in _ids(findings)
+
+
+def test_a_relative_pmtiles_link_off_https_is_reported_once(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    link = {"rel": "pmtiles", "href": "./roads.pmtiles", "type": "application/vnd.pmtiles"}
+    mutate_json(root / "roads" / "collection.json", lambda data: data["links"].append(link))
+    moved = ProbeResponse(status=301, headers={"location": "http://data.example.org/x"})
+    prober = StatusProber()
+    pmtiles = f"{_BASE}/roads/roads.pmtiles"
+    original_head = prober.head
+    prober.head = lambda url: moved if url == pmtiles else original_head(url)  # type: ignore[method-assign]
+    findings = validate_live(CatalogGraph.load(root), prober, base_url=_BASE)
+    redirects = [f for f in findings if f.rule_id == LIV_OFF_HTTPS]
+    assert len(redirects) == 1
+    assert redirects[0].json_pointer is not None and redirects[0].json_pointer.startswith("/links/")
+
+
+def test_an_alternate_off_the_publish_host_is_listed_as_not_probed(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.collection("roads", assets={"data": _s3_asset(_URL)})
+    findings = validate_live(CatalogGraph.load(catalog.write()), StatusProber(), base_url=_BASE)
+    note = next(f for f in findings if f.severity is Severity.INFO)
+    assert note.rule_id == LIV_UNAVAILABLE
+    assert "roads/collection.json#/assets/data" in note.message
+
+
+def test_tests_without_the_network_marker_cannot_resolve_other_hosts() -> None:
+    with pytest.raises(OSError, match="reached the network"):
+        socket.getaddrinfo("example.com", 443)
