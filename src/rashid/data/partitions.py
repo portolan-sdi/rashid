@@ -9,7 +9,7 @@ from rashid._href import is_absolute_href
 from rashid.catalog import Node
 from rashid.data import DataDefect, _files
 from rashid.data._files import AssetFiles
-from rashid.data.geoparquet import check_geoparquet
+from rashid.data.geoparquet import check_geoparquet, partitioned_vector_columns
 from rashid.data.reader import AssetReader, Locator
 from rashid.model import Severity, json_pointer
 from rashid.registry import (
@@ -60,6 +60,7 @@ def check_partitions(
     schemas: list[tuple[str, dict[str, str]]] = []
     already_read = _asset_paths(node, reader)
     found: list[DataDefect] = []
+    collection: list[DataDefect] = []
     for match, path in files:
         declared = str(path) in already_read
         with AssetFiles(Locator(is_remote=False, source=str(path))) as opened:
@@ -75,10 +76,12 @@ def check_partitions(
                     )
                 )
                 continue
+            if not schemas:
+                collection.extend(partitioned_vector_columns(node, parquet))
             schemas.append((match, {field.name: str(field.type) for field in parquet.schema_arrow}))
             if not declared:
                 found.extend(check_geoparquet(match, opened, subject=f"partition file '{match}'"))
-    return _partition_schema_defects(schemas), found, len(files)
+    return collection + _partition_schema_defects(schemas), found, len(files)
 
 
 def _partition_schema_defects(schemas: list[tuple[str, dict[str, str]]]) -> list[DataDefect]:

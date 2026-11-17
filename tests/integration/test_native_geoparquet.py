@@ -59,8 +59,9 @@ def test_native_geometry_is_accepted_and_still_checks_groups(
     assert not _findings(tmp_path, "PTL-DAT-023"), "an absent native crs is OGC:CRS84"
     if not spherical:
         assert any(f["severity"] == "warning" for f in _findings(tmp_path, "PTL-DAT-006"))
+    # No geo key: no covering recommendation (PORTO-FMT-008 binds GeoParquet 2.x).
     assert [f["severity"] for f in _findings(tmp_path, "PTL-DAT-007")] == (
-        ["error"] if spherical else ["warning"]
+        ["error"] if spherical else []
     )
     assert not _findings(tmp_path, "PTL-DAT-015")
     assert len(_findings(tmp_path, "PTL-DAT-017")) == 1

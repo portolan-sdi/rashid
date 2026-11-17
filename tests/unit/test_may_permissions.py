@@ -272,7 +272,7 @@ def test_converted_source_may_be_retained_alongside_the_parquet(catalog: Catalog
         "prices",
         title="Property Transaction Prices",
         assets={"data": default_asset(), "source": csv},
-        **{"table:columns": [{"name": "year", "type": "int64"}]},
+        **{"table:columns": [{"name": "year", "type": "int64", "description": "Sale year."}]},
     )
     report = validate(catalog.write())
     assert report.findings == []
