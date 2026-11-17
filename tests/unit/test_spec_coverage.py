@@ -26,6 +26,8 @@ This module gates the join in both directions:
 A requirement with ``status: incubating`` comes from a document under
 ``specs/incubating/``. The spec says the validator checks it and reports a
 failure as a warning at most, so its floor and its ceiling are WARNING.
+``rashid.registry`` refuses an ERROR declaration for the check families that
+enforce such text, and ``rashid.runner.cap_incubating`` caps the findings.
 """
 
 from __future__ import annotations
@@ -62,13 +64,6 @@ _ENTRY = re.compile(
 )
 _ID_LINE = re.compile(r"^\s*- id:", re.MULTILINE)
 INCUBATING = "incubating"
-
-# Incubating requirements that no check cites yet. The Zarr checks land in
-# https://github.com/portolan-sdi/rashid/pull/295, which empties this set.
-# An entry that a check cites fails the gate, so the set cannot rot.
-_PENDING_INCUBATING = frozenset(
-    f"PORTO-ZARR-{n:03d}" for n in (*range(1, 15), 16, 17, 18, 20, 21, 23, 24, 25, 26)
-)
 
 # MUST requirements deliberately not enforced by any ERROR-severity check.
 # Every entry quotes the spec text that mandates the softer severity; an
@@ -125,19 +120,6 @@ def test_manifest_ids_are_unique() -> None:
     assert len(ids) == len(set(ids))
 
 
-def test_pending_incubating_ids_are_uncited_validator_requirements() -> None:
-    """A pending entry that a check cites, or that left the manifest, is stale."""
-    validator = {
-        entry[0]
-        for entry in _manifest_entries()
-        if entry[2] == "validator" and entry[3] == INCUBATING
-    }
-    cited = _citations()
-    stale = sorted(req_id for req_id in _PENDING_INCUBATING if req_id in cited)
-    assert not stale, f"remove cited IDs from _PENDING_INCUBATING: {stale}"
-    assert validator >= _PENDING_INCUBATING, "pending IDs must be incubating validator IDs"
-
-
 def test_documented_rule_groups_match_the_registry() -> None:
     rules_doc = _TESTS_DIR.parent / "docs" / "rules.md"
     groups = re.findall(
@@ -159,10 +141,7 @@ def test_every_validator_must_and_should_is_cited() -> None:
     missing = [
         f"{req_id} ({severity})"
         for req_id, severity, enforcement, _status in _manifest_entries()
-        if enforcement == "validator"
-        and severity in ("MUST", "SHOULD")
-        and req_id not in cited
-        and req_id not in _PENDING_INCUBATING
+        if enforcement == "validator" and severity in ("MUST", "SHOULD") and req_id not in cited
     ]
     assert not missing, f"validator requirements cited by no check: {missing}"
 
@@ -186,11 +165,7 @@ def test_every_validator_may_is_cited_or_has_a_permission_test() -> None:
     """
     cited = _citations()
     covered = set(cited) | set(may_permissions.PERMISSION_TESTS)
-    missing = [
-        req_id
-        for req_id in _validator_mays()
-        if req_id not in covered and req_id not in _PENDING_INCUBATING
-    ]
+    missing = [req_id for req_id in _validator_mays() if req_id not in covered]
     assert not missing, (
         "validator MAY requirements with neither a citation nor a permission test: "
         f"{missing}; add one to tests/unit/test_may_permissions.py"
@@ -255,6 +230,25 @@ def test_severity_mapping() -> None:
         if strongest < floors[severity]:
             weak.append(f"{req_id} ({severity}) strongest citation is below the floor")
     assert not weak, weak
+
+
+def test_incubating_requirements_are_enforced_by_incubating_checks() -> None:
+    """A check citing incubating text must be in a family that cannot error.
+
+    The two halves of the cap meet here: the manifest says the requirement is
+    outside the conformance surface, and ``rashid.registry.is_incubating``
+    says the check enforcing it caps at a warning. A check that cited one
+    without being in such a family would pass the severity floors above while
+    still being able to fail a catalog.
+    """
+    statuses = {req_id: status for req_id, _sev, _enf, status in _manifest_entries()}
+    stray = [
+        f"{check_id} cites {spec_id}"
+        for check_id, (spec_ids, _severity) in _checks().items()
+        for spec_id in spec_ids
+        if statuses.get(spec_id) == INCUBATING and not registry.is_incubating(check_id)
+    ]
+    assert not stray, f"incubating requirements enforced by conformance checks: {stray}"
 
 
 def _constant_aliases() -> dict[str, set[str]]:

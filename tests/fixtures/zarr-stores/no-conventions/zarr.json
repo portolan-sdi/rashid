@@ -1,0 +1,66 @@
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "attributes": {
+    "proj:code": "EPSG:3857",
+    "spatial:dimensions": [
+      "y",
+      "x"
+    ],
+    "spatial:transform": [
+      10.0,
+      0.0,
+      500000.0,
+      0.0,
+      -10.0,
+      5000000.0
+    ]
+  },
+  "consolidated_metadata": {
+    "kind": "inline",
+    "must_understand": false,
+    "metadata": {
+      "temp": {
+        "zarr_format": 3,
+        "node_type": "array",
+        "shape": [
+          512,
+          512
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              512,
+              512
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0,
+        "codecs": [
+          {
+            "name": "bytes"
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0
+            }
+          }
+        ],
+        "dimension_names": [
+          "y",
+          "x"
+        ],
+        "attributes": {}
+      }
+    }
+  }
+}
