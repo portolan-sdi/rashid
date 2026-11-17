@@ -77,7 +77,6 @@ def _no_network(request: pytest.FixtureRequest) -> Iterator[None]:
     _store.reset()
 
 
-PORTOLAN_URI = "https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"
 LANGUAGE_URI = "https://stac-extensions.github.io/language/v1.0.0/schema.json"
 # multihash: varint(0x12 sha2-256) + varint(0x20) + sha256(b"")
 VALID_MULTIHASH = "1220e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
