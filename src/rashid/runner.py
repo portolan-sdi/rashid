@@ -37,6 +37,7 @@ from rashid.remote import (
     crawl,
 )
 from rashid.rule import Rule
+from rashid.rules.conformance import declared_schema_uris
 from rashid.schema import validate_schema
 from rashid.structural import validate_structural
 
@@ -82,18 +83,24 @@ def _optional_passes(
     options: ValidationOptions,
     *,
     known_statuses: Mapping[str, int] | None = None,
+    ran: list[str],
 ) -> list[Finding]:
-    """Run the structural, extension, schema, data, and live passes, honouring disable ids."""
+    """Run the structural, extension, schema, data, and live passes, honouring disable ids.
+
+    Appends the name of each pass that runs to ``ran``.
+    """
     findings: list[Finding] = []
     if options.structural and not config.disabled >= check_ids(
         "structural", enables_pass_only=True
     ):
+        ran.append("structural")
         findings.extend(
             _stage("structural", lambda: validate_structural(graph, options.structural_validator))
         )
     if options.extensions and not config.disabled >= check_ids(
         "extensions", enables_pass_only=True
     ):
+        ran.append("extensions")
         findings.extend(
             f
             for f in _stage(
@@ -103,6 +110,7 @@ def _optional_passes(
             if f.rule_id not in config.disabled
         )
     if options.schema and not config.disabled >= check_ids("schema", enables_pass_only=True):
+        ran.append("schema")
         findings.extend(
             f
             for f in _stage(
@@ -117,6 +125,7 @@ def _optional_passes(
             if f.rule_id not in config.disabled
         )
     if options.data and not config.disabled >= check_ids("data", enables_pass_only=True):
+        ran.append("data")
         findings.extend(
             f
             for f in _stage(
@@ -128,6 +137,7 @@ def _optional_passes(
             if f.rule_id not in config.disabled
         )
     if options.live and not config.disabled >= check_ids("live", enables_pass_only=True):
+        ran.append("live")
         findings.extend(
             f
             for f in _stage(
@@ -472,8 +482,10 @@ def _validate_graph(
         rules = DEFAULT_RULES
 
     findings.extend(_stage("rules", lambda: _run_rules(graph, rules, config)))
-
-    findings.extend(_optional_passes(graph, config, options, known_statuses=known_statuses))
+    ran = ["metadata"]
+    findings.extend(
+        _optional_passes(graph, config, options, known_statuses=known_statuses, ran=ran)
+    )
 
     if config.severity_overrides:
         findings = [
@@ -485,4 +497,10 @@ def _validate_graph(
 
     findings = cap_incubating(findings)
     findings.sort(key=lambda f: (f.path, f.rule_id, f.message))
-    return Report(findings=findings, files_checked=len(graph.nodes))
+    declared = declared_schema_uris(graph.root)
+    return Report(
+        findings=findings,
+        files_checked=len(graph.nodes),
+        declared_profile=declared[0] if len(declared) == 1 else None,
+        passes=tuple(ran),
+    )

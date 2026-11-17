@@ -11,6 +11,8 @@ name: Spec Sync
 # The PR comes from the org sync app, not GITHUB_TOKEN. GitHub starts no
 # workflow for a PR that GITHUB_TOKEN opens, so the verdict run never ran.
 # Auto-merge is armed, so a green PR lands on its own and a red one waits.
+# A sync that bundles a new profile version is a feature: it changes the
+# requirements rashid applies. It gets a feat: title and no auto-merge.
 
 on:
   schedule:
@@ -74,7 +76,13 @@ jobs:
       - name: Detect fixture drift
         id: drift
         run: |
-          if git diff --quiet -- tests/fixtures src/rashid/_schemas SPEC_REF; then
+          # A new release tag adds an untracked portolan/vX.Y.Z/ directory.
+          new_profile=$(git ls-files --others --exclude-standard -- src/rashid/_schemas/portolan \
+            | sed -n 's|^src/rashid/_schemas/portolan/\(v[0-9.]*\)/schema\.json$|\1|p' \
+            | sort -V | tail -n 1)
+          echo "new_profile=${new_profile}" >> "$GITHUB_OUTPUT"
+          if git diff --quiet -- tests/fixtures src/rashid/_schemas SPEC_REF \
+            && [ -z "$new_profile" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Fixtures already match spec main; nothing to sync."
           else
@@ -98,16 +106,22 @@ jobs:
         if: steps.drift.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NEW_PROFILE: ${{ steps.drift.outputs.new_profile }}
         run: |
           BRANCH="chore/spec-sync"
           REF="$(sed -n '3p' SPEC_REF)"
           SHORT="${REF:0:12}"
+          if [ -n "$NEW_PROFILE" ]; then
+            TITLE="feat(schema): bundle the Portolan ${NEW_PROFILE} profile schema"
+          else
+            TITLE="chore: sync spec fixtures to ${SHORT}"
+          fi
           gh auth setup-git
           git config user.name "portolan-bot"
           git config user.email "portolan@googlegroups.com"
           git checkout -B "$BRANCH"
           git add tests/fixtures src/rashid/_schemas SPEC_REF
-          git commit -m "chore: sync spec fixtures to ${SHORT}"
+          git commit -m "$TITLE"
           git push -f origin "$BRANCH"
           cat > "$RUNNER_TEMP/pr-body.md" <<'BODY'
           Automated re-vendor of the portolan-spec fixtures from `main` (`__SHORT__`),
@@ -129,13 +143,28 @@ jobs:
             the registry names an extension whose schema did not vendor. Check the
             vendoring step's log for a refused host.
           BODY
+          if [ -n "$NEW_PROFILE" ]; then
+            cat >> "$RUNNER_TEMP/pr-body.md" <<'BODY'
+
+          This sync bundles the new profile version __PROFILE__. rashid now applies
+          its requirements to every catalog, so auto-merge is off. A maintainer
+          reviews the change and merges it as a feature.
+          BODY
+            sed -i "s/__PROFILE__/${NEW_PROFILE}/" "$RUNNER_TEMP/pr-body.md"
+          fi
           sed -i "s/__SHORT__/${SHORT}/" "$RUNNER_TEMP/pr-body.md"
           if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -q OPEN; then
+            gh pr edit "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/pr-body.md"
             echo "Existing PR updated in place."
           else
             gh pr create --base main --head "$BRANCH" \
-              --title "chore: sync spec fixtures to ${SHORT}" \
+              --title "$TITLE" \
               --body-file "$RUNNER_TEMP/pr-body.md"
           fi
-          # The required checks gate the merge. A red run holds the PR open.
-          gh pr merge --auto --squash "$BRANCH"
+          if [ -n "$NEW_PROFILE" ]; then
+            # A new profile version needs a maintainer; disarm an earlier auto-merge.
+            gh pr merge --disable-auto "$BRANCH" || true
+          else
+            # The required checks gate the merge. A red run holds the PR open.
+            gh pr merge --auto --squash "$BRANCH"
+          fi

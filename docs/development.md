@@ -228,3 +228,13 @@ uv run python scripts/vendor_spec_fixtures.py --spec ../portolan-spec
 Released schemas come from final `vX.Y.Z` tags. The vendor stores the test-only draft in `tests/fixtures/draft-profile-schema.json`. The vendor reads the single schema on spec main, or the newest version folder in the old layout. The reference-catalog test maps an unreleased URI to this fixture. The wheel contains only tagged profile schemas.
 
 `spec-sync.yml` checks for spec changes nightly and opens a pull request when it finds them. Review the test results before merging. If `test_schema_uri_invariant` fails, rashid needs a code change as well as a fixture refresh.
+
+## Spec releases
+
+rashid applies the requirements of the newest profile version it bundles. A spec release needs two rashid releases: one with the new rules before the tag, and one that bundles the tagged schema after it.
+
+1. Before the spec tag, rashid main must enforce every validator requirement of the new version. `tests/unit/test_spec_coverage.py` checks the citations. `tests/unit/test_schema_parity.py` and `test_reference_catalog_passes_against_the_draft_profile` check rashid against the draft schema on spec main. Release rashid as described in [Releasing](#releasing). The spec examples pin this release.
+2. The spec tags `vX.Y.Z`. Confirm that the profile URI of that version serves the tagged schema.
+3. Run the sync: `gh workflow run spec-sync.yml -R portolan-sdi/rashid`. The new schema directory makes the pull request a feature, `feat(schema): bundle the Portolan vX.Y.Z profile schema`, with auto-merge off. `DEFAULT_SCHEMA_URI`, `rashid --version`, the JSON report, and `PTL-CNF-005` follow the newest bundled version. The pull request needs no code change. Review it and merge it.
+4. Release rashid again, so that the wheel on PyPI applies `vX.Y.Z`.
+5. Update the downstream pins. Tools read the newest version from `rashid.api.newest_profile_version()`.

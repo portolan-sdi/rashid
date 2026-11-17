@@ -33,6 +33,7 @@ EXPORTS = {
     "SPDX_LICENSE_IDS": "rashid._spdx",
     "STRUCTURAL_RELS": "rashid.rules._common",
     "ValidationOptions": "rashid.runner",
+    "bundled_profile_versions": "rashid._profile",
     "canonical_spdx_id": "rashid._spdx",
     "decode_multihash": "rashid._multihash",
     "encode_multihash": "rashid._multihash",
@@ -40,8 +41,13 @@ EXPORTS = {
     "is_cog_media_type": "rashid.rules._common",
     "is_well_formed_multihash": "rashid._multihash",
     "links_of": "rashid.rules._common",
+    "newest_profile_version": "rashid._profile",
     "parse_rfc3339": "rashid.rules._common",
+    "profile_uri": "rashid._profile",
+    "profile_version": "rashid._profile",
     "roles_of": "rashid.rules._common",
+    "spec_commit": "rashid._profile",
+    "profile_version_key": "rashid._profile",
 }
 
 

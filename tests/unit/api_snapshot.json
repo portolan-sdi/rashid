@@ -5,6 +5,7 @@
       "SPDX_LICENSE_IDS",
       "STRUCTURAL_RELS",
       "ValidationOptions",
+      "bundled_profile_versions",
       "canonical_spdx_id",
       "decode_multihash",
       "encode_multihash",
@@ -12,11 +13,17 @@
       "is_cog_media_type",
       "is_well_formed_multihash",
       "links_of",
+      "newest_profile_version",
       "parse_rfc3339",
-      "roles_of"
+      "profile_uri",
+      "profile_version",
+      "profile_version_key",
+      "roles_of",
+      "spec_commit"
     ],
     "signatures": {
       "ValidationOptions": "(*, config: 'RulesConfig | None' = None, rules: 'Sequence[Rule] | None' = None, structural: 'bool' = True, structural_validator: '_Validator | None' = None, extensions: 'bool' = True, schema: 'bool' = False, schema_validator: '_Validator | None' = None, schema_allow_network: 'bool' = False, schema_map: 'Mapping[str, dict[str, Any]] | None' = None, data: 'bool' = True, data_validator: 'DataValidator | None' = None, data_reader_factory: 'DataReaderFactory | None' = None, live: 'bool | None' = None, live_prober: 'LiveProber | None' = None, live_base_url: 'str | None' = None, fetcher: 'Fetcher | None' = None, max_documents: 'int' = 10000) -> None",
+      "bundled_profile_versions": "() -> 'tuple[str, ...]'",
       "canonical_spdx_id": "(value: 'object') -> 'str | None'",
       "decode_multihash": "(value: 'object') -> 'tuple[int, bytes] | None'",
       "encode_multihash": "(code: 'int', digest: 'bytes') -> 'str'",
@@ -24,8 +31,13 @@
       "is_cog_media_type": "(value: 'object') -> 'bool'",
       "is_well_formed_multihash": "(value: 'object') -> 'bool'",
       "links_of": "(node: 'Node') -> 'list[dict[str, Any]]'",
+      "newest_profile_version": "() -> 'str'",
       "parse_rfc3339": "(value: 'object') -> 'datetime | None'",
-      "roles_of": "(asset: 'dict[str, Any]') -> 'list[str]'"
+      "profile_uri": "(version: 'str') -> 'str'",
+      "profile_version": "(uri: 'str') -> 'str | None'",
+      "profile_version_key": "(version: 'str') -> 'tuple[int, ...]'",
+      "roles_of": "(asset: 'dict[str, Any]') -> 'list[str]'",
+      "spec_commit": "() -> 'str | None'"
     }
   },
   "rashid": {
@@ -48,7 +60,7 @@
     "signatures": {
       "CheckInfo": "(id: 'str', description: 'str', severity: 'Severity', spec_ids: 'tuple[str, ...]' = (), stage: 'PassName' = 'metadata', enables_pass: 'bool' = True, spec_note: 'str | None' = None) -> None",
       "Finding": "(rule_id: 'str', severity: 'Severity', message: 'str', path: 'str', object_id: 'str | None' = None, json_pointer: 'str | None' = None, fix_hint: 'str | None' = None, expected: 'Any | None' = None, actual: 'Any | None' = None, data: 'dict[str, Any] | None' = None) -> None",
-      "Report": "(findings: 'list[Finding]' = <factory>, files_checked: 'int' = 0) -> None",
+      "Report": "(findings: 'list[Finding]' = <factory>, files_checked: 'int' = 0, declared_profile: 'str | None' = None, passes: 'tuple[str, ...]' = ()) -> None",
       "RuleSummary": "(rule_id: 'str', severity: 'Severity', count: 'int', file_count: 'int', description: 'str' = '') -> None",
       "RulesConfig": "(disabled: 'frozenset[str]' = frozenset(), severity_overrides: 'dict[str, Severity]' = <factory>) -> None",
       "ValidationOptions": "(*, config: 'RulesConfig | None' = None, rules: 'Sequence[Rule] | None' = None, structural: 'bool' = True, structural_validator: '_Validator | None' = None, extensions: 'bool' = True, schema: 'bool' = False, schema_validator: '_Validator | None' = None, schema_allow_network: 'bool' = False, schema_map: 'Mapping[str, dict[str, Any]] | None' = None, data: 'bool' = True, data_validator: 'DataValidator | None' = None, data_reader_factory: 'DataReaderFactory | None' = None, live: 'bool | None' = None, live_prober: 'LiveProber | None' = None, live_base_url: 'str | None' = None, fetcher: 'Fetcher | None' = None, max_documents: 'int' = 10000) -> None",

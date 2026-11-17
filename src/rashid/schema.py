@@ -31,7 +31,7 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
-from rashid import _json
+from rashid import _json, _profile
 from rashid._jsonschema import (
     SchemaError,
     SchemaPass,
@@ -45,8 +45,8 @@ from rashid.model import Finding, Severity
 from rashid.registry import SCH_INVALID, SCH_UNAVAILABLE, SCH_UNUSED_MAP
 from rashid.rules.conformance import declared_schema_uris
 
-# The pinned v0.1 profile schema, used when the root declares no single URI.
-DEFAULT_SCHEMA_URI = "https://schemas.portolan-sdi.org/portolan/v0.2.0/schema.json"
+# The newest bundled profile schema, used when the root declares no single URI.
+DEFAULT_SCHEMA_URI = _profile.profile_uri(_profile.newest_profile_version())
 
 _PASS = SchemaPass("schema", SCH_INVALID, SCH_UNAVAILABLE, initialization_errors=(Exception,))
 
@@ -88,8 +88,7 @@ def _bundled_schemas() -> dict[str, dict[str, Any]]:
 
 def bundled_schema_versions() -> tuple[str, ...]:
     """The profile schema versions this build carries, e.g. ``("v0.1.0",)``."""
-    versions = (uri.split("/portolan/")[1].split("/")[0] for uri in _bundled_schemas())
-    return tuple(sorted(versions, key=lambda v: tuple(int(p) for p in v.lstrip("v").split("."))))
+    return _profile.bundled_profile_versions()
 
 
 def bundled_schema(schema_uri: str) -> dict[str, Any] | None:

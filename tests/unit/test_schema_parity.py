@@ -9,10 +9,15 @@ trips the schema here will produce a clean metadata report and fail the test.
 Each case mutates one aspect of a conformant tree. The corpus is not exhaustive;
 it covers the requirement families the schema encodes (titles, extents,
 providers, license, assets, conformance).
+
+Every case also runs against the draft profile schema on spec main, with the
+tree declaring the draft's URI. That rehearses the next profile release: a
+hand rule the draft needs fails here before the release is bundled.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -25,6 +30,29 @@ from rashid.schema import DEFAULT_SCHEMA_URI, bundled_schema, validator_from_sch
 from tests.conftest import CatalogBuilder, mutate_json
 
 pytestmark = pytest.mark.unit
+
+_DRAFT = Path(__file__).resolve().parents[1] / "fixtures" / "draft-profile-schema.json"
+
+
+def _profiles() -> dict[str, tuple[str, dict[str, Any]]]:
+    """Profile name -> (the URI the tree declares, the schema that judges it)."""
+    bundled = bundled_schema(DEFAULT_SCHEMA_URI)
+    assert bundled is not None
+    draft = json.loads(_DRAFT.read_bytes())
+    return {
+        "bundled": (DEFAULT_SCHEMA_URI, bundled),
+        "draft": (str(draft["$id"]).rstrip("#"), draft),
+    }
+
+
+_PROFILES = _profiles()
+
+
+def _write(catalog: CatalogBuilder, uri: str) -> Path:
+    catalog.overrides["stac_extensions"] = [uri]
+    catalog.collection("roads", stac_extensions=[uri])
+    return catalog.write()
+
 
 Mutation = Callable[[Path], None]
 
@@ -78,9 +106,7 @@ _MUTATIONS: dict[str, Mutation] = {
 }
 
 
-def _schema_error_count(root: Path) -> int:
-    schema = bundled_schema(DEFAULT_SCHEMA_URI)
-    assert schema is not None
+def _schema_error_count(root: Path, schema: dict[str, Any]) -> int:
     check = validator_from_schema(schema)
     graph = CatalogGraph.load(root)
     return sum(
@@ -90,14 +116,17 @@ def _schema_error_count(root: Path) -> int:
     )
 
 
+@pytest.mark.parametrize("profile", sorted(_PROFILES))
 @pytest.mark.parametrize("name", sorted(_MUTATIONS))
-def test_schema_rejection_implies_metadata_error(catalog: CatalogBuilder, name: str) -> None:
-    catalog.collection("roads")
-    root = catalog.write()
+def test_schema_rejection_implies_metadata_error(
+    catalog: CatalogBuilder, name: str, profile: str
+) -> None:
+    uri, schema = _PROFILES[profile]
+    root = _write(catalog, uri)
     _MUTATIONS[name](root)
 
-    if _schema_error_count(root) == 0:
-        pytest.skip(f"mutation {name!r} does not trip the bundled schema")
+    if _schema_error_count(root, schema) == 0:
+        pytest.skip(f"mutation {name!r} does not trip the {profile} schema")
     report = validate(root)
     assert report.errors, (
         f"the profile schema rejects {name!r} but the metadata pass reports no error; "
@@ -105,9 +134,10 @@ def test_schema_rejection_implies_metadata_error(catalog: CatalogBuilder, name: 
     )
 
 
-def test_conformant_tree_passes_both(catalog: CatalogBuilder) -> None:
+@pytest.mark.parametrize("profile", sorted(_PROFILES))
+def test_conformant_tree_passes_both(catalog: CatalogBuilder, profile: str) -> None:
     """The corpus baseline: unmutated, both oracles agree the tree is clean."""
-    catalog.collection("roads")
-    root = catalog.write()
-    assert _schema_error_count(root) == 0
+    uri, schema = _PROFILES[profile]
+    root = _write(catalog, uri)
+    assert _schema_error_count(root, schema) == 0
     assert validate(root).errors == []
