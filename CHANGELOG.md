@@ -1,3 +1,64 @@
+## v0.4.0 (2026-11-17)
+
+### BREAKING CHANGE
+
+- file:// partition globs and partition extensions other
+than v1.x are now errors; PTL-PRO-004 is now a warning.
+- the data pass now sends requests for a bucket partition:glob.
+Use --data-scope local to keep a run offline.
+- PTL-DAT-012 gives warnings instead of errors for
+pre-release versions and for stale geo keys on native files, and
+PTL-DAT-020 and PTL-DAT-017 report on more collections.
+- catalogs checked without a publish base now get hosting
+warnings instead of errors, and servers that echo a different origin now
+fail PTL-LIV-003 and PTL-LIV-005.
+- files under 5 MB now get an ordering verdict, and files
+with three to seven row groups are judged by their rows, not their boxes.
+- a catalog with a relative partition:glob now fails
+PTL-PRT-002. Replace the glob with its absolute bucket URL, such as
+s3://bucket/data/*.parquet.
+- Replace validate(path, data=False, config=config) with validate(path, options=ValidationOptions(data=False, config=config)). Import ValidationOptions from rashid or rashid.api. The unused extensions_validator parameter is removed; use validate_extensions for its lower-level validator adapter. Version changes remain part of the Commitizen release process.
+
+### Feat
+
+- **schema**: bundle the Portolan v0.3.0 profile schema (#322)
+- report the spec version rashid applies (#315)
+- **data**: list s3/gs/az partition globs anonymously and check sampled partition files (#316)
+- **zarr**: check a Zarr store against the incubating profile (#295)
+- **data**: judge spatial order by pruning efficiency and report it as a warning (#174)
+- **rules**: accept s3 asset hrefs that have an https alternate (#293)
+- **rules**: validate classification classes on raster bands (#243)
+- **schema**: map draft profile URIs and vendor release tags (#298)
+- check that every table:columns entry carries a description (#221)
+- **rules**: require partition globs to be listable absolute URLs (#292)
+- **validation**: recommend an overview COG for collections of rasters (#291)
+- **live**: require range support only for partial-read files (#290)
+- **validation**: enforce the spec batch requirements (#263)
+- add counters, stage timings, logging, and a profile entry point (#223)
+
+### Fix
+
+- **rules**: correct provenance, asset, and partition rules for spec v0.3 (#318)
+- **data**: read https alternates and fix native GeoParquet, ordering, and column checks (#314)
+- **live**: enforce CORS origins, scope hosts, and probe https alternates (#311)
+- **rules**: exempt COG visual derivatives from PTL-VIZ-002 (#252)
+- **data**: check native-geo Parquet instead of skipping it (#257)
+- **data**: check column descriptions on assetless partitioned collections (#297)
+- stop urllib streams at TLS EOF and compare POSIX finding paths (#274)
+- open the spec-sync pull request as the org sync app (#245)
+- **ci**: let the nightly mutmut sweep run the full suite (#241)
+- **live**: report a redirect off https as PTL-LIV-008 and never follow it (#228)
+
+### Refactor
+
+- give each repeated concept one owner and guard against new copies (#272)
+
+### Perf
+
+- **data**: open each asset once and read assets in parallel (#230)
+- load obstore, ssl, and urllib.request on the first HTTPS request (#225) (#229)
+- parse JSON with orjson and fetch remote objects with obstore (#218)
+
 ## v0.3.0 (2026-10-12)
 
 ### Feat
