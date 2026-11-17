@@ -1437,7 +1437,8 @@ def test_diverging_partition_schemas_flag_dat_014(tmp_path: Path) -> None:
     assert defects[0].json_pointer == "/partition:glob"
 
 
-def test_remote_partition_glob_is_skipped(tmp_path: Path) -> None:
+def test_a_bucket_glob_is_not_listed_by_a_local_reader(tmp_path: Path) -> None:
+    # _NoAssets reads no remote file, as with --data-scope local: no request goes out.
     node = _partitioned_collection(tmp_path, glob="s3://bucket/parts/*.parquet")
     assert _partition_schemas(node) == []
 
@@ -1471,14 +1472,15 @@ class _NoAssets:
 
 
 def _partition_schemas(node: Node) -> list:
-    schemas, _, _ = partitions.check_partitions(node, _NoAssets())
+    schemas, _ = partitions.check_partitions(node, _NoAssets())
     return schemas
 
 
 def _partition_bytes(node: Node, reader: object | None = None) -> list:
-    _, defects, total = partitions.check_partitions(node, reader or _NoAssets())
+    _, groups = partitions.check_partitions(node, reader or _NoAssets())
     source = DataResults()
-    source.extend(defects, partition_total=total)
+    for defects, total in groups:
+        source.extend(defects, partition_total=total)
     return source.build()
 
 

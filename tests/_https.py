@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
+from xml.sax.saxutils import escape
 
 import pytest
 import trustme
@@ -75,6 +77,8 @@ class HttpsServer:
         self.in_flight = 0
         self.peak_in_flight = 0
         self.counted: Callable[[str], bool] = lambda _path: True
+        # Buckets an S3 client can list: "/bucket" -> its (key, size) pairs.
+        self.buckets: dict[str, list[tuple[str, int]]] = {}
         self._lock = threading.Lock()
 
     def enter(self) -> None:
@@ -115,11 +119,19 @@ class _Handler(BaseHTTPRequestHandler):
         finally:
             self.state.leave()
 
+    def _route(self) -> Route:
+        """The canned answer, or a listing when an S3 client lists a known bucket."""
+        path, _, query = self.path.partition("?")
+        params = parse_qs(query)
+        if params.get("list-type") == ["2"] and path in self.state.buckets:
+            return Route(body=_list_bucket(self.state.buckets[path], params))
+        return self.state.routes.get(self.path, Route(status=404))
+
     def _respond(self, send_body: bool) -> None:
         self.state.seen.append(
             Seen(self.command, self.path, {k.lower(): v for k, v in self.headers.items()})
         )
-        route = self.state.routes.get(self.path, Route(status=404))
+        route = self._route()
         if route.latency:
             time.sleep(route.latency)
         body, status = route.body, route.status
@@ -159,6 +171,22 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:
         self._answer(False)
+
+
+def _list_bucket(objects: list[tuple[str, int]], params: dict[str, list[str]]) -> bytes:
+    """An S3 ListObjectsV2 answer, in one page, for the keys under ``prefix``."""
+    prefix = params.get("prefix", [""])[0]
+    contents = "".join(
+        f"<Contents><Key>{escape(key)}</Key><Size>{size}</Size>"
+        "<LastModified>2026-01-01T00:00:00.000Z</LastModified></Contents>"
+        for key, size in objects
+        if key.startswith(prefix)
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+        f"<IsTruncated>false</IsTruncated>{contents}</ListBucketResult>"
+    ).encode()
 
 
 def _handler(server: HttpsServer) -> type[BaseHTTPRequestHandler]:

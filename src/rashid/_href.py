@@ -367,3 +367,31 @@ def wire_url(base: str, rel: str) -> str:
         path = parsed.path
     encoded = quote(path, safe="/%:@!$&'()*+,;=")
     return f"{base}{origin}{encoded}{href_suffix(str(rel))}"
+
+
+# Schemes whose globs a client can list anonymously (formats.md, Partitioned
+# Collections): Amazon S3 or an S3-compatible service, Google Cloud Storage,
+# and Azure Blob Storage.
+BUCKET_SCHEMES = ("s3", "gs", "az")
+
+
+def bucket_glob(glob: str) -> tuple[str, str, str] | None:
+    """``(scheme, bucket, key pattern)`` for a listable bucket glob, else None.
+
+    The single owner of "a glob a client can list": an ``s3://``, ``gs://``,
+    or ``az://`` URL with a bucket (or container) and a key pattern. The
+    glob is split by hand, not as a URL: ``?`` is a wildcard and ``#`` a key
+    character, so neither starts a query or a fragment.
+    """
+    match = _BUCKET_GLOB.fullmatch(glob.strip())
+    if match is None or match["scheme"].lower() not in BUCKET_SCHEMES:
+        return None
+    return match["scheme"].lower(), match["bucket"], match["key"]
+
+
+# A bucket or container name has no user, port, or path: letters, digits,
+# dots, dashes, and underscores, as S3, GCS, and Azure allow.
+_BUCKET_GLOB = re.compile(
+    r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*)://(?P<bucket>[A-Za-z0-9][A-Za-z0-9._-]*)/(?P<key>.+)",
+    re.DOTALL,
+)

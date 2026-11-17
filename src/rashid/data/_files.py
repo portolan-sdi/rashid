@@ -5,13 +5,14 @@ from __future__ import annotations
 import contextlib
 import glob as globmodule
 import math
+import re
 from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
 import rasterio
 
-from rashid import _trace
+from rashid import _store, _trace
 from rashid.data.reader import Locator
 
 
@@ -117,5 +118,64 @@ def partition_files(base: Path, pattern: str) -> list[tuple[str, Path]]:
     The caller owns href applicability and containment; this owner performs
     filesystem enumeration only.
     """
-    matches = sorted(globmodule.glob(pattern, root_dir=str(base)))
+    matches = sorted(globmodule.glob(pattern, root_dir=str(base), recursive=True))
     return [(Path(match).as_posix(), base / match) for match in matches]
+
+
+def glob_regex(pattern: str) -> re.Pattern[str]:
+    """A regex that matches the keys a partition glob names.
+
+    ``*`` and ``?`` stay within one path segment, ``**`` spans segments, and
+    ``[...]`` is a character class (``[!...]`` negates it), as in DuckDB,
+    GDAL, and fsspec.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        char = pattern[i]
+        if pattern.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+            continue
+        if pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+            continue
+        if char == "*":
+            out.append("[^/]*")
+        elif char == "?":
+            out.append("[^/]")
+        elif char == "[" and (end := pattern.find("]", i + 2)) != -1:
+            body = pattern[i + 1 : end]
+            body = "^" + body[1:] if body.startswith("!") else body
+            out.append(f"[{body.replace(chr(92), chr(92) * 2)}]")
+            i = end + 1
+            continue
+        else:
+            out.append(re.escape(char))
+        i += 1
+    return re.compile("".join(out))
+
+
+def listing_prefix(pattern: str) -> str:
+    """The directory before the glob's first wildcard: the narrowest listing that
+    still returns every match."""
+    literal = re.split(r"[*?\[]", pattern, maxsplit=1)[0]
+    return literal.rpartition("/")[0]
+
+
+def remote_partition_files(
+    scheme: str, bucket: str, pattern: str, *, limit: int, config: dict[str, Any]
+) -> tuple[list[tuple[str, int]], int, bool]:
+    """The ``(key, size)`` of each listed object the glob matches, sorted by key.
+
+    Also returns how many objects the listing returned, and whether it
+    stopped at ``limit`` with more to come. A listing failure is a
+    :class:`rashid._store.StoreError`; an invalid pattern is a ``re.error``.
+    """
+    regex = glob_regex(pattern)  # a bad pattern fails before any request
+    listed, truncated = _store.list_objects(
+        scheme, bucket, listing_prefix(pattern), limit=limit, config=config
+    )
+    matched = sorted((key, size) for key, size in listed if regex.fullmatch(key))
+    return matched, len(listed), truncated

@@ -87,7 +87,7 @@ _MIN_ORDERING_ROWS = _ORDERING_CHUNKS * _MIN_CHUNK_ROWS
 
 
 def check_geoparquet(
-    key: str, files: AssetFiles, *, subject: str | None = None
+    key: str, files: AssetFiles, *, subject: str | None = None, rows: bool = True
 ) -> list[DataDefect]:
     """A GeoParquet asset MUST have bounded row groups, per-row-group spatial
     statistics, and spatial ordering (formats.md:30,64,75).
@@ -103,6 +103,9 @@ def check_geoparquet(
     ``subject`` names the file in the message. It defaults to the asset the key
     belongs to; the partition pass passes the matched path instead, since a
     partition file is addressed by the collection's glob and is nobody's asset.
+
+    ``rows=False`` reads the footer only and skips the ordering check
+    (``PTL-DAT-006``), which may read rows. A sampled partition file uses it.
     """
     subject = subject or f"asset '{key}'"
     try:
@@ -143,6 +146,8 @@ def check_geoparquet(
         key, parquet, geo, recommend_covering=has_geo_key, subject=subject
     )
     defects.extend(stat_defects)
+    if not rows:
+        return defects
     shape = (sum(row_counts), len(row_counts))
     if bboxes is None:
         # Without per-row-group boxes the footer check cannot run, so the

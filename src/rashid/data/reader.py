@@ -34,12 +34,20 @@ from rashid.catalog import CatalogGraph, Node
 _CHUNK = 1 << 16  # 64 KiB
 
 
+# An https URL to ask a reader whether it reads remote files at all, as it
+# must before a bucket partition:glob is listed.
+BUCKET_PROBE = "https://bucket.invalid/"
+
+
 @dataclass(frozen=True)
 class Locator:
     """Where an asset's bytes live: a local path string, or an ``https`` URL."""
 
     is_remote: bool
     source: str
+    # A size the caller already knows, such as from a bucket listing, so a
+    # remote read sends no HEAD to learn it.
+    size: int | None = None
 
     def gdal_path(self) -> str:
         """The path GDAL/rasterio opens: a local path, or a ``/vsicurl/`` URL."""
@@ -48,7 +56,7 @@ class Locator:
     def open_binary(self) -> io.IOBase:
         """A seekable binary handle: a local file, or an HTTP-range reader."""
         if self.is_remote:
-            return _HttpRangeFile(self.source)
+            return _HttpRangeFile(self.source, self.size)
         return Path(self.source).open("rb")
 
 
@@ -146,11 +154,11 @@ class _HttpRangeFile(io.RawIOBase):
     PMTiles reader to pull a footer or header without downloading the object.
     """
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, size: int | None = None) -> None:
         super().__init__()
         self._url = url
         self._pos = 0
-        self._size = _store.head_size(url)
+        self._size = _store.head_size(url) if size is None else size
 
     def readable(self) -> bool:
         return True
