@@ -439,7 +439,7 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
     ),
     CheckInfo(
         DAT_COG_STATS,
-        "every COG band carries embedded min/max/mean/stddev statistics",
+        "a COG that needs or includes statistics carries min/max/mean/stddev on every band",
         Severity.ERROR,
         ("PORTO-FMT-026", "PORTO-FMT-027", "PORTO-FMT-028", "PORTO-FMT-030", "PORTO-FMT-045"),
         stage="data",

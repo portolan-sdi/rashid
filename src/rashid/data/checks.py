@@ -16,9 +16,13 @@ and the real bytes into a :class:`rashid.data.DataDefect`:
 - ``PTL-DAT-006`` GeoParquet rows are not spatially ordered (MUST, formats.md:30)
 - ``PTL-DAT-007`` no per-row-group spatial statistics (MUST, formats.md:64)
 - ``PTL-DAT-008`` a row group exceeds 150,000 rows (MUST, formats.md:75)
-- ``PTL-DAT-009`` COG bands lack embedded statistics (MUST, formats.md:95)
+- ``PTL-DAT-009`` COG bands lack embedded statistics: an ERROR when a band
+  has more than 8 bits per sample and the raster is not classified
+  (PORTO-FMT-026), or when only some bands carry them (PORTO-FMT-084); a
+  WARNING on any other COG (PORTO-FMT-083)
 - ``PTL-DAT-010`` a band lacks embedded valid percent (SHOULD; MUST — and thus
-  an ERROR — when the band has a nodata value, formats.md:121)
+  an ERROR — when the band has a nodata value and the file includes or needs
+  statistics, PORTO-FMT-031)
 - ``PTL-DAT-011`` a raster larger than its own internal tile has no internal
   overviews. OGC 21-026 makes overviews optional in base COG but a SHALL in
   its Optimized GeoTIFF conformance class (/req/optimized_geotiff) — the class
