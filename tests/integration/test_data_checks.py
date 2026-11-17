@@ -718,7 +718,8 @@ def test_perfect_tiling_scores_exactly_one(count: int) -> None:
 def test_reference_tiling_covers_the_extent() -> None:
     """Cross-check 4: the reference is the full tiling, every cell filled.
 
-    PORTO-FMT-053 pins one construction so every validator divides by the same
+    The incubating spatial-order method (specs/incubating/spatial-order.md,
+    Method) pins one construction so every validator divides by the same
     number. The grid with an empty cell is a different number (0.644 against
     0.638 at n = 3 under the box-scaled window), and the last row of the
     pinned tiling stretches to the full width.
@@ -746,8 +747,8 @@ def test_reference_tiling_has_no_gap_at_any_count(count: int) -> None:
 
 @pytest.mark.parametrize("name", sorted(_VECTORS["layouts"]))
 def test_shared_layout_vectors(name: str) -> None:
-    """PORTO-FMT-054: the spec's abstract test vectors, vendored verbatim from
-    specs/portolan/abstract-tests/spatial-metric-vectors.json."""
+    """The spec's abstract test vectors, vendored verbatim from
+    specs/incubating/spatial-order/spatial-metric-vectors.json."""
     vector = _VECTORS["layouts"][name]
     rows = [float(r) for r in vector["rows"]] if "rows" in vector else None
     sizes = [float(x) for x in vector["sizes"]] if "sizes" in vector else None
@@ -780,7 +781,7 @@ def test_spatial_ordering_fails_below_the_bar() -> None:
 
 
 def test_spatial_ordering_ignores_consecutive_overlap() -> None:
-    # PORTO-FMT-049: a perfect grid tiling padded so neighbours touch. Every
+    # specs/incubating/spatial-order.md: a perfect grid tiling padded so neighbours touch. Every
     # consecutive pair overlaps, which the retired criterion faulted, but the
     # layout prunes as well as nine row groups allow.
     grid = geoparquet._ideal_grid_boxes((0.0, 0.0, 9.0, 9.0), 9)

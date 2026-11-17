@@ -257,7 +257,8 @@ def test_row_group_layout_is_reported_not_judged_below_the_floor(
 ) -> None:
     """Between two and seven row groups the numbers are reported at INFO.
 
-    PORTO-FMT-044 forbids a verdict from those boxes (a grid of so few cells
+    The incubating spatial-order method (specs/incubating/spatial-order.md)
+    forbids a verdict from those boxes (a grid of so few cells
     is a poor model of a curve sort), but the numbers still tell a publisher
     what a reader would skip. One box is the extent itself, so a single row
     group has no layout to report and stays silent.
@@ -329,8 +330,9 @@ def test_low_footer_efficiency_below_eight_groups_takes_the_row_check(
 def test_seven_interleaved_row_groups_with_few_rows_get_no_verdict(tmp_path: Path) -> None:
     """Fourteen corner-to-corner rows in seven groups: too few rows to judge.
 
-    The boxes score 0.00, but PORTO-FMT-044 forbids judging them, and the row
-    check needs 200 rows (PORTO-FMT-052).
+    The boxes score 0.00, but the incubating spatial-order method
+    (specs/incubating/spatial-order.md) forbids judging them, and its row
+    check needs 200 rows.
     """
     path = tmp_path / "seven_groups.parquet"
     assets.write_geoparquet(path, points=assets.interleaved_points(14))
@@ -356,7 +358,7 @@ def test_an_undefined_footer_efficiency_takes_the_row_check(
 
 
 def test_seven_middling_row_groups_withhold_the_pass(tmp_path: Path) -> None:
-    """PORTO-FMT-044: below eight groups the boxes give no verdict, and
+    """specs/incubating/spatial-order.md: below eight groups the boxes give no verdict, and
     fourteen rows are too few for the row check. The finding says so rather
     than staying silent."""
     path = tmp_path / "seven_sorted_groups.parquet"

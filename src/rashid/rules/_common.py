@@ -76,6 +76,13 @@ def roles_of(asset: dict[str, Any]) -> list[str]:
     return [role for role in raw if isinstance(role, str)]
 
 
+def media_type_essence(value: object) -> str | None:
+    """A media type without its parameters, lowercased: ``text/html; charset=utf-8`` is ``text/html``."""
+    if not isinstance(value, str):
+        return None
+    return value.split(";", 1)[0].strip().casefold()
+
+
 def is_source_asset(asset: dict[str, Any]) -> bool:
     """Only the source role exempts upstream bytes from format requirements."""
     return "source" in roles_of(asset)
@@ -325,7 +332,8 @@ def names_a_geometry_column(columns: list[dict[str, Any]]) -> bool:
     for column in columns:
         name = str(column.get("name", "")).casefold()
         ctype = str(column.get("type", "")).casefold()
-        if name in ("geometry", "geom") or "geometry" in ctype:
+        names = ("geometry", "geom", "geography", "geog")
+        if name in names or "geometry" in ctype or "geography" in ctype:
             return True
     return False
 

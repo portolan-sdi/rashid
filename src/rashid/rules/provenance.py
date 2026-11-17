@@ -14,7 +14,7 @@ from typing import Literal
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import links_of, parse_rfc3339, roles_of
+from rashid.rules._common import links_of, media_type_essence, parse_rfc3339, roles_of
 from rashid.rules.providers import providers_of
 
 Provenance = Literal["official", "mirror"]
@@ -56,7 +56,8 @@ class MirrorViaLinkRule(Rule):
         if provenance_of(node) != "mirror":
             return
         if any(
-            link.get("rel") == "via" and link.get("type") == "text/html" for link in links_of(node)
+            link.get("rel") == "via" and media_type_essence(link.get("type")) == "text/html"
+            for link in links_of(node)
         ):
             return
         yield self.finding(
@@ -98,8 +99,9 @@ class MirrorCanonicalLinkRule(Rule):
 class MirrorUpdatedRule(Rule):
     """A mirror records its last sync time in the top-level updated field.
 
-    Applies to every mirror collection; the root catalog is also required to
-    carry it when every collection in the tree is a mirror.
+    Applies to every mirror collection, and to every catalog, the root or a
+    sub-catalog, whose collections are all mirrors: a mirror sync sets
+    ``updated`` "on every catalog and collection it checks" (PORTO-CORE-057).
     """
 
     id = "PTL-PRO-003"
@@ -113,10 +115,10 @@ class MirrorUpdatedRule(Rule):
         for node in graph.iter("collection"):
             if provenances[node.path] == "mirror":
                 yield from self._check_updated(node)
-        root = graph.root
-        collections = list(provenances.values())
-        if root is not None and collections and all(p == "mirror" for p in collections):
-            yield from self._check_updated(root)
+        for catalog in graph.iter("catalog"):
+            under = _collections_under(graph, catalog)
+            if under and all(provenances.get(c.path) == "mirror" for c in under):
+                yield from self._check_updated(catalog)
 
     def _check_updated(self, node: Node) -> Iterable[Finding]:
         value = node.data.get("updated")
@@ -144,14 +146,31 @@ class MirrorUpdatedRule(Rule):
             )
 
 
+def _collections_under(graph: CatalogGraph, catalog: Node) -> list[Node]:
+    """Every collection below ``catalog``, through sub-catalogs and nested collections.
+
+    Containment parents sit in shallower directories, so the walk is a tree.
+    """
+    found: list[Node] = []
+    pending = [catalog]
+    while pending:
+        for child in graph.children_of(pending.pop()):
+            if child.kind == "collection":
+                found.append(child)
+            pending.append(child)
+    return found
+
+
 class OfficialNoUpstreamLinksRule(Rule):
-    """An official catalog carries no via/canonical links to an upstream."""
+    """An official catalog carries no via/canonical links to an upstream.
+
+    A WARNING: the sentence in core.md, Source Provenance, carries no RFC 2119
+    keyword, so the manifest gives it no ID and it is advice, not a MUST.
+    """
 
     id = "PTL-PRO-004"
-    # No manifest ID: the official-carries-no-upstream-links sentence in
-    # core.md, Source Provenance, carries no RFC 2119 keyword.
-    default_severity = Severity.ERROR
-    description = "an official collection must not carry via or canonical upstream links"
+    default_severity = Severity.WARNING
+    description = "an official collection should not carry via or canonical upstream links"
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:

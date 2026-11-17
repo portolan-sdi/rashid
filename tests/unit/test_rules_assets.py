@@ -179,18 +179,17 @@ def test_raw_sha256_checksum_is_rejected(catalog: CatalogBuilder) -> None:
     assert "multihash" in findings[0].message
 
 
-def test_item_assets_template_checks_type_and_roles_only(catalog: CatalogBuilder) -> None:
+def test_item_assets_templates_are_not_assets(catalog: CatalogBuilder) -> None:
+    """PORTO-CORE-025 governs assets; an item_assets entry is a template, not an asset."""
     catalog.collection(
         "roads",
         item_assets={
             "data": {"type": "application/vnd.apache.parquet", "roles": ["data"]},
-            "broken": {"type": "application/vnd.apache.parquet"},
+            "broken": {"title": "no type, no roles"},
         },
     )
     report = validate(catalog.write())
-    findings = findings_for(report, "PTL-AST-001")
-    assert len(findings) == 1
-    assert "'broken'" in findings[0].message
+    assert findings_for(report, "PTL-AST-001") == []
     # templates are exempt from href/size/checksum requirements
     assert all(
         "data" not in f.json_pointer
@@ -445,7 +444,8 @@ def test_pmtiles_alone_is_not_primary_data(
     assert len(findings_for(report, "PTL-AST-007")) == 1
     assert len(findings_for(report, "PTL-AST-009")) == 1
     if scope == "item":
-        assert len(findings_for(report, "PTL-AST-008")) == 1
+        # PORTO-CORE-083 asks for an asset with the data role, and this one has it.
+        assert findings_for(report, "PTL-AST-008") == []
 
 
 @pytest.mark.parametrize("scope", ["collection", "item"])
@@ -728,6 +728,9 @@ def test_orphan_pmtiles_item_still_reports_errors(tmp_path) -> None:  # type: ig
         "https://example.org/data.parquet?glob=*",
         "https://example.org/data.parquet?range=[0,1]",
         "./data.parquet#[x]",
+        # PORTO-FMT-065 makes no exception for the bracket of an IPv6 host.
+        "https://[::1]/data.parquet",
+        "https://[::1]:8443/data.parquet?x=1",
     ],
 )
 def test_data_asset_href_with_a_glob_is_flagged(catalog: CatalogBuilder, href: str) -> None:
@@ -751,8 +754,6 @@ def test_item_data_asset_href_with_a_glob_is_flagged(catalog: CatalogBuilder) ->
         "./data.parquet",
         "https://example.org/data.parquet?token=abc&v=2",
         "./part%2A%5B0%5D.parquet",
-        "https://[::1]/data.parquet",
-        "https://[::1]:8443/data.parquet?x=1",
     ],
 )
 def test_single_file_data_href_passes(catalog: CatalogBuilder, href: str) -> None:
@@ -795,3 +796,41 @@ def test_item_asset_templates_need_no_title_or_description(catalog: CatalogBuild
         if (f.json_pointer or "").startswith("/item_assets")
     ]
     assert templates == []
+
+
+def test_a_source_data_asset_may_name_a_glob(catalog: CatalogBuilder) -> None:
+    """PORTO-FMT-045 exempts an upstream original from the formats.md rules."""
+    source = _asset(href="https://upstream.example.org/parts/*.parquet")
+    source["roles"] = ["data", "source"]
+    catalog.collection("roads", assets={"data": _asset(), "upstream": source})
+    assert findings_for(validate(catalog.write()), "PTL-AST-012") == []
+
+
+def test_a_source_pmtiles_asset_is_exempt(catalog: CatalogBuilder) -> None:
+    """An upstream PMTiles file with only the source role passes PORTO-FMT-062."""
+    upstream = {
+        "href": "https://upstream.example.org/tiles.pmtiles",
+        "type": "application/vnd.pmtiles",
+        "roles": ["source"],
+    }
+    catalog.collection("roads", assets={"data": _asset(), "upstream": upstream})
+    assert findings_for(validate(catalog.write()), "PTL-AST-009") == []
+
+
+@pytest.mark.parametrize(
+    "column",
+    [
+        {"name": "geography", "type": "binary"},
+        {"name": "geog", "type": "binary"},
+        {"name": "shape", "type": "geography"},
+    ],
+)
+def test_a_geography_column_is_a_geoparquet_reference(
+    catalog: CatalogBuilder, column: dict[str, str]
+) -> None:
+    """PORTO-FMT-062: a Parquet GEOGRAPHY column is geometry for the PMTiles reference."""
+    data = _asset()
+    data["table:columns"] = [{"name": "id", "type": "int64"}, column]
+    visual = {"href": "./map.pmtiles", "type": "application/vnd.pmtiles", "roles": ["visual"]}
+    catalog.collection("roads", assets={"data": data, "map": visual})
+    assert findings_for(validate(catalog.write()), "PTL-AST-009") == []

@@ -23,6 +23,7 @@ from rashid.rules._common import (
     is_cog_media_type,
     is_pmtiles_asset,
     is_raster_data_asset,
+    is_source_asset,
     is_zarr_store_asset,
     roles_of,
 )
@@ -65,10 +66,6 @@ class AssetFieldsRule(Rule):
                     " e.g. './data.parquet'",
                 )
             yield from self._check_type_and_roles(node, pointer, key, asset)
-        # item_assets entries are templates: no href/size/checksum, but the
-        # descriptive fields must still be complete.
-        for pointer, key, template in _item_asset_templates(node):
-            yield from self._check_type_and_roles(node, pointer, key, template)
 
     def _check_type_and_roles(
         self, node: Node, pointer: str, key: str, asset: dict[str, Any]
@@ -139,8 +136,10 @@ class DataAssetSingleFileRule(Rule):
 
     formats.md: "Each data asset links to only one file. Its `href` MUST NOT
     contain `*` or `[`. It MAY include a query string." The whole href counts,
-    query and fragment included. A ``[`` inside the authority is an IPv6 host,
-    not a glob. A percent-encoded ``%2A`` or ``%5B`` is not a glob character.
+    query, fragment, and host included, so an IPv6 literal host fails too: the
+    requirement makes no exception for it. A percent-encoded ``%2A`` or
+    ``%5B`` is not a glob character. A ``source`` asset is an upstream
+    original and is exempt (PORTO-FMT-045).
     """
 
     id = "PTL-AST-012"
@@ -152,14 +151,10 @@ class DataAssetSingleFileRule(Rule):
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         for pointer, key, asset in assets_of(node):
             href = asset.get("href")
-            if "data" not in roles_of(asset) or not isinstance(href, str):
+            data = "data" in roles_of(asset) and not is_source_asset(asset)
+            if not data or not isinstance(href, str):
                 continue
-            parsed = split_href(href)
-            if parsed is None:
-                continue  # PTL-LNK-006 reports a malformed URI reference
-            head, authority, tail = href.partition(f"//{parsed.netloc}")
-            outside = head + tail if parsed.netloc and authority else href
-            if "*" not in href and "[" not in outside:
+            if "*" not in href and "[" not in href:
                 continue
             yield self.finding(
                 node,
@@ -376,7 +371,8 @@ class ItemDataRule(Rule):
     kinds = ("item",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        if _has_data_asset(node):
+        # Any data asset counts, a PMTiles one included (PORTO-CORE-083).
+        if any("data" in roles_of(asset) for _, _, asset in assets_of(node)):
             return
         yield self.finding(
             node,
@@ -436,8 +432,8 @@ class PMTilesDataRule(Rule):
 
     def _check_assets(self, node: Node, reference: bool) -> Iterable[Finding]:
         for pointer, key, asset in assets_of(node):
-            if not is_pmtiles_asset(asset):
-                continue
+            if not is_pmtiles_asset(asset) or is_source_asset(asset):
+                continue  # an upstream original is exempt (PORTO-FMT-045)
             if "visual" not in roles_of(asset):
                 yield self.finding(
                     node,

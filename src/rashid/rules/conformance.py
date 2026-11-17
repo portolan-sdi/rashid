@@ -12,6 +12,7 @@ from rashid import _json
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
+from rashid.rules.partitions import PARTITION_EXTENSION_PREFIX
 
 SCHEMA_URI_PATTERN = re.compile(
     r"^https://schemas\.portolan-sdi\.org/portolan/v\d+\.\d+\.\d+/schema\.json$"
@@ -234,8 +235,10 @@ class ExtensionVersionRule(Rule):
     compatibility, so those declarations must still match the pin exactly.
 
     Extensions absent from the registry are ignored: the registry governs what
-    it lists, not what a publisher adds. The Portolan schema URI is ignored
-    too, because the version a catalog declares there is owned by PTL-CNF-001
+    it lists, not what a publisher adds. The partition extension is skipped
+    on a collection, where PTL-PRT-001 reports its version (formats.md pins
+    v1.x); a catalog or item still gets this warning. The
+    Portolan schema URI is ignored too, because the version a catalog declares there is owned by PTL-CNF-001
     and PTL-CNF-002, which the spec pins to a warning about the root catalog
     rather than about the registry.
     """
@@ -257,6 +260,8 @@ class ExtensionVersionRule(Rule):
             parsed = _EXTENSION_URI_PATTERN.match(uri)
             if parsed is None:
                 continue  # not a versioned schema URI; nothing to compare
+            if node.kind == "collection" and uri.startswith(PARTITION_EXTENSION_PREFIX):
+                continue  # PTL-PRT-001 owns the partition version on a collection
             entry = registry.get(parsed["base"])
             if entry is None:
                 continue  # unregistered extension: out of the registry's scope

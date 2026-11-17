@@ -153,3 +153,54 @@ def test_mirror_service_via_links(catalog: CatalogBuilder, include_html: bool) -
     if findings:
         assert findings[0].severity is Severity.ERROR
         assert "text/html" in findings[0].fix_hint
+
+
+def test_an_all_mirror_sub_catalog_requires_updated(catalog: CatalogBuilder) -> None:
+    """PORTO-CORE-057: a sync sets updated on every catalog it checks, not only the root."""
+    catalog.collection("roads")  # the root also holds official data, so it is exempt
+    mirrors = catalog.subcatalog("mirrors")
+    census = mirrors.collection("census", providers=mirror_providers())
+    census.overrides["updated"] = "2026-07-01T12:00:00Z"
+    root = catalog.write()
+    mutate_json(
+        root / "mirrors" / "census" / "collection.json",
+        lambda d: d["links"].append(
+            {"rel": "via", "href": "https://source.example.org", "type": "text/html"}
+        ),
+    )
+    findings = findings_for(validate(root), "PTL-PRO-003")
+    assert [f.path for f in findings] == ["mirrors/catalog.json"]
+
+
+def test_a_via_link_type_with_parameters_counts(catalog: CatalogBuilder) -> None:
+    """PORTO-CORE-053 names the media type; a charset parameter does not change it."""
+    _mirror_collection(catalog)
+    root = catalog.write()
+    mutate_json(
+        root / "census" / "collection.json",
+        lambda d: d["links"].append(
+            {
+                "rel": "via",
+                "href": "https://source.example.org",
+                "type": "Text/HTML; charset=utf-8",
+            }
+        ),
+    )
+    assert findings_for(validate(root), "PTL-PRO-001") == []
+
+
+def test_official_upstream_links_are_a_warning(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(
+        root / "roads" / "collection.json",
+        lambda d: d["links"].append(
+            {
+                "rel": "canonical",
+                "href": "https://elsewhere.example.org",
+                "type": "application/json",
+            }
+        ),
+    )
+    findings = findings_for(validate(root), "PTL-PRO-004")
+    assert [f.severity for f in findings] == [Severity.WARNING]
