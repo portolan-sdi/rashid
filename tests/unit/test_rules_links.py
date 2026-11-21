@@ -50,6 +50,42 @@ def test_item_missing_collection_link(catalog: CatalogBuilder) -> None:
     assert "collection" in findings[0].message
 
 
+def test_missing_collection_link_names_the_item_and_the_defect(
+    catalog: CatalogBuilder,
+) -> None:
+    catalog.collection("roads").item("roads-2024")
+    root = catalog.write()
+    mutate_json(
+        root / "roads" / "roads-2024" / "roads-2024.json",
+        lambda d: d.__setitem__(
+            "links", [link for link in d["links"] if link["rel"] != "collection"]
+        ),
+    )
+    findings = findings_for(validate(root), "PTL-LNK-001")
+    assert len(findings) == 1
+    # The message names the item and its file and states the underlying
+    # defect, not only the missing link (#284).
+    assert findings[0].message == (
+        "item 'roads-2024' (roads/roads-2024/roads-2024.json) is not in a collection:"
+        " missing required structural link rel:'collection'"
+    )
+
+
+def test_missing_parent_link_names_the_object(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    mutate_json(
+        root / "roads" / "collection.json",
+        lambda d: d.__setitem__("links", [link for link in d["links"] if link["rel"] != "parent"]),
+    )
+    findings = findings_for(validate(root), "PTL-LNK-001")
+    assert len(findings) == 1
+    assert findings[0].message == (
+        "collection 'roads' (roads/collection.json) is missing required structural"
+        " link rel:'parent'"
+    )
+
+
 def test_contained_object_without_child_link(catalog: CatalogBuilder) -> None:
     catalog.collection("roads")
     root = catalog.write()
