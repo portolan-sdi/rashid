@@ -47,6 +47,21 @@ def _icon_links(node: Node) -> Iterable[tuple[int, dict[str, Any]]]:
             yield index, link
 
 
+def _missing_link_message(node: Node, rel: str) -> str:
+    """Name the object, and for an item, state what its missing link means.
+
+    The bare symptom ("missing required structural link rel:'collection'"),
+    repeated once per item, tells a reader neither which file failed nor what
+    actually fails (#284). core.md, Links makes a rel:'collection' link the
+    way an item belongs to a collection, so for that rel the message leads
+    with that underlying defect.
+    """
+    named = f"{node.kind} '{node.id}' ({node.path})" if node.id else f"'{node.path}'"
+    if rel == "collection" and node.kind == "item":
+        return f"{named} is not in a collection: missing required structural link rel:'collection'"
+    return f"{named} is missing required structural link rel:'{rel}'"
+
+
 class RequiredLinksRule(Rule):
     """Every object carries its required structural links.
 
@@ -71,7 +86,7 @@ class RequiredLinksRule(Rule):
             if rel not in rels:
                 yield self.finding(
                     node,
-                    f"missing required structural link rel:'{rel}'",
+                    _missing_link_message(node, rel),
                     json_pointer=json_pointer("links"),
                     fix_hint=f"add a rel:'{rel}' link to links, with a relative href to"
                     f" {_REQUIRED_LINK_TARGETS[rel]} and type application/json",
