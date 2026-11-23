@@ -838,3 +838,27 @@ def test_a_geography_column_is_a_geoparquet_reference(
     visual = {"href": "./map.pmtiles", "type": "application/vnd.pmtiles", "roles": ["visual"]}
     catalog.collection("roads", assets={"data": data, "map": visual})
     assert findings_for(validate(catalog.write()), "PTL-AST-009") == []
+
+
+@pytest.mark.parametrize(
+    ("columns", "findings"),
+    [
+        # Esri exports name the WKB column Shape (#334, free-flowing-rivers).
+        ([{"name": "Shape", "type": "binary"}], 0),
+        # GDAL/OGR names it wkb_geometry (#334, hydrolakes).
+        ([{"name": "wkb_geometry", "type": "binary"}], 0),
+        # Any binary column can hold WKB, so the list does not exclude geometry.
+        ([{"name": "footprint", "type": "binary"}], 0),
+        ([{"name": "name", "type": "string"}, {"name": "area", "type": "double"}], 1),
+    ],
+)
+def test_pmtiles_reference_reads_wkb_geometry_columns(
+    catalog: CatalogBuilder, columns: list[dict[str, str]], findings: int
+) -> None:
+    """PORTO-FMT-062: only a column list that excludes geometry is no GeoParquet reference."""
+    data = _asset(**{"table:columns": [{"name": "id", "type": "int64"}, *columns]})
+    visual = {"href": "./map.pmtiles", "type": "application/vnd.pmtiles", "roles": ["visual"]}
+    catalog.collection("rivers", assets={"data": data, "map": visual})
+    reported = findings_for(validate(catalog.write()), "PTL-AST-009")
+    assert len(reported) == findings
+    assert all("no GeoParquet reference" in f.message for f in reported)
