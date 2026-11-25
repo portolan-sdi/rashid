@@ -29,6 +29,7 @@ class DataDefect:
     json_pointer: str | None = None
     expected: Any | None = None
     actual: Any | None = None
+    fix_hint: str | None = None
 
 
 class DataResults:
@@ -72,6 +73,7 @@ class DataResults:
                     message,
                     "",
                     json_pointer=json_pointer("partition:glob"),
+                    fix_hint=first.fix_hint,
                 )
             )
         return results
