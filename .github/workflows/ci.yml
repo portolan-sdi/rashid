@@ -1,7 +1,7 @@
 # Thin caller — synced from portolan-sdi/portolan-ops (ci/python-package/).
 # CI logic lives in ops' reusable-python-ci.yml; change it there.
 #
-# This file carries repo-specific inputs, so it is not managed by ops sync.
+# This file defines repo-specific inputs, so it is not managed by ops sync.
 # The workflow it calls is, through the @v1 tag.
 #
 # security-audit.yml stays: it files a tracking issue on pip-audit
@@ -49,11 +49,11 @@ jobs:
       # rashid reads and writes files, and path handling is where Windows
       # breaks. The shared default is ubuntu alone.
       os: '["ubuntu", "macos", "windows"]'
-      # The geospatial stack is a core dependency now; no extra needed.
+      sync-args: "--all-packages --all-extras"
       # Package path, not package name: coverage accepts either, and wily
       # reads this as a directory to walk.
-      coverage-target: src/rashid
-      bandit-target: src/rashid
+      coverage-target: src/rashid_core
+      bandit-target: src/rashid_core
       # rashid has no Codecov project. The upload step fails the run on
       # error, so leaving this on would break every build. The 90%
       # diff-cover gate still runs.
@@ -72,6 +72,25 @@ jobs:
       - name: Install dependencies
         run: |
           uv python install 3.13
-          uv sync --locked
+          uv sync --locked --all-packages --all-extras
       - name: Prove guardrails reject injected faults
         run: uv run python scripts/gate_selftest.py
+
+  wheel-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: |
+          uv python install 3.13
+          uv sync --locked --all-packages --all-extras
+      - name: Check built wheels and upgrade from rashid 0.4.0
+        run: uv run python scripts/wheel_smoke.py

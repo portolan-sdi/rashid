@@ -1,0 +1,277 @@
+"""Conformance-declaration rules (spec: core.md, Conformance and Versioning)."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+
+from rashid_core._profile import (
+    EXTENSION_URI_PATTERN,
+    SCHEMA_URI_PATTERN,
+    declared_schema_uris,
+    newest_profile_version,
+    profile_uri,
+    profile_version,
+    profile_version_key,
+    registry,
+)
+from rashid_core._stac import PARTITION_EXTENSION_PREFIX
+from rashid_core.catalog import CatalogGraph, Node
+from rashid_core.model import Finding, Severity, json_pointer
+from rashid_core.rule import Rule
+
+
+class SchemaUriDeclaredRule(Rule):
+    """Every catalog and collection declares exactly one Portolan schema URI."""
+
+    id = "PTL-CNF-001"
+    spec_ids = ("PORTO-CORE-006", "PORTO-CORE-007")
+    default_severity = Severity.ERROR
+    description = "catalogs and collections must declare the versioned Portolan schema URI"
+    kinds = ("catalog", "collection")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        uris = declared_schema_uris(node)
+        if not uris:
+            yield self.finding(
+                node,
+                "stac_extensions declares no Portolan schema URI",
+                json_pointer=json_pointer("stac_extensions"),
+                fix_hint=f"add e.g. {profile_uri(newest_profile_version())}",
+            )
+        elif len(uris) > 1:
+            yield self.finding(
+                node,
+                f"stac_extensions declares {len(uris)} Portolan schema URIs; exactly one expected",
+                json_pointer=json_pointer("stac_extensions"),
+                fix_hint="keep the one Portolan schema URI this object conforms to and remove"
+                " the others from stac_extensions",
+                expected=1,
+                actual=len(uris),
+            )
+
+
+class SchemaUriConsistencyRule(Rule):
+    """All objects declare the root catalog's schema URI.
+
+    The spec makes declaring the URI a MUST but explicitly downgrades a
+    mismatch with the root to a warning: a mixed-version catalog remains
+    valid.
+    """
+
+    id = "PTL-CNF-002"
+    spec_ids = ("PORTO-CORE-009", "PORTO-CORE-010")
+    default_severity = Severity.WARNING
+    description = "objects whose Portolan schema URI differs from the root's are flagged"
+    kinds = ()  # graph-level: compares everything against the root
+
+    def check_graph(self, graph: CatalogGraph) -> Iterable[Finding]:
+        root = graph.root
+        if root is None:
+            return
+        root_uris = declared_schema_uris(root)
+        if len(root_uris) != 1:
+            return  # PTL-CNF-001 reports the root's own problem
+        root_uri = root_uris[0]
+        for node in graph.iter("catalog", "collection"):
+            if node is root:
+                continue
+            uris = declared_schema_uris(node)
+            if len(uris) != 1:
+                continue  # PTL-CNF-001 reports missing/ambiguous declarations
+            if uris[0] != root_uri:
+                yield Finding(
+                    rule_id=self.id,
+                    severity=self.default_severity,
+                    message=(
+                        f"declared schema URI {uris[0]} differs from the root catalog's {root_uri}"
+                    ),
+                    path=str(node.path),
+                    object_id=node.id,
+                    json_pointer=json_pointer("stac_extensions"),
+                    fix_hint=(
+                        f"replace the declared URI with the root catalog's {root_uri}, or"
+                        " migrate the whole catalog to one schema version"
+                    ),
+                    expected=root_uri,
+                    actual=uris[0],
+                )
+
+
+class AppliedProfileVersionRule(Rule):
+    """Say which profile version's requirements rashid applies.
+
+    rashid judges every catalog by the newest profile it bundles. A root that
+    declares another version gets one info finding, so the reader knows the
+    findings follow the newest requirements. The schema pass still validates
+    against the declared version's schema.
+    """
+
+    id = "PTL-CNF-005"
+    spec_ids = ("PORTO-CORE-089",)
+    default_severity = Severity.INFO
+    description = "rashid applies the newest bundled profile version's requirements"
+    kinds = ()  # graph-level: the root's declaration only
+
+    def check_graph(self, graph: CatalogGraph) -> Iterable[Finding]:
+        root = graph.root
+        uris = declared_schema_uris(root) if root is not None else []
+        if root is None or len(uris) != 1:
+            return  # PTL-CNF-001 reports a missing or ambiguous declaration
+        declared = profile_version(uris[0])
+        newest = newest_profile_version()
+        if declared is None or profile_version_key(declared) == profile_version_key(newest):
+            return
+        older = profile_version_key(declared) < profile_version_key(newest)
+        relation = "older than" if older else "newer than"
+        fix_hint = (
+            f"declare {profile_uri(newest)} after you check the catalog against it"
+            if older
+            else f"upgrade rashid to a release that bundles Portolan {declared}"
+        )
+        yield Finding(
+            rule_id=self.id,
+            severity=self.default_severity,
+            message=(
+                f"the catalog declares Portolan {declared}, which is {relation} {newest};"
+                f" rashid applies the requirements of {newest}, the newest version it bundles"
+            ),
+            path=str(root.path),
+            object_id=root.id,
+            json_pointer=json_pointer("stac_extensions"),
+            fix_hint=fix_hint,
+            expected=newest,
+            actual=declared,
+        )
+
+
+# The STAC version extension, the one place dataset versioning may live.
+# Version-tolerant prefix, matching how other extension declarations are
+# checked (web-map-links in viz, partition in partitions).
+_VERSION_EXTENSION_PREFIX = "https://stac-extensions.github.io/version/"
+
+# Fields the version extension defines on catalogs, collections, and items.
+_VERSION_FIELDS = ("version", "deprecated", "experimental")
+
+
+class VersionExtensionRule(Rule):
+    """Dataset versioning, where used, declares the STAC version extension.
+
+    core.md, Conformance and Versioning: "The specification version MUST NOT
+    be conflated with the dataset version. Dataset versioning, where used,
+    MUST use the STAC version extension." The specification version's only
+    home is the Portolan schema URI (PTL-CNF-001); a dataset version's only
+    home is the version extension's fields, and using those fields without
+    declaring the extension's schema in ``stac_extensions`` is the
+    machine-checkable violation.
+    """
+
+    id = "PTL-CNF-003"
+    spec_ids = ("PORTO-CORE-007", "PORTO-CORE-008")
+    default_severity = Severity.ERROR
+    description = "dataset versioning must declare the STAC version extension"
+    kinds = ("catalog", "collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        container = node.data.get("properties") if node.kind == "item" else node.data
+        if not isinstance(container, dict):
+            return
+        used = [field for field in _VERSION_FIELDS if field in container]
+        if not used or _declares_version_extension(node):
+            return
+        tokens = ("properties",) if node.kind == "item" else ()
+        yield self.finding(
+            node,
+            f"dataset version field(s) {used} used without declaring the STAC"
+            " version extension in stac_extensions",
+            json_pointer=json_pointer(*tokens, used[0]),
+            fix_hint=f"add '{_VERSION_EXTENSION_PREFIX}v1.2.0/schema.json' to stac_extensions",
+        )
+
+
+def _declares_version_extension(node: Node) -> bool:
+    extensions = node.data.get("stac_extensions")
+    if not isinstance(extensions, list):
+        return False
+    return any(
+        isinstance(uri, str) and uri.startswith(_VERSION_EXTENSION_PREFIX) for uri in extensions
+    )
+
+
+class ExtensionVersionRule(Rule):
+    """A registered extension meets the registry pin or a compatible newer version.
+
+    The profile's STAC extension registry (the spec's ``stac/README.md``) is
+    the normative list of which extensions Portolan uses and which schema URI
+    to pin for each. core.md defers to it: "Which extensions are required
+    versus recommended, the exact schema URIs and versions to pin, and their
+    usage are defined normatively by the Portolan STAC Profile." That sentence
+    carries no RFC 2119 keyword, so the requirements manifest assigns the
+    registry no ID and this rule cites none.
+
+    The finding is a warning rather than an error. The registry advances after
+    catalogs are published, and a catalog that pinned the then-current version
+    is not broken, only behind. For stable extensions, SemVer permits newer
+    minor and patch versions within the same major. Major zero promises no
+    compatibility, so those declarations must still match the pin exactly.
+
+    Extensions absent from the registry are ignored: the registry governs what
+    it lists, not what a publisher adds. The partition extension is skipped
+    on a collection, where PTL-PRT-001 reports its version (formats.md pins
+    v1.x); a catalog or item still gets this warning. The
+    Portolan schema URI is ignored too, because the version a catalog declares there is owned by PTL-CNF-001
+    and PTL-CNF-002, which the spec pins to a warning about the root catalog
+    rather than about the registry.
+    """
+
+    id = "PTL-CNF-004"
+    spec_ids = ()
+    default_severity = Severity.WARNING
+    description = "declared extensions meet the registry pin or a compatible newer version"
+    kinds = ("catalog", "collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        declared = node.data.get("stac_extensions")
+        if not isinstance(declared, list):
+            return
+        registered = registry()
+        for index, uri in enumerate(declared):
+            if not isinstance(uri, str) or SCHEMA_URI_PATTERN.match(uri):
+                continue
+            parsed = EXTENSION_URI_PATTERN.match(uri)
+            if parsed is None:
+                continue  # not a versioned schema URI; nothing to compare
+            if node.kind == "collection" and uri.startswith(PARTITION_EXTENSION_PREFIX):
+                continue  # PTL-PRT-001 owns the partition version on a collection
+            entry = registered.get(parsed["base"])
+            if entry is None:
+                continue  # unregistered extension: out of the registry's scope
+            name, pinned = entry
+            if parsed["version"] == pinned:
+                continue
+            if _compatible_extension_version(parsed["version"], pinned):
+                continue
+            expected = f"{parsed['base']}/{pinned}/schema.json"
+            yield self.finding(
+                node,
+                f"{name} extension declared at {parsed['version']}, but the Portolan"
+                f" extension registry pins {pinned}",
+                json_pointer=json_pointer("stac_extensions", index),
+                fix_hint=f"replace '{uri}' with '{expected}' in stac_extensions",
+                expected=expected,
+                actual=uri,
+            )
+
+
+def _compatible_extension_version(declared: str, pinned: str) -> bool:
+    parts = declared[1:].split(".")
+    # Bound untrusted decimal conversion; oversized components retain the warning.
+    if any(len(part) > 18 for part in parts):
+        return False
+    version = tuple(int(part) for part in parts)
+    floor = tuple(int(part) for part in pinned[1:].split("."))
+    return (
+        declared == f"v{'.'.join(map(str, version))}"
+        and version[0] > 0
+        and version[0] == floor[0]
+        and version >= floor
+    )

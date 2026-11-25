@@ -1,6 +1,6 @@
 """Unit tests for the data pass wiring — validator injection, no bytes, no deps.
 
-These exercise :func:`rashid.data.validate_data` and its runner/CLI wiring with a
+These exercise :func:`rashid_core.data.validate_data` and its runner/CLI wiring with a
 fake validator, exactly as ``test_schema.py`` does for the schema pass: the
 byte-reading and geospatial stack are not touched here (that is
 ``test_data_checks``/``test_data_catalog``), so these run without the
@@ -9,21 +9,23 @@ geospatial stack (now a core dependency, still lazily imported).
 
 from __future__ import annotations
 
+import builtins
 import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 
-import rashid.data as data_pass
-from rashid import ValidationOptions
-from rashid.catalog import CatalogGraph, Node
-from rashid.config import RulesConfig
-from rashid.data import DataDefect, validate_data
-from rashid.data.reader import AssetReader, Locator
-from rashid.model import Severity
-from rashid.registry import (
+import rashid_core.data as data_pass
+from rashid_core import ValidationOptions
+from rashid_core.catalog import CatalogGraph, Node
+from rashid_core.config import RulesConfig
+from rashid_core.data import validate_data
+from rashid_core.data._results import DataDefect
+from rashid_core.data.reader import AssetReader, Locator
+from rashid_core.ids import (
     DAT_CHECKSUM,
     DAT_CLASS_COLORS,
     DAT_COG,
@@ -66,7 +68,8 @@ from rashid.registry import (
     ZAR_TRANSFORM,
     ZAR_VARIABLES,
 )
-from rashid.runner import validate
+from rashid_core.model import Severity
+from rashid_core.runner import validate
 from tests.conftest import CatalogBuilder
 
 pytestmark = pytest.mark.unit
@@ -316,17 +319,68 @@ def test_systemic_failure_keeps_earlier_findings_and_drops_later_ones(
 def test_missing_geospatial_stack_downgrades_to_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def raise_import(_graph: CatalogGraph | None = None) -> data_pass.Validator:
-        raise ImportError("No module named 'pyarrow'")
+    original_import = builtins.__import__
+    attempts = []
 
-    monkeypatch.setattr(data_pass, "default_validator", raise_import)
+    def no_formats(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "rashid_core.data.formats":
+            attempts.append(name)
+            raise ImportError("No module named 'pyarrow'")
+        return original_import(name, *args, **kwargs)
 
-    findings = validate_data(_graph(catalog))
+    monkeypatch.setattr(builtins, "__import__", no_formats)
+    asset = {
+        "href": "./wrong.bin",
+        "type": "application/vnd.apache.parquet",
+        "roles": ["data"],
+        "table:columns": [{"name": "value", "type": "int64"}],
+        "file:size": 999,
+        "file:checksum": "1220" + "00" * 32,
+    }
+    store = {"href": "./store", "type": "application/vnd.zarr; version=3"}
+    collection = catalog.collection("roads", assets={"bad": asset, "zarr": store})
+    collection.item(
+        "seg1",
+        assets={
+            "bad": {**asset, "href": "../wrong.bin"},
+            "zarr": {**store, "href": "../store"},
+        },
+    )
+    catalog.collection("empty", **{"table:columns": [{"name": "value", "type": "int64"}]})
+    root = catalog.write()
+    (root / "roads/wrong.bin").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (root / "roads/store").mkdir()
+    (root / "roads/store/.zgroup").write_text('{"zarr_format": 2}')
 
-    assert len(findings) == 1
-    assert findings[0].rule_id == DAT_UNAVAILABLE
-    assert "geospatial stack" in findings[0].message
-    assert "--no-data" in findings[0].message
+    findings = validate_data(CatalogGraph.load(root))
+
+    assert attempts == ["rashid_core.data.formats"]
+    warnings = [f for f in findings if f.rule_id == DAT_UNAVAILABLE]
+    assert len(warnings) == 1
+    assert warnings[0].severity is Severity.WARNING
+    assert "geospatial checks skipped" in warnings[0].message
+    for instruction in (
+        "pyarrow",
+        "rasterio",
+        "rio-cogeo",
+        "pyproj",
+        "shapely",
+        "rashid-core[data]",
+        "or rashid",
+        "--no-data",
+        "ValidationOptions(data=False)",
+    ):
+        assert instruction in warnings[0].message
+    for object_id in ("roads", "seg1"):
+        assert [f.rule_id for f in findings if f.object_id == object_id] == [
+            DAT_CHECKSUM,
+            DAT_SIZE,
+            DAT_FORMAT,
+            DAT_COLUMN_DESCRIPTIONS,
+            ZAR_STORE_VERSION,
+        ]
+
+    assert [f.rule_id for f in findings if f.object_id == "empty"] == [DAT_COLUMN_DESCRIPTIONS]
 
 
 def test_data_pass_surfaces_by_default(catalog: CatalogBuilder) -> None:

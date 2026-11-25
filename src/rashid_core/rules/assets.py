@@ -1,0 +1,476 @@
+"""Asset rules (spec: core.md, Assets).
+
+Field presence and well-formedness only; verifying sizes and checksums
+against actual bytes is a data-pass job.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import Any
+
+from rashid_core._href import split_href
+from rashid_core._media import (
+    COG_MEDIA_TYPE,
+    is_cog_media_type,
+    is_pmtiles_asset,
+    is_raster_data_asset,
+    is_zarr_store_asset,
+)
+from rashid_core._multihash import is_well_formed_multihash
+from rashid_core._stac import (
+    asset_refers_to_self,
+    assets_of,
+    declares_geometry,
+    https_alternate,
+    is_source_asset,
+    roles_of,
+)
+from rashid_core.catalog import CatalogGraph, Node
+from rashid_core.model import Finding, Severity, json_pointer
+from rashid_core.rule import Rule
+
+
+def _has_data_asset(node: Node) -> bool:
+    return any(
+        "data" in roles_of(asset) and not is_pmtiles_asset(asset) for _, _, asset in assets_of(node)
+    )
+
+
+def _item_asset_templates(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
+    found: list[tuple[str, str, dict[str, Any]]] = []
+    templates = node.data.get("item_assets")
+    if isinstance(templates, dict):
+        for key, template in templates.items():
+            if isinstance(template, dict):
+                found.append((json_pointer("item_assets", key), key, template))
+    return found
+
+
+class AssetFieldsRule(Rule):
+    """Every asset carries an href, a media type, and at least one role."""
+
+    id = "PTL-AST-001"
+    spec_ids = ("PORTO-CORE-022", "PORTO-CORE-025", "PORTO-CORE-027")
+    default_severity = Severity.ERROR
+    description = "every asset needs an href, a type (media type), and at least one role"
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in assets_of(node):
+            href = asset.get("href")
+            if not isinstance(href, str) or not href.strip():
+                yield self.finding(
+                    node,
+                    f"asset '{key}' has no href",
+                    json_pointer=json_pointer("href", prefix=pointer),
+                    fix_hint="set href to the file's path relative to this object,"
+                    " e.g. './data.parquet'",
+                )
+            yield from self._check_type_and_roles(node, pointer, key, asset)
+
+    def _check_type_and_roles(
+        self, node: Node, pointer: str, key: str, asset: dict[str, Any]
+    ) -> Iterable[Finding]:
+        media_type = asset.get("type")
+        if not isinstance(media_type, str) or not media_type.strip():
+            yield self.finding(
+                node,
+                f"asset '{key}' has no type (media type)",
+                json_pointer=json_pointer("type", prefix=pointer),
+                fix_hint="add the file's IANA media type, e.g."
+                " 'application/vnd.apache.parquet' for GeoParquet",
+            )
+        roles = asset.get("roles")
+        if not isinstance(roles, list) or not any(isinstance(r, str) and r.strip() for r in roles):
+            yield self.finding(
+                node,
+                f"asset '{key}' has no roles",
+                json_pointer=json_pointer("roles", prefix=pointer),
+                fix_hint='add a roles array naming what the asset is for, e.g. ["data"],'
+                ' ["thumbnail"], or ["visual"]',
+            )
+
+
+class AssetHrefSchemeRule(Rule):
+    """Absolute asset hrefs use https, or carry an https ``alternate``.
+
+    Another scheme without an https alternate breaks the MUST
+    (PORTO-CORE-087); with one, only the SHOULD (PORTO-CORE-023) remains.
+    """
+
+    id = "PTL-AST-002"
+    spec_ids = ("PORTO-CORE-023", "PORTO-CORE-087")
+    default_severity = Severity.ERROR
+    description = "absolute asset hrefs should use https; another scheme needs an https alternate"
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in assets_of(node):
+            scheme = _absolute_scheme(asset.get("href"))
+            if scheme is None or scheme == "https":
+                continue
+            if https_alternate(asset) is not None:
+                yield self.finding(
+                    node,
+                    f"asset '{key}' href uses the '{scheme}' scheme; absolute hrefs should use https",
+                    severity=Severity.WARNING,
+                    json_pointer=json_pointer("href", prefix=pointer),
+                    fix_hint=f"make the https alternate the href and move the {scheme} URL"
+                    " to alternate",
+                    expected="https",
+                    actual=scheme,
+                )
+            else:
+                yield self.finding(
+                    node,
+                    f"asset '{key}' href uses the '{scheme}' scheme and has no https alternate",
+                    json_pointer=json_pointer("href", prefix=pointer),
+                    fix_hint="use the https URL that serves this file as the href, or add it"
+                    " to the asset's alternate field",
+                    expected="https",
+                    actual=scheme,
+                )
+
+
+class DataAssetSingleFileRule(Rule):
+    """A data asset's href names one file, not a glob.
+
+    formats.md: "Each data asset links to only one file. Its `href` MUST NOT
+    contain `*` or `[`. It MAY include a query string." The whole href counts,
+    query, fragment, and host included, so an IPv6 literal host fails too: the
+    requirement makes no exception for it. A percent-encoded ``%2A`` or
+    ``%5B`` is not a glob character. A ``source`` asset is an upstream
+    original and is exempt (PORTO-FMT-045).
+    """
+
+    id = "PTL-AST-012"
+    spec_ids = ("PORTO-FMT-065",)
+    default_severity = Severity.ERROR
+    description = "a data asset's href must link to one file, without * or ["
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in assets_of(node):
+            href = asset.get("href")
+            data = "data" in roles_of(asset) and not is_source_asset(asset)
+            if not data or not isinstance(href, str):
+                continue
+            if "*" not in href and "[" not in href:
+                continue
+            yield self.finding(
+                node,
+                f"data asset '{key}' href is a glob; a data asset links to one file",
+                json_pointer=json_pointer("href", prefix=pointer),
+                fix_hint="link each file in its own asset or item, or set partition:glob"
+                " on the collection",
+                actual=href,
+            )
+
+
+def _absolute_scheme(href: object) -> str | None:
+    """The lowercase scheme of an absolute href; None for relative or invalid."""
+    if not isinstance(href, str) or not href:
+        return None  # PTL-AST-001 reports missing hrefs
+    parsed = split_href(href)
+    if parsed is None:
+        return None  # PTL-LNK-006 reports the malformed URI reference.
+    return parsed.scheme.lower() or None
+
+
+class AssetTitleDescriptionRule(Rule):
+    """Every asset has a non-empty title and description."""
+
+    id = "PTL-AST-010"
+    spec_ids = ("PORTO-CORE-088",)
+    default_severity = Severity.WARNING
+    description = "every asset should have a non-empty title and description"
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in assets_of(node):
+            for field in ("title", "description"):
+                value = asset.get(field)
+                if not isinstance(value, str) or not value.strip():
+                    yield self.finding(
+                        node,
+                        f"asset '{key}' has no {field}",
+                        json_pointer=json_pointer(field, prefix=pointer),
+                        fix_hint=f"add a '{field}' that tells a reader what this file holds",
+                    )
+
+
+class CogMediaTypeRule(Rule):
+    """Primary raster data declares the required COG media type.
+
+    Raster intent comes from the data role plus a TIFF type or href, rather
+    than from an already-correct COG declaration. Otherwise an incomplete
+    type removes the asset from every COG-gated rule. A source asset is an
+    upstream original and is exempt from the cloud-native format requirements.
+    """
+
+    id = "PTL-AST-006"
+    spec_ids = ("PORTO-CORE-026", "PORTO-FMT-023", "PORTO-FMT-045")
+    default_severity = Severity.ERROR
+    description = "primary raster data must declare the required COG media type"
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in [*assets_of(node), *_item_asset_templates(node)]:
+            if not is_raster_data_asset(asset):
+                continue
+            media_type = asset.get("type")
+            if not isinstance(media_type, str) or not media_type.strip():
+                continue  # PTL-AST-001 reports a missing type
+            if is_cog_media_type(media_type):
+                continue
+            yield self.finding(
+                node,
+                f"raster data asset '{key}' has type {media_type!r}, expected '{COG_MEDIA_TYPE}'",
+                json_pointer=json_pointer("type", prefix=pointer),
+                fix_hint=f"set the asset's type to '{COG_MEDIA_TYPE}'",
+                expected=COG_MEDIA_TYPE,
+                actual=media_type,
+            )
+
+
+class AssetFileFieldsRule(Rule):
+    """Assets should carry file metadata unless they refer to their STAC object.
+
+    Self-references must omit both fields (PORTO-CORE-085). Other assets
+    should carry ``file:size`` and ``file:checksum`` (PORTO-CORE-028).
+    A catalog that describes data it does not host cannot checksum bytes it
+    never touches, so the absence is a warning rather than an error. A
+    ``file:size`` that is present but not a positive integer is reported here
+    too; the schema pass errors on its type independently (PORTO-CORE-028).
+    """
+
+    id = "PTL-AST-003"
+    spec_ids = ("PORTO-CORE-028", "PORTO-CORE-085")
+    default_severity = Severity.ERROR
+    description = "assets should carry file metadata; self-references must omit it"
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in assets_of(node):
+            href = asset.get("href")
+            if isinstance(href, str) and asset_refers_to_self(node, href, graph):
+                for field in ("file:size", "file:checksum"):
+                    if field in asset:
+                        yield self.finding(
+                            node,
+                            f"self-referencing asset '{key}' must omit {field}",
+                            json_pointer=json_pointer(field, prefix=pointer),
+                            fix_hint=f"remove {field} from the asset that refers to this STAC object",
+                        )
+                continue
+            size = asset.get("file:size")
+            if size is None:
+                yield self.finding(
+                    node,
+                    f"asset '{key}' has no file:size",
+                    severity=Severity.WARNING,
+                    json_pointer=json_pointer("file:size", prefix=pointer),
+                    fix_hint="add file:size, the asset's size in bytes as an integer",
+                )
+            elif isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+                yield self.finding(
+                    node,
+                    f"asset '{key}' file:size must be a positive integer, got {size!r}",
+                    severity=Severity.WARNING,
+                    json_pointer=json_pointer("file:size", prefix=pointer),
+                    fix_hint="set file:size to the asset's byte count, unquoted and greater than 0",
+                    actual=size,
+                )
+            if asset.get("file:checksum") is None and not is_zarr_store_asset(asset):
+                # incubating/zarr.md, Size and checksum: a Zarr store is a key
+                # prefix holding thousands of objects, with no single digest,
+                # so core.md's recommendation does not reach it. file:size
+                # still does: it is the total size of those objects.
+                yield self.finding(
+                    node,
+                    f"asset '{key}' has no file:checksum",
+                    severity=Severity.WARNING,
+                    json_pointer=json_pointer("file:checksum", prefix=pointer),
+                    fix_hint="add file:checksum, the multihash of the asset bytes:"
+                    " '1220' followed by the sha256 hex digest",
+                )
+
+
+class CatalogAssetsRule(Rule):
+    """Catalogs carry no assets.
+
+    core.md, Core Structure: "catalogs and collections are internal nodes,
+    items are leaves, and assets (data files) MUST sit at collection or item
+    level. Catalogs organize only". An ``assets`` field on a catalog puts data
+    at the wrong level, so its mere presence is the defect.
+    """
+
+    id = "PTL-AST-005"
+    spec_ids = ("PORTO-CORE-002",)
+    default_severity = Severity.ERROR
+    description = "assets must sit at collection or item level; catalogs organize only"
+    kinds = ("catalog",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        if "assets" in node.data:
+            yield self.finding(
+                node,
+                "catalog declares assets; assets (data files) must sit at collection or item level",
+                json_pointer=json_pointer("assets"),
+                fix_hint="move the assets onto the collection (or item) that owns the data",
+            )
+
+
+class CollectionDataRule(Rule):
+    """Every collection refers to its primary data.
+
+    core.md, Collections: "A collection MUST refer to its primary data. The
+    reference is an asset carrying the ``data`` role — on the collection
+    itself or on its items — or ``partition:glob`` on a partitioned
+    collection." A thumbnail, style, or metadata asset alone describes
+    nothing a client can fetch. A collection whose items exist but carry no
+    data asset fails here too, since no item supplies the reference;
+    PTL-AST-008 also names each such item.
+    """
+
+    id = "PTL-AST-007"
+    spec_ids = ("PORTO-CORE-082",)
+    default_severity = Severity.ERROR
+    description = "every collection must refer to its primary data with a data-role asset"
+    kinds = ("collection",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        if _has_data_asset(node):
+            return
+        glob = node.data.get("partition:glob")
+        if isinstance(glob, str) and glob.strip():
+            return
+        if any(_has_data_asset(item) for item in graph.items_of(node)):
+            return
+        yield self.finding(
+            node,
+            "collection refers to no primary data: no asset with the data role on the"
+            " collection or its items, and no partition:glob",
+            json_pointer=json_pointer("assets"),
+            fix_hint='add the data file as an asset with roles ["data"], on the collection'
+            " for a single file or on each item for several",
+        )
+
+
+class ItemDataRule(Rule):
+    """Every item carries an asset with the data role.
+
+    core.md, Items: "Where items do exist, each one MUST carry at least one
+    asset with the ``data`` role. An item exists to attach per-file metadata
+    to a data file, so an item without one describes nothing."
+    """
+
+    id = "PTL-AST-008"
+    spec_ids = ("PORTO-CORE-083",)
+    default_severity = Severity.ERROR
+    description = "every item must carry at least one asset with the data role"
+    kinds = ("item",)
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        # Any data asset counts, a PMTiles one included (PORTO-CORE-083).
+        if any("data" in roles_of(asset) for _, _, asset in assets_of(node)):
+            return
+        yield self.finding(
+            node,
+            "item carries no asset with the data role",
+            json_pointer=json_pointer("assets"),
+            fix_hint='add the item\'s data file as an asset with roles ["data"]',
+        )
+
+
+class ChecksumMultihashRule(Rule):
+    """file:checksum values are multihash-encoded."""
+
+    id = "PTL-AST-004"
+    spec_ids = ("PORTO-CORE-029",)
+    default_severity = Severity.ERROR
+    description = "file:checksum must be multihash-encoded, not a raw digest string"
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        for pointer, key, asset in assets_of(node):
+            checksum = asset.get("file:checksum")
+            if checksum is None:
+                continue  # PTL-AST-003 reports the absence
+            if not is_well_formed_multihash(checksum):
+                yield self.finding(
+                    node,
+                    f"asset '{key}' file:checksum is not a well-formed multihash",
+                    json_pointer=json_pointer("file:checksum", prefix=pointer),
+                    fix_hint="prefix the digest with the multihash code and length, "
+                    "e.g. '1220' + sha256 hex",
+                    actual=checksum,
+                )
+
+
+class PMTilesDataRule(Rule):
+    """PMTiles renders GeoParquet data owned by the same collection.
+
+    Check the reference once per collection, emitting findings on each asset's
+    owner. Item visits only handle orphans, which have no collection reference.
+    """
+
+    id = "PTL-AST-009"
+    spec_ids = ("PORTO-FMT-062",)
+    default_severity = Severity.ERROR
+    description = "PMTiles assets must carry visual and reference their collection's GeoParquet"
+    kinds = ("collection", "item")
+
+    def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
+        if node.kind == "item":
+            # Collection checks visit their own items; retain orphan diagnostics.
+            if graph.enclosing_collection_of(node) is None:
+                yield from self._check_assets(node, False)
+            return
+        reference = _has_geoparquet_reference(node, graph)
+        for owner in [node, *graph.items_of(node)]:
+            yield from self._check_assets(owner, reference)
+
+    def _check_assets(self, node: Node, reference: bool) -> Iterable[Finding]:
+        for pointer, key, asset in assets_of(node):
+            if not is_pmtiles_asset(asset) or is_source_asset(asset):
+                continue  # an upstream original is exempt (PORTO-FMT-045)
+            if "visual" not in roles_of(asset):
+                yield self.finding(
+                    node,
+                    f"PMTiles asset '{key}' has no visual role",
+                    json_pointer=json_pointer("roles", prefix=pointer),
+                    fix_hint="add visual to the PMTiles asset's roles",
+                )
+            if not reference:
+                yield self.finding(
+                    node,
+                    f"PMTiles asset '{key}' has no GeoParquet reference in its collection",
+                    json_pointer=pointer,
+                    fix_hint="register the rendered GeoParquet as a data asset on the same"
+                    " collection or its items, or set the collection's partition:glob",
+                )
+
+
+def _reference_has_geometry(owner: Node, asset: dict[str, Any], collection: Node) -> bool:
+    return declares_geometry(owner, asset, collection) is not False
+
+
+def _has_geoparquet_reference(collection: Node, graph: CatalogGraph) -> bool:
+    """Accept references unless declared columns positively exclude geometry."""
+    glob = collection.data.get("partition:glob")
+    if (
+        isinstance(glob, str)
+        and glob.strip()
+        and _reference_has_geometry(collection, {}, collection)
+    ):
+        return True
+    return any(
+        "data" in roles_of(asset)
+        and asset.get("type") == "application/vnd.apache.parquet"
+        and not is_pmtiles_asset(asset)
+        and _reference_has_geometry(owner, asset, collection)
+        for owner in [collection, *graph.items_of(collection)]
+        for _, _, asset in assets_of(owner)
+    )

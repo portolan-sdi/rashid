@@ -45,7 +45,7 @@ _RUFF = (
     "TID251",
     "--output-format",
     "json",
-    "src/rashid",
+    "src/rashid_core",
 )
 _LAYERS = ("uv", "run", "lint-imports", "--no-cache")
 _REGISTRY = _pytest("tests/unit/test_registration_owner.py")
@@ -71,13 +71,16 @@ FAULTS = (
     *(
         Fault(
             "banned-" + api.replace(".", "-"),
-            "src/rashid/_gate_fault.py",
+            "src/rashid_core/_gate_fault.py",
             "",
             f"from {api.rsplit('.', 1)[0]} import {api.rsplit('.', 1)[1]}\n",
             _RUFF,
             "TID251",
         )
         for api in (
+            "importlib.resources.files",
+            "importlib.metadata.version",
+            "importlib.import_module",
             "urllib.parse.urljoin",
             "urllib.parse.urlsplit",
             "urllib.parse.urlparse",
@@ -108,29 +111,69 @@ FAULTS = (
     ),
     Fault(
         "rule-layer",
-        "src/rashid/rules/_gate_fault.py",
+        "src/rashid_core/rules/_gate_fault.py",
         "",
-        "import rashid.live\n",
+        "import rashid_core._store\n",
         _LAYERS,
-        "metadata rules must not import network passes or transport BROKEN",
+        "metadata rules must not import transport BROKEN",
     ),
     Fault(
-        "file-layer",
-        "src/rashid/_gate_fault.py",
-        "",
-        "import rashid.data._files\n",
+        "rules-independent",
+        "src/rashid_core/rules/assets.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport rashid_core.rules.bbox\n",
         _LAYERS,
-        "only data checks may import the file-handle owner BROKEN",
+        "metadata rule modules must be independent BROKEN",
+    ),
+    Fault(
+        "rules-only-registry",
+        "src/rashid_core/api.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport rashid_core.rules.assets\n",
+        _LAYERS,
+        "only the registry may import metadata rules BROKEN",
+    ),
+    Fault(
+        "package-layers",
+        "src/rashid_core/model.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport rashid_core.report\n",
+        _LAYERS,
+        "package imports follow exhaustive layers BROKEN",
+    ),
+    Fault(
+        "formats-only-geo",
+        "src/rashid_core/data/reader.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport pyarrow\n",
+        _LAYERS,
+        "only optional formats may import the geospatial stack BROKEN",
+    ),
+    Fault(
+        "cli-only-click",
+        "src/rashid_core/report.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport click\n",
+        _LAYERS,
+        "only the cli may import click BROKEN",
+    ),
+    Fault(
+        "formats-entry-point",
+        "src/rashid_core/data/reader.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport rashid_core.data.formats.raster\n",
+        _LAYERS,
+        "only the data entry point may import optional formats BROKEN",
     ),
     Fault(
         "duplicate-block",
-        "src/rashid/_gate_fault.py",
+        "src/rashid_core/_gate_fault.py",
         _DUPLICATE_CLEAN,
         _DUPLICATE_CLEAN + "\ndef second_total(values, limit):" + _DUPLICATE_BODY,
         (
             "uvx",
             "jscpd@5.2.1",
-            "src/rashid",
+            "src/rashid_core",
             "tests",
             "--baseline",
             ".jscpd-baseline.json",
@@ -141,31 +184,31 @@ FAULTS = (
     ),
     Fault(
         "api-export",
-        "src/rashid/api.py",
+        "src/rashid_core/api.py",
         '    "roles_of",\n',
         "",
         _API,
-        "test_public_api_snapshot[rashid.api]",
+        "test_public_api_snapshot[rashid_core.api]",
     ),
     Fault(
         "package-export",
-        "src/rashid/__init__.py",
+        "src/rashid_core/__init__.py",
         '    "Finding",\n',
         "",
         _API,
-        "test_public_api_snapshot[rashid]",
+        "test_public_api_snapshot[rashid_core]",
     ),
     Fault(
         "api-signature",
-        "src/rashid/runner.py",
+        "src/rashid_core/runner.py",
         "max_documents: int = DEFAULT_MAX_DOCUMENTS",
         "max_documents: int = 9_999",
         _API,
-        "test_public_api_snapshot[rashid.api]",
+        "test_public_api_snapshot[rashid_core.api]",
     ),
     Fault(
         "duplicate-rule-id",
-        "src/rashid/registry.py",
+        "src/rashid_core/ids.py",
         'DAT_SIZE = "PTL-DAT-002"',
         'DAT_SIZE = "PTL-DAT-001"',
         _REGISTRY,
@@ -173,15 +216,15 @@ FAULTS = (
     ),
     Fault(
         "unregistered-emitter",
-        "src/rashid/_gate_fault.py",
+        "src/rashid_core/_gate_fault.py",
         "",
-        'from rashid.model import Finding, Severity\nfinding = Finding("PTL-ZZZ-999", Severity.ERROR, "fault", "catalog.json")\n',
+        'from rashid_core.model import Finding, Severity\nfinding = Finding("PTL-ZZZ-999", Severity.ERROR, "fault", "catalog.json")\n',
         _REGISTRY,
         "test_registered_ids_equal_ids_emitted_in_src",
     ),
     Fault(
         "orphan-registration",
-        "src/rashid/data/raster.py",
+        "src/rashid_core/data/formats/raster.py",
         "DAT_COG_STATS",
         "DAT_SIZE",
         _REGISTRY,
@@ -189,8 +232,8 @@ FAULTS = (
     ),
     Fault(
         "copied-pass-id",
-        "src/rashid/registry.py",
-        "        GEN_MISSING_ROOT,\n",
+        "src/rashid_core/registry.py",
+        "        ids.GEN_MISSING_ROOT,\n",
         '        "PTL-GEN-000",\n',
         _REGISTRY,
         "test_pass_checks_use_the_id_constants_once",
@@ -198,7 +241,7 @@ FAULTS = (
     *(
         Fault(
             "pointer-" + name,
-            "src/rashid/_gate_fault.py",
+            "src/rashid_core/_gate_fault.py",
             "",
             "pointer = " + source + "\n",
             _POINTER,
@@ -256,14 +299,6 @@ FAULTS = (
         _pytest("tests/unit/test_guardrail_exemptions.py::test_exemption_counts_and_reasons"),
         "test_exemption_counts_and_reasons",
     ),
-    Fault(
-        "rules-data-layer",
-        "src/rashid/rules/_gate_fault.py",
-        "",
-        "import rashid.data\n",
-        _LAYERS,
-        "metadata rules must not import data checks BROKEN",
-    ),
     *(
         Fault(
             name,
@@ -289,8 +324,8 @@ FAULTS = (
     Fault(
         "extra-ruff-ignore",
         "pyproject.toml",
-        '"src/rashid/_href.py" = ["TID251"]',
-        '"src/rashid/_href.py" = ["TID251", "ARG001"]',
+        '"src/rashid_core/_href.py" = ["TID251"]',
+        '"src/rashid_core/_href.py" = ["TID251", "ARG001"]',
         _pytest(
             "tests/unit/test_guardrail_exemptions.py::test_ruff_exemptions_match_config_and_banned_uses"
         ),
@@ -318,7 +353,7 @@ FAULTS = (
         "def _copy_" + "head(repo:",
         "FAULTS = FAULTS[1:]\n\ndef _copy_" + "head(repo:",
         ("uv", "run", "python", "scripts/gate_selftest.py", "--help"),
-        "expected 43 faults",
+        "expected 50 faults",
     ),
 )
 
@@ -364,7 +399,7 @@ def _check_baseline(root: Path) -> None:
             (
                 "uvx",
                 "jscpd@5.2.1",
-                "src/rashid",
+                "src/rashid_core",
                 "tests",
                 "--baseline",
                 str(baseline),
@@ -431,8 +466,8 @@ def exercise(repo: Path, fault: Fault) -> bool:
 
 
 def main() -> int:
-    assert len(FAULTS) == 43, f"expected 43 faults, found {len(FAULTS)}"
-    assert len({fault.name for fault in FAULTS}) == 43, "fault names must be unique"
+    assert len(FAULTS) == 50, f"expected 50 faults, found {len(FAULTS)}"
+    assert len({fault.name for fault in FAULTS}) == 50, "fault names must be unique"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fault", choices=[fault.name for fault in FAULTS])
     parser.add_argument(

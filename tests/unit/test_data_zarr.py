@@ -21,14 +21,13 @@ from typing import Any
 
 import pytest
 
-from rashid import ValidationOptions, validate
-from rashid._href import store_member_href
-from rashid.catalog import CatalogGraph, Node
-from rashid.data.reader import LocalOnlyReader, Locator
-from rashid.data.zarr import check_zarr
-from rashid.model import Report, Severity
-from rashid.registry import (
-    CHECKS,
+from rashid_core import ValidationOptions, validate
+from rashid_core._href import store_member_href
+from rashid_core._media import COG_MEDIA_TYPE
+from rashid_core.catalog import CatalogGraph, Node
+from rashid_core.data.reader import LocalOnlyReader, Locator
+from rashid_core.data.zarr import check_zarr
+from rashid_core.ids import (
     ZAR_ASSET,
     ZAR_AXIS_ORDER,
     ZAR_CHUNK_SIZE,
@@ -47,9 +46,10 @@ from rashid.registry import (
     ZAR_STORE_VERSION,
     ZAR_TRANSFORM,
     ZAR_VARIABLES,
-    is_incubating,
 )
-from rashid.rules._common import COG_MEDIA_TYPE
+from rashid_core.model import Severity
+from rashid_core.registry import CHECKS, is_incubating
+from rashid_core.report import Report
 from tests.conftest import CatalogBuilder, default_asset, thumbnail_asset
 
 pytestmark = pytest.mark.unit

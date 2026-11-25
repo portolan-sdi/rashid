@@ -3,62 +3,45 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "rashid"
+name = "rashid-core"
 version = "0.4.0"
 description = "Validator and linter for Portolan catalogs"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [{ name = "Portolan contributors" }]
-# The data pass reads asset bytes to verify checksum, size, format, and extent —
-# the core of what a catalog validator is for — so its geospatial stack is a
-# core dependency and the pass runs by default. The import-linter contracts
-# keep `import rashid` cheap: the heavy imports stay confined to
-# rashid.data check modules and load only when the pass runs.
-#
-# Floors stay at releases that resolved on Python 3.10, the previous minimum.
-# Raising them is a separate change. pyarrow is the exception: 21 is the
-# oldest release whose reader exposes native GeospatialStatistics (geoparquet._native_bboxes
-# feature-detects it either way), and consumers cap pyarrow below 25 over an
-# abseil ABI break, so a >=25 floor would make rashid uninstallable next to them
-# (#36; also fixed on main by #49 — the floors agree whichever merges first).
-# shapely joins the stack for the item-mirror comparison in
-# mirror._geometry_agrees, which decodes the mirror's WKB and the item's GeoJSON
-# and compares them structurally. Its floor follows the same rule: 2.1 is the
-# newest series shapely ships.
-# jsonschema-rs screens each object before jsonschema sees it
-# (rashid._jsonschema.screened), and its registry needs the meta-schemas that
-# jsonschema-specifications carries; jsonschema already depends on it, so
-# naming it adds no install, only the direct import.
 dependencies = [
     "click>=8.4",
     "jsonschema>=4.26",
+    # Rust screening precedes jsonschema; its registry needs the bundled meta-schemas.
     "jsonschema-rs>=0.58",
+    # Already a jsonschema dependency; declared here for our direct registry import.
     "jsonschema-specifications>=2023.3.6",
     "referencing>=0.30",
-    "pyarrow>=21",
-    "rasterio>=1.4.4",
-    "rio-cogeo>=6",
-    "pyproj>=3.7.1",
-    "shapely>=2.1",
     "orjson>=3.11",
     "obstore>=0.9",
     "tzdata; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
-# Back-compat: the data pass's stack moved into the core dependencies, so the
-# extra is an intentional no-op; `pip install rashid[data]` keeps working.
-data = []
+data = [
+    "numpy>=1.24",
+    # 21 first exposes native GeospatialStatistics. Consumers cap below 25 for the
+    # abseil ABI break, so a >=25 floor would prevent joint installation.
+    "pyarrow>=21",
+    "rasterio>=1.4.4",
+    "rio-cogeo>=6",
+    "pyproj>=3.7.1",
+    # Item-mirror geometry comparison uses WKB and GeoJSON; 2.1 is the supported series.
+    "shapely>=2.1",
+]
 
 [project.urls]
 Homepage = "https://github.com/portolan-sdi/rashid"
 
-[project.scripts]
-rashid = "rashid.cli:main"
-
 [dependency-groups]
 dev = [
+    "rashid",
     "pytest>=9",
     "pytest-cov>=7",
     "pytest-xdist>=3.8",
@@ -77,8 +60,15 @@ dev = [
     "trustme>=1.2.1",
 ]
 
+[tool.uv.workspace]
+members = ["meta/rashid"]
+
+[tool.uv.sources]
+rashid = { workspace = true }
+rashid-core = { workspace = true }
+
 [tool.hatch.build.targets.wheel]
-packages = ["src/rashid"]
+packages = ["src/rashid_core"]
 
 [tool.ruff]
 line-length = 100
@@ -114,18 +104,19 @@ max-locals = 15
 max-returns = 6
 
 [tool.ruff.lint.isort]
-known-first-party = ["rashid"]
+known-first-party = ["rashid_core"]
 
 [tool.ruff.lint.per-file-ignores]
 # Rules share check(node, graph); many rules do not need the graph context.
-"src/rashid/rules/*.py" = ["ARG002"]
+"src/rashid_core/rules/*.py" = ["ARG002"]
 # Test doubles retain protocol method and callback signatures. Keep ARG001 on for fixtures.
 "tests/**" = ["ARG002", "ARG005"]
 # Dedicated owners; reasons and live matches are checked in guardrail_exemptions.json.
-"src/rashid/_href.py" = ["TID251"]
-"src/rashid/_store.py" = ["TID251"]
-"src/rashid/_json.py" = ["TID251"]
-"src/rashid/data/_files.py" = ["TID251"]
+"src/rashid_core/_package.py" = ["TID251"]
+"src/rashid_core/_href.py" = ["TID251"]
+"src/rashid_core/_store.py" = ["TID251"]
+"src/rashid_core/_json.py" = ["TID251"]
+"src/rashid_core/data/formats/_files.py" = ["TID251"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "pytest.xfail" = { msg = "use @pytest.mark.xfail(strict=True) keyed to an open issue and listed in the ledger" }
@@ -133,14 +124,14 @@ known-first-party = ["rashid"]
 [tool.mypy]
 strict = true
 python_version = "3.11"
-files = ["src/rashid"]
+files = ["src/rashid_core"]
 
 # jsonschema and jsonschema-specifications ship no py.typed marker.
 [[tool.mypy.overrides]]
 module = ["jsonschema.*", "jsonschema_specifications.*"]
 ignore_missing_imports = true
 
-# The data-pass geospatial stack (rashid[data]) ships no usable type information.
+# The data-pass geospatial stack (rashid-core[data]) ships no usable type information.
 [[tool.mypy.overrides]]
 module = ["pyarrow.*", "rasterio.*", "pyproj.*", "rio_cogeo.*", "shapely.*"]
 ignore_missing_imports = true
@@ -152,7 +143,7 @@ python_files = "test_*.py"
 addopts = [
     "--tb=short",
     "--strict-markers",
-    "--cov=rashid",
+    "--cov=rashid_core",
     "--cov-report=term-missing",
     "--cov-fail-under=90",
 ]
@@ -171,86 +162,106 @@ exclude_lines = [
 ]
 
 [tool.importlinter]
-root_package = "rashid"
+root_package = "rashid_core"
 include_external_packages = true
 
-[[tool.importlinter.contracts]]
-name = "validation core must not import a CLI framework"
-type = "forbidden"
-source_modules = [
-    "rashid.model",
-    "rashid.catalog",
-    "rashid.rule",
-    "rashid.runner",
-    "rashid.config",
-    "rashid.rules",
-    "rashid.live",
-    "rashid.api",
-    "rashid._trace",
-]
-forbidden_modules = ["click"]
+# Node annotations in _href do not create a runtime dependency on catalog.
+# Import-linter exposes this option per configuration, rather than per contract.
+exclude_type_checking_imports = true
 
-# The data check modules own the geospatial stack; the core validator and
-# the data-pass glue (entry point, byte reader) stay stdlib-only, so `import
-# rashid` never pulls pyarrow/rasterio/pyproj. The lazy rashid.data -> checks edge is
-# severed here because it fires only inside default_validator(), on demand; the
-# runner -> rashid.data chain then still catches any direct geo import in the glue.
-# rashid.data itself is not a source module: it is a package, so listing it would
-# pull in all the data check modules that import the stack.
 [[tool.importlinter.contracts]]
-name = "core and data readers must not import the geospatial stack"
-type = "forbidden"
-source_modules = [
-    "rashid.model",
-    "rashid.catalog",
-    "rashid.rule",
-    "rashid.runner",
-    "rashid.config",
-    "rashid.rules",
-    "rashid.schema",
-    "rashid.structural",
-    "rashid.cli",
-    "rashid.live",
-    "rashid.data.reader",
-    "rashid.api",
-    "rashid._trace",
+id = "package-layers"
+name = "package imports follow exhaustive layers"
+type = "layers"
+containers = ["rashid_core"]
+exhaustive = true
+layers = [
+    "__main__",
+    "cli",
+    "api",
+    "runner",
+    "schema | structural | extensions | remote | live | data",
+    "_jsonschema",
+    "report",
+    "registry",
+    "rules",
+    "_media",
+    "_profile | _stac | rule",
+    "catalog | config",
+    "_store",
+    "_href | _http | _json",
+    "_trace | _multihash | _spdx | ids | model | _package",
 ]
-forbidden_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"]
-ignore_imports = ["rashid.data -> rashid.data.checks"]
+
+[[tool.importlinter.contracts]]
+id = "formats-only-geo"
+name = "only optional formats may import the geospatial stack"
+type = "protected"
+protected_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely", "numpy"]
+allowed_importers = ["rashid_core.data.formats"]
+
+[[tool.importlinter.contracts]]
+id = "cli-only-click"
+name = "only the cli may import click"
+type = "protected"
+protected_modules = ["click"]
+allowed_importers = ["rashid_core.cli"]
+
+[[tool.importlinter.contracts]]
+id = "formats-entry-point"
+name = "only the data entry point may import optional formats"
+type = "protected"
+protected_modules = ["rashid_core.data.formats", "rashid_core.data.formats.**"]
+# Exact entry module; treating rashid_core.data as a package would allow every reader.
+as_packages = false
+allowed_importers = ["rashid_core.data", "rashid_core.data.formats.**"]
 
 [[tool.importlinter.contracts]]
 id = "rules-no-network"
-name = "metadata rules must not import network passes or transport"
+name = "metadata rules must not import transport"
 type = "forbidden"
-source_modules = ["rashid.rules"]
-forbidden_modules = ["rashid.live", "rashid.remote", "rashid._store"]
+source_modules = ["rashid_core.rules"]
+forbidden_modules = ["rashid_core._store"]
 
 [[tool.importlinter.contracts]]
-id = "rules-no-data"
-name = "metadata rules must not import data checks"
-type = "forbidden"
-source_modules = ["rashid.rules"]
-forbidden_modules = ["rashid.data"]
-
-[[tool.importlinter.contracts]]
-id = "data-files-owner"
-name = "only data checks may import the file-handle owner"
-type = "protected"
-protected_modules = ["rashid.data._files"]
-as_packages = false
-# T9 split data/checks.py into these concern modules. No package-wide wildcard.
-allowed_importers = [
-    "rashid.data.checks",
-    "rashid.data.geoparquet",
-    "rashid.data.raster",
-    "rashid.data.mirror",
-    "rashid.data.partitions",
+id = "rules-independent"
+name = "metadata rule modules must be independent"
+type = "independence"
+modules = [
+    "rashid_core.rules.assets",
+    "rashid_core.rules.bbox",
+    "rashid_core.rules.catalogs",
+    "rashid_core.rules.classification",
+    "rashid_core.rules.collections",
+    "rashid_core.rules.conformance",
+    "rashid_core.rules.files",
+    "rashid_core.rules.item_mirror",
+    "rashid_core.rules.license",
+    "rashid_core.rules.links",
+    "rashid_core.rules.partitions",
+    "rashid_core.rules.provenance",
+    "rashid_core.rules.providers",
+    "rashid_core.rules.temporal",
+    "rashid_core.rules.titles",
+    "rashid_core.rules.versions",
+    "rashid_core.rules.viz",
 ]
+
+[[tool.importlinter.contracts]]
+id = "rules-only-registry"
+name = "only the registry may import metadata rules"
+type = "protected"
+protected_modules = ["rashid_core.rules"]
+allowed_importers = ["rashid_core.registry"]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
 version = "0.4.0"
-version_files = ["pyproject.toml:^version"]
+version_files = [
+    "pyproject.toml:^version",
+    "meta/rashid/pyproject.toml:^version",
+    'meta/rashid/pyproject.toml:rashid-core\[data\]==',
+]
 tag_format = "v$version"
 annotated_tag = true
 # uv.lock records this package's own version, and version_files rewrites
@@ -272,14 +283,14 @@ check-filenames = true
 
 [tool.vulture]
 min_confidence = 80
-paths = ["src/rashid", "tests", "scripts"]
+paths = ["src/rashid_core", "tests", "scripts"]
 sort_by_size = true
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
 
 [tool.deptry]
-known_first_party = ["rashid"]
+known_first_party = ["rashid_core"]
 # .claude holds generated Claude Code worktrees, each with its own .venv.
 exclude = [".venv", "tests", ".claude", ".cache"]
 

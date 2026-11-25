@@ -16,7 +16,7 @@ catalog or stays flat.
     exercises the data pass: hashing, the parquet footers, and the rasters.
 ``remote``
     The ``metadata`` tree served over a local HTTPS server, validated by URL.
-    It exercises the crawl pool, the live HEAD pool, and ``rashid._store``.
+    It exercises the crawl pool, the live HEAD pool, and ``rashid_core._store``.
 ``remote-data``
     The ``data`` tree served over a local HTTPS server, validated by URL with
     the data pass on. Every asset is remote, as on a published catalog, and
@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from rashid import ValidationOptions
+from rashid_core import ValidationOptions
 from tests.conftest import CatalogBuilder, mutate_json
 
 GENERATOR_VERSION = 1
@@ -219,11 +219,11 @@ def tree_digest(root: Path) -> str:
 
 @contextmanager
 def target(name: str, size: str, seed: int = 0, cache_dir: Path | None = None) -> Iterator[Target]:
-    """Build or reuse the scenario, and yield what to pass to ``rashid.validate``.
+    """Build or reuse the scenario, and yield what to pass to ``rashid_core.validate``.
 
     For ``remote`` the tree is served over a local HTTPS server until the
     block ends. Every transport, the live probes included, reads
-    ``rashid._store``'s certificate option, which the server sets.
+    ``rashid_core._store``'s certificate option, which the server sets.
 
     ``remote-data`` serves its tree the same way, with the data pass on and
     the live pass off, so the server sees the data pass's requests alone.
@@ -252,7 +252,7 @@ def _remote_data(root: Path) -> Iterator[Target]:
     """Serve the ``data`` tree from a child process, ``REMOTE_LATENCY`` on each asset.
 
     GDAL reads a ``/vsicurl`` URL through libcurl, which does not read
-    ``rashid._store``'s certificate option. rasterio points libcurl at certifi
+    ``rashid_core._store``'s certificate option. rasterio points libcurl at certifi
     through ``GDAL_CURL_CA_BUNDLE`` on import, and that option outranks
     ``CURL_CA_BUNDLE``. So the variable names the server's CA for the
     duration, and TLS verification stays on.

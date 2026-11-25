@@ -15,11 +15,11 @@ from typing import Any
 
 import pytest
 
-from rashid import RulesConfig, ValidationOptions, _store, validate
-from rashid._jsonschema import SchemaError, vendored_extension_schemas
-from rashid.catalog import CatalogGraph
-from rashid.extensions import SchemaUnavailable, default_validator, validate_extensions
-from rashid.model import Severity
+from rashid_core import RulesConfig, ValidationOptions, _store, validate
+from rashid_core._jsonschema import SchemaError, vendored_extension_schemas
+from rashid_core.catalog import CatalogGraph
+from rashid_core.extensions import SchemaUnavailable, default_validator, validate_extensions
+from rashid_core.model import Severity
 from tests.conftest import CatalogBuilder, mutate_json, write_language_trees
 
 pytestmark = pytest.mark.unit
@@ -198,11 +198,11 @@ def test_the_vendored_closure_covers_every_registered_extension() -> None:
     """
     from importlib import resources
 
-    from rashid.rules.conformance import registered_extension
+    from rashid_core._profile import registered_extension
 
     store = vendored_extension_schemas()
     registry = json.loads(
-        resources.files("rashid")
+        resources.files("rashid_core")
         .joinpath("_schemas/extension-registry.json")
         .read_text(encoding="utf-8")
     )
@@ -396,7 +396,7 @@ def test_a_missing_jsonschema_degrades_to_one_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     catalog.collection("roads", stac_extensions=[PROJECTION_URI])
-    from rashid import extensions as extensions_module
+    from rashid_core import extensions as extensions_module
 
     def no_jsonschema(*_args: object, **_kwargs: object) -> None:
         raise ImportError("No module named 'jsonschema'")
@@ -426,7 +426,7 @@ def test_a_pinned_extension_missing_from_the_wheel_is_reported_not_validated(
     report has to say so.
     """
     catalog.collection("roads", stac_extensions=[PROJECTION_URI])
-    from rashid import extensions as extensions_module
+    from rashid_core import extensions as extensions_module
 
     monkeypatch.setattr(extensions_module, "vendored_extension_schemas", dict)
     findings = validate_extensions(_graph(catalog))
@@ -445,7 +445,7 @@ def test_a_pinned_extension_missing_from_the_wheel_is_reported_not_validated(
 )
 def test_a_contains_failure_names_the_requirement(subschema: dict, expected: str) -> None:
     """The raw jsonschema message prints the array and never the requirement."""
-    from rashid._jsonschema import _contains_requirement
+    from rashid_core._jsonschema import _contains_requirement
 
     assert _contains_requirement(subschema) == expected
 
@@ -460,7 +460,7 @@ def test_a_contains_failure_names_the_requirement(subschema: dict, expected: str
 )
 def test_an_inexpressible_contains_requirement_falls_back(subschema: object) -> None:
     """No const or enum to name, so describe() keeps the raw message."""
-    from rashid._jsonschema import _contains_requirement
+    from rashid_core._jsonschema import _contains_requirement
 
     assert _contains_requirement(subschema) is None
 
@@ -469,18 +469,12 @@ def test_the_extension_store_is_empty_without_a_vendored_tree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A build with no extensions/ tree yields no store, rather than raising."""
-    from importlib import resources
+    from rashid_core import _jsonschema as jsonschema_mod
+    from rashid_core import _package
 
-    from rashid import _jsonschema as jsonschema_mod
-
-    package_root = tmp_path / "rashid"
-    (package_root / "_schemas").mkdir(parents=True)
-    original = resources.files
-    monkeypatch.setattr(
-        resources,
-        "files",
-        lambda package: package_root if package == "rashid" else original(package),
-    )
+    schema_root = tmp_path / "_schemas"
+    schema_root.mkdir()
+    monkeypatch.setattr(_package, "schemas", lambda: schema_root)
     jsonschema_mod.vendored_extension_schemas.cache_clear()
     try:
         assert jsonschema_mod.vendored_extension_schemas() == {}
@@ -498,7 +492,7 @@ def test_the_extension_store_is_empty_without_a_vendored_tree(
 
 
 def test_the_language_extension_is_pinned_and_vendored() -> None:
-    from rashid.rules.conformance import registered_extension
+    from rashid_core._profile import registered_extension
 
     assert registered_extension(LANGUAGE_URI) == ("Language", "v1.0.0")
     assert LANGUAGE_URI in vendored_extension_schemas()

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rashid"
+version = "0.4.0"
+description = "Validator and linter for Portolan catalogs, including data validation"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "Portolan contributors" }]
+dependencies = ["rashid-core[data]==0.4.0"]
+
+[project.optional-dependencies]
+data = []
+
+[project.urls]
+Homepage = "https://github.com/portolan-sdi/rashid"
+
+[project.scripts]
+rashid = "rashid_core.cli:main"
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.hatch.build.targets.sdist]
+include = ["pyproject.toml", "README.md", "LICENSE"]

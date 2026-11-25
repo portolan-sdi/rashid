@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-from rashid import validate
-from rashid.api import ValidationOptions
+from rashid_core import validate
+from rashid_core.api import ValidationOptions
 from tests._https import HttpsServer, Route
 from tests.conftest import CatalogBuilder, mutate_json
 

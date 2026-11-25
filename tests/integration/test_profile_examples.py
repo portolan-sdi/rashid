@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from rashid import ValidationOptions, validate
+from rashid_core import ValidationOptions, validate
 
 pytestmark = pytest.mark.integration
 

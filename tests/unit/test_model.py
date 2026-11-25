@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from rashid.model import Finding, Report, Severity
+from rashid_core.model import Finding, Severity
+from rashid_core.report import Report
 
 pytestmark = pytest.mark.unit
 
@@ -140,7 +141,7 @@ def test_by_rule_sorts_loudest_first() -> None:
 
 
 def test_by_rule_carries_the_registry_description() -> None:
-    from rashid.registry import describe
+    from rashid_core.registry import describe
 
     report = Report(findings=[_finding(Severity.ERROR, "PTL-AST-003")])
     assert report.by_rule()[0].description == describe("PTL-AST-003")

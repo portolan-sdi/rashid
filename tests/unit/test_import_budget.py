@@ -1,4 +1,4 @@
-"""What ``import rashid`` and ``rashid --help`` load, checked in a fresh interpreter.
+"""What ``import rashid_core`` and ``rashid --help`` load, checked in a fresh interpreter.
 
 import-linter proves that no rashid module imports the geospatial stack at
 module level. It cannot see an import that a third-party package makes, or
@@ -62,9 +62,19 @@ def _loaded(code: str) -> set[str]:
 
 
 def test_import_rashid_loads_no_heavy_module_and_no_cli_framework() -> None:
-    loaded = _loaded("import rashid")
-    assert "rashid" in loaded
+    loaded = _loaded("import rashid_core")
+    assert "rashid_core" in loaded
     assert loaded & (_HEAVY | _PROFILERS | _NETWORK | _METADATA | {"click"}) == set()
+
+
+@pytest.mark.parametrize(
+    "module",
+    ["rashid_core.api", "rashid_core.data", "rashid_core.data.storage", "rashid_core.data.zarr"],
+)
+def test_import_data_loads_no_heavy_module(module: str) -> None:
+    loaded = _loaded(f"import {module}")
+    assert module in loaded
+    assert loaded & _HEAVY == set()
 
 
 def test_import_probe_reports_child_stderr() -> None:
@@ -90,10 +100,25 @@ def test_import_probe_preserves_platform_environment(monkeypatch: pytest.MonkeyP
 def test_cli_help_loads_no_heavy_module() -> None:
     code = (
         "import contextlib, io\n"
-        "from rashid.cli import main\n"
+        "from rashid_core.cli import main\n"
         "with contextlib.redirect_stdout(io.StringIO()):\n"
         "    try:\n"
         "        main(['check', '--help'])\n"
+        "    except SystemExit as exc:\n"
+        "        assert exc.code == 0, exc.code\n"
+    )
+    loaded = _loaded(code)
+    assert "click" in loaded
+    assert loaded & (_HEAVY | _PROFILERS | _NETWORK | _METADATA) == set()
+
+
+def test_module_help_loads_no_heavy_module() -> None:
+    code = (
+        "import contextlib, io, runpy, sys\n"
+        "sys.argv = ['rashid_core', '--help']\n"
+        "with contextlib.redirect_stdout(io.StringIO()):\n"
+        "    try:\n"
+        "        runpy.run_module('rashid_core', run_name='__main__', alter_sys=True)\n"
         "    except SystemExit as exc:\n"
         "        assert exc.code == 0, exc.code\n"
     )
@@ -107,7 +132,7 @@ def test_a_local_metadata_check_loads_no_network_stack() -> None:
     catalog = Path(__file__).parents[1] / "fixtures" / "reference-catalog"
     code = (
         "import contextlib, io\n"
-        "from rashid.cli import main\n"
+        "from rashid_core.cli import main\n"
         "with contextlib.redirect_stdout(io.StringIO()):\n"
         "    try:\n"
         f"        main(['check', '--no-data', {str(catalog)!r}])\n"
@@ -117,7 +142,7 @@ def test_a_local_metadata_check_loads_no_network_stack() -> None:
     assert _loaded(code) & (_NETWORK | _METADATA) == set()
 
 
-@pytest.mark.parametrize("module", ["rashid.data.checks"])
+@pytest.mark.parametrize("module", ["rashid_core.data.formats.checks"])
 def test_the_budget_detects_a_heavy_import(module: str) -> None:
     """The check itself can fail: the data checks module loads the geo stack."""
     pytest.importorskip("pyarrow")
@@ -126,11 +151,11 @@ def test_the_budget_detects_a_heavy_import(module: str) -> None:
 
 def test_the_budget_detects_the_network_stack() -> None:
     """The first store loads obstore. Building it sends no request."""
-    loaded = _loaded("from rashid import _store\n_store._store('https://example.org')")
+    loaded = _loaded("from rashid_core import _store\n_store._store('https://example.org')")
     assert "obstore" in loaded
 
 
 def test_the_first_urllib_request_loads_ssl() -> None:
     """The urllib transport loads ``ssl`` and ``urllib.request`` when it builds its opener."""
-    loaded = _loaded("from rashid import _store\n_store._opener()")
+    loaded = _loaded("from rashid_core import _store\n_store._opener()")
     assert {"ssl", "urllib.request"} <= loaded

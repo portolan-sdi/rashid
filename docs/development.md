@@ -5,14 +5,16 @@ Use this guide to set up rashid, run checks, measure performance, and inspect lo
 ## Setup
 
 ```bash
-uv sync
+uv sync --all-packages --all-extras
 uv run pre-commit install \
   --hook-type pre-commit \
   --hook-type commit-msg \
   --hook-type pre-push
 ```
 
-`uv sync` includes development dependencies. Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org), which Commitizen checks through the `commit-msg` hook.
+This installs both workspace distributions, development dependencies, and the geospatial stack.
+All Python code is in `src/rashid_core/`; `meta/rashid/` holds the code-free metapackage and its console entry point.
+Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org), which Commitizen checks through the `commit-msg` hook.
 
 ## Local checks
 
@@ -38,7 +40,7 @@ uv run pytest -n 8             # Full suite, as in CI
 uv run pytest -n 8 -m unit     # Fast, isolated tests
 ```
 
-Tests use the `unit`, `integration`, and `network` markers. Network tests check live servers for the live pass and remote data validation, and skip when offline. Structural and schema validation use the schema closures vendored in `src/rashid/_schemas/` and require no network access.
+Tests use the `unit`, `integration`, and `network` markers. Network tests check live servers for the live pass and remote data validation, and skip when offline. Structural and schema validation use the schema closures vendored in `src/rashid_core/_schemas/` and require no network access.
 
 Set `ENABLE_PRE_PUSH_TESTS=1` to include fast tests in the pre-push hook.
 
@@ -48,17 +50,18 @@ These gates keep each consolidated concept at its owner ([#266](https://github.c
 
 | Gate | Enforced boundary |
 |---|---|
-| Ruff `TID251` | URL interpretation belongs to `_href.py`; urllib requests and HTTPStore construction to `_store.py`; JSON loading to `_json.py`; raw readers and glob enumeration to `data/_files.py`. |
-| import-linter | Metadata rules cannot import live checks, the crawler, transport, or the data pass. The `data-files-owner` contract lists the modules allowed to import `data/_files.py`. |
-| jscpd 5.2.1 | New Python clones in `src/rashid` and `tests` fail the commit hook. Fixtures and virtual environments are excluded. An empty scan fails. |
-| API snapshot | `test_api.py` pins `rashid.api` and `rashid.__all__`, their defining objects, and callable signatures. Python defines the enum constructor signature. |
+| Ruff `TID251` | `_href.py` owns URL interpretation; `_store.py` owns requests and object stores. `_json.py` owns JSON loading; `_package.py` owns schema resources and installed versions. `data/formats/_files.py` owns readers and glob enumeration. |
+| import-linter | Exhaustive layers start with `__main__` and order every package module. Metadata rules stay independent, cannot import transport, and are imported by the registry alone. Geospatial libraries are limited to `data/formats/`, which the data entry point alone imports. Click is limited to the CLI. |
+| jscpd 5.2.1 | New Python clones in `src/rashid_core` and `tests` fail the commit hook. Fixtures and virtual environments are excluded. An empty scan fails. |
+| Package split | `test_packaging.py` checks version agreement and the core dependency closure. `wheel-smoke` checks isolated wheels and upgrades from rashid 0.4.0. |
+| API snapshot | `test_api.py` pins `rashid_core.api` and `rashid_core.__all__`, their defining objects, and callable signatures. Python defines the enum constructor signature. |
 | Registry checks | Duplicate IDs fail registry construction. An AST scan compares emitted IDs with `CHECKS` and checks that pass declarations reuse the ID constants. |
 | Pointer construction | An AST scan rejects hand-built pointers outside `model.py`: f-strings, addition, percent formatting, `.format`, and slash joins. Generic slash prefixes are checked in values assigned or passed as `pointer` or `json_pointer`. |
-| Exemption ledger | `guardrail_exemptions.json` lists every Ruff per-file ignore code (including the #264 signature exemptions), import ignore, allowed file-owner importer, baseline, and strict xfail issue, with reasons. Tests pin their counts and reject stale entries. |
+| Exemption ledger | `guardrail_exemptions.json` lists every Ruff per-file ignore code (including the #264 signature exemptions), import ignore, allowed importer, baseline, and strict xfail issue, with reasons. Tests pin their counts and reject stale entries. |
 | Strict xfails | Tests for unresolved defects must reference an open issue that the PR does not close and use `strict=True`. After a fix, the test fails with XPASS until its xfail marker is removed. Ruff bans imperative `pytest.xfail`, including imported aliases, in tests too. |
 
-T9 split `data/checks.py` into concern modules. The file-owner contract allows those exact modules, without a package wildcard.
-`_href.py` also owns wire encoding. The rules-to-network contract has no import exemptions.
+`data/formats` owns geospatial readers; storage and Zarr checks remain in `data`.
+`_href.py` also owns wire encoding. The import contracts have no ignored imports.
 `remote.py` has no banned API use, so it needs no Ruff ignore. Production-only API bans live in `src/ruff.toml`; tests and developer scripts can construct raw fixtures without a blanket TID251 exemption.
 
 The committed jscpd baseline accepts existing clones. Its fingerprint and clone counts may only decrease; `test_quality_config.py` pins the counts without running external tools. The archive self-test checks live fingerprints and rejects stale entries.
@@ -66,7 +69,7 @@ Because `origin/main` has no baseline yet, the fingerprint membership comparison
 After deleting duplication, regenerate it and lower the pinned counts in the same commit:
 
 ```bash
-uvx jscpd@5.2.1 src/rashid tests --baseline .jscpd-baseline.json --update-baseline
+uvx jscpd@5.2.1 src/rashid_core tests --baseline .jscpd-baseline.json --update-baseline
 ```
 
 The commit hook and CI run the same command with `--fail-on-new-clones 0` instead of `--update-baseline`.
@@ -81,7 +84,7 @@ uv run python scripts/gate_selftest.py --fault duplicate-block
 ```
 
 The script extracts `HEAD` with `git archive`, runs each gate on a clean copy, then injects its fault.
-It checks banned APIs, all three layer contracts, duplication, API exports and signatures, duplicate and missing IDs, pointer variants, baseline growth, loose and bare xfails, CI wiring, and exemption growth.
+It checks banned APIs, import boundaries, duplication, API exports and signatures, duplicate and missing IDs, pointer variants, baseline growth, loose and bare xfails, CI wiring, and exemption growth.
 The self-test pins its fault count so dropping a case fails. Each fault must produce its specific diagnostic; syntax errors and clean-copy failures fail the self-test, which runs without modifying the working tree.
 
 ## Measuring performance
@@ -146,7 +149,16 @@ Counters are always enabled. `tests/integration/test_operation_counts.py` checks
 
 If your change reduces the work performed, update the expected counts in the same pull request.
 
-`tests/unit/test_import_budget.py` checks that `import rashid` and `rashid --help` do not load the geospatial stack, jsonschema, the network stack, or a profiler. Keep heavy imports inside the functions that need them.
+`tests/unit/test_import_budget.py` checks that `import rashid_core`, `rashid --help`, and `python -m rashid_core --help` do not load the geospatial stack, jsonschema, the network stack, or a profiler. Keep heavy imports inside the functions that need them.
+
+Build both wheels and test isolated installs with:
+
+```bash
+uv run python scripts/wheel_smoke.py
+```
+
+The smoke check verifies the base dependency allowlist, metadata validation, and upgrades from rashid 0.4.0.
+Without the geospatial stack, it requires the missing-stack warning alongside checksum, size, and Zarr findings.
 
 ## Logs and timings
 
@@ -161,6 +173,12 @@ uv run rashid --trace trace.json check path/to/catalog
 - `--timings` adds a `meta` block to JSON reports. Without `--json`, it prints the stage table to stderr.
 - `-v` enables `INFO` logs; `-vv` enables `DEBUG` logs. Logs go to stderr, leaving stdout for the report.
 - `--trace` writes a Chrome trace that you can open in [Perfetto](https://ui.perfetto.dev).
+
+Logger names follow the import package:
+
+```text
++0.055s DEBUG rashid_core.runner: rules: start
+```
 
 When calling `validate()` from a library, use these environment variables:
 
@@ -197,7 +215,20 @@ git tag -d "vX.Y.Z"
 git push -u origin release/vX.Y.Z
 ```
 
-Replace `X.Y.Z` with the release version. `cz bump` updates `pyproject.toml` and `CHANGELOG.md`, and a pre-bump hook refreshes `uv.lock`. It then creates a `bump:` commit and tag.
+Replace `X.Y.Z` with the release version.
+`cz bump` updates both project versions, the metapackage's exact core pin, and `CHANGELOG.md`.
+The pre-bump hook refreshes `uv.lock`. Commitizen then creates one `bump:` commit and one `vX.Y.Z` tag for both distributions.
+
+Build both wheels and source distributions locally with:
+
+```bash
+uv build --package rashid-core --out-dir .cache/dist/core
+uv build --package rashid --out-dir .cache/dist/meta
+```
+
+`rashid-core` contains all Python code. The code-free `rashid` metapackage provides the console command and depends on `rashid-core[data]` at the same version.
+The publish workflow uses the `pypi` environment and publishes `rashid-core` first, then `rashid`.
+Both upload steps skip existing files so interrupted releases can be retried.
 
 Delete the local tag. `publish.yml` creates the tag on the merged commit; the local tag points to the release branch commit.
 
@@ -237,4 +268,4 @@ rashid applies the requirements of the newest profile version it bundles. A spec
 2. The spec tags `vX.Y.Z`. Confirm that the profile URI of that version serves the tagged schema.
 3. Run the sync: `gh workflow run spec-sync.yml -R portolan-sdi/rashid`. The new schema directory makes the pull request a feature, `feat(schema): bundle the Portolan vX.Y.Z profile schema`, with auto-merge off. `DEFAULT_SCHEMA_URI`, `rashid --version`, the JSON report, and `PTL-CNF-005` follow the newest bundled version. The pull request needs no code change. Review it and merge it.
 4. Release rashid again, so that the wheel on PyPI applies `vX.Y.Z`.
-5. Update the downstream pins. Tools read the newest version from `rashid.api.newest_profile_version()`.
+5. Update the downstream pins. Tools read the newest version from `rashid_core.api.newest_profile_version()`.

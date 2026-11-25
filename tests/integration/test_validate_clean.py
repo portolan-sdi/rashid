@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import validate
+from rashid_core import validate
 from tests.conftest import CatalogBuilder, mirror_providers
 
 

@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import RulesConfig, ValidationOptions, validate, validate_structural
-from rashid._jsonschema import SchemaError
-from rashid.catalog import CatalogGraph
-from rashid.model import Severity
-from rashid.structural import default_validator
+from rashid_core import RulesConfig, ValidationOptions, validate, validate_structural
+from rashid_core._jsonschema import SchemaError
+from rashid_core.catalog import CatalogGraph
+from rashid_core.model import Severity
+from rashid_core.structural import default_validator
 from tests.conftest import CatalogBuilder, mutate_json
 
 pytestmark = pytest.mark.unit
@@ -80,7 +80,7 @@ def test_validator_failure_is_a_single_warning(catalog: CatalogBuilder) -> None:
 def test_missing_package_is_a_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid.structural as structural
+    import rashid_core.structural as structural
 
     def raise_import() -> None:
         raise ImportError("No module named 'jsonschema'")
@@ -95,7 +95,7 @@ def test_missing_package_is_a_warning(
 def test_default_validator_used_when_none(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid.structural as structural
+    import rashid_core.structural as structural
 
     monkeypatch.setattr(structural, "default_validator", lambda: lambda data: [])
     assert structural.validate_structural(_graph(catalog), None) == []

@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
-import rashid
-from rashid import _trace
-from rashid.model import Finding
+import rashid_core
+from rashid_core import _trace
+from rashid_core.model import Finding
 from tests import scenarios
 from tests._https import DOCUMENT_SUFFIXES, Seen, ServedTree
 
@@ -36,9 +36,9 @@ def cache_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 def _steady_counts(name: str, size: str, cache_dir: Path) -> dict[str, int]:
     with scenarios.target(name, size, cache_dir=cache_dir) as target:
-        rashid.validate(target.location, options=target.options)
+        rashid_core.validate(target.location, options=target.options)
         with _trace.counting() as delta:
-            rashid.validate(target.location, options=target.options)
+            rashid_core.validate(target.location, options=target.options)
     return delta
 
 
@@ -105,7 +105,7 @@ def _remote_data_run(
     with scenarios.target("remote-data", "small", cache_dir=cache_dir) as target:
         if prepare is not None:
             prepare(target.server)
-        report = rashid.validate(target.location, options=target.options)
+        report = rashid_core.validate(target.location, options=target.options)
         return target.server.seen(), target.server.peak_in_flight(), report.findings
 
 
@@ -180,7 +180,7 @@ def test_remote_data_raster_open_retries_a_throttled_request(cache_dir: Path) ->
     pytest.importorskip("rasterio")
     tif = "/layers/raster-000/data.tif"
     seen, _peak, remote = _remote_data_run(cache_dir, lambda server: server.fail(tif, 2, "GDAL"))
-    local = rashid.validate(scenarios.cached("data", "small", cache_dir=cache_dir)).findings
+    local = rashid_core.validate(scenarios.cached("data", "small", cache_dir=cache_dir)).findings
 
     assert _data_findings(remote) == _data_findings(local)
     gdal = [s for s in seen if s.path == tif and "GDAL" in s.headers.get("user-agent", "")]
@@ -196,7 +196,7 @@ def test_remote_data_findings_match_local(cache_dir: Path) -> None:
     pytest.importorskip("pyarrow")
     pytest.importorskip("rasterio")
     _seen, _peak, remote = _remote_data_run(cache_dir)
-    local = rashid.validate(scenarios.cached("data", "small", cache_dir=cache_dir)).findings
+    local = rashid_core.validate(scenarios.cached("data", "small", cache_dir=cache_dir)).findings
 
     assert _data_findings(remote) == _data_findings(local)
     assert _data_findings(local)  # the scenario reports something to compare
@@ -230,10 +230,10 @@ def test_metadata_large_traced_memory_ceiling(cache_dir: Path) -> None:
     peaks: dict[str, int] = {}
     for size in scenarios.SIZES:
         root = scenarios.cached("metadata", size, cache_dir=cache_dir)
-        rashid.validate(root, options=rashid.ValidationOptions(data=False))
+        rashid_core.validate(root, options=rashid_core.ValidationOptions(data=False))
         tracemalloc.start()
         try:
-            rashid.validate(root, options=rashid.ValidationOptions(data=False))
+            rashid_core.validate(root, options=rashid_core.ValidationOptions(data=False))
             peaks[size] = tracemalloc.get_traced_memory()[1]
         finally:
             tracemalloc.stop()
@@ -245,7 +245,7 @@ def test_metadata_large_traced_memory_ceiling(cache_dir: Path) -> None:
 def test_timings_cover_every_stage_of_a_url_run(cache_dir: Path) -> None:
     _trace.enable("on")
     with scenarios.target("remote", "small", cache_dir=cache_dir) as target:
-        rashid.validate(target.location, options=target.options)
+        rashid_core.validate(target.location, options=target.options)
     names = [node["name"] for node in _trace.timings()]
     assert names == ["crawl", "load", "rules", "structural", "extensions", "live"]
     crawl = _trace.timings()[0]

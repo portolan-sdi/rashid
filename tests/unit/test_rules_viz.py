@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import validate
-from rashid.model import Severity
-from rashid.rules.viz import _bbox_area
+from rashid_core import validate
+from rashid_core.model import Severity
+from rashid_core.rules.viz import _bbox_area
 from tests.conftest import (
     CatalogBuilder,
     default_asset,

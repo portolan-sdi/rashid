@@ -7,7 +7,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from rashid.cli import main
+from rashid_core.cli import main
 from tests.conftest import CatalogBuilder
 
 

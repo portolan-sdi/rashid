@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from rashid._href import (
+from rashid_core._href import (
     crawl_prefix,
     is_absolute_href,
     is_catalog_url,
@@ -22,7 +22,7 @@ from rashid._href import (
     split_catalog_url,
     structural_prefix,
 )
-from rashid.catalog import CatalogGraph
+from rashid_core.catalog import CatalogGraph
 from tests.conftest import CatalogBuilder, nest_items_under_organizing_catalog
 
 pytestmark = pytest.mark.unit
@@ -174,7 +174,7 @@ def test_rebuilding_graph_indexes_from_source_is_order_independent(catalog: Cata
 
 @pytest.mark.parametrize("suffix", ["?token=x#piece", "#piece", "?token=%3F%23", "?#", "?"])
 def test_suffix_is_ignored_for_containment_and_retained_for_wire_and_live(suffix: str) -> None:
-    from rashid._href import containment_href, href_suffix, wire_url
+    from rashid_core._href import containment_href, href_suffix, wire_url
 
     href = "./a%20b.parquet" + suffix
     assert containment_href(href) == "./a%20b.parquet"
@@ -193,7 +193,7 @@ def test_suffix_is_ignored_for_containment_and_retained_for_wire_and_live(suffix
 
 
 def test_uri_reference_grammar_preserves_encoded_and_reserved_characters() -> None:
-    from rashid._href import is_uri_reference
+    from rashid_core._href import is_uri_reference
 
     for href in (
         "",
@@ -269,7 +269,7 @@ def test_file_location(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("href", ["https://[broken/a", "https://host／a"])
 def test_malformed_authorities_are_safe_at_every_href_entry_point(href: str) -> None:
-    from rashid._href import is_uri_reference, split_href
+    from rashid_core._href import is_uri_reference, split_href
 
     assert split_href(href) is None
     assert is_absolute_href(href)
@@ -292,7 +292,7 @@ def test_malformed_authorities_are_safe_at_every_href_entry_point(href: str) -> 
 
 
 def test_local_resolution_decodes_once_and_keeps_request_spelling() -> None:
-    from rashid._href import local_path, request_target
+    from rashid_core._href import local_path, request_target
 
     directory = "my%20%2520%20roads"
     href = "./a%20b%2520.parquet?token=x#piece"

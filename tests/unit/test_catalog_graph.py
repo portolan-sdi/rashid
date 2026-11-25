@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from rashid.catalog import CatalogGraph, Node
+from rashid_core.catalog import CatalogGraph, Node
 from tests.conftest import (
     CatalogBuilder,
     mutate_json,
@@ -303,3 +303,33 @@ def test_a_catalog_without_a_readable_root_names_no_translations(tmp_path: Path)
     graph = CatalogGraph.load(root)
     assert graph.root is None
     assert graph.translation_roots() == []
+
+
+def test_read_text_uses_the_catalog_root(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads")
+    root = catalog.write()
+    readme = root / "roads" / "README.md"
+    readme.write_text("# Roads\nCafé data", encoding="utf-8")
+    graph = CatalogGraph.load(root)
+    assert graph.read_text(PurePosixPath("roads/README.md")) == "# Roads\nCafé data"
+    assert graph.read_text(PurePosixPath("missing.md")) is None
+
+
+@pytest.mark.parametrize("failure", ["removed", "invalid-utf8", "os-error"])
+def test_read_text_returns_none_for_unreadable_files(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    root = catalog.write()
+    graph = CatalogGraph.load(root)
+    readme = root / "README.md"
+    if failure == "removed":
+        readme.unlink()
+    elif failure == "invalid-utf8":
+        readme.write_bytes(b"\xff")
+    else:
+
+        def unreadable(_path: Path, **_kwargs: object) -> str:
+            raise OSError("unreadable")
+
+        monkeypatch.setattr(Path, "read_text", unreadable)
+    assert graph.read_text(PurePosixPath("README.md")) is None

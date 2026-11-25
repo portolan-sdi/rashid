@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from rashid.rules.conformance import SCHEMA_URI_PATTERN
-from rashid.schema import DEFAULT_SCHEMA_URI
+from rashid_core._profile import SCHEMA_URI_PATTERN
+from rashid_core.schema import DEFAULT_SCHEMA_URI
 
 pytestmark = pytest.mark.unit
 
@@ -28,7 +28,7 @@ def _version_key(schema_path: Path) -> tuple[int, ...]:
     return tuple(int(part) for part in schema_path.parent.name.lstrip("v").split("."))
 
 
-_BUNDLED = Path(str(resources.files("rashid").joinpath("_schemas/portolan")))
+_BUNDLED = Path(str(resources.files("rashid_core").joinpath("_schemas/portolan")))
 SCHEMAS = sorted(_BUNDLED.glob("v*/schema.json"), key=_version_key)
 
 

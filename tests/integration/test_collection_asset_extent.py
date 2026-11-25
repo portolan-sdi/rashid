@@ -98,7 +98,7 @@ def test_collection_extent_with_skipped_remote_asset(
 
     from click.testing import CliRunner
 
-    from rashid.cli import main
+    from rashid_core.cli import main
     from tests._https import Route
 
     directory = _catalog(tmp_path, extent={"spatial": {"bbox": [[0, 0, 2, 1]]}})

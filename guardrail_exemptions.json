@@ -1,36 +1,35 @@
 {
   "ruff": {
-    "src/rashid/_href.py": {
+    "src/rashid_core/_href.py": {
       "TID251": "Owns URL interpretation and containment policies (#266)."
     },
-    "src/rashid/_store.py": {
+    "src/rashid_core/_store.py": {
       "TID251": "Owns HTTPStore construction and urllib requests with HTTPS and User-Agent policy (#266)."
     },
-    "src/rashid/_json.py": {
+    "src/rashid_core/_json.py": {
       "TID251": "Owns counted JSON parsing and the stdlib fallback (#266)."
     },
-    "src/rashid/data/_files.py": {
+    "src/rashid_core/data/formats/_files.py": {
       "TID251": "Owns counted reader construction and partition glob enumeration (#266)."
     },
     "tests/**": {
       "ARG002": "#264: test doubles preserve the uniform check(node, graph) and protocol signatures.",
       "ARG005": "Test callbacks retain the signatures of the production callbacks they replace."
     },
-    "src/rashid/rules/*.py": {
+    "src/rashid_core/rules/*.py": {
       "ARG002": "#264: rules preserve the uniform check(node, graph) signature even when a rule does not need graph."
+    },
+    "src/rashid_core/_package.py": {
+      "TID251": "Owns package schema resources and lazy installed-version lookup (#336)."
     }
   },
-  "import-linter": {
-    "core and data readers must not import the geospatial stack": {
-      "rashid.data -> rashid.data.checks": "The lazy default_validator import loads the data stack only when validation runs."
-    }
-  },
+  "import-linter": {},
   "allowed-importers": {
-    "rashid.data.checks": "Owns asset dispatch and shares one file handle across checks (#266).",
-    "rashid.data.geoparquet": "T9 extracted GeoParquet checks from data/checks.py; consumes shared handles (#266).",
-    "rashid.data.raster": "T9 extracted raster checks from data/checks.py; consumes shared handles (#266).",
-    "rashid.data.mirror": "T9 extracted mirror checks from data/checks.py; consumes shared handles (#266).",
-    "rashid.data.partitions": "T9 extracted partition checks from data/checks.py; owns per-partition shared handles (#266)."
+    "rashid_core.data.formats": "Owns optional geospatial imports; storage and Zarr checks stay independent (#336).",
+    "rashid_core.cli": "Owns the click command interface (#336).",
+    "rashid_core.data": "Selects optional format checks through one lazy import (#336).",
+    "rashid_core.data.formats.**": "Format modules share readers and geospatial helpers within their protected package (#336).",
+    "rashid_core.registry": "Owns metadata rule registration; other production modules use shared helpers (#336)."
   },
   "jscpd": {
     ".jscpd-baseline.json": "Existing clones at guardrail adoption (#266); fingerprint count is pinned and may only shrink."

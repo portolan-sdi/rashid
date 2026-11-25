@@ -13,11 +13,33 @@ The name comes from the Arabic root ر ش د. Its participles رَاشِدٌ and
 
 ## Install
 
+Install `rashid` for the full command, including asset byte validation:
+
 ```bash
 uv tool install rashid
 ```
 
-rashid requires Python 3.11 or later.
+For a light installation, install `rashid-core` without the geospatial libraries:
+
+```bash
+pip install rashid-core
+python -m rashid_core check --no-data path/to/catalog
+```
+
+`rashid-core` provides the Python library and module entry point. Only `rashid` installs the `rashid` console command.
+Core still checks checksums, sizes, file signatures, and Zarr metadata by default.
+It reports `PTL-DAT-000` when geospatial checks cannot run.
+Install `rashid-core[data]` to add geospatial validation, or install `rashid` for the full tool.
+Both distributions require Python 3.11 or later.
+
+## Upgrade from 0.4
+
+| Before | After |
+|---|---|
+| `from rashid import validate` | `from rashid_core import validate` |
+| `rashid.api` and internal modules such as `rashid.catalog` | `rashid_core.api` |
+| `rashid` as a library dependency | `rashid-core`, or `rashid-core[data]` for the data checks |
+| `logging.getLogger("rashid")` | `logging.getLogger("rashid_core")` |
 
 ## Check a Catalog
 
@@ -99,7 +121,7 @@ For transfer details and every rule ID, see [the rule reference](docs/rules.md).
 ## Use rashid from Python
 
 ```python
-from rashid import ValidationOptions, validate
+from rashid_core import ValidationOptions, validate
 
 report = validate("path/to/catalog")
 published = validate("https://data.example.org/my-catalog/catalog.json")
@@ -113,7 +135,7 @@ for finding in report.errors:
 Use `RulesConfig` to disable rules or change their severity.
 
 ```python
-from rashid import RulesConfig, Severity, ValidationOptions, validate
+from rashid_core import RulesConfig, Severity, ValidationOptions, validate
 
 config = RulesConfig(
     disabled=frozenset({"PTL-VIZ-004"}),
@@ -123,7 +145,7 @@ config = RulesConfig(
 report = validate("path/to/catalog", options=ValidationOptions(config=config))
 ```
 
-The public `rashid.api` module also provides helpers for tools that repair catalogs. Names from this module remain available across 0.x releases. Other internal modules can change in a patch release.
+The public `rashid_core.api` module also provides helpers for tools that repair catalogs. Names from this module remain available across 0.x releases. Other internal modules can change in a patch release.
 
 ## Documentation
 

@@ -16,10 +16,10 @@ from urllib.request import urlopen
 
 import pytest
 
-from rashid.catalog import CatalogGraph
-from rashid.data import validate_data
-from rashid.model import Severity
-from rashid.registry import DAT_CHECKSUM, DAT_SIZE
+from rashid_core.catalog import CatalogGraph
+from rashid_core.data import validate_data
+from rashid_core.ids import DAT_CHECKSUM, DAT_SIZE
+from rashid_core.model import Severity
 from tests.conftest import CatalogBuilder, skip_if_network_flaked
 
 pytestmark = [pytest.mark.integration, pytest.mark.network]

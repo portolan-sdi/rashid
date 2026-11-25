@@ -10,16 +10,16 @@ import pytest
 from click.testing import CliRunner
 from jsonschema import Draft202012Validator
 
-from rashid import ValidationOptions, _profile, validate
-from rashid.cli import main
-from rashid.model import REPORT_SCHEMA_URI, REPORT_VERSION
+from rashid_core import ValidationOptions, _profile, validate
+from rashid_core.cli import main
+from rashid_core.report import REPORT_SCHEMA_URI, REPORT_VERSION
 from tests.conftest import PORTOLAN_URI, CatalogBuilder, mutate_json
 
 pytestmark = pytest.mark.unit
 
 
 def _schema() -> dict[str, Any]:
-    path = resources.files("rashid").joinpath(f"_schemas/report/v{REPORT_VERSION}/schema.json")
+    path = resources.files("rashid_core").joinpath(f"_schemas/report/v{REPORT_VERSION}/schema.json")
     return json.loads(path.read_text(encoding="utf-8"))
 
 

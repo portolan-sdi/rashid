@@ -33,29 +33,88 @@ def test_tid251_bans_the_owner_apis() -> None:
     assert source["extend"] == "../pyproject.toml"
     banned = source["lint"]["flake8-tidy-imports"]["extend-banned-api"]
     assert all(entry["msg"].strip() for entry in banned.values())
+    assert {
+        "importlib.resources.files",
+        "importlib.metadata.version",
+        "importlib.import_module",
+    } <= set(banned)
 
 
 def test_owner_layer_contracts_cover_new_modules() -> None:
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     contracts = {row.get("id"): row for row in config["tool"]["importlinter"]["contracts"]}
+    assert set(contracts) == {
+        "package-layers",
+        "formats-only-geo",
+        "cli-only-click",
+        "formats-entry-point",
+        "rules-no-network",
+        "rules-independent",
+        "rules-only-registry",
+    }
+    assert all(not contract.get("ignore_imports") for contract in contracts.values())
+    assert config["tool"]["importlinter"]["exclude_type_checking_imports"] is True
+    layers = contracts["package-layers"]
+    assert layers["type"] == "layers"
+    assert layers["containers"] == ["rashid_core"]
+    assert layers["exhaustive"] is True
+    assert not layers.get("exhaustive_ignores")
+    assert layers["layers"] == [
+        "__main__",
+        "cli",
+        "api",
+        "runner",
+        "schema | structural | extensions | remote | live | data",
+        "_jsonschema",
+        "report",
+        "registry",
+        "rules",
+        "_media",
+        "_profile | _stac | rule",
+        "catalog | config",
+        "_store",
+        "_href | _http | _json",
+        "_trace | _multihash | _spdx | ids | model | _package",
+    ]
+    for contract_id, modules, importers in (
+        (
+            "formats-only-geo",
+            ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely", "numpy"],
+            ["rashid_core.data.formats"],
+        ),
+        ("cli-only-click", ["click"], ["rashid_core.cli"]),
+        (
+            "formats-entry-point",
+            ["rashid_core.data.formats", "rashid_core.data.formats.**"],
+            ["rashid_core.data", "rashid_core.data.formats.**"],
+        ),
+    ):
+        contract = contracts[contract_id]
+        assert contract["type"] == "protected"
+        assert contract["protected_modules"] == modules
+        assert contract["allowed_importers"] == importers
+        assert contract.get("as_packages", True) is (contract_id != "formats-entry-point")
     rules = contracts["rules-no-network"]
     assert rules["type"] == "forbidden"
-    assert not rules.get("ignore_imports")
-    assert rules["source_modules"] == ["rashid.rules"]
-    assert set(rules["forbidden_modules"]) == {"rashid.live", "rashid.remote", "rashid._store"}
+    assert rules["source_modules"] == ["rashid_core.rules"]
+    assert rules["forbidden_modules"] == ["rashid_core._store"]
     assert rules.get("as_packages", True) is True
     assert rules.get("allow_indirect_imports", False) is False
-    data = contracts["rules-no-data"]
-    assert data["type"] == "forbidden"
-    assert data["source_modules"] == ["rashid.rules"]
-    assert data["forbidden_modules"] == ["rashid.data"]
-    assert not data.get("ignore_imports")
-    assert data.get("as_packages", True) is True
-    assert data.get("allow_indirect_imports", False) is False
-    files = contracts["data-files-owner"]
-    assert files["type"] == "protected"
-    assert files["protected_modules"] == ["rashid.data._files"]
-    assert files["as_packages"] is False
+
+    independent = contracts["rules-independent"]
+    assert independent["type"] == "independence"
+    assert not independent.get("ignore_imports")
+    assert set(independent["modules"]) == {
+        "rashid_core.rules." + path.stem
+        for path in (ROOT / "src/rashid_core/rules").glob("*.py")
+        if path.stem != "__init__"
+    }
+    owner = contracts["rules-only-registry"]
+    assert owner["type"] == "protected"
+    assert owner["protected_modules"] == ["rashid_core.rules"]
+    assert owner["allowed_importers"] == ["rashid_core.registry"]
+    assert owner.get("as_packages", True) is True
+    assert not owner.get("ignore_imports")
 
 
 def test_jscpd_baseline_only_shrinks() -> None:
@@ -153,7 +212,7 @@ def test_jscpd_hook_runs_in_the_ci_commit_stage() -> None:
     assert command[0] == "uvx"
     assert command[1].startswith("jscpd@") and command[1].removeprefix("jscpd@")
     assert command[2:] == [
-        "src/rashid",
+        "src/rashid_core",
         "tests",
         "--baseline",
         ".jscpd-baseline.json",
@@ -169,6 +228,7 @@ def test_jscpd_hook_runs_in_the_ci_commit_stage() -> None:
     assert workflow == "portolan-sdi/portolan-ops/.github/workflows/reusable-python-ci.yml"
     assert ref
     assert "pytest -n 8" in ci["jobs"]["ci"]["with"]["test-command"]
+    assert ci["jobs"]["ci"]["with"]["sync-args"] == "--all-packages --all-extras"
 
 
 def test_ci_runs_the_gate_selftest_on_linux() -> None:
@@ -184,7 +244,9 @@ def test_ci_runs_the_gate_selftest_on_linux() -> None:
         if step.get("uses", "").startswith("astral-sh/setup-uv@")
     )
     install = next(
-        index for index, step in enumerate(steps) if "uv sync --locked" in step.get("run", "")
+        index
+        for index, step in enumerate(steps)
+        if "uv sync --locked --all-packages --all-extras" in step.get("run", "")
     )
     run = next(
         index
@@ -194,3 +256,34 @@ def test_ci_runs_the_gate_selftest_on_linux() -> None:
     assert setup < install < run
     assert not steps[run].get("if")
     assert not steps[run].get("continue-on-error", False)
+
+
+def test_ci_checks_built_wheels_on_linux() -> None:
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    job = ci["jobs"]["wheel-smoke"]
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["timeout-minutes"] <= 20
+    assert job["permissions"] == {"contents": "read"}
+    assert not job.get("if")
+    assert not job.get("continue-on-error", False)
+    for step in job["steps"]:
+        if "uses" in step:
+            assert len(step["uses"].partition("@")[2]) == 40
+    assert job["steps"][-1]["run"] == "uv run python scripts/wheel_smoke.py"
+
+
+def test_publish_builds_both_distributions_and_uploads_core_first() -> None:
+    config = yaml.safe_load((ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8"))
+    job = config["jobs"]["publish"]
+    assert job["environment"] == "pypi"
+    steps = job["steps"]
+    builds = [step["run"] for step in steps if step.get("name") == "Build distributions"]
+    assert builds == [
+        "uv build --package rashid-core --out-dir dist/core\n"
+        "uv build --package rashid --out-dir dist/meta\n"
+    ]
+    uploads = [
+        step for step in steps if step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
+    ]
+    assert [step["with"]["packages-dir"] for step in uploads] == ["dist/core", "dist/meta"]
+    assert all(step["with"]["skip-existing"] for step in uploads)

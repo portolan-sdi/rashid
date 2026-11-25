@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import validate
-from rashid.model import Severity
+from rashid_core import validate
+from rashid_core.model import Severity
 from tests.conftest import CatalogBuilder, findings_for, mutate_json
 
 pytestmark = pytest.mark.unit

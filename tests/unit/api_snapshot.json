@@ -1,15 +1,24 @@
 {
-  "rashid.api": {
+  "rashid_core.api": {
     "exports": [
+      "CatalogGraph",
+      "ExpectedLink",
+      "LocalOnlyReader",
+      "Node",
+      "Report",
+      "RulesConfig",
       "SHA2_256",
       "SPDX_LICENSE_IDS",
       "STRUCTURAL_RELS",
+      "Severity",
       "ValidationOptions",
       "bundled_profile_versions",
       "canonical_spdx_id",
       "decode_multihash",
       "encode_multihash",
+      "expected_links",
       "has_cog",
+      "is_absolute_href",
       "is_cog_media_type",
       "is_well_formed_multihash",
       "links_of",
@@ -21,13 +30,48 @@
       "roles_of",
       "spec_commit"
     ],
+    "modules": {
+      "CatalogGraph": "rashid_core.catalog",
+      "ExpectedLink": "rashid_core.catalog",
+      "LocalOnlyReader": "rashid_core.data.reader",
+      "Node": "rashid_core.catalog",
+      "Report": "rashid_core.report",
+      "RulesConfig": "rashid_core.config",
+      "Severity": "rashid_core.model",
+      "ValidationOptions": "rashid_core.runner",
+      "bundled_profile_versions": "rashid_core._profile",
+      "canonical_spdx_id": "rashid_core._spdx",
+      "decode_multihash": "rashid_core._multihash",
+      "encode_multihash": "rashid_core._multihash",
+      "expected_links": "rashid_core.catalog",
+      "has_cog": "rashid_core._media",
+      "is_absolute_href": "rashid_core._href",
+      "is_cog_media_type": "rashid_core._media",
+      "is_well_formed_multihash": "rashid_core._multihash",
+      "links_of": "rashid_core._stac",
+      "newest_profile_version": "rashid_core._profile",
+      "parse_rfc3339": "rashid_core._stac",
+      "profile_uri": "rashid_core._profile",
+      "profile_version": "rashid_core._profile",
+      "profile_version_key": "rashid_core._profile",
+      "roles_of": "rashid_core._stac",
+      "spec_commit": "rashid_core._profile"
+    },
     "signatures": {
+      "CatalogGraph": "(root_path: 'Path', nodes: 'dict[PurePosixPath, Node]' = <factory>, dir_listing: 'dict[PurePosixPath, set[str]]' = <factory>, base_url: 'str | None' = None, _translation_roots: 'list[Node] | None' = None, _by_kinds: 'dict[frozenset[Kind], list[Node]]' = <factory>, _parents: 'dict[tuple[PurePosixPath, Kind], Node | None]' = <factory>, _children: 'dict[PurePosixPath, list[Node]] | None' = None, _items: 'dict[PurePosixPath, list[Node]] | None' = None) -> None",
+      "ExpectedLink": "(rel: 'str', target: 'Node', href: 'str', type: 'str') -> None",
+      "LocalOnlyReader": "(graph: 'CatalogGraph') -> 'None'",
+      "Node": "(path: 'PurePosixPath', abs_path: 'Path', kind: 'Kind', id: 'str | None', data: 'dict[str, Any]', parse_error: 'str | None' = None) -> None",
+      "Report": "(findings: 'list[Finding]' = <factory>, files_checked: 'int' = 0, declared_profile: 'str | None' = None, passes: 'tuple[str, ...]' = ()) -> None",
+      "RulesConfig": "(disabled: 'frozenset[str]' = frozenset(), severity_overrides: 'dict[str, Severity]' = <factory>) -> None",
       "ValidationOptions": "(*, config: 'RulesConfig | None' = None, rules: 'Sequence[Rule] | None' = None, structural: 'bool' = True, structural_validator: '_Validator | None' = None, extensions: 'bool' = True, schema: 'bool' = False, schema_validator: '_Validator | None' = None, schema_allow_network: 'bool' = False, schema_map: 'Mapping[str, dict[str, Any]] | None' = None, data: 'bool' = True, data_validator: 'DataValidator | None' = None, data_reader_factory: 'DataReaderFactory | None' = None, live: 'bool | None' = None, live_prober: 'LiveProber | None' = None, live_base_url: 'str | None' = None, fetcher: 'Fetcher | None' = None, max_documents: 'int' = 10000) -> None",
       "bundled_profile_versions": "() -> 'tuple[str, ...]'",
       "canonical_spdx_id": "(value: 'object') -> 'str | None'",
       "decode_multihash": "(value: 'object') -> 'tuple[int, bytes] | None'",
       "encode_multihash": "(code: 'int', digest: 'bytes') -> 'str'",
+      "expected_links": "(graph: 'CatalogGraph', node: 'Node') -> 'tuple[ExpectedLink, ...]'",
       "has_cog": "(node: 'Node') -> 'bool'",
+      "is_absolute_href": "(href: 'str') -> 'bool'",
       "is_cog_media_type": "(value: 'object') -> 'bool'",
       "is_well_formed_multihash": "(value: 'object') -> 'bool'",
       "links_of": "(node: 'Node') -> 'list[dict[str, Any]]'",
@@ -40,7 +84,7 @@
       "spec_commit": "() -> 'str | None'"
     }
   },
-  "rashid": {
+  "rashid_core": {
     "exports": [
       "CHECKS",
       "CheckInfo",
@@ -57,6 +101,21 @@
       "validate_schema",
       "validate_structural"
     ],
+    "modules": {
+      "CheckInfo": "rashid_core.registry",
+      "Finding": "rashid_core.model",
+      "Report": "rashid_core.report",
+      "RuleSummary": "rashid_core.report",
+      "RulesConfig": "rashid_core.config",
+      "Severity": "rashid_core.model",
+      "ValidationOptions": "rashid_core.runner",
+      "describe": "rashid_core.registry",
+      "validate": "rashid_core.runner",
+      "validate_data": "rashid_core.data",
+      "validate_live": "rashid_core.live",
+      "validate_schema": "rashid_core.schema",
+      "validate_structural": "rashid_core.structural"
+    },
     "signatures": {
       "CheckInfo": "(id: 'str', description: 'str', severity: 'Severity', spec_ids: 'tuple[str, ...]' = (), stage: 'PassName' = 'metadata', enables_pass: 'bool' = True, spec_note: 'str | None' = None) -> None",
       "Finding": "(rule_id: 'str', severity: 'Severity', message: 'str', path: 'str', object_id: 'str | None' = None, json_pointer: 'str | None' = None, fix_hint: 'str | None' = None, expected: 'Any | None' = None, actual: 'Any | None' = None, data: 'dict[str, Any] | None' = None) -> None",

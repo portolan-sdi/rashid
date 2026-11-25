@@ -30,15 +30,15 @@ def test_parse_importtime_sorts_by_cumulative_time(profile: ModuleType) -> None:
     stderr = "\n".join(
         [
             "import time: self [us] | cumulative | imported package",
-            "import time:       437 |      34470 |       rashid._store",
-            "import time:       326 |      93989 | rashid",
+            "import time:       437 |      34470 |       rashid_core._store",
+            "import time:       326 |      93989 | rashid_core",
             "noise",
             "import time:      1351 |      13630 |         urllib.request",
         ]
     )
     assert profile.parse_importtime(stderr) == [
-        (93989, 326, "rashid"),
-        (34470, 437, "rashid._store"),
+        (93989, 326, "rashid_core"),
+        (34470, 437, "rashid_core._store"),
         (13630, 1351, "urllib.request"),
     ]
 
@@ -142,6 +142,6 @@ def test_import_mode_names_the_cli_total(
 ) -> None:
     assert profile.main(["metadata", "--mode", "import"]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert out[0].startswith("# import rashid.cli: ")
+    assert out[0].startswith("# import rashid_core.cli: ")
     assert out[1].split() == ["cumulative", "ms", "self", "ms", "module"]
-    assert out[2].split()[-1] == "rashid.cli"
+    assert out[2].split()[-1] == "rashid_core.cli"

@@ -42,7 +42,7 @@ repos:
         # misspellings, San Francisco's neighborhood names among them.
         exclude: >
           (?x)^(
-            src/rashid/_schemas/
+            src/rashid_core/_schemas/
             |tests/fixtures/reference-catalog/
             |tests/fixtures/profile-examples/
             |tests/fixtures/requirements\.yaml$
@@ -71,15 +71,15 @@ repos:
       - id: jscpd
         name: duplicate code (jscpd, baseline-gated)
         # renovate: datasource=npm depName=jscpd
-        entry: uvx jscpd@5.2.1 src/rashid tests --baseline .jscpd-baseline.json --fail-on-new-clones 0
+        entry: uvx jscpd@5.2.1 src/rashid_core tests --baseline .jscpd-baseline.json --fail-on-new-clones 0
         language: system
-        files: '^(src/rashid/.*\.py|tests/.*\.py|\.jscpd(-baseline)?\.json)$'
+        files: '^(src/rashid_core/.*\.py|tests/.*\.py|\.jscpd(-baseline)?\.json)$'
         pass_filenames: false
         stages: [pre-commit]
 
       - id: bandit
         name: bandit (security)
-        entry: uv run bandit -r src/rashid -c pyproject.toml
+        entry: uv run bandit -r src/rashid_core -c pyproject.toml
         language: system
         pass_filenames: false
         stages: [pre-push]

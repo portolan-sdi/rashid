@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from rashid import _trace, validate
-from rashid.api import ValidationOptions
-from rashid.cli import main
+from rashid_core import _trace, validate
+from rashid_core.api import ValidationOptions
+from rashid_core.cli import main
 from tests._https import HttpsServer, Route
 from tests.conftest import CatalogBuilder, mutate_json, nest_items_under_organizing_catalog
 

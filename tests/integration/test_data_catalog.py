@@ -8,7 +8,7 @@ data pass cleanly; each test then mutates one metadata field and asserts the one
 finding it should raise. Byte-structure rules (COG validity, spatial ordering,
 statistics) are covered in ``test_data_storage``.
 
-Needs the ``rashid[data]`` extra; skips without it. Fully local — no network.
+Needs the ``rashid-core[data]`` extra; skips without it. Fully local — no network.
 """
 
 from __future__ import annotations
@@ -20,17 +20,17 @@ from typing import Any
 
 import pytest
 
-from rashid import ValidationOptions
+from rashid_core import ValidationOptions
 
 pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
-from rashid import validate
-from rashid.catalog import CatalogGraph
-from rashid.data import validate_data
-from rashid.model import Severity
-from rashid.registry import DAT_CHECKSUM, DAT_CONSISTENCY, DAT_FORMAT, DAT_ORDERING, DAT_SIZE
+from rashid_core import validate
+from rashid_core.catalog import CatalogGraph
+from rashid_core.data import validate_data
+from rashid_core.ids import DAT_CHECKSUM, DAT_CONSISTENCY, DAT_FORMAT, DAT_ORDERING, DAT_SIZE
+from rashid_core.model import Severity
 from tests.conftest import CatalogBuilder, mutate_json, thumbnail_asset
 from tests.integration import _data_assets as assets
 

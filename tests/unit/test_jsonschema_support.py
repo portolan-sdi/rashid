@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid._jsonschema import _GEOJSON_BASE, _STAC_BASE, SchemaError, describe, stac_registry
+from rashid_core._jsonschema import _GEOJSON_BASE, STAC_BASE, SchemaError, describe, stac_registry
 
 pytestmark = pytest.mark.unit
 
@@ -16,7 +16,7 @@ def test_registry_serves_the_stac_roots() -> None:
         "collection-spec/json-schema/collection.json",
         "item-spec/json-schema/item.json",
     ):
-        assert registry.contents(f"{_STAC_BASE}{path}")["$id"] == f"{_STAC_BASE}{path}"
+        assert registry.contents(f"{STAC_BASE}{path}")["$id"] == f"{STAC_BASE}{path}"
 
 
 def test_registry_serves_the_geojson_schemas() -> None:
@@ -29,7 +29,7 @@ def test_registry_serves_the_geojson_schemas() -> None:
 def test_registry_normalizes_malformed_ids() -> None:
     """Upstream common.json declares a malformed $id; the registry must key it
     (and rebase its relative $refs) on the canonical retrieval URL instead."""
-    url = f"{_STAC_BASE}item-spec/json-schema/common.json"
+    url = f"{STAC_BASE}item-spec/json-schema/common.json"
     assert stac_registry().contents(url)["$id"] == url
 
 

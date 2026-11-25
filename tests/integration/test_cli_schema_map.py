@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from rashid import RulesConfig, ValidationOptions, _trace, validate
-from rashid._profile import bundled_profile_versions, profile_uri
-from rashid.cli import SchemaMapping, main
+from rashid_core import RulesConfig, ValidationOptions, _trace, validate
+from rashid_core._profile import bundled_profile_versions, profile_uri
+from rashid_core.cli import SchemaMapping, main
 from tests._https import HttpsServer, Route
 from tests.conftest import PORTOLAN_URI, CatalogBuilder
 

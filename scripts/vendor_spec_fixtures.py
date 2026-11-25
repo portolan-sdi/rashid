@@ -11,14 +11,14 @@ fixtures, and records the spec commit they came from in ``SPEC_REF``:
 
 - ``tests/fixtures/reference-catalog/`` — the JSON and Markdown of the reference
   catalog, binaries stripped (rashid validates metadata, never asset bytes).
-- ``src/rashid/_schemas/portolan/<vX.Y.Z>/schema.json`` — every published
+- ``src/rashid_core/_schemas/portolan/<vX.Y.Z>/schema.json`` — every published
   profile schema version, discovered from git tags, never hardcoded. These ship in
   the wheel: the schema pass validates against them offline.
 - ``tests/fixtures/draft-profile-schema.json`` — the profile schema on spec main,
   used only by tests for an unreleased catalog URI. It never ships in the wheel.
 - ``tests/fixtures/profile-examples/`` — the profile's own hand-authored STAC
   example objects (the micro-cases its ``check-portolan`` runs).
-- ``src/rashid/_schemas/extension-registry.json`` — the profile's normative
+- ``src/rashid_core/_schemas/extension-registry.json`` — the profile's normative
   registry of STAC extensions (``stac/README.md``), parsed out of the Markdown
   table into a name-to-URI map so ``PTL-CNF-004`` compares versions at runtime
   without parsing prose.
@@ -28,7 +28,7 @@ fixtures, and records the spec commit they came from in ``SPEC_REF``:
   against.
 - ``tests/fixtures/spatial-metric-vectors.json`` — the test vectors of the
   incubating spatial-order method, which ``PTL-DAT-006`` reproduces.
-- ``src/rashid/_schemas/spec-ref.json`` — the spec commit, as ``SPEC_REF``
+- ``src/rashid_core/_schemas/spec-ref.json`` — the spec commit, as ``SPEC_REF``
   records it, shipped in the wheel for ``rashid --version`` and the JSON report.
 
 Nothing here assumes a single schema version: the schema set is enumerated from
@@ -56,7 +56,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
-SCHEMAS_ROOT = REPO_ROOT / "src" / "rashid" / "_schemas"
+SCHEMAS_ROOT = REPO_ROOT / "src" / "rashid_core" / "_schemas"
 BUNDLED_SCHEMAS = SCHEMAS_ROOT / "portolan"
 EXTENSION_REGISTRY_DEST = SCHEMAS_ROOT / "extension-registry.json"
 SPEC_REF_DEST = SCHEMAS_ROOT / "spec-ref.json"

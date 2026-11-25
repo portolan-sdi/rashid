@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import ValidationOptions, validate
+from rashid_core import ValidationOptions, validate
 from tests.conftest import CatalogBuilder, mutate_json, rule_ids
 
 pytestmark = pytest.mark.integration

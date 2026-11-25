@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import _profile
-from rashid.schema import DEFAULT_SCHEMA_URI, bundled_schema
+from rashid_core import _profile
+from rashid_core.schema import DEFAULT_SCHEMA_URI, bundled_schema
 
 pytestmark = pytest.mark.unit
 
@@ -57,7 +57,7 @@ def test_the_spec_commit_matches_spec_ref() -> None:
 def test_version_lists_the_bundled_profiles_and_the_spec_commit() -> None:
     from click.testing import CliRunner
 
-    from rashid.cli import main
+    from rashid_core.cli import main
 
     result = CliRunner().invoke(main, ["--version"])
     assert result.exit_code == 0

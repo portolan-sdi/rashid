@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from rashid import RulesConfig, Severity, ValidationOptions, validate
-from rashid.cli import main
+from rashid_core import RulesConfig, Severity, ValidationOptions, validate
+from rashid_core.cli import main
 from tests.conftest import CatalogBuilder, findings_for, rule_ids
 
 pytestmark = pytest.mark.integration
@@ -194,7 +194,7 @@ def test_validation_options_are_frozen_and_keyword_only() -> None:
 
     import pytest
 
-    from rashid.api import ValidationOptions as PublicOptions
+    from rashid_core.api import ValidationOptions as PublicOptions
 
     assert PublicOptions is ValidationOptions
     options = ValidationOptions(data=False)

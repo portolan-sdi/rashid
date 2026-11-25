@@ -7,6 +7,12 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 
+[manifest]
+members = [
+    "rashid",
+    "rashid-core",
+]
+
 [[package]]
 name = "affine"
 version = "3.0.1"
@@ -2481,6 +2487,18 @@ wheels = [
 [[package]]
 name = "rashid"
 version = "0.4.0"
+source = { editable = "meta/rashid" }
+dependencies = [
+    { name = "rashid-core", extra = ["data"] },
+]
+
+[package.metadata]
+requires-dist = [{ name = "rashid-core", extras = ["data"], editable = "." }]
+provides-extras = ["data"]
+
+[[package]]
+name = "rashid-core"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -2489,15 +2507,21 @@ dependencies = [
     { name = "jsonschema-specifications" },
     { name = "obstore" },
     { name = "orjson" },
+    { name = "referencing" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
+]
+
+[package.optional-dependencies]
+data = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pyarrow" },
     { name = "pyproj", version = "3.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "pyproj", version = "3.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "rasterio", version = "1.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "referencing" },
     { name = "rio-cogeo" },
     { name = "shapely" },
-    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 
 [package.dev-dependencies]
@@ -2515,6 +2539,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
+    { name = "rashid" },
     { name = "ruff" },
     { name = "trustme" },
     { name = "vulture" },
@@ -2526,14 +2551,15 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.26" },
     { name = "jsonschema-rs", specifier = ">=0.58" },
     { name = "jsonschema-specifications", specifier = ">=2023.3.6" },
+    { name = "numpy", marker = "extra == 'data'", specifier = ">=1.24" },
     { name = "obstore", specifier = ">=0.9" },
     { name = "orjson", specifier = ">=3.11" },
-    { name = "pyarrow", specifier = ">=21" },
-    { name = "pyproj", specifier = ">=3.7.1" },
-    { name = "rasterio", specifier = ">=1.4.4" },
+    { name = "pyarrow", marker = "extra == 'data'", specifier = ">=21" },
+    { name = "pyproj", marker = "extra == 'data'", specifier = ">=3.7.1" },
+    { name = "rasterio", marker = "extra == 'data'", specifier = ">=1.4.4" },
     { name = "referencing", specifier = ">=0.30" },
-    { name = "rio-cogeo", specifier = ">=6" },
-    { name = "shapely", specifier = ">=2.1" },
+    { name = "rio-cogeo", marker = "extra == 'data'", specifier = ">=6" },
+    { name = "shapely", marker = "extra == 'data'", specifier = ">=2.1" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 provides-extras = ["data"]
@@ -2553,6 +2579,7 @@ dev = [
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-cov", specifier = ">=7" },
     { name = "pytest-xdist", specifier = ">=3.8" },
+    { name = "rashid", editable = "meta/rashid" },
     { name = "ruff", specifier = ">=0.17.3" },
     { name = "trustme", specifier = ">=1.2.1" },
     { name = "vulture", specifier = ">=2.16" },

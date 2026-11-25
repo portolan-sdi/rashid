@@ -30,7 +30,7 @@ def test_windows_partition_display_uses_posix_separators(
 ) -> None:
     from pathlib import PureWindowsPath
 
-    from rashid.data import _files
+    from rashid_core.data.formats import _files
 
     directory = _catalog(tmp_path, **{"partition:glob": "parts/*.parquet"})
     match = r"parts\bad.parquet"

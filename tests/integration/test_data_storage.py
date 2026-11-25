@@ -1,6 +1,6 @@
 """Cloud-native storage rules: COG validity/statistics and GeoParquet layout.
 
-Needs the ``rashid[data]`` extra; skips without it. Drives the check functions
+Needs the ``rashid-core[data]`` extra; skips without it. Drives the check functions
 directly on generated assets — a spec-compliant asset produces no findings, and
 each non-compliant variant raises exactly the rule it violates (formats.md:30/64/
 75/91/95).
@@ -27,15 +27,16 @@ import pyarrow.parquet as pq
 from click.testing import CliRunner
 from pyproj import CRS
 
-import rashid.data._files as file_owner
-import rashid.data.checks as checks
-from rashid.catalog import Node
-from rashid.cli import main
-from rashid.data import DataDefect, DataResults, geoparquet, partitions, raster
-from rashid.data._files import AssetFiles
-from rashid.data.reader import Locator
-from rashid.model import Severity
-from rashid.registry import (
+import rashid_core.data.formats._files as file_owner
+import rashid_core.data.formats.checks as checks
+from rashid_core.catalog import Node
+from rashid_core.cli import main
+from rashid_core.data import checks as core_checks
+from rashid_core.data._results import DataDefect, DataResults
+from rashid_core.data.formats import geoparquet, partitions, raster
+from rashid_core.data.formats._files import AssetFiles
+from rashid_core.data.reader import Locator
+from rashid_core.ids import (
     DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
@@ -54,6 +55,7 @@ from rashid.registry import (
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
 )
+from rashid_core.model import Severity
 from tests.conftest import CatalogBuilder, resolve_pointer
 from tests.integration import _data_assets as assets
 
@@ -1836,7 +1838,7 @@ def test_plain_parquet_is_not_vector(tmp_path: Path) -> None:
 
 def _described(node: Node, **asset_fields: object) -> list:
     asset = {"href": "./data.parquet", "roles": ["data"], **asset_fields}
-    return geoparquet.check_column_descriptions(node, "data", asset)
+    return core_checks.check_column_descriptions(node, "data", asset)
 
 
 def test_columns_without_descriptions_flag_dat_020() -> None:
@@ -1884,7 +1886,7 @@ def test_assetless_partitioned_collection_gets_dat_020(tmp_path: Path) -> None:
     node = _partitioned_collection(tmp_path, glob="s3://bucket/parts/*.parquet")
     node.data["table:columns"] = [{"name": "value", "type": "int64"}]
     node.data["assets"] = {"visual": {"href": "./b.pmtiles", "roles": ["visual"]}}
-    defects = geoparquet.check_collection_column_descriptions(node)
+    defects = core_checks.check_collection_column_descriptions(node)
     assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
     assert defects[0].json_pointer == "/table:columns"
     assert "1 of 1" in defects[0].message
@@ -1897,14 +1899,14 @@ def test_partitioned_collection_with_a_data_asset_is_left_to_the_asset_check(
     node = _partitioned_collection(tmp_path)
     node.data["table:columns"] = [{"name": "value", "type": "int64"}]
     node.data["assets"] = {"data": {"href": "./d.parquet", "roles": ["data"]}}
-    assert geoparquet.check_collection_column_descriptions(node) == []
+    assert core_checks.check_collection_column_descriptions(node) == []
 
 
 def test_an_unpartitioned_collection_without_a_data_asset_gets_dat_020() -> None:
     # PORTO-FMT-077 binds the columns a collection declares on itself, even
     # when its items, not a collection asset, carry the files.
     bare = [{"name": "value", "type": "int64"}]
-    defects = geoparquet.check_collection_column_descriptions(
+    defects = core_checks.check_collection_column_descriptions(
         _tabular_collection(**{"table:columns": bare})
     )
     assert [d.rule_id for d in defects] == [DAT_COLUMN_DESCRIPTIONS]
@@ -1912,7 +1914,7 @@ def test_an_unpartitioned_collection_without_a_data_asset_gets_dat_020() -> None
 
 
 def test_described_collections_and_items_get_no_collection_finding(tmp_path: Path) -> None:
-    check = geoparquet.check_collection_column_descriptions
+    check = core_checks.check_collection_column_descriptions
     described = _partitioned_collection(tmp_path)
     described.data["table:columns"] = _COLUMNS
     assert check(described) == []
@@ -1951,7 +1953,7 @@ def test_non_data_roles_carry_no_column_finding() -> None:
     columns = [{"name": "value", "type": "int64"}]
     node = _tabular_collection(**{"table:columns": columns})
     asset = {"href": "./x.parquet", "roles": ["metadata"]}
-    assert geoparquet.check_column_descriptions(node, "x", asset) == []
+    assert core_checks.check_column_descriptions(node, "x", asset) == []
 
 
 def test_non_data_roles_are_not_vector(tmp_path: Path) -> None:

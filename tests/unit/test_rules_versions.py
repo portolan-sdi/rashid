@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from rashid.cli import main
+from rashid_core.cli import main
 from tests._https import HttpsServer, Route
 from tests.conftest import CatalogBuilder, mutate_json
 

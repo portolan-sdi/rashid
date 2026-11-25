@@ -3,15 +3,15 @@
 The structural pass validates every object against the STAC core schemas for
 its ``type``; the extension pass validates it against the schemas of the STAC
 extensions it declares. Both sets ship in the wheel
-(``src/rashid/_schemas/``) so the passes run offline; this script is the only
+(``src/rashid_core/_schemas/``) so the passes run offline; this script is the only
 way they get there. It crawls the transitive ``$ref`` closure from every root
 and writes each file byte-identical to upstream — the ``$id`` normalization
-that resolution needs happens at load time in :mod:`rashid._jsonschema`, never
+that resolution needs happens at load time in :mod:`rashid_core._jsonschema`, never
 on disk, so ``--check`` stays an honest diff against upstream.
 
 The core roots are the three STAC 1.1.0 schemas, fixed here. The extension
 roots are **not** listed here: they are read from
-``src/rashid/_schemas/extension-registry.json``, which
+``src/rashid_core/_schemas/extension-registry.json``, which
 ``scripts/vendor_spec_fixtures.py`` syncs from the Portolan STAC profile. The
 profile's extension registry is the single source of truth for which
 extensions Portolan approves and which version of each it pins, so pinning a
@@ -76,7 +76,7 @@ _PROFILE_URI = re.compile(
 # serves either way. Named so an operator reading their logs can find us.
 _USER_AGENT = "rashid-schema-vendor (+https://www.portolan-sdi.org/)"
 
-_SCHEMAS_DIR = Path(__file__).resolve().parent.parent / "src" / "rashid" / "_schemas"
+_SCHEMAS_DIR = Path(__file__).resolve().parent.parent / "src" / "rashid_core" / "_schemas"
 _GEOJSON_VENDOR_DIR = _SCHEMAS_DIR / "geojson"
 _EXTENSION_VENDOR_DIR = _SCHEMAS_DIR / "extensions"
 _REGISTRY_FILE = _SCHEMAS_DIR / "extension-registry.json"

@@ -1,6 +1,6 @@
 """Byte-check logic — fake readers with in-memory bytes, no network.
 
-Needs the ``rashid[data]`` extra (importing :mod:`rashid.data.checks` pulls the
+Needs the ``rashid-core[data]`` extra (importing :mod:`rashid_core.data.formats.checks` pulls the
 geospatial stack), so it lives under integration and skips when the extra is
 absent. Covers the checksum, size, and format checks with synthetic bytes plus
 the PMTiles header parse and the reprojection helper; the parquet-geo and COG
@@ -25,15 +25,17 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pyproj import CRS, Transformer
 
-import rashid.data.checks as checks
-from rashid import _trace
-from rashid.catalog import Node
-from rashid.data import DataDefect, DataResults, geoparquet, mirror, raster, spatial, storage
-from rashid.data._files import AssetFiles
-from rashid.data.reader import Locator
-from rashid.model import Severity
-from rashid.registry import DAT_CHECKSUM, DAT_COG, DAT_CONSISTENCY, DAT_FORMAT, DAT_SIZE
-from rashid.rules._common import is_source_asset
+import rashid_core.data.formats.checks as checks
+from rashid_core import _trace
+from rashid_core._stac import is_source_asset
+from rashid_core.catalog import Node
+from rashid_core.data import storage
+from rashid_core.data._results import DataDefect, DataResults
+from rashid_core.data.formats import geoparquet, mirror, raster, spatial
+from rashid_core.data.formats._files import AssetFiles
+from rashid_core.data.reader import Locator
+from rashid_core.ids import DAT_CHECKSUM, DAT_COG, DAT_CONSISTENCY, DAT_FORMAT, DAT_SIZE
+from rashid_core.model import Severity
 
 # --- the shared test vectors -------------------------------------------------
 

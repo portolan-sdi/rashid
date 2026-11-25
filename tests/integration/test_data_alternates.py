@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from rashid.catalog import CatalogGraph
-from rashid.cli import main
-from rashid.data import _reads_remote
-from rashid.data.reader import FilesystemHttpReader
+from rashid_core.catalog import CatalogGraph
+from rashid_core.cli import main
+from rashid_core.data import _reads_remote
+from rashid_core.data.reader import FilesystemHttpReader
 from tests._https import HttpsServer, Route
 from tests.integration import _data_assets as assets
 from tests.integration._owner_catalog import _catalog, _declare

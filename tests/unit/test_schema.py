@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from rashid import RulesConfig, ValidationOptions, _store, validate, validate_schema
-from rashid._jsonschema import SchemaError, fetch_schema
-from rashid.catalog import CatalogGraph
-from rashid.model import Severity
-from rashid.schema import DEFAULT_SCHEMA_URI, _schema_uri_for, default_validator
+from rashid_core import RulesConfig, ValidationOptions, _store, validate, validate_schema
+from rashid_core._jsonschema import SchemaError, fetch_schema
+from rashid_core.catalog import CatalogGraph
+from rashid_core.model import Severity
+from rashid_core.schema import DEFAULT_SCHEMA_URI, _schema_uri_for, default_validator
 from tests._https import HttpsServer, Route
 from tests.conftest import (
     PORTOLAN_URI,
@@ -91,7 +91,7 @@ def test_validator_failure_is_a_single_warning(catalog: CatalogBuilder) -> None:
 def test_missing_package_is_a_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid.schema as schema
+    import rashid_core.schema as schema
 
     def raise_import(uri: str, allow_network: bool = False) -> None:  # noqa: ARG001 - replacement schema factory accepts URI and allow_network by keyword
         raise ImportError("No module named 'jsonschema'")
@@ -106,7 +106,7 @@ def test_missing_package_is_a_warning(
 def test_schema_fetch_failure_is_a_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid.schema as schema
+    import rashid_core.schema as schema
 
     def raise_fetch(uri: str, allow_network: bool = False) -> None:  # noqa: ARG001 - replacement schema factory accepts URI and allow_network by keyword
         raise OSError("connection refused")
@@ -121,7 +121,7 @@ def test_schema_fetch_failure_is_a_warning(
 def test_default_validator_used_when_none(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid.schema as schema
+    import rashid_core.schema as schema
 
     monkeypatch.setattr(
         schema, "default_validator", lambda uri, allow_network=False: lambda data: []
@@ -247,7 +247,7 @@ def test_remote_schema_fetch_sends_a_named_user_agent(https_server: HttpsServer)
     assert fetched == {"$id": "x"}
     (seen,) = https_server.seen
     assert seen.headers["user-agent"] == (
-        f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
+        f"rashid/{version('rashid-core')} (+https://github.com/portolan-sdi/rashid)"
     )
 
 
@@ -318,7 +318,7 @@ def test_bundled_schema_is_used_without_network(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_bundled_versions_are_discovered() -> None:
-    from rashid.schema import bundled_schema, bundled_schema_versions
+    from rashid_core.schema import bundled_schema, bundled_schema_versions
 
     versions = bundled_schema_versions()
     assert versions, "wheel bundles no profile schema"

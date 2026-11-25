@@ -6,9 +6,9 @@ from importlib import import_module
 
 import pytest
 
-from rashid import _store, validate
-from rashid.api import ValidationOptions
-from rashid.schema import validator_from_schema
+from rashid_core import _store, validate
+from rashid_core.api import ValidationOptions
+from rashid_core.schema import validator_from_schema
 from tests._https import HttpsServer, Route
 from tests.conftest import CatalogBuilder
 
@@ -20,9 +20,9 @@ PROJECTION_URI = "https://stac-extensions.github.io/projection/v2.0.0/schema.jso
 def _assert_owner(name: str) -> None:
     # This is a move with unchanged behavior: reversion must fail ownership,
     # while the real-engine assertions below preserve each pass's policy.
-    owner = import_module("rashid._jsonschema")
+    owner = import_module("rashid_core._jsonschema")
     assert hasattr(owner, "SchemaPass"), "the schema-pass shell must have one owner"
-    assert isinstance(import_module(f"rashid.{name}")._PASS, owner.SchemaPass)
+    assert isinstance(import_module(f"rashid_core.{name}")._PASS, owner.SchemaPass)
 
 
 @pytest.mark.parametrize("name", ["structural", "schema", "extensions"])

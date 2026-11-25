@@ -1,0 +1,451 @@
+"""In-memory model of a Portolan catalog's file tree.
+
+The graph owns catalog I/O; rules query its nodes and file helpers.
+STAC objects are raw JSON dicts, not pystac objects, so validation
+observes exactly what is on disk.
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
+from typing import Any, Literal
+from urllib.parse import quote
+
+from rashid_core import _json
+from rashid_core._href import (
+    is_absolute_href,
+    local_path,
+    relative_href,
+    relative_path,
+    self_link_base,
+    structural_prefix,
+)
+
+Kind = Literal["catalog", "collection", "item", "unknown"]
+
+ROOT_CATALOG = PurePosixPath("catalog.json")
+
+
+@dataclass
+class Node:
+    """One STAC object file inside the catalog tree.
+
+    Attributes:
+        path: POSIX path of the JSON file, relative to the catalog root.
+        abs_path: Absolute path on disk.
+        kind: Detected object kind; ``unknown`` when the file cannot be parsed.
+        id: The object's STAC ``id``, when present.
+        data: Raw parsed JSON (empty dict when parsing failed).
+        parse_error: JSON decode failure message, when parsing failed.
+    """
+
+    path: PurePosixPath
+    abs_path: Path
+    kind: Kind
+    id: str | None
+    data: dict[str, Any]
+    parse_error: str | None = None
+
+
+@dataclass(frozen=True)
+class ExpectedLink:
+    """A required structural link to an existing object in the graph."""
+
+    rel: str
+    target: Node
+    href: str
+    type: str
+
+
+def structural_link_type(rel: str) -> str:
+    """Media type required for a structural link relation."""
+    return "application/geo+json" if rel == "item" else "application/json"
+
+
+def required_link_targets(graph: CatalogGraph, node: Node) -> dict[str, Node | None]:
+    """Required ancestor relations, including missing targets on incomplete trees."""
+    root = graph.language_root_of(node)
+    targets = {"root": root}
+    if node is not root:
+        targets["parent"] = graph.parent_of(node)
+    if node.kind == "item":
+        targets["collection"] = graph.enclosing_collection_of(node)
+    return targets
+
+
+def expected_links(graph: CatalogGraph, node: Node) -> tuple[ExpectedLink, ...]:
+    """Required links, in root, parent, collection, then contained-object order.
+
+    Hrefs use the graph's URI spelling, including percent-encoded local names.
+    Translation trees have their own root and no containment links between
+    languages. Missing ancestor targets are omitted; validation reports the
+    incomplete tree separately. Unknown objects have no required links.
+    """
+    if node.kind == "unknown":
+        return ()
+    targets = list(required_link_targets(graph, node).items())
+    if node.kind in ("catalog", "collection"):
+        root = graph.language_root_of(node)
+        targets.extend(
+            ("item" if child.kind == "item" else "child", child)
+            for child in graph.children_of(node)
+            if child.kind != "unknown"
+            and child.parse_error is None
+            and graph.language_root_of(child) is root
+        )
+    return tuple(
+        ExpectedLink(
+            rel=rel,
+            target=target,
+            href=relative_href(str(graph.href_path(node)), str(graph.href_path(target))),
+            type=structural_link_type(rel),
+        )
+        for rel, target in targets
+        if target is not None
+    )
+
+
+def _detect_kind(data: dict[str, Any]) -> Kind:
+    stac_type = data.get("type")
+    if stac_type == "Catalog":
+        return "catalog"
+    if stac_type == "Collection":
+        return "collection"
+    if stac_type == "Feature" and "stac_version" in data:
+        return "item"
+    return "unknown"
+
+
+def _is_within(path: PurePosixPath, prefix: PurePosixPath) -> bool:
+    """True when ``path`` sits at or below the directory ``prefix``.
+
+    Only ever asked about a translation root's directory, which is a real
+    subdirectory: the one file that could make ``prefix`` the catalog root is
+    the root ``catalog.json``, and that is not a translation of itself.
+    """
+    return path.parts[: len(prefix.parts)] == prefix.parts
+
+
+@dataclass
+class CatalogGraph:
+    """The catalog file tree loaded into memory.
+
+    ``nodes`` maps relative POSIX file paths to STAC object nodes.
+    ``dir_listing`` maps every scanned directory (relative POSIX path, ``.``
+    for the root) to the set of filenames it contains, so required-file rules
+    can check existence without touching disk again.
+
+    ``base_url`` is the https URL the tree is published under when the tree
+    was read from there — the URL ``rashid check`` was given. None for a tree
+    read from disk; ``--live-base-url`` reaches the live pass directly.
+
+    :meth:`iter` and the containment queries (:meth:`parent_of`,
+    :meth:`children_of`, :meth:`items_of`) are answered from indexes built on
+    first use, so the graph must not change after :meth:`load`. Without them, each call scans
+    every node, and a catalog of 100,000 items under 100 collections costs
+    tens of millions of path lookups.
+    """
+
+    root_path: Path
+    nodes: dict[PurePosixPath, Node] = field(default_factory=dict)
+    dir_listing: dict[PurePosixPath, set[str]] = field(default_factory=dict)
+    base_url: str | None = None
+    _translation_roots: list[Node] | None = field(default=None, repr=False, compare=False)
+    _by_kinds: dict[frozenset[Kind], list[Node]] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+    _parents: dict[tuple[PurePosixPath, Kind], Node | None] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+    _children: dict[PurePosixPath, list[Node]] | None = field(
+        default=None, repr=False, compare=False
+    )
+    _items: dict[PurePosixPath, list[Node]] | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def root(self) -> Node | None:
+        """The root ``catalog.json`` node, when present and parseable."""
+        node = self.nodes.get(ROOT_CATALOG)
+        if node is not None and node.kind == "catalog":
+            return node
+        return None
+
+    def published_base(self) -> str | None:
+        """The URL prefix the root catalog's ``self`` link says the tree is served under.
+
+        See :func:`self_link_base`. This is the catalog's own claim about its
+        location; ``base_url`` is the caller's. A live pass that is given no
+        base falls back to this one, and one given both compares them.
+        """
+        return self_link_base(self.root)
+
+    def translation_roots(self) -> list[Node]:
+        """The root catalogs of the catalog's alternate-language trees.
+
+        core.md, Alternate-Language Trees: a catalog may carry its metadata in
+        more than one language, as one tree of STAC objects per language joined
+        by ``alternate`` links. Such a tree translates the catalog rather than
+        extending it, so it hangs off the root catalog's ``alternate`` links
+        and never off its ``child`` links. Following those links is the only
+        way to find it, since the walk that builds the graph sees a translation
+        as an ordinary directory of STAC files.
+
+        Only the root catalog's own ``alternate`` links count, and only those
+        declaring ``application/json``. ``alternate`` also covers other media
+        types, so the type is what separates a translation from an HTML
+        rendering of the same object.
+        """
+        if self._translation_roots is None:
+            self._translation_roots = self._find_translation_roots()
+        return self._translation_roots
+
+    def _find_translation_roots(self) -> list[Node]:
+        root = self.root
+        if root is None:
+            return []
+        raw = root.data.get("links")
+        found: list[Node] = []
+        for link in raw if isinstance(raw, list) else []:
+            if not isinstance(link, dict):
+                continue
+            if link.get("rel") != "alternate" or link.get("type") != "application/json":
+                continue
+            href = link.get("href")
+            if not isinstance(href, str):
+                continue
+            target = self.resolve_link(root, href)
+            if target is not None and target.kind == "catalog" and target is not root:
+                found.append(target)
+        return found
+
+    def language_root_of(self, node: Node) -> Node | None:
+        """The root catalog of the language tree ``node`` sits in.
+
+        A node inside an alternate-language tree answers with that tree's root
+        catalog. Every other node answers with the catalog's own root, so a
+        caller can compare two nodes' answers to tell whether they share a
+        language tree.
+        """
+        best: Node | None = None
+        for translation in self.translation_roots():
+            prefix = translation.path.parent
+            if not _is_within(node.path, prefix):
+                continue
+            if best is None or len(prefix.parts) > len(best.path.parent.parts):
+                best = translation
+        return best if best is not None else self.root
+
+    @classmethod
+    def load(cls, root_path: Path) -> CatalogGraph:
+        """Walk ``root_path`` and load every STAC object file.
+
+        ``catalog.json`` and ``collection.json`` files are always loaded
+        (a parse failure becomes a ``parse_error`` node). Any other ``.json``
+        file is loaded and kept only if it is a STAC item; non-item JSON
+        (style files, arbitrary sidecars) is ignored. Hidden directories are
+        skipped.
+        """
+        graph = cls(root_path=root_path.resolve())
+        for dirpath, dirnames, filenames in os.walk(graph.root_path):
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+            rel_dir = PurePosixPath(Path(dirpath).relative_to(graph.root_path).as_posix())
+            graph.dir_listing[rel_dir] = set(filenames)
+            for filename in sorted(filenames):
+                if not filename.endswith(".json"):
+                    continue
+                abs_path = Path(dirpath) / filename
+                rel = (
+                    rel_dir / filename if rel_dir != PurePosixPath(".") else PurePosixPath(filename)
+                )
+                structural = filename in ("catalog.json", "collection.json")
+                try:
+                    data = _json.loads(abs_path.read_text(encoding="utf-8"))
+                except (ValueError, UnicodeDecodeError) as exc:
+                    if structural:
+                        graph.nodes[rel] = Node(
+                            path=rel,
+                            abs_path=abs_path,
+                            kind="unknown",
+                            id=None,
+                            data={},
+                            parse_error=str(exc),
+                        )
+                    continue
+                if not isinstance(data, dict):
+                    if structural:
+                        graph.nodes[rel] = Node(
+                            path=rel,
+                            abs_path=abs_path,
+                            kind="unknown",
+                            id=None,
+                            data={},
+                            parse_error="top-level JSON value is not an object",
+                        )
+                    continue
+                kind = _detect_kind(data)
+                if not structural and kind != "item":
+                    continue
+                raw_id = data.get("id")
+                graph.nodes[rel] = Node(
+                    path=rel,
+                    abs_path=abs_path,
+                    kind=kind,
+                    id=raw_id if isinstance(raw_id, str) else None,
+                    data=data,
+                )
+        return graph
+
+    def iter(self, *kinds: Kind) -> Iterator[Node]:
+        """Yield nodes of the given kinds (all nodes when none given), sorted by path."""
+        key = frozenset(kinds)
+        selected = self._by_kinds.get(key)
+        if selected is None:
+            selected = self._by_kinds[key] = [
+                self.nodes[path]
+                for path in sorted(self.nodes)
+                if not kinds or self.nodes[path].kind in kinds
+            ]
+        yield from selected
+
+    def file_exists(self, rel_path: PurePosixPath) -> bool:
+        """True when the walk saw a file at this relative path."""
+        return rel_path.name in self.dir_listing.get(rel_path.parent, set())
+
+    def read_text(self, rel_path: PurePosixPath) -> str | None:
+        """UTF-8 text for a known file, or None when missing or unreadable."""
+        if not self.file_exists(rel_path):
+            return None
+        try:
+            return (self.root_path / rel_path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    def resolve_link(self, from_node: Node, href: str) -> Node | None:
+        """Resolve a relative href against the file tree.
+
+        Returns the target node, or None when the href is absolute, escapes
+        the catalog root, or does not land on a known STAC object file.
+        """
+        resolved = self.local_path(from_node, href)
+        return self.nodes.get(resolved) if resolved is not None else None
+
+    def resolve_path(self, from_node: Node, href: str) -> PurePosixPath | None:
+        """Normalize a relative href without decoding its document identity."""
+        resolved = relative_path(str(self.href_path(from_node).parent), href)
+        return PurePosixPath(resolved) if resolved is not None else None
+
+    def href_path(self, node: Node) -> PurePosixPath:
+        """URI spelling of a local filename or an already-encoded mirror name."""
+        return (
+            node.path
+            if self.base_url is not None
+            else PurePosixPath(quote(str(node.path), safe="/"))
+        )
+
+    def local_path(self, from_node: Node, href: str) -> PurePosixPath | None:
+        """Path in the local tree: decoded filenames, or encoded mirror names."""
+        if self.base_url is not None:
+            return self.resolve_path(from_node, href)
+        resolved = local_path(str(self.href_path(from_node).parent), href)
+        return PurePosixPath(resolved) if resolved is not None else None
+
+    def resolve_structural_link(self, node: Node, href: str) -> tuple[bool, Node | None]:
+        """Resolve structural links using the language tree's published prefix."""
+        if not is_absolute_href(href):
+            return True, self.resolve_link(node, href)
+        root = self.language_root_of(node)
+        relative = structural_prefix(href, self_link_base(root))
+        if relative is None:
+            return False, None
+        return True, self.resolve_link(root, relative) if root is not None else None
+
+    def parent_of(self, node: Node) -> Node | None:
+        """The object containing ``node``: the nearest ancestor-directory object.
+
+        For a catalog or collection the search starts at the directory above
+        its own; for an item it starts at its own directory (item JSON may sit
+        directly in the collection directory or in a per-item subdirectory).
+        The root catalog has no parent.
+        """
+        key = (node.path, node.kind)
+        if key not in self._parents:
+            self._parents[key] = self._find_parent(node)
+        return self._parents[key]
+
+    def _find_parent(self, node: Node) -> Node | None:
+        if node.path == ROOT_CATALOG:
+            return None
+        start = node.path.parent
+        if node.kind in ("catalog", "collection"):
+            start = start.parent
+        current = start
+        while True:
+            for name in ("catalog.json", "collection.json"):
+                candidate = self.nodes.get(current / name)
+                if candidate is None and str(current) == ".":
+                    candidate = self.nodes.get(PurePosixPath(name))
+                if candidate is not None and candidate.path != node.path:
+                    return candidate
+            if str(current) == ".":
+                return None
+            current = current.parent
+
+    def enclosing_collection_of(self, node: Node) -> Node | None:
+        """The nearest collection above ``node`` in the containment chain.
+
+        core.md, Core Structure permits a catalog below a collection to
+        organize its items, so the object containing an item is not always
+        the collection the item belongs to. This walks the parent chain past
+        any intermediate catalogs and returns the first collection it finds,
+        or None when no collection encloses ``node``.
+        """
+        current = self.parent_of(node)
+        while current is not None:
+            if current.kind == "collection":
+                return current
+            current = self.parent_of(current)
+        return None
+
+    def children_of(self, node: Node) -> list[Node]:
+        """Objects whose containment parent is ``node``."""
+        if self._children is None:
+            # Built aside and assigned whole: the data pass reads this from
+            # many threads, and none may see a half-filled index.
+            children: dict[PurePosixPath, list[Node]] = {}
+            for n in self.iter():
+                parent = self.parent_of(n)
+                if parent is not None:
+                    children.setdefault(parent.path, []).append(n)
+            self._children = children
+        return list(self._children.get(node.path, [])) if self._owns(node) else []
+
+    def items_of(self, node: Node) -> list[Node]:
+        """The items ``node`` owns, across any catalogs organizing them.
+
+        The containment child of a collection is not always its item:
+        core.md, Core Structure permits a catalog below a collection to group
+        items, so an item can sit any number of levels down. Ownership follows
+        :meth:`enclosing_collection_of`, which stops at the nearest collection,
+        so a nested collection keeps its own items rather than lending them
+        upward.
+        """
+        if self._items is None:
+            # Built aside and assigned whole, as in children_of.
+            items: dict[PurePosixPath, list[Node]] = {}
+            for n in self.iter("item"):
+                collection = self.enclosing_collection_of(n)
+                if collection is not None:
+                    items.setdefault(collection.path, []).append(n)
+            self._items = items
+        return list(self._items.get(node.path, [])) if self._owns(node) else []
+
+    def _owns(self, node: Node) -> bool:
+        """True when ``node`` is this graph's own node, not a copy with its path.
+
+        The indexes are keyed by path, but containment compares nodes by
+        identity, so a node from another graph has no children here.
+        """
+        return self.nodes.get(node.path) is node

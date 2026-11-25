@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import validate
-from rashid.model import Finding, Severity
+from rashid_core import validate
+from rashid_core.model import Finding, Severity
 from tests.conftest import (
     VALID_MULTIHASH,
     CatalogBuilder,
@@ -639,7 +639,7 @@ def test_pmtiles_reference_ignores_other_assets_primary_geometry(
 def test_pmtiles_reference_scanned_once(catalog: CatalogBuilder, reference: str) -> None:
     from unittest.mock import patch
 
-    from rashid.rules import assets
+    from rashid_core.rules import assets
 
     collection = catalog.collection("roads", assets={})
     if reference != "missing":
@@ -699,8 +699,8 @@ def test_pmtiles_item_findings_name_the_item(catalog: CatalogBuilder, organized:
 def test_orphan_pmtiles_item_still_reports_errors(tmp_path) -> None:  # type: ignore[no-untyped-def]
     from pathlib import PurePosixPath
 
-    from rashid.catalog import CatalogGraph, Node
-    from rashid.rules.assets import PMTilesDataRule
+    from rashid_core.catalog import CatalogGraph, Node
+    from rashid_core.rules.assets import PMTilesDataRule
 
     node = Node(
         PurePosixPath("tiles.json"),

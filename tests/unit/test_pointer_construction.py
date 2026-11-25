@@ -105,8 +105,8 @@ def _slash_join(node: ast.AST) -> bool:
 def test_no_handbuilt_pointers_in_src() -> None:
     copies = []
     root = Path(__file__).resolve().parents[2]
-    for path in (root / "src/rashid").rglob("*.py"):
-        if path == root / "src/rashid/model.py":
+    for path in (root / "src/rashid_core").rglob("*.py"):
+        if path == root / "src/rashid_core/model.py":
             continue  # the RFC 6901 encoder owns construction
         copies.extend(
             f"{path.relative_to(root)}:{line}"
