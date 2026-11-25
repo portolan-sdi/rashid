@@ -83,7 +83,7 @@ The following metadata signals identify a geospatial collection:
 
 A geometry column has a type that contains `geometry` or `geography`, or one of these names, in any case: `geometry`, `geom`, `geography`, `geog`, `shape`, or a name that starts with `wkb_`. Esri exports use `Shape`, and GDAL/OGR uses `wkb_geometry`.
 
-A declared column list without a geometry column identifies a tabular collection. The collection is then exempt from the thumbnail requirement. A binary column, such as type `binary` or `byte_array`, can hold WKB geometry. If the list has one, metadata cannot decide, and the rule reports the uncertainty. Set `table:primary_geometry` to decide the question.
+A declared column list without a geometry column identifies a tabular collection. The collection is then exempt from the thumbnail requirement. A binary column, such as type `binary` or `byte_array`, can hold WKB geometry. If the list has one, metadata cannot decide, and the rule reports the uncertainty. Set `table:primary_geometry` to name the geometry column.
 
 The rule's message reports absent geometry evidence only. `PTL-COL-005` answers whether the collection owes items at all, so a structural fault never reaches the reader through a sentence about thumbnails.
 
