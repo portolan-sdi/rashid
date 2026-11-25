@@ -1,10 +1,11 @@
-"""Small helpers in ``rashid.rules._common``."""
+"""Media types and STAC geometry helpers."""
 
 from __future__ import annotations
 
 import pytest
 
-from rashid.rules._common import media_type_essence, names_a_geometry_column
+from rashid._media import media_type_essence
+from rashid._stac import names_a_geometry_column
 
 pytestmark = pytest.mark.unit
 

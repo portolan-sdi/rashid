@@ -39,6 +39,7 @@ import pytest
 
 import rashid.registry as registry
 import tests.unit.test_may_permissions as may_permissions
+from rashid import ids
 from rashid.model import Severity
 from rashid.registry import CHECKS
 
@@ -254,7 +255,7 @@ def test_incubating_requirements_are_enforced_by_incubating_checks() -> None:
 def _constant_aliases() -> dict[str, set[str]]:
     """Check id -> the module-constant names tests may reference it by."""
     aliases: dict[str, set[str]] = {}
-    for name, value in vars(registry).items():
+    for name, value in vars(ids).items():
         if isinstance(value, str) and re.fullmatch(r"PTL-[A-Z]{3}-\d{3}", value):
             aliases.setdefault(value, set()).add(name)
     return aliases

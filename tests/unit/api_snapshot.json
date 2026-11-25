@@ -38,6 +38,24 @@
       "profile_version_key": "(version: 'str') -> 'tuple[int, ...]'",
       "roles_of": "(asset: 'dict[str, Any]') -> 'list[str]'",
       "spec_commit": "() -> 'str | None'"
+    },
+    "modules": {
+      "ValidationOptions": "rashid.runner",
+      "bundled_profile_versions": "rashid._profile",
+      "canonical_spdx_id": "rashid._spdx",
+      "decode_multihash": "rashid._multihash",
+      "encode_multihash": "rashid._multihash",
+      "has_cog": "rashid._media",
+      "is_cog_media_type": "rashid._media",
+      "is_well_formed_multihash": "rashid._multihash",
+      "links_of": "rashid._stac",
+      "newest_profile_version": "rashid._profile",
+      "parse_rfc3339": "rashid._stac",
+      "profile_uri": "rashid._profile",
+      "profile_version": "rashid._profile",
+      "profile_version_key": "rashid._profile",
+      "roles_of": "rashid._stac",
+      "spec_commit": "rashid._profile"
     }
   },
   "rashid": {
@@ -70,6 +88,21 @@
       "validate_live": "(graph: 'CatalogGraph', prober: 'Prober | None' = None, *, base_url: 'str | None' = None, known_statuses: 'Mapping[str, int] | None' = None) -> 'list[Finding]'",
       "validate_schema": "(graph: 'CatalogGraph', validator: 'Validator | None' = None, schema_uri: 'str | None' = None, *, allow_network: 'bool' = False, schema_map: 'Mapping[str, dict[str, Any]] | None' = None) -> 'list[Finding]'",
       "validate_structural": "(graph: 'CatalogGraph', validator: 'Validator | None' = None) -> 'list[Finding]'"
+    },
+    "modules": {
+      "CheckInfo": "rashid.registry",
+      "Finding": "rashid.model",
+      "Report": "rashid.model",
+      "RuleSummary": "rashid.model",
+      "RulesConfig": "rashid.config",
+      "Severity": "rashid.model",
+      "ValidationOptions": "rashid.runner",
+      "describe": "rashid.registry",
+      "validate": "rashid.runner",
+      "validate_data": "rashid.data",
+      "validate_live": "rashid.live",
+      "validate_schema": "rashid.schema",
+      "validate_structural": "rashid.structural"
     }
   }
 }

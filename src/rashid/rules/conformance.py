@@ -2,34 +2,22 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
-from functools import lru_cache
-from importlib import resources
-from typing import Any
 
-from rashid import _json
 from rashid._profile import (
+    _EXTENSION_URI_PATTERN,
+    SCHEMA_URI_PATTERN,
+    _registry,
+    declared_schema_uris,
     newest_profile_version,
     profile_uri,
     profile_version,
     profile_version_key,
 )
+from rashid._stac import PARTITION_EXTENSION_PREFIX
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules.partitions import PARTITION_EXTENSION_PREFIX
-
-SCHEMA_URI_PATTERN = re.compile(
-    r"^https://schemas\.portolan-sdi\.org/portolan/v\d+\.\d+\.\d+/schema\.json$"
-)
-
-
-def declared_schema_uris(node: Node) -> list[str]:
-    raw = node.data.get("stac_extensions")
-    if not isinstance(raw, list):
-        return []
-    return [uri for uri in raw if isinstance(uri, str) and SCHEMA_URI_PATTERN.match(uri)]
 
 
 class SchemaUriDeclaredRule(Rule):
@@ -207,67 +195,6 @@ def _declares_version_extension(node: Node) -> bool:
     return any(
         isinstance(uri, str) and uri.startswith(_VERSION_EXTENSION_PREFIX) for uri in extensions
     )
-
-
-# The profile's extension registry, vendored from the spec's stac/README.md by
-# scripts/vendor_spec_fixtures.py and shipped in the wheel.
-_REGISTRY_RESOURCE = "_schemas/extension-registry.json"
-
-# Every registered URI pins a version: <base>/vX.Y.Z/schema.json. The base
-# carries the host and the extension's path, so it identifies the extension
-# across versions on either host the registry uses.
-_EXTENSION_URI_PATTERN = re.compile(
-    r"^(?P<base>https://\S+?)/(?P<version>v\d+\.\d+\.\d+)/schema\.json$"
-)
-
-
-@lru_cache(maxsize=1)
-def _registry() -> dict[str, tuple[str, str]]:
-    """Registered extensions, keyed by base URI: base -> (name, pinned version)."""
-    resource = resources.files("rashid").joinpath(_REGISTRY_RESOURCE)
-    document: dict[str, Any] = _json.loads(resource.read_bytes())
-    registered: dict[str, tuple[str, str]] = {}
-    for name, uri in document["extensions"].items():
-        parsed = _EXTENSION_URI_PATTERN.match(str(uri))
-        if parsed is None:  # pragma: no cover - the vendoring script rejects these
-            continue
-        registered[parsed["base"]] = (str(name), parsed["version"])
-    return registered
-
-
-def registered_extension(uri: str) -> tuple[str, str] | None:
-    """``(name, version)`` when ``uri`` is a registered extension's pinned URI.
-
-    ``None`` covers a URI that is not a versioned schema URI, an extension the
-    registry does not list, and a registered extension declared at a version
-    the registry does not pin. :func:`registered_at_other_version` tells the
-    last case apart.
-    """
-    parsed = _EXTENSION_URI_PATTERN.match(uri)
-    if parsed is None:
-        return None
-    entry = _registry().get(parsed["base"])
-    if entry is None or entry[1] != parsed["version"]:
-        return None
-    return entry
-
-
-def registered_at_other_version(uri: str) -> tuple[str, str] | None:
-    """``(name, declared version)`` when ``uri`` is a registered extension at an unpinned version.
-
-    A catalog declaring Raster v1.1.0 must not be validated against the pinned
-    v2.0.0 schema, which invents errors about fields v1.1.0 never had. It must
-    not escape validation either, or declaring an older version would turn
-    every schema error into a PTL-CNF-004 warning. The extension pass uses this
-    to validate such objects against the schema of the version they declare.
-    """
-    parsed = _EXTENSION_URI_PATTERN.match(uri)
-    if parsed is None:
-        return None
-    entry = _registry().get(parsed["base"])
-    if entry is None or entry[1] == parsed["version"]:
-        return None
-    return entry[0], parsed["version"]
 
 
 class ExtensionVersionRule(Rule):

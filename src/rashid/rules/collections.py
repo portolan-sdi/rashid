@@ -21,12 +21,11 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from rashid._media import TIFF_SUFFIXES, is_raster_data_asset
+from rashid._stac import assets_of, is_partitioned, mirror_assets, roles_of
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import TIFF_SUFFIXES, assets_of, is_raster_data_asset, roles_of
-from rashid.rules.item_mirror import mirror_assets
-from rashid.rules.partitions import is_partitioned
 
 _HAS_DATA_ASSET = "has-data-asset"
 _NO_DATA_ASSET = "no-data-asset"

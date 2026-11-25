@@ -3,19 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
 
+from rashid._stac import providers_of, roles_of
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import roles_of
-
-
-def providers_of(node: Node) -> list[dict[str, Any]]:
-    raw = node.data.get("providers")
-    if not isinstance(raw, list):
-        return []
-    return [p for p in raw if isinstance(p, dict)]
 
 
 class ProducerPresentRule(Rule):

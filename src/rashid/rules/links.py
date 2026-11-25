@@ -6,10 +6,10 @@ from collections.abc import Iterable
 from typing import Any
 
 from rashid._href import is_absolute_href, is_uri_reference
+from rashid._stac import STRUCTURAL_RELS, assets_of, indexed_links_of, links_of
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import STRUCTURAL_RELS, assets_of, indexed_links_of, links_of
 
 # What each required structural link points at, for the fix hints.
 _REQUIRED_LINK_TARGETS = {

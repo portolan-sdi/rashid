@@ -13,8 +13,8 @@ import pytest
 
 from rashid import _store, _trace
 from rashid._href import object_location
+from rashid._stac import asset_refers_to_self
 from rashid.catalog import Node
-from rashid.rules._common import asset_refers_to_self
 from tests._https import HttpsServer, Route
 
 _AGENT = f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"

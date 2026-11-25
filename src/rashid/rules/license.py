@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from rashid._spdx import SPDX_LICENSE_IDS, canonical_spdx_id
+from rashid._stac import links_of
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import links_of
 
 
 class LicenseDeclaredRule(Rule):

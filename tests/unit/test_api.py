@@ -31,21 +31,21 @@ pytestmark = pytest.mark.unit
 EXPORTS = {
     "SHA2_256": "rashid._multihash",
     "SPDX_LICENSE_IDS": "rashid._spdx",
-    "STRUCTURAL_RELS": "rashid.rules._common",
+    "STRUCTURAL_RELS": "rashid._stac",
     "ValidationOptions": "rashid.runner",
     "bundled_profile_versions": "rashid._profile",
     "canonical_spdx_id": "rashid._spdx",
     "decode_multihash": "rashid._multihash",
     "encode_multihash": "rashid._multihash",
-    "has_cog": "rashid.rules._common",
-    "is_cog_media_type": "rashid.rules._common",
+    "has_cog": "rashid._media",
+    "is_cog_media_type": "rashid._media",
     "is_well_formed_multihash": "rashid._multihash",
-    "links_of": "rashid.rules._common",
+    "links_of": "rashid._stac",
     "newest_profile_version": "rashid._profile",
-    "parse_rfc3339": "rashid.rules._common",
+    "parse_rfc3339": "rashid._stac",
     "profile_uri": "rashid._profile",
     "profile_version": "rashid._profile",
-    "roles_of": "rashid.rules._common",
+    "roles_of": "rashid._stac",
     "spec_commit": "rashid._profile",
     "profile_version_key": "rashid._profile",
 }
@@ -70,6 +70,11 @@ def test_public_api_snapshot(module: object) -> None:
     snapshot = json.loads(Path(__file__).with_name("api_snapshot.json").read_text(encoding="utf-8"))
     expected = snapshot[module.__name__]
     assert sorted(module.__all__) == expected["exports"]
+    assert {
+        name: getattr(module, name).__module__
+        for name in sorted(module.__all__)
+        if callable(getattr(module, name))
+    } == expected["modules"]
     assert {
         name: str(inspect.signature(getattr(module, name)))
         for name in sorted(module.__all__)

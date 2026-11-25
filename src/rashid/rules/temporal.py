@@ -5,22 +5,15 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from rashid._stac import has_datetime, parse_rfc3339
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import parse_rfc3339
 
 
 def _properties(node: Node) -> dict[str, Any]:
     raw = node.data.get("properties")
     return raw if isinstance(raw, dict) else {}
-
-
-def has_datetime(fields: dict[str, Any]) -> bool:
-    """Whether ``fields`` carry a datetime or both ends of an interval."""
-    return fields.get("datetime") is not None or (
-        fields.get("start_datetime") is not None and fields.get("end_datetime") is not None
-    )
 
 
 class DatetimePresentRule(Rule):

@@ -40,10 +40,10 @@ from rashid._jsonschema import (
     schema_nodes,
     schema_targets,
 )
+from rashid._profile import declared_schema_uris
 from rashid.catalog import CatalogGraph
 from rashid.ids import SCH_INVALID, SCH_UNAVAILABLE, SCH_UNUSED_MAP
 from rashid.model import Finding, Severity
-from rashid.rules.conformance import declared_schema_uris
 
 # The newest bundled profile schema, used when the root declares no single URI.
 DEFAULT_SCHEMA_URI = _profile.profile_uri(_profile.newest_profile_version())

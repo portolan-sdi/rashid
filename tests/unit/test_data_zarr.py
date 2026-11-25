@@ -23,6 +23,7 @@ import pytest
 
 from rashid import ValidationOptions, validate
 from rashid._href import store_member_href
+from rashid._media import COG_MEDIA_TYPE
 from rashid.catalog import CatalogGraph, Node
 from rashid.data.reader import LocalOnlyReader, Locator
 from rashid.data.zarr import check_zarr
@@ -48,7 +49,6 @@ from rashid.ids import (
 )
 from rashid.model import Report, Severity
 from rashid.registry import CHECKS, is_incubating
-from rashid.rules._common import COG_MEDIA_TYPE
 from tests.conftest import CatalogBuilder, default_asset, thumbnail_asset
 
 pytestmark = pytest.mark.unit

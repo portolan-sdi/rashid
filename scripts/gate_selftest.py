@@ -115,6 +115,22 @@ FAULTS = (
         "metadata rules must not import network passes or transport BROKEN",
     ),
     Fault(
+        "rules-independent",
+        "src/rashid/rules/assets.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport rashid.rules.bbox\n",
+        _LAYERS,
+        "metadata rule modules must be independent BROKEN",
+    ),
+    Fault(
+        "rules-only-registry",
+        "src/rashid/_gate_fault.py",
+        "",
+        "import rashid.rules.assets\n",
+        _LAYERS,
+        "only the registry may import metadata rules BROKEN",
+    ),
+    Fault(
         "file-layer",
         "src/rashid/_gate_fault.py",
         "",
@@ -190,7 +206,7 @@ FAULTS = (
     Fault(
         "copied-pass-id",
         "src/rashid/registry.py",
-        "        GEN_MISSING_ROOT,\n",
+        "        ids.GEN_MISSING_ROOT,\n",
         '        "PTL-GEN-000",\n',
         _REGISTRY,
         "test_pass_checks_use_the_id_constants_once",
@@ -318,7 +334,7 @@ FAULTS = (
         "def _copy_" + "head(repo:",
         "FAULTS = FAULTS[1:]\n\ndef _copy_" + "head(repo:",
         ("uv", "run", "python", "scripts/gate_selftest.py", "--help"),
-        "expected 43 faults",
+        "expected 45 faults",
     ),
 )
 
@@ -431,8 +447,8 @@ def exercise(repo: Path, fault: Fault) -> bool:
 
 
 def main() -> int:
-    assert len(FAULTS) == 43, f"expected 43 faults, found {len(FAULTS)}"
-    assert len({fault.name for fault in FAULTS}) == 43, "fault names must be unique"
+    assert len(FAULTS) == 45, f"expected 45 faults, found {len(FAULTS)}"
+    assert len({fault.name for fault in FAULTS}) == 45, "fault names must be unique"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fault", choices=[fault.name for fault in FAULTS])
     parser.add_argument(

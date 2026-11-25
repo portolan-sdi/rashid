@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from rashid.rules.conformance import SCHEMA_URI_PATTERN
+from rashid._profile import SCHEMA_URI_PATTERN
 from rashid.schema import DEFAULT_SCHEMA_URI
 
 pytestmark = pytest.mark.unit

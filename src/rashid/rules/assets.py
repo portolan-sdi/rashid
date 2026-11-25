@@ -10,23 +10,25 @@ from collections.abc import Iterable
 from typing import Any
 
 from rashid._href import split_href
-from rashid._multihash import is_well_formed_multihash
-from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity, json_pointer
-from rashid.rule import Rule
-from rashid.rules._common import (
+from rashid._media import (
     COG_MEDIA_TYPE,
+    is_cog_media_type,
+    is_pmtiles_asset,
+    is_raster_data_asset,
+    is_zarr_store_asset,
+)
+from rashid._multihash import is_well_formed_multihash
+from rashid._stac import (
     asset_refers_to_self,
     assets_of,
     declares_geometry,
     https_alternate,
-    is_cog_media_type,
-    is_pmtiles_asset,
-    is_raster_data_asset,
     is_source_asset,
-    is_zarr_store_asset,
     roles_of,
 )
+from rashid.catalog import CatalogGraph, Node
+from rashid.model import Finding, Severity, json_pointer
+from rashid.rule import Rule
 
 
 def _has_data_asset(node: Node) -> bool:

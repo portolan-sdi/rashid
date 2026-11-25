@@ -8,7 +8,7 @@ about the object's shape, and this pass checks the claim.
 
 Which extensions Portolan approves, and which version of each it pins, is the
 profile's extension registry — vendored to ``_schemas/extension-registry.json``
-and read here through :func:`rashid.rules.conformance.registered_extension`.
+and read here through :func:`rashid._profile.registered_extension`.
 The same file drives ``scripts/vendor_stac_schemas.py``, so a version pinned in
 the spec arrives with its schema on the next spec sync and this module needs no
 edit to validate against it.
@@ -46,14 +46,10 @@ from rashid._jsonschema import (
     screened,
     vendored_extension_schemas,
 )
+from rashid._profile import SCHEMA_URI_PATTERN, registered_at_other_version, registered_extension
 from rashid.catalog import CatalogGraph, Node
 from rashid.ids import EXT_INVALID, EXT_UNAVAILABLE, EXT_UNVALIDATED
 from rashid.model import Finding, Severity
-from rashid.rules.conformance import (
-    SCHEMA_URI_PATTERN,
-    registered_at_other_version,
-    registered_extension,
-)
 
 _PASS = SchemaPass("extension", EXT_INVALID, EXT_UNAVAILABLE)
 

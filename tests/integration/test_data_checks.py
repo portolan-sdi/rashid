@@ -27,13 +27,13 @@ from pyproj import CRS, Transformer
 
 import rashid.data.checks as checks
 from rashid import _trace
+from rashid._stac import is_source_asset
 from rashid.catalog import Node
 from rashid.data import DataDefect, DataResults, geoparquet, mirror, raster, spatial, storage
 from rashid.data._files import AssetFiles
 from rashid.data.reader import Locator
 from rashid.ids import DAT_CHECKSUM, DAT_COG, DAT_CONSISTENCY, DAT_FORMAT, DAT_SIZE
 from rashid.model import Severity
-from rashid.rules._common import is_source_asset
 
 # --- the shared test vectors -------------------------------------------------
 

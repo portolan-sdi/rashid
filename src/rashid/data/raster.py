@@ -13,6 +13,8 @@ from rasterio.enums import ColorInterp, MaskFlags
 from rio_cogeo.cogeo import cog_validate
 
 from rashid import _trace
+from rashid._media import is_overview_asset
+from rashid._stac import asset_class_lists, band_count, is_integer, roles_of
 from rashid.catalog import Node
 from rashid.data import DataDefect
 from rashid.data._files import AssetFiles
@@ -29,8 +31,6 @@ from rashid.ids import (
     DAT_VALID_PERCENT,
 )
 from rashid.model import Severity, json_pointer
-from rashid.rules._common import is_overview_asset, roles_of
-from rashid.rules.classification import asset_class_lists, band_count, is_integer
 
 # geotiff-stats-headers.md — the embedded per-band statistics a COG MUST carry.
 _COG_STAT_KEYS = (

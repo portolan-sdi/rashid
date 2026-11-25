@@ -198,7 +198,7 @@ def test_the_vendored_closure_covers_every_registered_extension() -> None:
     """
     from importlib import resources
 
-    from rashid.rules.conformance import registered_extension
+    from rashid._profile import registered_extension
 
     store = vendored_extension_schemas()
     registry = json.loads(
@@ -498,7 +498,7 @@ def test_the_extension_store_is_empty_without_a_vendored_tree(
 
 
 def test_the_language_extension_is_pinned_and_vendored() -> None:
-    from rashid.rules.conformance import registered_extension
+    from rashid._profile import registered_extension
 
     assert registered_extension(LANGUAGE_URI) == ("Language", "v1.0.0")
     assert LANGUAGE_URI in vendored_extension_schemas()

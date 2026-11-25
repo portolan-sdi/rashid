@@ -17,13 +17,11 @@ import re
 from collections.abc import Iterable
 
 from rashid._href import BUCKET_SCHEMES, bucket_glob, split_href
+from rashid._stac import PARTITION_EXTENSION_PREFIX, _declared_extensions, is_partitioned
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
 
-# Version-tolerant prefix of the partition extension's schema URI, matching
-# how the web-map-links declaration is checked in the viz rules.
-PARTITION_EXTENSION_PREFIX = "https://schemas.portolan-sdi.org/incubating/partition/"
 # formats.md requires the partition extension v1.0.0. A v1.x minor or patch
 # release is compatible with it.
 _PARTITION_V1 = re.compile(re.escape(PARTITION_EXTENSION_PREFIX) + r"v1\.\d+\.\d+/schema\.json")
@@ -97,24 +95,6 @@ class PartitionFieldsRule(Rule):
 
 
 _PARTITION_V1_URI = f"{PARTITION_EXTENSION_PREFIX}v1.0.0/schema.json"
-
-
-def is_partitioned(node: Node) -> bool:
-    return any(key.startswith("partition:") for key in node.data) or bool(
-        _declared_extensions(node)
-    )
-
-
-def _declared_extensions(node: Node) -> list[tuple[int, str]]:
-    """``(index, uri)`` of each partition extension URI in ``stac_extensions``."""
-    extensions = node.data.get("stac_extensions")
-    if not isinstance(extensions, list):
-        return []
-    return [
-        (index, uri)
-        for index, uri in enumerate(extensions)
-        if isinstance(uri, str) and uri.startswith(PARTITION_EXTENSION_PREFIX)
-    ]
 
 
 class PartitionGlobSchemeRule(Rule):

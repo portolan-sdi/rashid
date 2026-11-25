@@ -12,6 +12,7 @@ from typing import Any
 from rashid import _trace
 from rashid._href import is_catalog_url, split_catalog_url
 from rashid._jsonschema import SchemaError
+from rashid._profile import declared_schema_uris
 from rashid.catalog import ROOT_CATALOG, CatalogGraph
 from rashid.config import RulesConfig
 from rashid.data import ReaderFactory as DataReaderFactory
@@ -31,7 +32,6 @@ from rashid.remote import (
     crawl,
 )
 from rashid.rule import Rule
-from rashid.rules.conformance import declared_schema_uris
 from rashid.schema import validate_schema
 from rashid.structural import validate_structural
 

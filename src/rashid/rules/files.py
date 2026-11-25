@@ -14,10 +14,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from rashid._href import is_absolute_href
+from rashid._stac import indexed_links_of
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import indexed_links_of
 
 _REQUIRED = ("AGENTS.md", "README.md")
 _MARKDOWN = "text/markdown"

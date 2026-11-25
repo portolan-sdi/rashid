@@ -17,43 +17,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from rashid._media import PARQUET_MEDIA_TYPE, is_raster_data_asset
+from rashid._stac import MIRROR_ROLE, assets_of, mirror_assets, roles_of
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import (
-    PARQUET_MEDIA_TYPE,
-    assets_of,
-    is_raster_data_asset,
-    roles_of,
-)
-
-MIRROR_ROLE = "collection-mirror"
-MIRROR_FILENAME = "items.parquet"
-
-
-def mirror_assets(node: Node) -> list[tuple[str, str, dict[str, object]]]:
-    """The node's item-mirror assets, found by role or href.
-
-    Role is the normative signal, but a producer that gets the role wrong
-    still means the asset as a mirror, and PTL-MIR-002 should say so rather
-    than treat it as an unrelated Parquet file. The filename is the other way
-    the same intent shows up. The asset key carries no signal: the
-    stac-geoparquet spec names none, so the producer chooses it.
-    """
-    return [entry for entry in assets_of(node) if is_mirror_asset(entry[2])]
-
-
-def is_mirror_asset(asset: dict[str, object]) -> bool:
-    """Whether one asset is an item mirror rather than collection data.
-
-    The data pass uses this to route a mirror through its agreement check
-    (``PORTO-FMT-042``) on top of the GeoParquet requirements that bind it
-    like any other spatial table (``PORTO-FMT-043``).
-    """
-    href = asset.get("href")
-    return MIRROR_ROLE in roles_of(asset) or (
-        isinstance(href, str) and href.rsplit("/", 1)[-1] == MIRROR_FILENAME
-    )
 
 
 def _scene_items(node: Node, graph: CatalogGraph) -> list[Node]:

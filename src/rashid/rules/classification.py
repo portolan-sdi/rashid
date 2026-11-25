@@ -32,26 +32,31 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from functools import lru_cache
 from importlib import resources
-from typing import Any, TypeGuard
+from typing import Any
 
 from rashid import _json
+from rashid._stac import (
+    _ABSENT,
+    CLASSES_FIELD,
+    ClassList,
+    _home,
+    asset_class_lists,
+    band_count,
+    is_integer,
+    is_source_asset,
+)
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
-from rashid.rules._common import is_source_asset
-
-CLASSES_FIELD = "classification:classes"
-BAND_FIELDS = ("bands", "raster:bands")
 
 # Version-tolerant prefix of the extension's schema URI, as the partition rule
 # matches its own. The hint names the current release.
 _EXTENSION_PREFIX = "https://stac-extensions.github.io/classification/"
 _EXTENSION_URI = f"{_EXTENSION_PREFIX}v2.0.0/schema.json"
 
-_ABSENT = object()
 
 _CLASS_SCHEMA = "_schemas/extensions/stac-extensions.github.io/classification/v2.0.0/schema.json"
 
@@ -120,88 +125,6 @@ def class_object_errors(entry: Any) -> Iterator[tuple[str | None, str]]:
             yield field, f"is above the maximum of {limits['maximum']}"
 
 
-@dataclass(frozen=True)
-class ClassList:
-    """One ``classification:classes`` array and the band facts that bind it.
-
-    ``nodata`` is the band's own value, or the enclosing asset's when the
-    band leaves it out, as STAC 1.1 inherits it. ``_ABSENT`` marks a value
-    declared at neither level. ``band_field`` and
-    ``band_index`` locate the band in its asset's band list, so the data pass
-    can pair it with the band of the same position in the file; both are None
-    for a list declared outside a band list.
-    """
-
-    pointer: str
-    classes: Any
-    nodata: Any
-    band_field: str | None = None
-    band_index: int | None = None
-    # On a source asset, which PORTO-FMT-045 exempts from Portolan's own
-    # class requirements; the extension's class object still applies.
-    source: bool = False
-
-    def entries(self) -> Iterator[tuple[str, dict[str, Any]]]:
-        """(pointer, class object) for each class that is an object."""
-        if not isinstance(self.classes, list):
-            return
-        for index, entry in enumerate(self.classes):
-            if isinstance(entry, dict):
-                yield json_pointer(index, prefix=self.pointer), entry
-
-
-def asset_class_lists(pointer: str, asset: dict[str, Any]) -> list[ClassList]:
-    """Every class list on one asset: its own, and each band's.
-
-    A legacy ``raster:bands`` list is left out where it mirrors a list in
-    ``bands`` or, for the asset's only band, on the asset.
-    """
-    nodata = asset.get("nodata", _ABSENT)
-    found: list[ClassList] = []
-    if CLASSES_FIELD in asset:
-        found.append(
-            ClassList(json_pointer(CLASSES_FIELD, prefix=pointer), asset[CLASSES_FIELD], nodata)
-        )
-    for field in BAND_FIELDS:
-        bands = asset.get(field)
-        if not isinstance(bands, list):
-            continue
-        for index, band in enumerate(bands):
-            if not isinstance(band, dict) or CLASSES_FIELD not in band:
-                continue
-            if field == "raster:bands" and _mirrors(asset, index, band):
-                continue
-            found.append(
-                ClassList(
-                    json_pointer(field, index, CLASSES_FIELD, prefix=pointer),
-                    band[CLASSES_FIELD],
-                    band.get("nodata", nodata),
-                    field,
-                    index,
-                )
-            )
-    return found
-
-
-def _home(asset: dict[str, Any], index: int) -> dict[str, Any] | None:
-    """The ``bands`` entry, or the single-band asset, with classes for legacy band ``index``."""
-    if _has_classes(asset, index):
-        band: dict[str, Any] = asset["bands"][index]
-        return band
-    if index == 0 and band_count(asset) == 1 and CLASSES_FIELD in asset:
-        return asset
-    return None
-
-
-def _mirrors(asset: dict[str, Any], index: int, legacy: dict[str, Any]) -> bool:
-    """Whether a legacy ``raster:bands`` entry repeats the class list and nodata of its home."""
-    home = _home(asset, index)
-    if home is None or home.get(CLASSES_FIELD) != legacy[CLASSES_FIELD]:
-        return False
-    inherited = asset.get("nodata", _ABSENT)
-    return bool(home.get("nodata", inherited) == legacy.get("nodata", inherited))
-
-
 def _containers(node: Node) -> Iterator[tuple[str, dict[str, Any]]]:
     """(pointer, object) for every place a class list can sit on a node.
 
@@ -248,14 +171,6 @@ def _title_problem(entry: dict[str, Any]) -> bool:
     """Whether a class lacks the readable title PORTO-FMT-052 requires."""
     title = entry.get("title")
     return not isinstance(title, str) or not title.strip()
-
-
-def is_integer(value: Any) -> TypeGuard[int]:
-    """A JSON integer as draft-07 reads it: 1 or 1.0, but neither true nor 1.5."""
-    # JSON true is a Python int; the schema's integer type excludes it.
-    if isinstance(value, float):
-        return value.is_integer()
-    return isinstance(value, int) and not isinstance(value, bool)
 
 
 class ClassificationExtensionRule(Rule):
@@ -414,26 +329,6 @@ class NodataClassRule(Rule):
                         expected=found.nodata,
                         actual=value,
                     )
-
-
-def _has_classes(asset: dict[str, Any], index: int | None) -> bool:
-    """Whether the asset (index None) or its band ``index`` in ``bands`` has classes."""
-    if index is None:
-        return CLASSES_FIELD in asset
-    bands = asset.get("bands")
-    if not isinstance(bands, list) or index >= len(bands):
-        return False
-    band = bands[index]
-    return isinstance(band, dict) and CLASSES_FIELD in band
-
-
-def band_count(asset: dict[str, Any]) -> int:
-    """How many bands the asset declares; one when it lists none."""
-    for field in BAND_FIELDS:
-        bands = asset.get(field)
-        if isinstance(bands, list):
-            return len(bands)
-    return 1
 
 
 def _misplaced(asset: dict[str, Any], found: ClassList) -> str | None:

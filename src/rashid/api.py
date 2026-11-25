@@ -27,6 +27,7 @@ To run validation, use the top-level package:
 
 from __future__ import annotations
 
+from rashid._media import has_cog, is_cog_media_type
 from rashid._multihash import (
     SHA2_256,
     decode_multihash,
@@ -42,14 +43,7 @@ from rashid._profile import (
     spec_commit,
 )
 from rashid._spdx import SPDX_LICENSE_IDS, canonical_spdx_id
-from rashid.rules._common import (
-    STRUCTURAL_RELS,
-    has_cog,
-    is_cog_media_type,
-    links_of,
-    parse_rfc3339,
-    roles_of,
-)
+from rashid._stac import STRUCTURAL_RELS, links_of, parse_rfc3339, roles_of
 from rashid.runner import ValidationOptions
 
 __all__ = [

@@ -84,6 +84,14 @@ from typing import Any
 import rasterio
 
 from rashid import _trace
+from rashid._media import is_zarr_store_asset
+from rashid._stac import (
+    asset_refers_to_self,
+    assets_of,
+    is_mirror_asset,
+    is_source_asset,
+    read_target,
+)
 from rashid.catalog import CatalogGraph, Node
 from rashid.data import DataDefect, DataResults
 from rashid.data._files import AssetFiles
@@ -116,14 +124,6 @@ from rashid.data.storage import check_bytes, expected_format
 from rashid.data.zarr import check_zarr
 from rashid.ids import DAT_CONSISTENCY
 from rashid.model import Severity
-from rashid.rules._common import (
-    asset_refers_to_self,
-    assets_of,
-    is_source_asset,
-    is_zarr_store_asset,
-    read_target,
-)
-from rashid.rules.item_mirror import is_mirror_asset
 
 # GDAL options for a remote raster (https://gdal.org/en/stable/user/configoptions.html).
 # On a published host each request waits hundreds of milliseconds for its

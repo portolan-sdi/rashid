@@ -179,6 +179,10 @@ name = "validation core must not import a CLI framework"
 type = "forbidden"
 source_modules = [
     "rashid.model",
+    "rashid._stac",
+    "rashid._media",
+    "rashid._profile",
+    "rashid.ids",
     "rashid.catalog",
     "rashid.rule",
     "rashid.runner",
@@ -202,6 +206,10 @@ name = "core and data readers must not import the geospatial stack"
 type = "forbidden"
 source_modules = [
     "rashid.model",
+    "rashid._stac",
+    "rashid._media",
+    "rashid._profile",
+    "rashid.ids",
     "rashid.catalog",
     "rashid.rule",
     "rashid.runner",
@@ -246,6 +254,39 @@ allowed_importers = [
     "rashid.data.mirror",
     "rashid.data.partitions",
 ]
+
+[[tool.importlinter.contracts]]
+id = "rules-independent"
+name = "metadata rule modules must be independent"
+type = "independence"
+# Removed with the report split in item 4 of #336.
+ignore_imports = ["rashid.model -> rashid.registry"]
+modules = [
+    "rashid.rules.assets",
+    "rashid.rules.bbox",
+    "rashid.rules.catalogs",
+    "rashid.rules.classification",
+    "rashid.rules.collections",
+    "rashid.rules.conformance",
+    "rashid.rules.files",
+    "rashid.rules.item_mirror",
+    "rashid.rules.license",
+    "rashid.rules.links",
+    "rashid.rules.partitions",
+    "rashid.rules.provenance",
+    "rashid.rules.providers",
+    "rashid.rules.temporal",
+    "rashid.rules.titles",
+    "rashid.rules.versions",
+    "rashid.rules.viz",
+]
+
+[[tool.importlinter.contracts]]
+id = "rules-only-registry"
+name = "only the registry may import metadata rules"
+type = "protected"
+protected_modules = ["rashid.rules"]
+allowed_importers = ["rashid.registry"]
 
 [tool.commitizen]
 name = "cz_conventional_commits"

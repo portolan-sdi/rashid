@@ -57,6 +57,21 @@ def test_owner_layer_contracts_cover_new_modules() -> None:
     assert files["protected_modules"] == ["rashid.data._files"]
     assert files["as_packages"] is False
 
+    independent = contracts["rules-independent"]
+    assert independent["type"] == "independence"
+    assert independent["ignore_imports"] == ["rashid.model -> rashid.registry"]
+    assert set(independent["modules"]) == {
+        "rashid.rules." + path.stem
+        for path in (ROOT / "src/rashid/rules").glob("*.py")
+        if path.stem != "__init__"
+    }
+    owner = contracts["rules-only-registry"]
+    assert owner["type"] == "protected"
+    assert owner["protected_modules"] == ["rashid.rules"]
+    assert owner["allowed_importers"] == ["rashid.registry"]
+    assert owner.get("as_packages", True) is True
+    assert not owner.get("ignore_imports")
+
 
 def test_jscpd_baseline_only_shrinks() -> None:
     """Delete only: lower the pin after deduplication, never raise it."""

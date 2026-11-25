@@ -22,9 +22,9 @@ from pathlib import Path
 import pytest
 
 from rashid import ValidationOptions, validate
+from rashid._profile import declared_schema_uris
 from rashid.catalog import CatalogGraph
 from rashid.model import Severity
-from rashid.rules.conformance import declared_schema_uris
 from rashid.schema import DEFAULT_SCHEMA_URI, bundled_schema
 from scripts import vendor_spec_fixtures as vendor
 from tests.conftest import CatalogBuilder

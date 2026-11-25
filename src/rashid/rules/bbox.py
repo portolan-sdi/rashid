@@ -6,31 +6,14 @@ import math
 from collections.abc import Iterable
 from typing import Any
 
+from rashid._stac import bboxes_of
 from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity, json_pointer
+from rashid.model import Finding, Severity
 from rashid.rule import Rule
 
 # DBL_MAX and friends written out by broken exporters as "effectively
 # infinite" sentinels. Anything at or beyond this magnitude is garbage.
 _SENTINEL_MAGNITUDE = 1.7e308
-
-
-def bboxes_of(node: Node) -> list[tuple[str, Any]]:
-    """All bbox arrays on a node, with a JSON pointer for each."""
-    found: list[tuple[str, Any]] = []
-    if node.kind == "item":
-        if "bbox" in node.data:
-            found.append((json_pointer("bbox"), node.data["bbox"]))
-        return found
-    extent = node.data.get("extent")
-    if isinstance(extent, dict):
-        spatial = extent.get("spatial")
-        if isinstance(spatial, dict):
-            boxes = spatial.get("bbox")
-            if isinstance(boxes, list):
-                for index, box in enumerate(boxes):
-                    found.append((json_pointer("extent", "spatial", "bbox", index), box))
-    return found
 
 
 class BboxValidRule(Rule):

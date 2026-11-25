@@ -11,6 +11,7 @@ import pyarrow as pa
 from pyproj import CRS
 
 from rashid import _json
+from rashid._stac import assets_of, has_table_columns, roles_of, table_declarations
 from rashid.catalog import Node
 from rashid.data import DataDefect
 from rashid.data._files import AssetFiles
@@ -26,12 +27,6 @@ from rashid.ids import (
     DAT_VECTOR_COLUMNS,
 )
 from rashid.model import Severity, json_pointer
-from rashid.rules._common import (
-    assets_of,
-    has_table_columns,
-    roles_of,
-    table_declarations,
-)
 
 # formats.md:75 — a GeoParquet row group MUST hold no more than this many rows.
 _MAX_ROW_GROUP_ROWS = 150_000

@@ -7,16 +7,14 @@ from collections.abc import Iterator
 from typing import Any
 
 from rashid import _trace
+from rashid._media import is_tiff_media_type
 from rashid._multihash import decode_multihash
+from rashid._stac import read_target
 from rashid.catalog import Node
 from rashid.data import DataDefect
 from rashid.data.reader import AssetReader
 from rashid.ids import DAT_CHECKSUM, DAT_FORMAT, DAT_SIZE
 from rashid.model import Severity
-from rashid.rules._common import (
-    is_tiff_media_type,
-    read_target,
-)
 
 # Multihash function code -> hashlib algorithm name.
 _HASH_ALGOS = {

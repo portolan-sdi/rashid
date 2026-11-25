@@ -9,8 +9,9 @@ from typing import Any
 import pytest
 
 from rashid import validate
+from rashid._stac import MIRROR_ROLE
 from rashid.model import Severity
-from rashid.rules.item_mirror import MIRROR_ROLE, PARQUET_MEDIA_TYPE
+from rashid.rules.item_mirror import PARQUET_MEDIA_TYPE
 from tests.conftest import (
     CatalogBuilder,
     findings_for,

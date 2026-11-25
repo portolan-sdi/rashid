@@ -23,6 +23,9 @@
   "import-linter": {
     "core and data readers must not import the geospatial stack": {
       "rashid.data -> rashid.data.checks": "The lazy default_validator import loads the data stack only when validation runs."
+    },
+    "metadata rule modules must be independent": {
+      "rashid.model -> rashid.registry": "Temporary report description lookup; removed when reports move out of model in #336 item 4."
     }
   },
   "allowed-importers": {
@@ -30,7 +33,8 @@
     "rashid.data.geoparquet": "T9 extracted GeoParquet checks from data/checks.py; consumes shared handles (#266).",
     "rashid.data.raster": "T9 extracted raster checks from data/checks.py; consumes shared handles (#266).",
     "rashid.data.mirror": "T9 extracted mirror checks from data/checks.py; consumes shared handles (#266).",
-    "rashid.data.partitions": "T9 extracted partition checks from data/checks.py; owns per-partition shared handles (#266)."
+    "rashid.data.partitions": "T9 extracted partition checks from data/checks.py; owns per-partition shared handles (#266).",
+    "rashid.registry": "Owns metadata rule registration; other production modules use shared helpers (#336)."
   },
   "jscpd": {
     ".jscpd-baseline.json": "Existing clones at guardrail adoption (#266); fingerprint count is pinned and may only shrink."

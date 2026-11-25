@@ -1,11 +1,12 @@
-"""Shared helpers for rule modules."""
+"""STAC document fields, asset roles, and hrefs."""
 
 from __future__ import annotations
 
 import os.path
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, TypeGuard
 from urllib.parse import quote
 
 from rashid._href import (
@@ -19,40 +20,9 @@ from rashid._href import (
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import json_pointer
 
-# Rels that make the tree navigable; every one carries type requirements and
+# Rels that make the tree navigable; every one has type requirements and
 # must be relative and resolvable.
 STRUCTURAL_RELS = ("root", "parent", "child", "item", "collection")
-
-PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
-PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
-COPC_MEDIA_TYPE = "application/vnd.laszip+copc"
-
-# incubating/zarr.md, Access: a Zarr store asset carries the Zarr media type
-# with a version parameter, and MAY carry more parameters such as
-# `profile=multiscales`. PTL-ZAR-004 judges the whole declaration.
-ZARR_MEDIA_TYPE = "application/vnd.zarr"
-
-# The filename suffix a Zarr store carries, with or without a trailing slash.
-ZARR_SUFFIX = ".zarr"
-
-# Icechunk is its own format. Its media type is not a Zarr media type, and a
-# repository is not a Zarr store unless it is served as plain Zarr v3 under a
-# Zarr media type, so the word is refused wherever "zarr" is matched loosely.
-_ICECHUNK_MARKER = "icechunk"
-
-# Media types that say nothing about the format, so an href may speak instead.
-_UNTYPED = frozenset({"", "application/octet-stream", "binary/octet-stream"})
-
-# core.md, Assets: Portolan raster data is COG, declared with this media type.
-# A plain GeoTIFF may appear only as an upstream source, not as primary data.
-COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
-_TIFF_MEDIA_TYPE = "image/tiff"
-_COG_PARAMETERS = {"application=geotiff", "profile=cloud-optimized"}
-
-# The filename suffixes a raster scene carries. Public because scene files
-# are also counted straight off the directory listing, where no asset
-# declares a media type to read.
-TIFF_SUFFIXES = (".tif", ".tiff")
 
 
 def indexed_links_of(node: Node) -> Iterator[tuple[int, dict[str, Any]]]:
@@ -74,13 +44,6 @@ def roles_of(asset: dict[str, Any]) -> list[str]:
     if not isinstance(raw, list):
         return []
     return [role for role in raw if isinstance(role, str)]
-
-
-def media_type_essence(value: object) -> str | None:
-    """A media type without its parameters, lowercased: ``text/html; charset=utf-8`` is ``text/html``."""
-    if not isinstance(value, str):
-        return None
-    return value.split(";", 1)[0].strip().casefold()
 
 
 def is_source_asset(asset: dict[str, Any]) -> bool:
@@ -138,144 +101,6 @@ def read_target(asset: dict[str, Any]) -> str | None:
     if parsed is not None and parsed.scheme.lower() in ("", "https"):
         return href
     return https_alternate(asset)
-
-
-def is_tiff_media_type(
-    value: object, *, policy: Literal["base-type", "prefix", "literal-prefix"] = "base-type"
-) -> bool:
-    """TIFF intent under the metadata, byte-probe, or spatial-media policy.
-
-    Primary raster intent matches the normalized base type. Byte probing
-    retains its case-insensitive prefix match; spatial-media evidence retains
-    its literal prefix match, independently of roles and hrefs.
-    """
-    if not isinstance(value, str):
-        return False
-    if policy == "literal-prefix":
-        return value.startswith(_TIFF_MEDIA_TYPE)
-    if policy == "prefix":
-        return value.lower().startswith(_TIFF_MEDIA_TYPE)
-    return value.split(";", 1)[0].strip().lower() == _TIFF_MEDIA_TYPE
-
-
-def media_parameters(value: str) -> dict[str, str]:
-    """The parameters of a media type, lowercased, order and spacing ignored."""
-    parameters: dict[str, str] = {}
-    for part in value.split(";")[1:]:
-        name, separator, raw = part.partition("=")
-        if separator:
-            parameters[name.strip().lower()] = raw.strip().strip('"').lower()
-    return parameters
-
-
-def media_base_type(value: object) -> str:
-    """A media type's base type, lowercased and trimmed; empty when there is none."""
-    if not isinstance(value, str):
-        return ""
-    return value.split(";", 1)[0].strip().lower()
-
-
-def names_a_zarr_store(value: object) -> bool:
-    """Whether a media type names a Zarr store, however it is spelled.
-
-    The profile requires ``application/vnd.zarr``, and catalogs in the wild
-    write ``application/vnd+zarr``, ``application/x-zarr`` and
-    ``application/zarr`` for the same thing. Reading the loose spellings as a
-    store is what lets ``PTL-ZAR-004`` report the media type that is wrong; a
-    strict match would make the misspelling hide the rule that governs it.
-    Icechunk is excluded: its media type names a different format.
-    """
-    base = media_base_type(value)
-    return "zarr" in base and _ICECHUNK_MARKER not in base
-
-
-def is_zarr_store_asset(asset: dict[str, Any]) -> bool:
-    """Whether an asset publishes a Zarr store, so the profile's rules bind it.
-
-    The media type decides whenever it names a format at all. An asset that
-    declares none, or declares only that it is bytes, falls back to its href:
-    a ``data`` asset at a ``.zarr`` prefix is a store whatever it forgot to
-    say. A media type that names some other format is believed rather than
-    second-guessed, so a COG or a ``.zarr.zip`` archive is never read as a
-    store. An upstream ``source`` asset is out of scope either way.
-    """
-    media_type = asset.get("type")
-    if names_a_zarr_store(media_type):
-        return True
-    if is_source_asset(asset) or "data" not in roles_of(asset):
-        return False
-    if media_base_type(media_type) not in _UNTYPED:
-        return False
-    href = asset.get("href")
-    parsed = split_href(href) if isinstance(href, str) else None
-    return parsed is not None and parsed.path.rstrip("/").lower().endswith(ZARR_SUFFIX)
-
-
-def is_cog_media_type(value: object) -> bool:
-    """True when a media type names a cloud-optimized GeoTIFF.
-
-    The TIFF base type and both required parameters matter. Parameter order,
-    case, and surrounding whitespace do not; a missing parameter means the
-    declaration does not name the COG media type Portolan requires.
-    """
-    if not isinstance(value, str):
-        return False
-    parts = [part.strip().lower() for part in value.split(";")]
-    return bool(parts) and parts[0] == _TIFF_MEDIA_TYPE and _COG_PARAMETERS.issubset(parts[1:])
-
-
-def is_partial_read_media_type(value: object) -> bool:
-    """Whether clients read a file of this media type by byte range.
-
-    core.md, Data Storage lists COG, Parquet, PMTiles, and COPC.
-    """
-    return is_cog_media_type(value) or value in (
-        PARQUET_MEDIA_TYPE,
-        PMTILES_MEDIA_TYPE,
-        COPC_MEDIA_TYPE,
-    )
-
-
-def is_raster_data_asset(asset: dict[str, Any]) -> bool:
-    """Whether an asset declares primary raster-data intent.
-
-    Applicability cannot depend on a correct COG declaration: doing that lets
-    a bad media type hide the COG media-type, scene-modeling, and item-mirror
-    findings it should trigger. The data role plus either a TIFF type or TIFF
-    href establishes raster intent. Upstream source assets are deliberately
-    excluded because the spec permits them to remain ordinary GeoTIFFs.
-    """
-    if "data" not in roles_of(asset) or is_source_asset(asset):
-        return False
-    if is_tiff_media_type(asset.get("type")):
-        return True
-    href = asset.get("href")
-    if not isinstance(href, str):
-        return False
-    parsed = split_href(href)
-    return parsed is not None and parsed.path.lower().endswith(TIFF_SUFFIXES)
-
-
-def is_overview_asset(asset: dict[str, Any]) -> bool:
-    """formats.md, Raster: an overview is a COG with the visual and overview roles.
-
-    The ``overview`` role alone is STAC's generic preview image, often a PNG.
-    """
-    return {"visual", "overview"} <= set(roles_of(asset)) and is_cog_media_type(asset.get("type"))
-
-
-def has_cog(node: Node) -> bool:
-    """Whether any asset declares a COG, regardless of its roles or href."""
-    return any(is_cog_media_type(asset.get("type")) for _pointer, _key, asset in assets_of(node))
-
-
-def is_pmtiles_asset(asset: dict[str, Any]) -> bool:
-    """Identify PMTiles by media type or href, including URL query strings."""
-    href = asset.get("href")
-    parsed = split_href(href) if isinstance(href, str) else None
-    return asset.get("type") == PMTILES_MEDIA_TYPE or (
-        parsed is not None and parsed.path.lower().endswith(".pmtiles")
-    )
 
 
 def parse_rfc3339(value: object) -> datetime | None:
@@ -392,3 +217,202 @@ def has_table_columns(node: Node, asset: dict[str, Any]) -> bool:
         isinstance(columns := holder.get("table:columns"), list) and bool(columns)
         for holder in table_declarations(node, asset)
     )
+
+
+MIRROR_ROLE = "collection-mirror"
+MIRROR_FILENAME = "items.parquet"
+
+
+def mirror_assets(node: Node) -> list[tuple[str, str, dict[str, object]]]:
+    """The node's item-mirror assets, found by role or href.
+
+    Role is the normative signal, but a producer that gets the role wrong
+    still means the asset as a mirror, and PTL-MIR-002 should say so rather
+    than treat it as an unrelated Parquet file. The filename is the other way
+    the same intent shows up. The asset key has no signal: the
+    stac-geoparquet spec names none, so the producer chooses it.
+    """
+    return [entry for entry in assets_of(node) if is_mirror_asset(entry[2])]
+
+
+def is_mirror_asset(asset: dict[str, object]) -> bool:
+    """Whether one asset is an item mirror rather than collection data.
+
+    The data pass uses this to route a mirror through its agreement check
+    (``PORTO-FMT-042``) on top of the GeoParquet requirements that bind it
+    like any other spatial table (``PORTO-FMT-043``).
+    """
+    href = asset.get("href")
+    return MIRROR_ROLE in roles_of(asset) or (
+        isinstance(href, str) and href.rsplit("/", 1)[-1] == MIRROR_FILENAME
+    )
+
+
+# Version-tolerant prefix of the partition extension's schema URI, matching
+# how the web-map-links declaration is checked in the viz rules.
+PARTITION_EXTENSION_PREFIX = "https://schemas.portolan-sdi.org/incubating/partition/"
+
+
+def is_partitioned(node: Node) -> bool:
+    return any(key.startswith("partition:") for key in node.data) or bool(
+        _declared_extensions(node)
+    )
+
+
+def _declared_extensions(node: Node) -> list[tuple[int, str]]:
+    """``(index, uri)`` of each partition extension URI in ``stac_extensions``."""
+    extensions = node.data.get("stac_extensions")
+    if not isinstance(extensions, list):
+        return []
+    return [
+        (index, uri)
+        for index, uri in enumerate(extensions)
+        if isinstance(uri, str) and uri.startswith(PARTITION_EXTENSION_PREFIX)
+    ]
+
+
+def providers_of(node: Node) -> list[dict[str, Any]]:
+    raw = node.data.get("providers")
+    if not isinstance(raw, list):
+        return []
+    return [p for p in raw if isinstance(p, dict)]
+
+
+def bboxes_of(node: Node) -> list[tuple[str, Any]]:
+    """All bbox arrays on a node, with a JSON pointer for each."""
+    found: list[tuple[str, Any]] = []
+    if node.kind == "item":
+        if "bbox" in node.data:
+            found.append((json_pointer("bbox"), node.data["bbox"]))
+        return found
+    extent = node.data.get("extent")
+    if isinstance(extent, dict):
+        spatial = extent.get("spatial")
+        if isinstance(spatial, dict):
+            boxes = spatial.get("bbox")
+            if isinstance(boxes, list):
+                for index, box in enumerate(boxes):
+                    found.append((json_pointer("extent", "spatial", "bbox", index), box))
+    return found
+
+
+def has_datetime(fields: dict[str, Any]) -> bool:
+    """Whether ``fields`` include a datetime or both ends of an interval."""
+    return fields.get("datetime") is not None or (
+        fields.get("start_datetime") is not None and fields.get("end_datetime") is not None
+    )
+
+
+CLASSES_FIELD = "classification:classes"
+BAND_FIELDS = ("bands", "raster:bands")
+_ABSENT = object()
+
+
+@dataclass(frozen=True)
+class ClassList:
+    """One ``classification:classes`` array and the band facts that bind it.
+
+    ``nodata`` is the band's own value, or the enclosing asset's when the
+    band leaves it out, as STAC 1.1 inherits it. ``_ABSENT`` marks a value
+    declared at neither level. ``band_field`` and
+    ``band_index`` locate the band in its asset's band list, so the data pass
+    can pair it with the band of the same position in the file; both are None
+    for a list declared outside a band list.
+    """
+
+    pointer: str
+    classes: Any
+    nodata: Any
+    band_field: str | None = None
+    band_index: int | None = None
+    # On a source asset, which PORTO-FMT-045 exempts from Portolan's own
+    # class requirements; the extension's class object still applies.
+    source: bool = False
+
+    def entries(self) -> Iterator[tuple[str, dict[str, Any]]]:
+        """(pointer, class object) for each class that is an object."""
+        if not isinstance(self.classes, list):
+            return
+        for index, entry in enumerate(self.classes):
+            if isinstance(entry, dict):
+                yield json_pointer(index, prefix=self.pointer), entry
+
+
+def asset_class_lists(pointer: str, asset: dict[str, Any]) -> list[ClassList]:
+    """Every class list on one asset: its own, and each band's.
+
+    A legacy ``raster:bands`` list is left out where it mirrors a list in
+    ``bands`` or, for the asset's only band, on the asset.
+    """
+    nodata = asset.get("nodata", _ABSENT)
+    found: list[ClassList] = []
+    if CLASSES_FIELD in asset:
+        found.append(
+            ClassList(json_pointer(CLASSES_FIELD, prefix=pointer), asset[CLASSES_FIELD], nodata)
+        )
+    for field in BAND_FIELDS:
+        bands = asset.get(field)
+        if not isinstance(bands, list):
+            continue
+        for index, band in enumerate(bands):
+            if not isinstance(band, dict) or CLASSES_FIELD not in band:
+                continue
+            if field == "raster:bands" and _mirrors(asset, index, band):
+                continue
+            found.append(
+                ClassList(
+                    json_pointer(field, index, CLASSES_FIELD, prefix=pointer),
+                    band[CLASSES_FIELD],
+                    band.get("nodata", nodata),
+                    field,
+                    index,
+                )
+            )
+    return found
+
+
+def _home(asset: dict[str, Any], index: int) -> dict[str, Any] | None:
+    """The ``bands`` entry, or the single-band asset, with classes for legacy band ``index``."""
+    if _has_classes(asset, index):
+        band: dict[str, Any] = asset["bands"][index]
+        return band
+    if index == 0 and band_count(asset) == 1 and CLASSES_FIELD in asset:
+        return asset
+    return None
+
+
+def _mirrors(asset: dict[str, Any], index: int, legacy: dict[str, Any]) -> bool:
+    """Whether a legacy ``raster:bands`` entry repeats the class list and nodata of its home."""
+    home = _home(asset, index)
+    if home is None or home.get(CLASSES_FIELD) != legacy[CLASSES_FIELD]:
+        return False
+    inherited = asset.get("nodata", _ABSENT)
+    return bool(home.get("nodata", inherited) == legacy.get("nodata", inherited))
+
+
+def is_integer(value: Any) -> TypeGuard[int]:
+    """A JSON integer as draft-07 reads it: 1 or 1.0, but neither true nor 1.5."""
+    # JSON true is a Python int; the schema's integer type excludes it.
+    if isinstance(value, float):
+        return value.is_integer()
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _has_classes(asset: dict[str, Any], index: int | None) -> bool:
+    """Whether the asset (index None) or its band ``index`` in ``bands`` has classes."""
+    if index is None:
+        return CLASSES_FIELD in asset
+    bands = asset.get("bands")
+    if not isinstance(bands, list) or index >= len(bands):
+        return False
+    band = bands[index]
+    return isinstance(band, dict) and CLASSES_FIELD in band
+
+
+def band_count(asset: dict[str, Any]) -> int:
+    """How many bands the asset declares; one when it lists none."""
+    for field in BAND_FIELDS:
+        bands = asset.get(field)
+        if isinstance(bands, list):
+            return len(bands)
+    return 1

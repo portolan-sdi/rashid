@@ -358,7 +358,7 @@ def vendored_extension_schemas() -> dict[str, dict[str, Any]]:
 
     A plain store, not a policy: it answers "do we carry this URI offline?".
     Which URIs an object may legitimately declare is the profile registry's
-    call, and :func:`rashid.rules.conformance.registered_extension` makes it.
+    call, and :func:`rashid._profile.registered_extension` makes it.
     The store therefore also holds schemas that are only ``$ref`` targets,
     such as PROJJSON, which no object ever declares.
     """
