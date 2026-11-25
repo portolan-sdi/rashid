@@ -79,7 +79,7 @@ def test_stream_missing_is_none(catalog: CatalogBuilder) -> None:
 
 # --- remote reads against a local HTTPS server -----------------------------
 
-_AGENT = f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
+_AGENT = f"rashid/{version('rashid-core')} (+https://github.com/portolan-sdi/rashid)"
 
 
 def test_http_stream_reads_whole_object(catalog: CatalogBuilder, https_server: HttpsServer) -> None:

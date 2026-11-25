@@ -247,7 +247,7 @@ def test_remote_schema_fetch_sends_a_named_user_agent(https_server: HttpsServer)
     assert fetched == {"$id": "x"}
     (seen,) = https_server.seen
     assert seen.headers["user-agent"] == (
-        f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
+        f"rashid/{version('rashid-core')} (+https://github.com/portolan-sdi/rashid)"
     )
 
 

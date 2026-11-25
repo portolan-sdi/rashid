@@ -3,62 +3,41 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "rashid"
+name = "rashid-core"
 version = "0.4.0"
 description = "Validator and linter for Portolan catalogs"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [{ name = "Portolan contributors" }]
-# The data pass reads asset bytes to verify checksum, size, format, and extent —
-# the core of what a catalog validator is for — so its geospatial stack is a
-# core dependency and the pass runs by default. The import-linter contracts
-# keep `import rashid_core` cheap: the heavy imports stay confined to
-# rashid_core.data check modules and load only when the pass runs.
-#
-# Floors stay at releases that resolved on Python 3.10, the previous minimum.
-# Raising them is a separate change. pyarrow is the exception: 21 is the
-# oldest release whose reader exposes native GeospatialStatistics (geoparquet._native_bboxes
-# feature-detects it either way), and consumers cap pyarrow below 25 over an
-# abseil ABI break, so a >=25 floor would make rashid uninstallable next to them
-# (#36; also fixed on main by #49 — the floors agree whichever merges first).
-# shapely joins the stack for the item-mirror comparison in
-# mirror._geometry_agrees, which decodes the mirror's WKB and the item's GeoJSON
-# and compares them structurally. Its floor follows the same rule: 2.1 is the
-# newest series shapely ships.
-# jsonschema-rs screens each object before jsonschema sees it
-# (rashid_core._jsonschema.screened), and its registry needs the meta-schemas that
-# jsonschema-specifications carries; jsonschema already depends on it, so
-# naming it adds no install, only the direct import.
+# Heavy readers load lazily and are optional for metadata-only installations.
+# Keep the existing dependency floors; changing them is a separate task.
 dependencies = [
     "click>=8.4",
     "jsonschema>=4.26",
     "jsonschema-rs>=0.58",
     "jsonschema-specifications>=2023.3.6",
     "referencing>=0.30",
-    "pyarrow>=21",
-    "rasterio>=1.4.4",
-    "rio-cogeo>=6",
-    "pyproj>=3.7.1",
-    "shapely>=2.1",
     "orjson>=3.11",
     "obstore>=0.9",
     "tzdata; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
-# Back-compat: the data pass's stack moved into the core dependencies, so the
-# extra is an intentional no-op; `pip install rashid[data]` keeps working.
-data = []
+data = [
+    "pyarrow>=21",
+    "rasterio>=1.4.4",
+    "rio-cogeo>=6",
+    "pyproj>=3.7.1",
+    "shapely>=2.1",
+]
 
 [project.urls]
 Homepage = "https://github.com/portolan-sdi/rashid"
 
-[project.scripts]
-rashid = "rashid_core.cli:main"
-
 [dependency-groups]
 dev = [
+    "rashid",
     "pytest>=9",
     "pytest-cov>=7",
     "pytest-xdist>=3.8",
@@ -76,6 +55,13 @@ dev = [
     "pip-audit>=2.10",
     "trustme>=1.2.1",
 ]
+
+[tool.uv.workspace]
+members = ["meta/rashid"]
+
+[tool.uv.sources]
+rashid = { workspace = true }
+rashid-core = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rashid_core"]
@@ -141,7 +127,7 @@ files = ["src/rashid_core"]
 module = ["jsonschema.*", "jsonschema_specifications.*"]
 ignore_missing_imports = true
 
-# The data-pass geospatial stack (rashid[data]) ships no usable type information.
+# The data-pass geospatial stack (rashid-core[data]) ships no usable type information.
 [[tool.mypy.overrides]]
 module = ["pyarrow.*", "rasterio.*", "pyproj.*", "rio_cogeo.*", "shapely.*"]
 ignore_missing_imports = true
@@ -266,7 +252,11 @@ allowed_importers = ["rashid_core.registry"]
 [tool.commitizen]
 name = "cz_conventional_commits"
 version = "0.4.0"
-version_files = ["pyproject.toml:^version"]
+version_files = [
+    "pyproject.toml:^version",
+    "meta/rashid/pyproject.toml:^version",
+    'meta/rashid/pyproject.toml:rashid-core\[data\]==',
+]
 tag_format = "v$version"
 annotated_tag = true
 # uv.lock records this package's own version, and version_files rewrites

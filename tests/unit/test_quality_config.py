@@ -227,6 +227,7 @@ def test_jscpd_hook_runs_in_the_ci_commit_stage() -> None:
     assert workflow == "portolan-sdi/portolan-ops/.github/workflows/reusable-python-ci.yml"
     assert ref
     assert "pytest -n 8" in ci["jobs"]["ci"]["with"]["test-command"]
+    assert ci["jobs"]["ci"]["with"]["sync-args"] == "--all-packages --all-extras"
 
 
 def test_ci_runs_the_gate_selftest_on_linux() -> None:
@@ -242,7 +243,9 @@ def test_ci_runs_the_gate_selftest_on_linux() -> None:
         if step.get("uses", "").startswith("astral-sh/setup-uv@")
     )
     install = next(
-        index for index, step in enumerate(steps) if "uv sync --locked" in step.get("run", "")
+        index
+        for index, step in enumerate(steps)
+        if "uv sync --locked --all-packages --all-extras" in step.get("run", "")
     )
     run = next(
         index
@@ -252,3 +255,34 @@ def test_ci_runs_the_gate_selftest_on_linux() -> None:
     assert setup < install < run
     assert not steps[run].get("if")
     assert not steps[run].get("continue-on-error", False)
+
+
+def test_ci_checks_built_wheels_on_linux() -> None:
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    job = ci["jobs"]["wheel-smoke"]
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["timeout-minutes"] <= 20
+    assert job["permissions"] == {"contents": "read"}
+    assert not job.get("if")
+    assert not job.get("continue-on-error", False)
+    for step in job["steps"]:
+        if "uses" in step:
+            assert len(step["uses"].partition("@")[2]) == 40
+    assert job["steps"][-1]["run"] == "uv run python scripts/wheel_smoke.py"
+
+
+def test_publish_builds_both_distributions_and_uploads_core_first() -> None:
+    config = yaml.safe_load((ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8"))
+    job = config["jobs"]["publish"]
+    assert job["environment"] == "pypi"
+    steps = job["steps"]
+    builds = [step["run"] for step in steps if step.get("name") == "Build distributions"]
+    assert builds == [
+        "uv build --package rashid-core --out-dir dist/core\n"
+        "uv build --package rashid --out-dir dist/meta\n"
+    ]
+    uploads = [
+        step for step in steps if step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
+    ]
+    assert [step["with"]["packages-dir"] for step in uploads] == ["dist/core", "dist/meta"]
+    assert all(step["with"]["skip-existing"] for step in uploads)

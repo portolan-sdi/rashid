@@ -111,6 +111,21 @@ def test_cli_help_loads_no_heavy_module() -> None:
     assert loaded & (_HEAVY | _PROFILERS | _NETWORK | _METADATA) == set()
 
 
+def test_module_help_loads_no_heavy_module() -> None:
+    code = (
+        "import contextlib, io, runpy, sys\n"
+        "sys.argv = ['rashid_core', '--help']\n"
+        "with contextlib.redirect_stdout(io.StringIO()):\n"
+        "    try:\n"
+        "        runpy.run_module('rashid_core', run_name='__main__', alter_sys=True)\n"
+        "    except SystemExit as exc:\n"
+        "        assert exc.code == 0, exc.code\n"
+    )
+    loaded = _loaded(code)
+    assert "click" in loaded
+    assert loaded & (_HEAVY | _PROFILERS | _NETWORK | _METADATA) == set()
+
+
 def test_a_local_metadata_check_loads_no_network_stack() -> None:
     """A ``--no-data`` check of a directory sends no request, so it loads no transport."""
     catalog = Path(__file__).parents[1] / "fixtures" / "reference-catalog"

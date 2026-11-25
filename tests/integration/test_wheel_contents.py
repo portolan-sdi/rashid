@@ -35,7 +35,7 @@ def test_wheel_ships_marker_and_schemas(tmp_path: Path) -> None:
         timeout=120,
     )
     assert build.returncode == 0, f"uv build failed in {REPO_ROOT}:\n{build.stderr}"
-    (wheel,) = tmp_path.glob("rashid-*.whl")
+    (wheel,) = tmp_path.glob("rashid_core-*.whl")
     names = zipfile.ZipFile(wheel).namelist()
     assert "rashid_core/py.typed" in names
     schemas = [

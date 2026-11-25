@@ -44,7 +44,7 @@ def test_timings_add_meta_to_json(root: Path) -> None:
     _trace.reset()
     result = CliRunner().invoke(main, [*_check("--timings"), "--json", str(root)])
     meta = json.loads(result.stdout)["meta"]
-    assert meta["version"] == version("rashid")
+    assert meta["version"] == version("rashid-core")
     assert meta["run_id"] == _trace.RUN_ID
     (check,) = meta["timings"]
     assert check["name"] == "check"

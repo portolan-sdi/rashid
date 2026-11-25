@@ -13,13 +13,27 @@ The name comes from the Arabic root ر ش د. Its participles رَاشِدٌ and
 
 ## Install
 
+Install `rashid` for the full command, including asset byte validation:
+
 ```bash
 uv tool install rashid
 ```
 
-rashid requires Python 3.11 or later.
+For metadata-only use, install `rashid-core` without the geospatial libraries:
 
-## Check a Catalog
+```bash
+pip install rashid-core
+python -m rashid_core check --no-data tests/fixtures/reference-catalog
+```
+
+`rashid-core` provides the Python library and module entry point. It does not install the `rashid` console command.
+Install `rashid-core[data]` to add byte validation, or install `rashid` for the full tool.
+Both distributions require Python 3.11 or later.
+
+The Python import name changed from `rashid` to `rashid_core`.
+The public `rashid.api` module is now `rashid_core.api`. Update existing Python imports.
+
+## Check a catalog
 
 ```bash
 rashid check path/to/catalog

@@ -1184,7 +1184,7 @@ def test_user_agent_carries_the_installed_version(
     monkeypatch: pytest.MonkeyPatch, probe: str
 ) -> None:
     agent = _record(monkeypatch, probe).get_header("User-agent")
-    assert agent == f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
+    assert agent == f"rashid/{version('rashid-core')} (+https://github.com/portolan-sdi/rashid)"
 
 
 def test_user_agent_does_not_displace_the_probe_headers(monkeypatch: pytest.MonkeyPatch) -> None:

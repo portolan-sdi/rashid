@@ -637,7 +637,8 @@ def test_env_timings(value: str | None, mode: str | None) -> None:
     assert _trace.env_timings(environ) == mode
 
 
-def test_env_names_derive_from_the_package() -> None:
+def test_env_names_remain_rashid_after_the_import_rename() -> None:
+    assert _trace._PACKAGE == "rashid"
     assert (_trace.ENV_LOG, _trace.ENV_LOG_FILE, _trace.ENV_TIMINGS, _trace.ENV_TRACE) == (
         "RASHID_LOG",
         "RASHID_LOG_FILE",

@@ -12,7 +12,7 @@ uv run pre-commit install \
   --hook-type pre-push
 ```
 
-`uv sync` includes development dependencies. Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org), which Commitizen checks through the `commit-msg` hook.
+`uv sync` installs development dependencies and the local `rashid` metapackage, including the geospatial stack. Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org), which Commitizen checks through the `commit-msg` hook.
 
 ## Local checks
 
@@ -51,6 +51,7 @@ These gates keep each consolidated concept at its owner ([#266](https://github.c
 | Ruff `TID251` | URL interpretation belongs to `_href.py`; urllib requests and HTTPStore construction to `_store.py`; JSON loading to `_json.py`; raw readers and glob enumeration to `data/formats/_files.py`. |
 | import-linter | Exhaustive layers order every package module and keep metadata rules independent of validation passes. Only optional formats import geospatial libraries; only the CLI imports click. Only the data entry point imports optional formats, and metadata rules cannot import transport. |
 | jscpd 5.2.1 | New Python clones in `src/rashid_core` and `tests` fail the commit hook. Fixtures and virtual environments are excluded. An empty scan fails. |
+| Package split | `test_packaging.py` checks version agreement and the core dependency closure. `wheel-smoke` checks isolated wheels and upgrades from rashid 0.4.0. |
 | API snapshot | `test_api.py` pins `rashid_core.api` and `rashid_core.__all__`, their defining objects, and callable signatures. Python defines the enum constructor signature. |
 | Registry checks | Duplicate IDs fail registry construction. An AST scan compares emitted IDs with `CHECKS` and checks that pass declarations reuse the ID constants. |
 | Pointer construction | An AST scan rejects hand-built pointers outside `model.py`: f-strings, addition, percent formatting, `.format`, and slash joins. Generic slash prefixes are checked in values assigned or passed as `pointer` or `json_pointer`. |
@@ -146,7 +147,16 @@ Counters are always enabled. `tests/integration/test_operation_counts.py` checks
 
 If your change reduces the work performed, update the expected counts in the same pull request.
 
-`tests/unit/test_import_budget.py` checks that `import rashid_core` and `rashid --help` do not load the geospatial stack, jsonschema, the network stack, or a profiler. Keep heavy imports inside the functions that need them.
+`tests/unit/test_import_budget.py` checks imports, `rashid --help`, and `python -m rashid_core --help`.
+They must not load the geospatial stack, jsonschema, transport, or a profiler. Keep heavy imports inside the functions that need them.
+
+Build both wheels and test isolated installs with:
+
+```bash
+uv run python scripts/wheel_smoke.py
+```
+
+The smoke check verifies the base dependency allowlist, metadata validation, the missing-stack warning, and upgrades from rashid 0.4.0.
 
 ## Logs and timings
 
@@ -197,7 +207,20 @@ git tag -d "vX.Y.Z"
 git push -u origin release/vX.Y.Z
 ```
 
-Replace `X.Y.Z` with the release version. `cz bump` updates `pyproject.toml` and `CHANGELOG.md`, and a pre-bump hook refreshes `uv.lock`. It then creates a `bump:` commit and tag.
+Replace `X.Y.Z` with the release version.
+`cz bump` updates both project versions, the metapackage's exact core pin, and `CHANGELOG.md`.
+The pre-bump hook refreshes `uv.lock`. Commitizen then creates one `bump:` commit and one `vX.Y.Z` tag for both distributions.
+
+Build both wheels and source distributions locally with:
+
+```bash
+uv build --package rashid-core --out-dir .cache/dist/core
+uv build --package rashid --out-dir .cache/dist/meta
+```
+
+`rashid-core` contains all Python code. The code-free `rashid` metapackage provides the console command and depends on `rashid-core[data]` at the same version.
+The publish workflow uses the `pypi` environment and publishes `rashid-core` first, then `rashid`.
+Both upload steps skip existing files so interrupted releases can be retried.
 
 Delete the local tag. `publish.yml` creates the tag on the merged commit; the local tag points to the release branch commit.
 

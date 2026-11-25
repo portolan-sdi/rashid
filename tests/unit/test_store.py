@@ -17,7 +17,7 @@ from rashid_core._stac import asset_refers_to_self
 from rashid_core.catalog import Node
 from tests._https import HttpsServer, Route
 
-_AGENT = f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
+_AGENT = f"rashid/{version('rashid-core')} (+https://github.com/portolan-sdi/rashid)"
 
 
 def test_get_returns_the_body_and_sends_the_named_agent(https_server: HttpsServer) -> None:

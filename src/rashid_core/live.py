@@ -132,7 +132,7 @@ from rashid_core.ids import (
 )
 from rashid_core.model import Finding, Severity, json_pointer
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("rashid.live")
 
 
 # Assets are declared on collections and items; catalogs carry none.

@@ -66,7 +66,7 @@ from rashid_core.ids import (
 )
 from rashid_core.model import Severity
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("rashid.data.zarr")
 
 #: The Zarr version the profile accepts.
 ZARR_FORMAT = 3

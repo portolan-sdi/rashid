@@ -1,9 +1,7 @@
 """Counters, stage spans, and logging setup, from the standard library alone.
 
-This module imports nothing from its own package. The package name and the
-environment variable prefix come from ``__name__``, so the same file serves
-any package that copies it (portolan-sdi/portolan-ops#131). For rashid the
-variables are:
+This module imports nothing from its own package. The logger name and
+public environment variables retain the rashid command's name:
 
 ``RASHID_LOG``
     ``debug``, ``info``, ``warning``, or ``error``. Log records at that level
@@ -52,7 +50,7 @@ from typing import TYPE_CHECKING, Any, TextIO, TypeVar
 if TYPE_CHECKING:
     from concurrent.futures import Executor, Future
 
-_PACKAGE = __name__.split(".")[0]
+_PACKAGE = "rashid"
 _PREFIX = _PACKAGE.upper()
 
 ENV_LOG = f"{_PREFIX}_LOG"

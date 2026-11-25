@@ -12,6 +12,7 @@ jobs:
   publish:
     # Only run on commitizen bump commits (or manual recovery dispatch).
     if: startsWith(github.event.head_commit.message, 'bump:') || github.event_name == 'workflow_dispatch'
+    environment: pypi
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -59,14 +60,26 @@ jobs:
             git push origin "v$VERSION"
           fi
 
-      - name: Build distribution
+      - name: Build distributions
         if: steps.check.outputs.exists == 'false'
-        run: uv build
+        run: |
+          uv build --package rashid-core --out-dir dist/core
+          uv build --package rashid --out-dir dist/meta
 
-      - name: Publish to PyPI
+      - name: Publish rashid-core to PyPI
         if: steps.check.outputs.exists == 'false'
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
+          packages-dir: dist/core
+          skip-existing: true
+          print-hash: true
+
+      - name: Publish rashid to PyPI
+        if: steps.check.outputs.exists == 'false'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist/meta
+          skip-existing: true
           print-hash: true
 
       - name: Create GitHub release
@@ -75,7 +88,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # Attach each --json report schema under a name that carries its version.
+          # Attach each --json report schema under a name that includes its version.
           assets=()
           for schema in src/rashid_core/_schemas/report/v*/schema.json; do
             version_dir=$(basename "$(dirname "$schema")")

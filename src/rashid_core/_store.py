@@ -75,7 +75,7 @@ if TYPE_CHECKING:
 
     from obstore.store import HTTPStore
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("rashid._store")
 
 # Longest wait for the next bytes of a response, in either transport.
 _IDLE = timedelta(seconds=30)

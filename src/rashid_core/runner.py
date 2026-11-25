@@ -36,7 +36,7 @@ from rashid_core.rule import Rule
 from rashid_core.schema import validate_schema
 from rashid_core.structural import validate_structural
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("rashid.runner")
 
 
 # Structural/schema validators map one object's raw JSON to schema errors.
