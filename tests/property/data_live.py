@@ -28,61 +28,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from hypothesis import strategies as st
 
-from rashid_core import ValidationOptions
+from rashid_core import ValidationOptions, ids
 from rashid_core._media import COG_MEDIA_TYPE, PARQUET_MEDIA_TYPE
-from rashid_core.ids import (
-    DAT_CHECKSUM,
-    DAT_CLASS_COLORS,
-    DAT_COG,
-    DAT_COG_STATS,
-    DAT_COLUMN_DESCRIPTIONS,
-    DAT_CONSISTENCY,
-    DAT_FORMAT,
-    DAT_GEOPARQUET_VERSION,
-    DAT_MIRROR,
-    DAT_NATIVE_CRS,
-    DAT_ORDERING,
-    DAT_OVERVIEW_FORMAT,
-    DAT_OVERVIEWS,
-    DAT_PARTITION_SCHEMA,
-    DAT_ROWGROUP_SIZE,
-    DAT_ROWGROUP_STATS,
-    DAT_SCENE_MASK,
-    DAT_SIZE,
-    DAT_TABULAR,
-    DAT_TILE_SIZE,
-    DAT_UNAVAILABLE,
-    DAT_VALID_PERCENT,
-    DAT_VECTOR_COLUMNS,
-    LIV_CORS_EXPOSE,
-    LIV_CORS_ORIGIN,
-    LIV_CORS_PREFLIGHT,
-    LIV_HEAD_LENGTH,
-    LIV_LINK_TARGET,
-    LIV_OFF_HTTPS,
-    LIV_RANGE,
-    LIV_SELF_BASE,
-    LIV_UNAVAILABLE,
-    ZAR_ASSET,
-    ZAR_AXIS_ORDER,
-    ZAR_CHUNK_SIZE,
-    ZAR_CODECS,
-    ZAR_CONVENTIONS,
-    ZAR_CORS,
-    ZAR_CRS,
-    ZAR_DISPLAY_RANGE,
-    ZAR_LAYOUT_FIELDS,
-    ZAR_LEVEL_STEP,
-    ZAR_NODATA,
-    ZAR_NONSPATIAL_CHUNK,
-    ZAR_PYRAMID,
-    ZAR_READ_AMPLIFICATION,
-    ZAR_ROW_MAJOR,
-    ZAR_SHARD_SPAN,
-    ZAR_STORE_VERSION,
-    ZAR_TRANSFORM,
-    ZAR_VARIABLES,
-)
 from rashid_core.live import ProbeResponse
 from tests.conftest import CatalogBuilder, CollectionBuilder, mutate_json
 from tests.integration import _data_assets as assets
@@ -297,20 +244,20 @@ def _raster_item(root: Path) -> Path:
     return first_item(collection_of(root, "raster"))
 
 
-@breaks(DAT_UNAVAILABLE)
+@breaks(ids.DAT_UNAVAILABLE)
 def _unreachable_asset(root: Path) -> ValidationOptions:
     asset = _asset("s3://bucket/data.parquet", PARQUET_MEDIA_TYPE)
     mutate_json(_vector(root), lambda d: d["assets"].__setitem__("upstream", asset))
     return _LEAN
 
 
-@breaks(DAT_CHECKSUM)
+@breaks(ids.DAT_CHECKSUM)
 def _wrong_checksum(root: Path) -> ValidationOptions:
     _edit_asset(_vector(root), "data", **{"file:checksum": assets.multihash(b"")})
     return _LEAN
 
 
-@breaks(DAT_SIZE)
+@breaks(ids.DAT_SIZE)
 def _wrong_size(root: Path) -> ValidationOptions:
     document = _vector(root)
     size = load(document)["assets"]["data"]["file:size"]
@@ -318,19 +265,19 @@ def _wrong_size(root: Path) -> ValidationOptions:
     return _LEAN
 
 
-@breaks(DAT_FORMAT)
+@breaks(ids.DAT_FORMAT)
 def _wrong_media_type(root: Path) -> ValidationOptions:
     _edit_asset(_vector(root), "data", type="application/vnd.pmtiles")
     return _LEAN
 
 
-@breaks(DAT_CONSISTENCY)
+@breaks(ids.DAT_CONSISTENCY)
 def _bbox_elsewhere(root: Path) -> ValidationOptions:
     mutate_json(_raster_item(root), lambda d: d.__setitem__("bbox", [10.0, 60.0, 12.0, 62.0]))
     return _LEAN
 
 
-@breaks(DAT_PARTITION_SCHEMA)
+@breaks(ids.DAT_PARTITION_SCHEMA)
 def _diverging_partitions(root: Path) -> ValidationOptions:
     document = _vector(root)
     parts = document.parent / "parts"
@@ -341,14 +288,14 @@ def _diverging_partitions(root: Path) -> ValidationOptions:
     return _LEAN
 
 
-@breaks(DAT_TABULAR)
+@breaks(ids.DAT_TABULAR)
 def _undocumented_table(root: Path) -> ValidationOptions:
     document = _vector(root)
     mutate_json(document, lambda d: d.pop("table:columns"))
     return _rewrite(document, lambda path: assets.write_geoparquet(path, geo=False))
 
 
-@breaks(DAT_MIRROR)
+@breaks(ids.DAT_MIRROR)
 def _mirror_without_ids(root: Path) -> ValidationOptions:
     directory = collection_of(root, "raster")
     mirror = {"href": "./items.parquet", "type": PARQUET_MEDIA_TYPE, "roles": ["collection-mirror"]}
@@ -358,13 +305,13 @@ def _mirror_without_ids(root: Path) -> ValidationOptions:
     return _LEAN
 
 
-@breaks(DAT_VECTOR_COLUMNS)
+@breaks(ids.DAT_VECTOR_COLUMNS)
 def _undocumented_vector(root: Path) -> ValidationOptions:
     mutate_json(_vector(root), lambda d: d.pop("table:columns"))
     return _LEAN
 
 
-@breaks(DAT_OVERVIEW_FORMAT)
+@breaks(ids.DAT_OVERVIEW_FORMAT)
 def _single_band_overview(root: Path) -> ValidationOptions:
     directory = collection_of(root, "raster")
     overview = {"href": "./overview.tif", "type": COG_MEDIA_TYPE, "roles": ["visual", "overview"]}
@@ -376,13 +323,13 @@ def _single_band_overview(root: Path) -> ValidationOptions:
     return _LEAN
 
 
-@breaks(DAT_COLUMN_DESCRIPTIONS)
+@breaks(ids.DAT_COLUMN_DESCRIPTIONS)
 def _bare_column(root: Path) -> ValidationOptions:
     mutate_json(_vector(root), lambda d: d["table:columns"][0].pop("description"))
     return _LEAN
 
 
-@breaks(DAT_CLASS_COLORS)
+@breaks(ids.DAT_CLASS_COLORS)
 def _class_color_off_the_table(root: Path) -> ValidationOptions:
     document = _raster_item(root)
     _edit_asset(document, "data", **_classified_asset(**{"permanent-water": "1E90FF"}))
@@ -391,25 +338,27 @@ def _class_color_off_the_table(root: Path) -> ValidationOptions:
     )
 
 
-@breaks(DAT_NATIVE_CRS)
+@breaks(ids.DAT_NATIVE_CRS)
 def _registry_code_native_crs(root: Path) -> ValidationOptions:
     return _rewrite(_vector(root), lambda path: write_native_crs_geoparquet(path, "srid:3857"))
 
 
 # Byte rewrites that each break one storage rule, in the shapes the storage tests use.
 _GEOPARQUET_REWRITES: dict[str, dict[str, Any]] = {
-    DAT_ORDERING: {"points": assets.interleaved_points()},
-    DAT_ROWGROUP_STATS: {"covering": False},
-    DAT_ROWGROUP_SIZE: {"points": assets.ordered_points(150_001), "row_group_size": 200_000},
-    DAT_GEOPARQUET_VERSION: {"version": "1.0.0"},
+    ids.DAT_ORDERING: {"points": assets.interleaved_points()},
+    ids.DAT_ROWGROUP_STATS: {"covering": False},
+    ids.DAT_ROWGROUP_SIZE: {"points": assets.ordered_points(150_001), "row_group_size": 200_000},
+    ids.DAT_GEOPARQUET_VERSION: {"version": "1.0.0"},
 }
 _COG_REWRITES: dict[str, Any] = {
-    DAT_COG: assets.write_plain_tiff,
-    DAT_COG_STATS: lambda path: assets.write_cog(path, size=256, stats=False),
-    DAT_VALID_PERCENT: lambda path: assets.write_cog(path, size=256, valid_percent=False),
-    DAT_OVERVIEWS: lambda path: assets.write_cog(path, size=400, blocksize=256, overviews=False),
-    DAT_TILE_SIZE: assets.write_tiled_tiff,
-    DAT_SCENE_MASK: lambda path: assets.write_cog(path, size=256, count=3),
+    ids.DAT_COG: assets.write_plain_tiff,
+    ids.DAT_COG_STATS: lambda path: assets.write_cog(path, size=256, stats=False),
+    ids.DAT_VALID_PERCENT: lambda path: assets.write_cog(path, size=256, valid_percent=False),
+    ids.DAT_OVERVIEWS: lambda path: assets.write_cog(
+        path, size=400, blocksize=256, overviews=False
+    ),
+    ids.DAT_TILE_SIZE: assets.write_tiled_tiff,
+    ids.DAT_SCENE_MASK: lambda path: assets.write_cog(path, size=256, count=3),
 }
 
 
@@ -458,29 +407,29 @@ def write_native_crs_geoparquet(path: Path, crs: str) -> None:
 
 #: Each check and the fixture store that breaks it (see tests/unit/test_data_zarr.py).
 _BROKEN_STORES = {
-    ZAR_STORE_VERSION: "zarr-v2",
-    ZAR_CONVENTIONS: "no-conventions",
-    ZAR_TRANSFORM: "no-transform",
-    ZAR_AXIS_ORDER: "axis-order",
-    ZAR_ROW_MAJOR: "transposed",
-    ZAR_CRS: "no-crs",
-    ZAR_PYRAMID: "no-pyramid",
-    ZAR_LAYOUT_FIELDS: "layout-fields",
-    ZAR_LEVEL_STEP: "step-three",
-    ZAR_READ_AMPLIFICATION: "time-chunked",
-    ZAR_NONSPATIAL_CHUNK: "time-chunked-four",
-    ZAR_CHUNK_SIZE: "small-chunks",
-    ZAR_SHARD_SPAN: "wide-shard",
-    ZAR_CODECS: "unsupported-codec",
-    ZAR_VARIABLES: "two-variables",
+    ids.ZAR_STORE_VERSION: "zarr-v2",
+    ids.ZAR_CONVENTIONS: "no-conventions",
+    ids.ZAR_TRANSFORM: "no-transform",
+    ids.ZAR_AXIS_ORDER: "axis-order",
+    ids.ZAR_ROW_MAJOR: "transposed",
+    ids.ZAR_CRS: "no-crs",
+    ids.ZAR_PYRAMID: "no-pyramid",
+    ids.ZAR_LAYOUT_FIELDS: "layout-fields",
+    ids.ZAR_LEVEL_STEP: "step-three",
+    ids.ZAR_READ_AMPLIFICATION: "time-chunked",
+    ids.ZAR_NONSPATIAL_CHUNK: "time-chunked-four",
+    ids.ZAR_CHUNK_SIZE: "small-chunks",
+    ids.ZAR_SHARD_SPAN: "wide-shard",
+    ids.ZAR_CODECS: "unsupported-codec",
+    ids.ZAR_VARIABLES: "two-variables",
 }
 
 #: Asset edits that break a check against the store the base already has.
 _ZARR_ASSET_EDITS: dict[str, dict[str, Any]] = {
-    ZAR_ASSET: {"type": "application/vnd.zarr"},
-    ZAR_DISPLAY_RANGE: {"bands": [{"name": "temp", "nodata": -9999}]},
-    ZAR_NODATA: {"bands": [{"name": "temp", "statistics": {"minimum": 0, "maximum": 1}}]},
-    ZAR_VARIABLES: {"bands": [{"name": "temp"}, {"name": "prec"}]},
+    ids.ZAR_ASSET: {"type": "application/vnd.zarr"},
+    ids.ZAR_DISPLAY_RANGE: {"bands": [{"name": "temp", "nodata": -9999}]},
+    ids.ZAR_NODATA: {"bands": [{"name": "temp", "statistics": {"minimum": 0, "maximum": 1}}]},
+    ids.ZAR_VARIABLES: {"bands": [{"name": "temp"}, {"name": "prec"}]},
 }
 
 
@@ -505,13 +454,13 @@ for _check_id in {**_BROKEN_STORES, **_ZARR_ASSET_EDITS}:
 #: Host misbehaviors as TreeProber flags, with the collection kinds each needs:
 #: the range and preflight checks probe a partial-read file, which a GeoParquet is.
 _HOST_FAULTS: dict[str, tuple[dict[str, Any], tuple[str, ...]]] = {
-    LIV_UNAVAILABLE: ({"down": True}, ()),
-    LIV_RANGE: ({"ranges": False}, ("vector",)),
-    LIV_CORS_ORIGIN: ({"origin": False}, ()),
-    LIV_CORS_EXPOSE: ({"expose": False}, ("vector",)),
-    LIV_CORS_PREFLIGHT: ({"preflight_headers": "If-Match"}, ("vector",)),
-    LIV_OFF_HTTPS: ({"redirect_http": True}, ()),
-    ZAR_CORS: ({"store_cors": False}, ("zarr",)),
+    ids.LIV_UNAVAILABLE: ({"down": True}, ()),
+    ids.LIV_RANGE: ({"ranges": False}, ("vector",)),
+    ids.LIV_CORS_ORIGIN: ({"origin": False}, ()),
+    ids.LIV_CORS_EXPOSE: ({"expose": False}, ("vector",)),
+    ids.LIV_CORS_PREFLIGHT: ({"preflight_headers": "If-Match"}, ("vector",)),
+    ids.LIV_OFF_HTTPS: ({"redirect_http": True}, ()),
+    ids.ZAR_CORS: ({"store_cors": False}, ("zarr",)),
 }
 
 
@@ -528,19 +477,19 @@ for _check_id, (_flags, _kinds) in _HOST_FAULTS.items():
     breaks(_check_id)(_host_breaker(_flags, _kinds))
 
 
-@breaks(LIV_HEAD_LENGTH)
+@breaks(ids.LIV_HEAD_LENGTH)
 def _stale_size(root: Path) -> ValidationOptions:
     _wrong_size(root)
     return live_options(TreeProber(root))
 
 
-@breaks(LIV_LINK_TARGET)
+@breaks(ids.LIV_LINK_TARGET)
 def _missing_link_target(root: Path) -> ValidationOptions:
     (root / "README.md").unlink()
     return live_options(TreeProber(root))
 
 
-@breaks(LIV_SELF_BASE)
+@breaks(ids.LIV_SELF_BASE)
 def _self_link_elsewhere(root: Path) -> ValidationOptions:
     self_link = {
         "rel": "self",
