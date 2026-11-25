@@ -13,6 +13,7 @@ import pytest
 
 from rashid_core import ValidationOptions, validate
 from rashid_core.api import STRUCTURAL_RELS, CatalogGraph, expected_links
+from rashid_core.model import Severity
 from rashid_core.rules.links import RequiredLinksRule, StructuralLinkTypeRule
 from tests.conftest import (
     CatalogBuilder,
@@ -102,12 +103,32 @@ def test_missing_targets_do_not_hide_required_links(catalog: CatalogBuilder) -> 
     item.data["links"] = []
     assert expected_links(graph, item) == ()
     assert [finding.message for finding in RequiredLinksRule().check(item, graph)] == [
-        f"missing required structural link rel:'{rel}'" for rel in ("root", "parent", "collection")
+        "missing required structural link rel:'root'",
+        "missing required structural link rel:'parent'",
+        "item is not in a collection: missing required structural link rel:'collection'",
     ]
     item.data["links"] = [{"rel": "item", "href": "./road-2024.json"}]
     assert [finding.message for finding in StructuralLinkTypeRule().check(item, graph)] == [
         "link rel:'item' has type None, expected 'application/geo+json'"
     ]
+
+
+def test_missing_item_collection_link_names_the_defect(catalog: CatalogBuilder) -> None:
+    catalog.collection("roads").item("a")
+    graph = CatalogGraph.load(catalog.write())
+    item = next(graph.iter("item"))
+    item.data["links"] = [link for link in item.data["links"] if link["rel"] != "collection"]
+    (finding,) = RequiredLinksRule().check(item, graph)
+    assert finding.message == (
+        "item is not in a collection: missing required structural link rel:'collection'"
+    )
+    assert finding.rule_id == "PTL-LNK-001"
+    assert finding.severity is Severity.ERROR
+    assert finding.json_pointer == "/links"
+    assert finding.fix_hint == (
+        "add a rel:'collection' link to links, with a relative href to"
+        " the item's enclosing collection.json and type application/json"
+    )
 
 
 def test_mirror_paths_are_not_encoded_twice(catalog: CatalogBuilder) -> None:

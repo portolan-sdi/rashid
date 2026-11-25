@@ -28,7 +28,7 @@ def test_collection_missing_parent_link(catalog: CatalogBuilder) -> None:
     report = validate(root)
     findings = findings_for(report, "PTL-LNK-001")
     assert len(findings) == 1
-    assert "parent" in findings[0].message
+    assert findings[0].message == "missing required structural link rel:'parent'"
     assert findings[0].path == "roads/collection.json"
 
 

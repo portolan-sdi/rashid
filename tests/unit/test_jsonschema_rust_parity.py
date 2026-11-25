@@ -186,13 +186,22 @@ def test_screened_skips_python_for_a_valid_object() -> None:
     assert screened(Rejects(), Passes())({"x": 1}) == []
 
 
-def test_screened_asks_python_when_rust_rejects_or_is_missing() -> None:
-    python = Draft7Validator({"properties": {"x": {"type": "string"}}})
-    rust = compile_rust({"properties": {"x": {"type": "string"}}}, None, draft7=True)
+@pytest.mark.parametrize(
+    ("constraint", "message"),
+    [({"type": "string"}, "1 is not of type 'string'"), ({"not": {}}, "'x' is not allowed here")],
+)
+def test_screened_asks_python_when_rust_rejects_or_is_missing(
+    constraint: dict, message: str
+) -> None:
+    schema = {"properties": {"x": constraint}}
+    python = Draft7Validator(schema)
+    rust = compile_rust(schema, None, draft7=True)
+    assert rust is not None
     for validate in (screened(python, rust), screened(python, None)):
         (error,) = validate({"x": 1})
         assert error.json_pointer == "/x"
-        assert validate({"x": "a"}) == []
+        assert error.message == message
+        assert validate({}) == []
 
 
 def test_compile_rust_returns_none_for_an_unresolvable_ref() -> None:

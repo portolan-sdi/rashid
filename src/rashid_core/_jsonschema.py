@@ -451,6 +451,9 @@ def describe(error: Any) -> SchemaError:
         if requirement is not None:
             count = len(error.instance) if isinstance(error.instance, list) else 0
             message = f"none of the {count} entries has {requirement}"
+    elif error.validator == "not" and error.validator_value == {}:
+        member = f"'{error.absolute_path[-1]}'" if error.absolute_path else "document"
+        message = f"{member} is not allowed here"
     if len(message) > _MAX_MESSAGE:
         message = message[: _MAX_MESSAGE - 3] + "..."
     return SchemaError(message=message, json_pointer=pointer)
