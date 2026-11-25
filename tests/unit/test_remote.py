@@ -614,8 +614,10 @@ def test_url_mode_compares_the_self_link_with_the_url(catalog: CatalogBuilder) -
     )
     report = _check_url(root)
     [finding] = [f for f in report.findings if f.rule_id == LIV_SELF_BASE]
-    assert "old.example.org" in finding.message
-    assert _BASE in finding.message
+    assert finding.message == (
+        "root self link places the catalog under https://old.example.org/cat/"
+        f" but it is published under {_BASE}"
+    )
 
 
 def test_url_mode_with_a_matching_self_link_is_quiet(catalog: CatalogBuilder) -> None:
