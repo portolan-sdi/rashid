@@ -8,7 +8,9 @@ collection. Each object's own ``root`` link proves the layout.
 
 The examples are not complete catalogs. They have no README, data files, or
 thumbnails, so the metadata rules and the data pass do not apply. The passes
-that judge each object against STAC and the profile schema do.
+that judge each object against STAC and the profile schema do. An unreleased
+profile URI on spec main uses the test-only draft fixture, as the reference
+catalog test does.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from typing import Any
 import pytest
 
 from rashid_core import ValidationOptions, validate
+from tests.integration.test_reference_catalog import _schema_map_for_catalog
 
 pytestmark = pytest.mark.integration
 
@@ -60,7 +63,14 @@ def _lay_out(dest: Path) -> list[PurePosixPath]:
 def test_the_profile_examples_pass_the_object_passes(tmp_path: Path) -> None:
     placed = _lay_out(tmp_path)
     assert len(placed) == len(list(EXAMPLES.glob("*.json"))) > 0
-    options = ValidationOptions(rules=(), structural=True, extensions=True, schema=True, data=False)
+    options = ValidationOptions(
+        rules=(),
+        structural=True,
+        extensions=True,
+        schema=True,
+        data=False,
+        schema_map=_schema_map_for_catalog(tmp_path),
+    )
     report = validate(tmp_path, options=options)
     found = {
         (f.rule_id, f.path): f.message

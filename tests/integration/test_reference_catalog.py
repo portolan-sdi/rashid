@@ -61,8 +61,10 @@ def test_reference_catalog_metadata_pass_is_clean() -> None:
     findings = report.findings
     blocking = [f for f in findings if f.severity is not Severity.INFO]
     assert blocking == [], [(f.rule_id, f.path) for f in blocking]
-    # the only findings a conformant catalog may raise are the mirror INFOs
-    assert {f.rule_id for f in findings} <= {"PTL-PRO-002"}
+    # the only findings a conformant catalog may raise are the mirror INFOs,
+    # plus the applied-version INFO while spec main declares an unreleased profile
+    allowed = {"PTL-PRO-002"} | ({"PTL-CNF-005"} if _schema_map_for_catalog() else set())
+    assert {f.rule_id for f in findings} <= allowed
     assert report.passed
 
 
