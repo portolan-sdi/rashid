@@ -76,11 +76,12 @@ def test_primary_geometry_marks_collection_geospatial(
             "roles": ["source"],
         }
     findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
+    assert len(findings) == 1
     if primary == "footprint" and scope != "source":
-        assert len(findings) == 1
         assert findings[0].severity is Severity.ERROR
     else:
-        assert findings == []
+        # The binary footprint column may hold WKB, so metadata cannot decide.
+        assert findings[0].severity is Severity.WARNING
 
 
 def test_thumbnail_with_wrong_type(catalog: CatalogBuilder) -> None:
@@ -226,6 +227,42 @@ def test_declared_columns_without_geometry_mark_tabular(catalog: CatalogBuilder)
         **table_columns([{"name": "year", "type": "int64"}]),
     )
     assert findings_for(validate(catalog.write()), "PTL-VIZ-001") == []
+
+
+@pytest.mark.parametrize("name", ["Shape", "wkb_geometry"])
+def test_wkb_geometry_column_names_mark_geospatial(catalog: CatalogBuilder, name: str) -> None:
+    """Esri and GDAL/OGR default geometry column names identify geometry (#334)."""
+    asset = default_asset()
+    asset["table:columns"] = [{"name": "id", "type": "int64"}, {"name": name, "type": "binary"}]
+    catalog.collection("rivers", assets={"data": asset})
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+
+
+@pytest.mark.parametrize(
+    ("binary", "named"),
+    [
+        (["footprint"], "binary column 'footprint',"),
+        (["footprint", "outline"], "binary columns 'footprint', 'outline',"),
+    ],
+)
+def test_binary_column_leaves_geospatial_undecided(
+    catalog: CatalogBuilder, binary: list[str], named: str
+) -> None:
+    """A binary column can hold WKB, so the column list does not mark the data tabular."""
+    asset = default_asset()
+    asset["table:columns"] = [
+        {"name": "year", "type": "int64"},
+        *({"name": name, "type": "binary"} for name in binary),
+    ]
+    catalog.collection("places", assets={"data": asset})
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.WARNING
+    assert named in findings[0].message
+    assert "neither it nor its assets declare table:columns" not in findings[0].message
+    assert "table:primary_geometry" in (findings[0].fix_hint or "")
 
 
 def test_geometry_column_marks_geospatial(catalog: CatalogBuilder) -> None:

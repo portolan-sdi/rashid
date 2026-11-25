@@ -31,6 +31,8 @@ from rashid_core._media import (
 from rashid_core._stac import (
     assets_of,
     bboxes_of,
+    binary_columns,
+    declared_columns,
     declares_geometry,
     has_datetime,
     indexed_links_of,
@@ -74,10 +76,12 @@ def is_geospatial(node: Node, graph: CatalogGraph) -> bool | None:
     geometry column — a data-pass fact. From metadata we can only look for
     positive signals: an item with a geometry, an inherently spatial media
     type, or a geometry column declared via the table extension. A declared
-    column list with no geometry in it is the one negative signal, and it
+    column list that excludes geometry is the one negative signal, and it
     yields to a spatial media type, since a COG stays raster however an
-    attribute table beside it is described. With no signal either way, return
-    None: callers report that uncertainty rather than guess past it.
+    attribute table beside it is described. A list whose only candidate is a
+    binary column is no signal, because the column can hold WKB. With no
+    signal either way, return None: callers report that uncertainty rather
+    than guess past it.
     """
     for child in graph.items_of(node):
         if child.data.get("geometry") is not None:
@@ -90,8 +94,8 @@ def is_geospatial(node: Node, graph: CatalogGraph) -> bool | None:
 def _undecided_because(node: Node, graph: CatalogGraph) -> str:
     """The signals that were absent, phrased as one clause each.
 
-    Only called where :func:`is_geospatial` returned None, so all three
-    signals are known to be missing; the item clause reports which of the two
+    Only called where :func:`is_geospatial` returned None, so no signal
+    decided the question; the item clause reports which of the two
     ways that happened, since publishing items and giving them geometries are
     separate edits. It reports absent geometry evidence and nothing more:
     whether the collection owes items at all is ``PTL-COL-005``'s question,
@@ -107,16 +111,28 @@ def _undecided_because(node: Node, graph: CatalogGraph) -> str:
         seen = "its one item declares no geometry"
     else:
         seen = f"none of its {items} items declares a geometry"
+    columns = declared_columns(node)
+    if columns is None:
+        declared = "neither it nor its assets declare table:columns"
+    else:
+        # is_geospatial returned None, so the list names only binary candidates.
+        binary = binary_columns(columns)
+        noun = "binary column" if len(binary) == 1 else "binary columns"
+        named = ", ".join(repr(name) for name in binary)
+        declared = (
+            f"its table:columns name no geometry column but declare {noun} {named},"
+            " which can hold WKB geometry"
+        )
     return (
-        f"{seen}, neither it nor its assets declare table:columns, and no asset"
-        " carries an inherently spatial media type (PMTiles, COG, or COPC)"
+        f"{seen}, {declared}, and no asset carries an inherently spatial media type"
+        " (PMTiles, COG, or COPC)"
     )
 
 
 #: Imperative repair for an undecidable collection, shared by both callers.
 _RESOLVE_HINT = (
-    "declare table:columns on the data asset, naming the geometry column when the"
-    " data has one, so the next run can decide"
+    "declare table:columns on the data asset, and set table:primary_geometry to the"
+    " geometry column when the data has one, so the next run can decide"
 )
 
 

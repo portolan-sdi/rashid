@@ -153,14 +153,69 @@ def asset_refers_to_self(node: Node, href: str, graph: CatalogGraph | None = Non
     )
 
 
+# Column names that identify geometry. ``shape`` is the Esri default and
+# ``wkb_*`` (for example ``wkb_geometry``) the GDAL/OGR default (#334).
+_GEOMETRY_COLUMN_NAMES = frozenset({"geometry", "geom", "geography", "geog", "shape"})
+_GEOMETRY_COLUMN_PREFIX = "wkb_"
+
+# Column types that store raw bytes. GeoParquet writes WKB geometry to a
+# Parquet binary column, and publishers often declare that physical type.
+_BYTE_COLUMN_TYPES = frozenset({"byte_array", "bytes", "blob", "wkb"})
+
+
+def _column_field(column: dict[str, Any], key: str) -> str:
+    return str(column.get(key, "")).strip().casefold()
+
+
 def names_a_geometry_column(columns: list[dict[str, Any]]) -> bool:
+    """Whether a column is positively a geometry column, by its name or its type."""
     for column in columns:
-        name = str(column.get("name", "")).casefold()
-        ctype = str(column.get("type", "")).casefold()
-        names = ("geometry", "geom", "geography", "geog")
-        if name in names or "geometry" in ctype or "geography" in ctype:
+        name = _column_field(column, "name")
+        ctype = _column_field(column, "type")
+        if (
+            name in _GEOMETRY_COLUMN_NAMES
+            or name.startswith(_GEOMETRY_COLUMN_PREFIX)
+            or "geometry" in ctype
+            or "geography" in ctype
+        ):
             return True
     return False
+
+
+def binary_columns(columns: list[dict[str, Any]]) -> list[str]:
+    """Names of the columns whose declared type stores bytes, so may hold WKB."""
+    found: list[str] = []
+    for column in columns:
+        ctype = _column_field(column, "type").split("(", 1)[0].strip()
+        if "binary" in ctype or ctype in _BYTE_COLUMN_TYPES:
+            found.append(str(column.get("name", "")))
+    return found
+
+
+def column_geometry(columns: list[dict[str, Any]]) -> bool | None:
+    """What a declared column list says about geometry.
+
+    True when a column is positively geometry. False only when the list
+    excludes geometry. None when no column is named as geometry but a binary
+    column can hold WKB, because only the file's ``geo`` metadata can say.
+    """
+    if names_a_geometry_column(columns):
+        return True
+    return None if binary_columns(columns) else False
+
+
+def declared_columns(
+    node: Node, asset: dict[str, Any] | None = None, collection: Node | None = None
+) -> list[dict[str, Any]] | None:
+    """The ``table:columns`` entries of every declaration, or None when none declares a list."""
+    declared: list[dict[str, Any]] = []
+    found = False
+    for holder in table_declarations(node, asset, collection):
+        columns = holder.get("table:columns")
+        if isinstance(columns, list):
+            found = True
+            declared += [column for column in columns if isinstance(column, dict)]
+    return declared if found else None
 
 
 def declares_geometry(
@@ -172,19 +227,16 @@ def declares_geometry(
     otherwise read all non-source assets. Source columns describe upstream
     data rather than what the collection publishes. A ``table:primary_geometry``
     name or a geometry column takes precedence over a negative column list.
-    None means neither a primary geometry nor a column list was declared.
+    False means the declared columns exclude geometry. None means the metadata
+    cannot decide: no primary geometry and no column list was declared, or
+    the only possible geometry is a binary column (see :func:`column_geometry`).
     """
-    declared: list[dict[str, Any]] = []
-    found = False
     for holder in table_declarations(node, asset, collection):
         primary = holder.get("table:primary_geometry")
         if isinstance(primary, str) and primary:
             return True
-        columns = holder.get("table:columns")
-        if isinstance(columns, list):
-            found = True
-            declared += [column for column in columns if isinstance(column, dict)]
-    return names_a_geometry_column(declared) if found else None
+    columns = declared_columns(node, asset, collection)
+    return None if columns is None else column_geometry(columns)
 
 
 def table_declarations(
