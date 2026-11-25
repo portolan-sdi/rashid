@@ -44,12 +44,14 @@ def test_a_failure_is_an_os_error(https_server: HttpsServer) -> None:
         _store.get(https_server.url("missing.json"))
 
 
-def test_get_without_a_server_has_no_status() -> None:
+# obstore serves a plain path; a query string sends the request through urllib.
+@pytest.mark.parametrize("query", ["", "?v=1"])
+def test_get_without_a_server_has_no_status(query: str) -> None:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     with pytest.raises(_store.StoreError, match="GET https://127") as raised:
-        _store.get(f"https://127.0.0.1:{port}/catalog.json")
+        _store.get(f"https://127.0.0.1:{port}/catalog.json{query}")
     assert raised.value.status is None
     assert not raised.value.refused
 
@@ -337,16 +339,6 @@ def test_urllib_follows_a_redirect_to_https(https_server: HttpsServer) -> None:
     https_server.routes["/new.json"] = Route(body=b"{}")
 
     assert _store.get(https_server.url("old.json?v=1")) == b"{}"
-
-
-def test_urllib_without_a_server_has_no_status() -> None:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    with pytest.raises(_store.StoreError, match="GET https://127") as raised:
-        _store.get(f"https://127.0.0.1:{port}/catalog.json?v=1")
-    assert raised.value.status is None
-    assert not raised.value.refused
 
 
 def test_get_range_reports_the_status(https_server: HttpsServer) -> None:
