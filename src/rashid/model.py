@@ -195,16 +195,14 @@ class Report:
 
         The shape follows the JSON Schema at ``REPORT_SCHEMA_URI``.
         """
-        from importlib.metadata import version
-
-        from rashid import _profile
+        from rashid import _package, _profile
 
         return {
             "$schema": REPORT_SCHEMA_URI,
             "report_version": REPORT_VERSION,
             "validator": {
                 "name": "rashid",
-                "version": version("rashid"),
+                "version": _package.version(),
                 "spec_commit": _profile.spec_commit(),
                 "bundled_profiles": list(_profile.bundled_profile_versions()),
                 "applied_profile": _profile.newest_profile_version(),

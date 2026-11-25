@@ -27,10 +27,9 @@ import logging
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from functools import lru_cache
-from importlib import resources
 from typing import TYPE_CHECKING, Any, cast
 
-from rashid import _json, _trace
+from rashid import _json, _package, _trace
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity, json_pointer
 
@@ -242,7 +241,7 @@ def _rust_registry_over(trees: tuple[tuple[Traversable, str], ...]) -> Any:
 
 
 def _stac_trees() -> tuple[tuple[Traversable, str], ...]:
-    schemas = resources.files("rashid").joinpath("_schemas")
+    schemas = _package.schemas()
     return (
         (schemas.joinpath("stac").joinpath(STAC_VERSION), _STAC_BASE),
         (schemas.joinpath("geojson"), _GEOJSON_BASE),
@@ -250,7 +249,7 @@ def _stac_trees() -> tuple[tuple[Traversable, str], ...]:
 
 
 def _extension_trees() -> tuple[tuple[Traversable, str], ...]:
-    schemas = resources.files("rashid").joinpath("_schemas")
+    schemas = _package.schemas()
     trees: list[tuple[Traversable, str]] = [(schemas.joinpath("geojson"), _GEOJSON_BASE)]
     trees.extend(
         (version_dir, f"{_STAC_HOST}v{version_dir.name}/")
@@ -362,7 +361,7 @@ def vendored_extension_schemas() -> dict[str, dict[str, Any]]:
     The store therefore also holds schemas that are only ``$ref`` targets,
     such as PROJJSON, which no object ever declares.
     """
-    schemas = resources.files("rashid").joinpath("_schemas").joinpath("extensions")
+    schemas = _package.schemas().joinpath("extensions")
     if not schemas.is_dir():
         return {}
     out: dict[str, dict[str, Any]] = {}

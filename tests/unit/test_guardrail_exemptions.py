@@ -20,7 +20,7 @@ EXEMPTIONS = json.loads((ROOT / "guardrail_exemptions.json").read_text(encoding=
 
 def test_exemption_counts_and_reasons() -> None:
     assert {kind: len(rows) for kind, rows in EXEMPTIONS.items()} == {
-        "ruff": 6,
+        "ruff": 7,
         "import-linter": 2,
         "allowed-importers": 6,
         "jscpd": 1,

@@ -78,6 +78,9 @@ FAULTS = (
             "TID251",
         )
         for api in (
+            "importlib.resources.files",
+            "importlib.metadata.version",
+            "importlib.import_module",
             "urllib.parse.urljoin",
             "urllib.parse.urlsplit",
             "urllib.parse.urlparse",
@@ -334,7 +337,7 @@ FAULTS = (
         "def _copy_" + "head(repo:",
         "FAULTS = FAULTS[1:]\n\ndef _copy_" + "head(repo:",
         ("uv", "run", "python", "scripts/gate_selftest.py", "--help"),
-        "expected 45 faults",
+        "expected 48 faults",
     ),
 )
 
@@ -447,8 +450,8 @@ def exercise(repo: Path, fault: Fault) -> bool:
 
 
 def main() -> int:
-    assert len(FAULTS) == 45, f"expected 45 faults, found {len(FAULTS)}"
-    assert len({fault.name for fault in FAULTS}) == 45, "fault names must be unique"
+    assert len(FAULTS) == 48, f"expected 48 faults, found {len(FAULTS)}"
+    assert len({fault.name for fault in FAULTS}) == 48, "fault names must be unique"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fault", choices=[fault.name for fault in FAULTS])
     parser.add_argument(

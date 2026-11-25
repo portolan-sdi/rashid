@@ -33,6 +33,11 @@ def test_tid251_bans_the_owner_apis() -> None:
     assert source["extend"] == "../pyproject.toml"
     banned = source["lint"]["flake8-tidy-imports"]["extend-banned-api"]
     assert all(entry["msg"].strip() for entry in banned.values())
+    assert {
+        "importlib.resources.files",
+        "importlib.metadata.version",
+        "importlib.import_module",
+    } <= set(banned)
 
 
 def test_owner_layer_contracts_cover_new_modules() -> None:

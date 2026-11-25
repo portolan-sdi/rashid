@@ -469,18 +469,12 @@ def test_the_extension_store_is_empty_without_a_vendored_tree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A build with no extensions/ tree yields no store, rather than raising."""
-    from importlib import resources
-
     from rashid import _jsonschema as jsonschema_mod
+    from rashid import _package
 
-    package_root = tmp_path / "rashid"
-    (package_root / "_schemas").mkdir(parents=True)
-    original = resources.files
-    monkeypatch.setattr(
-        resources,
-        "files",
-        lambda package: package_root if package == "rashid" else original(package),
-    )
+    schema_root = tmp_path / "_schemas"
+    schema_root.mkdir()
+    monkeypatch.setattr(_package, "schemas", lambda: schema_root)
     jsonschema_mod.vendored_extension_schemas.cache_clear()
     try:
         assert jsonschema_mod.vendored_extension_schemas() == {}

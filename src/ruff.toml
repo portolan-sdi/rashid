@@ -17,3 +17,6 @@ extend = "../pyproject.toml"
 "glob.glob" = { msg = "Use rashid.data._files for partition enumeration." }
 "pyarrow.parquet.ParquetFile" = { msg = "Use rashid.data._files for shared, counted readers." }
 "rasterio.open" = { msg = "Use rashid.data._files for shared, counted readers." }
+"importlib.resources.files" = { msg = "Use rashid._package.schemas for bundled schemas." }
+"importlib.metadata.version" = { msg = "Use rashid._package.version for distribution metadata." }
+"importlib.import_module" = { msg = "Use static imports so dependency contracts can trace them." }

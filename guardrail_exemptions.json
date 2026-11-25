@@ -18,6 +18,9 @@
     },
     "src/rashid/rules/*.py": {
       "ARG002": "#264: rules preserve the uniform check(node, graph) signature even when a rule does not need graph."
+    },
+    "src/rashid/_package.py": {
+      "TID251": "Owns package schema resources and lazy installed-version lookup (#336)."
     }
   },
   "import-linter": {

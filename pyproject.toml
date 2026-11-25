@@ -122,6 +122,7 @@ known-first-party = ["rashid"]
 # Test doubles retain protocol method and callback signatures. Keep ARG001 on for fixtures.
 "tests/**" = ["ARG002", "ARG005"]
 # Dedicated owners; reasons and live matches are checked in guardrail_exemptions.json.
+"src/rashid/_package.py" = ["TID251"]
 "src/rashid/_href.py" = ["TID251"]
 "src/rashid/_store.py" = ["TID251"]
 "src/rashid/_json.py" = ["TID251"]
@@ -182,6 +183,7 @@ source_modules = [
     "rashid._stac",
     "rashid._media",
     "rashid._profile",
+    "rashid._package",
     "rashid.ids",
     "rashid.catalog",
     "rashid.rule",
@@ -209,6 +211,7 @@ source_modules = [
     "rashid._stac",
     "rashid._media",
     "rashid._profile",
+    "rashid._package",
     "rashid.ids",
     "rashid.catalog",
     "rashid.rule",

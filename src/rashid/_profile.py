@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from importlib import resources
 from typing import Any
 
-from rashid import _json
+from rashid import _json, _package
 from rashid.catalog import Node
 
 PROFILE_URI_PREFIX = "https://schemas.portolan-sdi.org/portolan/"
@@ -39,7 +38,7 @@ def profile_version(uri: str) -> str | None:
 @lru_cache(maxsize=1)
 def bundled_profile_versions() -> tuple[str, ...]:
     """The profile schema versions in the wheel, oldest first."""
-    root = resources.files("rashid").joinpath("_schemas/portolan")
+    root = _package.schemas().joinpath("portolan")
     found = [d.name for d in root.iterdir() if d.joinpath("schema.json").is_file()]
     return tuple(sorted(found, key=profile_version_key))
 
@@ -52,7 +51,7 @@ def newest_profile_version() -> str:
 @lru_cache(maxsize=1)
 def spec_commit() -> str | None:
     """The portolan-spec commit the bundled schemas and fixtures came from."""
-    ref = resources.files("rashid").joinpath("_schemas/spec-ref.json")
+    ref = _package.schemas().joinpath("spec-ref.json")
     if not ref.is_file():
         return None
     commit = _json.loads(ref.read_bytes()).get("commit")
@@ -73,7 +72,7 @@ def declared_schema_uris(node: Node) -> list[str]:
 
 # The profile's extension registry, vendored from the spec's stac/README.md by
 # scripts/vendor_spec_fixtures.py and shipped in the wheel.
-_REGISTRY_RESOURCE = "_schemas/extension-registry.json"
+_REGISTRY_RESOURCE = "extension-registry.json"
 
 
 # Every registered URI pins a version: <base>/vX.Y.Z/schema.json. The base
@@ -87,7 +86,7 @@ _EXTENSION_URI_PATTERN = re.compile(
 @lru_cache(maxsize=1)
 def _registry() -> dict[str, tuple[str, str]]:
     """Registered extensions, keyed by base URI: base -> (name, pinned version)."""
-    resource = resources.files("rashid").joinpath(_REGISTRY_RESOURCE)
+    resource = _package.schemas().joinpath(_REGISTRY_RESOURCE)
     document: dict[str, Any] = _json.loads(resource.read_bytes())
     registered: dict[str, tuple[str, str]] = {}
     for name, uri in document["extensions"].items():

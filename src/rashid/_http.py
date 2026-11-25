@@ -38,10 +38,6 @@ def user_agent() -> str:
     Read at first use, not at import, so `import rashid` stays cheap.
     ``importlib.metadata`` alone costs about 9 ms to import.
     """
-    from importlib.metadata import PackageNotFoundError, version
+    from rashid import _package
 
-    try:
-        release = version("rashid")
-    except PackageNotFoundError:  # pragma: no cover - installed metadata is always present
-        release = "unknown"
-    return f"rashid/{release} (+{_PROJECT_URL})"
+    return f"rashid/{_package.version()} (+{_PROJECT_URL})"

@@ -34,10 +34,9 @@ import re
 from collections.abc import Iterable, Iterator
 from dataclasses import replace
 from functools import lru_cache
-from importlib import resources
 from typing import Any
 
-from rashid import _json
+from rashid import _json, _package
 from rashid._stac import (
     _ABSENT,
     CLASSES_FIELD,
@@ -58,13 +57,13 @@ _EXTENSION_PREFIX = "https://stac-extensions.github.io/classification/"
 _EXTENSION_URI = f"{_EXTENSION_PREFIX}v2.0.0/schema.json"
 
 
-_CLASS_SCHEMA = "_schemas/extensions/stac-extensions.github.io/classification/v2.0.0/schema.json"
+_CLASS_SCHEMA = "extensions/stac-extensions.github.io/classification/v2.0.0/schema.json"
 
 
 @lru_cache(maxsize=1)
 def _list_schema() -> dict[str, Any]:
     """The vendored extension's schema for a ``classification:classes`` array."""
-    schema = _json.loads(resources.files("rashid").joinpath(_CLASS_SCHEMA).read_bytes())
+    schema = _json.loads(_package.schemas().joinpath(_CLASS_SCHEMA).read_bytes())
     definitions: dict[str, Any] = schema["definitions"]
     listed: dict[str, Any] = dict(definitions["fields"]["properties"][CLASSES_FIELD])
     listed["items"] = definitions["class_object"]

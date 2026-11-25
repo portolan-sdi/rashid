@@ -94,10 +94,10 @@ def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> 
     """Print the package version, the bundled profile versions, and the spec commit."""
     if not value or ctx.resilient_parsing:
         return
-    from importlib.metadata import version
+    from rashid import _package
 
     versions = _profile.bundled_profile_versions()
-    click.echo(f"rashid, version {version('rashid')}")
+    click.echo(f"rashid, version {_package.version()}")
     click.echo(f"Portolan profiles: {', '.join(versions)} (applies {versions[-1]})")
     click.echo(f"portolan-spec commit: {_profile.spec_commit() or 'unknown'}")
     ctx.exit()
@@ -295,9 +295,9 @@ def check(  # noqa: PLR0913, PLR0917 - Click passes one argument per CLI option
     if as_json:
         output = report.to_dict()
         if show_timings:
-            from importlib.metadata import version
+            from rashid import _package
 
-            output["meta"] = _trace.meta(version("rashid"))
+            output["meta"] = _trace.meta(_package.version())
         click.echo(json_module.dumps(output, indent=2))
     else:
         _print_human(report, list_all=list_all, force_summary=force_summary)

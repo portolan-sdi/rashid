@@ -28,10 +28,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from functools import lru_cache
-from importlib import resources
 from typing import Any
 
-from rashid import _json, _profile
+from rashid import _json, _package, _profile
 from rashid._jsonschema import (
     SchemaError,
     SchemaPass,
@@ -76,7 +75,7 @@ def _bundled_schemas() -> dict[str, dict[str, Any]]:
     ``tests/unit/test_schema_uri_invariant.py``).
     """
     schemas: dict[str, dict[str, Any]] = {}
-    root = resources.files("rashid").joinpath("_schemas/portolan")
+    root = _package.schemas().joinpath("portolan")
     for version_dir in root.iterdir():
         schema_file = version_dir.joinpath("schema.json")
         if not schema_file.is_file():
