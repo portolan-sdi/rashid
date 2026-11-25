@@ -217,6 +217,7 @@ def _check_class_placement(key: str, asset: dict[str, Any], files: AssetFiles) -
 # internal tile size exists to compare against.
 _MAX_TILE = 512
 # Each overview level reduces the one before it by a factor in [2, 10].
+_MIN_REDUCTION = 2
 _MAX_REDUCTION = 10
 _RGB_BANDS = 3
 _RGBA_BANDS = 4
@@ -265,24 +266,34 @@ def _check_overviews(key: str, files: AssetFiles) -> list[DataDefect]:
         not _overview_reduction(previous, shape)
         for previous, shape in zip([(src.height, src.width), *shapes[:-1]], shapes, strict=True)
     ):
-        reason = f"overview pyramid factors {factors} must reduce each preceding level by 2–10"
+        reason = f"overview levels {_sizes(shapes)} must reduce each preceding level by 2–10"
     elif shapes[-1][1] > tile_width or shapes[-1][0] > tile_height:
-        reason = f"overview pyramid factors {factors} stop before the coarsest level fits one {tile}px internal tile"
+        reason = f"overview levels {_sizes(shapes)} stop before the coarsest level fits one {tile}px internal tile"
     else:
         return []
     return [DataDefect(DAT_OVERVIEWS, Severity.ERROR, f"asset '{key}' {reason}", key)]
 
 
+def _sizes(shapes: list[tuple[int, int]]) -> str:
+    """Level sizes as width x height; Rasterio's factors are rounded (1025 for 2x)."""
+    return ", ".join(f"{width}x{height}" for height, width in shapes)
+
+
 def _overview_reduction(previous: tuple[int, int], current: tuple[int, int]) -> bool:
-    """Can one scale in [2, 10] yield both dimensions after pixel rounding?"""
-    if previous == current:
+    """Can one scale in [2, 10] yield both dimensions, rounded down or up?
+
+    GDAL rounds odd overview dimensions down (1001 -> 500), other writers up.
+    """
+    if previous == current or min(current) < 1:
         return False
     dimensions = list(zip(previous, current, strict=True))
-    scale = max(Fraction(2), *(Fraction(before, after) for before, after in dimensions))
-    # ceil(before / scale) == after, with an exact bound at integer pixels.
-    return scale <= _MAX_REDUCTION and all(
-        before > (after - 1) * scale for before, after in dimensions
+    # after is floor or ceil of before / scale iff after - 1 < before / scale < after + 1.
+    low = max(Fraction(before, after + 1) for before, after in dimensions)
+    high = min(
+        (Fraction(before, after - 1) for before, after in dimensions if after > 1),
+        default=Fraction(_MAX_REDUCTION + 1),
     )
+    return low < high and low < _MAX_REDUCTION and high > _MIN_REDUCTION
 
 
 def _check_tile_size(key: str, files: AssetFiles) -> list[DataDefect]:
