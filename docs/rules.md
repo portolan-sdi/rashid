@@ -209,10 +209,7 @@ uv sync
 Install the repository hooks:
 
 ```bash
-uv run pre-commit install \
-  --hook-type pre-commit \
-  --hook-type commit-msg \
-  --hook-type pre-push
+uv run prek install
 ```
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). The commit message hook uses commitizen to enforce the format.

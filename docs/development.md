@@ -6,10 +6,7 @@ Use this guide to set up rashid, run checks, measure performance, and inspect lo
 
 ```bash
 uv sync --all-packages --all-extras
-uv run pre-commit install \
-  --hook-type pre-commit \
-  --hook-type commit-msg \
-  --hook-type pre-push
+uv run prek install
 ```
 
 This installs both workspace distributions, development dependencies, and the geospatial stack.
@@ -23,13 +20,13 @@ Hooks run checks at commit and push time. CI runs both sets.
 ```bash
 # On commit: ruff, ruff-format, codespell,
 # actionlint, zizmor, jscpd, and file hygiene checks
-uv run pre-commit run --all-files
+uv run prek run --all-files
 
 # On push: bandit, deptry, strict mypy, vulture, and import-linter
-uv run pre-commit run --all-files --hook-stage pre-push
+uv run prek run --all-files --stage pre-push
 ```
 
-CI uses [prek](https://github.com/j178/prek) to run the same `.pre-commit-config.yaml`, so these checks apply even if you haven't installed the local hooks.
+[prek](https://github.com/j178/prek) reads `.pre-commit-config.yaml`. CI runs the same commands, so these checks apply even if you haven't installed the local hooks.
 
 ## Tests
 
@@ -41,8 +38,6 @@ uv run pytest -n 8 -m unit     # Fast, isolated tests
 ```
 
 Tests use the `unit`, `integration`, and `network` markers. Network tests check live servers for the live pass and remote data validation, and skip when offline. Structural and schema validation use the schema closures vendored in `src/rashid_core/_schemas/` and require no network access.
-
-Set `ENABLE_PRE_PUSH_TESTS=1` to include fast tests in the pre-push hook.
 
 ## Consolidation guardrails
 
@@ -74,7 +69,7 @@ uvx jscpd@5.2.1 src/rashid_core tests --baseline .jscpd-baseline.json --update-b
 
 The commit hook and CI run the same command with `--fail-on-new-clones 0` instead of `--update-baseline`.
 CI also runs `scripts/gate_selftest.py` in a Linux job after installing the locked dependencies.
-The pinned reusable workflow runs both pre-commit stages; `test_quality_config.py` pins that caller and the jscpd hook.
+The pinned reusable workflow runs both hook stages; `test_quality_config.py` pins that caller and the jscpd hook.
 
 After committing, prove the gates against injected faults:
 
