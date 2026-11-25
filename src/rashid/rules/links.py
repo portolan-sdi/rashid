@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from pathlib import PurePosixPath
 from typing import Any
 
 from rashid._href import is_absolute_href, is_uri_reference
@@ -11,9 +10,9 @@ from rashid._stac import STRUCTURAL_RELS, assets_of, indexed_links_of, links_of
 from rashid.catalog import (
     CatalogGraph,
     Node,
-    _required_link_targets,
-    _structural_link_type,
     expected_links,
+    required_link_targets,
+    structural_link_type,
 )
 from rashid.model import Finding, Severity, json_pointer
 from rashid.rule import Rule
@@ -71,13 +70,7 @@ class RequiredLinksRule(Rule):
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         rels = {link.get("rel") for link in links_of(node)}
-        required = [
-            link.rel for link in expected_links(graph, node) if link.rel in _REQUIRED_LINK_TARGETS
-        ]
-        # A missing target must not hide the required-link finding on an incomplete tree.
-        targets = _required_link_targets(graph, node)
-        if any(target is None for target in targets.values()):
-            required = list(targets)
+        required = required_link_targets(graph, node)
         for rel in required:
             if rel not in rels:
                 yield self.finding(
@@ -145,12 +138,11 @@ class StructuralLinkTypeRule(Rule):
     kinds = ("catalog", "collection", "item")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        types = {link.rel: link.type for link in expected_links(graph, node)}
         for index, link in indexed_links_of(node):
             rel = link.get("rel")
             if rel not in STRUCTURAL_RELS:
                 continue
-            expected = types.get(rel, _structural_link_type(rel))
+            expected = structural_link_type(rel)
             actual = link.get("type")
             if actual != expected:
                 yield self.finding(
@@ -181,24 +173,13 @@ def _unresolved_message(node: Node, graph: CatalogGraph, rel: str, href: str) ->
     return message, hint
 
 
-def _wrong_target(
-    node: Node,
-    graph: CatalogGraph,
-    rel: str,
-    target: Node,
-    expected: dict[str, dict[PurePosixPath, Node]],
-) -> str | None:
+def _wrong_target(node: Node, graph: CatalogGraph, rel: str, target: Node) -> str | None:
     """Explain which structural relationship the target violates."""
-    targets = expected.get(rel, {})
-    wanted = next(iter(targets.values()), None)
-    # Optional parent links on translation roots still use the filesystem parent.
-    parent = graph.parent_of(node) if rel == "parent" and wanted is None else wanted
-    enclosing = wanted if rel == "collection" else None
-    contained = targets.get(target.path) is target
-    if rel in ("child", "item") and not contained:
-        # Optional containment links are judged too, including links to translation roots.
-        contained = graph.parent_of(target) is node
-    if rel == "root" and target is not wanted:
+    parent = graph.parent_of(node) if rel == "parent" else None
+    enclosing = (
+        graph.enclosing_collection_of(node) if rel == "collection" and node.kind == "item" else None
+    )
+    if rel == "root" and target is not graph.language_root_of(node):
         return "must point to the root catalog"
     if rel == "parent" and target is not parent:
         return "must point to the containing object" + (
@@ -208,9 +189,11 @@ def _wrong_target(
         return "must point to the item's enclosing collection" + (
             f" ({enclosing.path})" if enclosing is not None else ""
         )
-    if rel == "child" and (target.kind not in ("catalog", "collection") or not contained):
+    if rel == "child" and (
+        target.kind not in ("catalog", "collection") or graph.parent_of(target) is not node
+    ):
         return "must point to a catalog or collection contained by this object"
-    if rel == "item" and (target.kind != "item" or not contained):
+    if rel == "item" and (target.kind != "item" or graph.parent_of(target) is not node):
         return "must point to an item contained by this object"
     return None
 
@@ -268,9 +251,6 @@ class LinkResolutionRule(Rule):
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         yield from self._invalid_hrefs(node)
-        expected: dict[str, dict[PurePosixPath, Node]] = {}
-        for required in expected_links(graph, node):
-            expected.setdefault(required.rel, {})[required.target.path] = required.target
         for index, link in indexed_links_of(node):
             rel = link.get("rel")
             if rel not in STRUCTURAL_RELS:
@@ -306,7 +286,7 @@ class LinkResolutionRule(Rule):
                     actual=href,
                 )
                 continue
-            wrong = _wrong_target(node, graph, rel, target, expected)
+            wrong = _wrong_target(node, graph, rel, target)
             if wrong is not None:
                 yield self.finding(
                     node,

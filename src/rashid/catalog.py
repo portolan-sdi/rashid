@@ -60,11 +60,13 @@ class ExpectedLink:
     type: str
 
 
-def _structural_link_type(rel: str) -> str:
+def structural_link_type(rel: str) -> str:
+    """Media type required for a structural link relation."""
     return "application/geo+json" if rel == "item" else "application/json"
 
 
-def _required_link_targets(graph: CatalogGraph, node: Node) -> dict[str, Node | None]:
+def required_link_targets(graph: CatalogGraph, node: Node) -> dict[str, Node | None]:
+    """Required ancestor relations, including missing targets on incomplete trees."""
     root = graph.language_root_of(node)
     targets = {"root": root}
     if node is not root:
@@ -84,7 +86,7 @@ def expected_links(graph: CatalogGraph, node: Node) -> tuple[ExpectedLink, ...]:
     """
     if node.kind == "unknown":
         return ()
-    targets = list(_required_link_targets(graph, node).items())
+    targets = list(required_link_targets(graph, node).items())
     if node.kind in ("catalog", "collection"):
         root = graph.language_root_of(node)
         targets.extend(
@@ -97,7 +99,7 @@ def expected_links(graph: CatalogGraph, node: Node) -> tuple[ExpectedLink, ...]:
             rel=rel,
             target=target,
             href=relative_href(str(graph.href_path(node)), str(graph.href_path(target))),
-            type=_structural_link_type(rel),
+            type=structural_link_type(rel),
         )
         for rel, target in targets
         if target is not None
