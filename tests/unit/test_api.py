@@ -14,6 +14,7 @@ import json
 from collections.abc import Iterable
 from datetime import timedelta
 from pathlib import Path, PurePosixPath
+from types import ModuleType
 
 import pytest
 
@@ -75,7 +76,7 @@ def test_all_lists_every_documented_export() -> None:
 
 
 @pytest.mark.parametrize("module", [api, rashid_core], ids=["rashid_core.api", "rashid_core"])
-def test_public_api_snapshot(module: object) -> None:
+def test_public_api_snapshot(module: ModuleType) -> None:
     snapshot = json.loads(Path(__file__).with_name("api_snapshot.json").read_text(encoding="utf-8"))
     expected = snapshot[module.__name__]
     assert sorted(module.__all__) == expected["exports"]

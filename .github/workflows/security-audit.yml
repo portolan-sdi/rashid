@@ -1,7 +1,8 @@
 # Daily security audit — notification layer, zero secrets required.
 #
-# Philosophy (same as portolan-cli): separate GATE (the tests.yml security
-# job blocks PRs) from NOTIFICATION (this workflow manages a tracking issue).
+# Philosophy (same as portolan-cli): separate GATE (the security job in the
+# shared reusable-python-ci.yml blocks PRs) from NOTIFICATION (this workflow
+# manages a tracking issue).
 # Fix PRs come from Dependabot (dependabot.yml + auto-merge), so no bot PAT
 # is needed here.
 name: Security Audit

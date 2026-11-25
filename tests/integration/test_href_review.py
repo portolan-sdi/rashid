@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import quote
 
 import pytest
@@ -90,10 +91,11 @@ def test_encoded_asset_href_reads_the_local_filename(catalog: CatalogBuilder, sc
     outside = root.parent / "secret.bin"
     outside.write_bytes(b"abc")
     for href in ("%2e%2e/%2e%2e/secret.bin", "%2Fsecret.bin", "..%5Csecret.bin", "a%00b"):
-        mutate_json(
-            root / "roads/collection.json",
-            lambda d, href=href: d["assets"]["data"].update(href=href),
-        )
+
+        def point(d: dict[str, Any], href: str = href) -> None:
+            d["assets"]["data"]["href"] = href
+
+        mutate_json(root / "roads/collection.json", point)
         findings = _check(root, "--data-scope", scope)["findings"]
         assert not [f for f in findings if f["rule_id"] == "PTL-DAT-002"]
 
@@ -117,7 +119,7 @@ def test_encoded_local_self_reference_keeps_the_file_field_exemption(
 
 
 @pytest.mark.parametrize(
-    "href,self_reference",
+    ("href", "self_reference"),
     [("%2e/../a.json", False), ("%2e/../a/a.json", True)],
 )
 def test_encoded_dot_self_identity_matches_local_file_access(
@@ -171,9 +173,11 @@ def test_iri_hrefs_resolve_and_fetch_like_ascii_hrefs(
     for directory, stem in (("ascii", "data"), ("iri", name)):
         (root / directory / f"{stem}.bin").write_bytes(b"abc")
         link = {"rel": "related", "href": f"./{stem}.bin", "type": "application/octet-stream"}
-        mutate_json(
-            root / directory / "collection.json", lambda d, link=link: d["links"].append(link)
-        )
+
+        def add_link(data: dict[str, Any], link: dict[str, str] = link) -> None:
+            data["links"].append(link)
+
+        mutate_json(root / directory / "collection.json", add_link)
     for path in root.rglob("*"):
         if path.is_file():
             route = "/" + quote(path.relative_to(root).as_posix(), safe="/")

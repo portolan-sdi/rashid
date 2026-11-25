@@ -20,7 +20,7 @@ EXEMPTIONS = json.loads((ROOT / "guardrail_exemptions.json").read_text(encoding=
 
 def test_exemption_counts_and_reasons() -> None:
     assert {kind: len(rows) for kind, rows in EXEMPTIONS.items()} == {
-        "ruff": 7,
+        "ruff": 8,
         "import-linter": 0,
         "allowed-importers": 5,
         "jscpd": 1,
@@ -48,7 +48,7 @@ def test_ruff_exemptions_match_config_and_banned_uses() -> None:
             "ruff",
             "check",
             "--select",
-            "TID251,ARG002,ARG005",
+            ",".join(sorted({code for codes in EXEMPTIONS["ruff"].values() for code in codes})),
             "--ignore-noqa",
             "--config",
             "lint.per-file-ignores={}",
@@ -89,7 +89,7 @@ def _imports(module: str) -> set[str]:
         }
     path = ROOT / "src" / module.replace(".", "/")
     path = path / "__init__.py" if path.is_dir() else path.with_suffix(".py")
-    imports = set()
+    imports: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.Import):
             imports.update(alias.name for alias in node.names)
@@ -140,15 +140,16 @@ def xfail_issues(source: str) -> set[str]:
         if not (isinstance(node, ast.Attribute) and node.attr == "xfail"):
             continue
         call = parents.get(node)
-        assert isinstance(call, ast.Call) and call.func is node, (
-            f"bare xfail marker at line {node.lineno}"
-        )
+        bare = f"bare xfail marker at line {node.lineno}"
+        assert isinstance(call, ast.Call), bare
+        assert call.func is node, bare
         keywords = {keyword.arg: keyword.value for keyword in call.keywords}
-        assert (
-            isinstance(keywords.get("strict"), ast.Constant) and keywords["strict"].value is True
-        ), "xfail must use strict=True"
+        strict = keywords.get("strict")
+        assert isinstance(strict, ast.Constant), "xfail must use strict=True"
+        assert strict.value is True, "xfail must use strict=True"
         reason = keywords.get("reason")
-        assert isinstance(reason, ast.Constant) and isinstance(reason.value, str)
+        assert isinstance(reason, ast.Constant)
+        assert isinstance(reason.value, str)
         match = re.match(r"#\d+\b", reason.value)
         assert match, f"xfail must name its issue at line {node.lineno}"
         issues.add(match[0])

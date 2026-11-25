@@ -31,7 +31,7 @@ from rashid_core.catalog import CatalogGraph
 from rashid_core.data import validate_data
 from rashid_core.ids import DAT_CHECKSUM, DAT_CONSISTENCY, DAT_FORMAT, DAT_ORDERING, DAT_SIZE
 from rashid_core.model import Severity
-from tests.conftest import CatalogBuilder, mutate_json, thumbnail_asset
+from tests.conftest import CatalogBuilder, mutate_json, table_columns, thumbnail_asset
 from tests.integration import _data_assets as assets
 
 pytestmark = pytest.mark.integration
@@ -75,7 +75,7 @@ def _build(root: Path) -> Path:
             "extra": _asset("./extra.parquet", _PARQUET_TYPE),
             "thumbnail": thumbnail_asset(),
         },
-        **{"table:columns": _TABLE_COLUMNS},
+        **table_columns(_TABLE_COLUMNS),
     )
     col.item(
         "points",
@@ -163,7 +163,8 @@ def test_wrong_size_flags_dat_002(catalog_root: Path) -> None:
     # expected carries the true byte count, actual the declared value: enough
     # for a caller to repair the metadata without re-reading the asset.
     assert finding.actual == 7
-    assert isinstance(finding.expected, int) and finding.expected != 7
+    assert isinstance(finding.expected, int)
+    assert finding.expected != 7
 
 
 def test_wrong_media_type_flags_dat_003(catalog_root: Path) -> None:

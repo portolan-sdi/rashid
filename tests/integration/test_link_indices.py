@@ -14,7 +14,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize(
-    "link,rule,pointers",
+    ("link", "rule", "pointers"),
     [
         ({"rel": "via", "href": "./bad name.bin"}, "PTL-LNK-006", ["/links/1/href"]),
         ({"rel": "root", "href": "../catalog.json"}, "PTL-LNK-003", ["/links/1/type"]),
@@ -74,7 +74,7 @@ def test_translation_link_pointer_preserves_unfiltered_index(catalog: CatalogBui
     assert finding["json_pointer"] == "/links/1"
 
 
-@pytest.mark.parametrize("rel,rule", [("via", "PTL-LIV-006"), ("self", "PTL-LIV-007")])
+@pytest.mark.parametrize(("rel", "rule"), [("via", "PTL-LIV-006"), ("self", "PTL-LIV-007")])
 def test_live_link_pointer_preserves_unfiltered_index(
     catalog: CatalogBuilder, https_server: HttpsServer, rel: str, rule: str
 ) -> None:

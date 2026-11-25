@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from rashid_core import ValidationOptions, validate
@@ -32,16 +35,13 @@ def test_kitchen_sink(catalog: CatalogBuilder) -> None:
     root = catalog.write()
 
     (root / "bad_layer" / "AGENTS.md").unlink()  # FIL-001 (+ FIL-002 href dangling)
-    mutate_json(
-        root / "bad_layer" / "collection.json",
-        lambda d: (
-            d.pop("stac_extensions"),  # CNF-001
-            d["extent"]["spatial"].__setitem__("bbox", [[4.0, 52.0, 6.0, 50.0]]),  # BBX-001
-            d.__setitem__(
-                "links", [link for link in d["links"] if link["rel"] != "parent"]
-            ),  # LNK-001
-        ),
-    )
+
+    def break_layer(d: dict[str, Any]) -> None:
+        d.pop("stac_extensions")  # CNF-001
+        d["extent"]["spatial"]["bbox"] = [[4.0, 52.0, 6.0, 50.0]]  # BBX-001
+        d["links"] = [link for link in d["links"] if link["rel"] != "parent"]  # LNK-001
+
+    mutate_json(root / "bad_layer" / "collection.json", break_layer)
 
     # Metadata-pass fixture: structural off so the expected set stays exactly
     # the hand rules (the same mutations legitimately trip STAC core too).
@@ -81,7 +81,7 @@ def test_unparseable_collection_json(catalog: CatalogBuilder) -> None:
     assert "PTL-LNK-006" in ids
 
 
-def test_missing_root_catalog(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_missing_root_catalog(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text("# Not a catalog\n")
     report = validate(tmp_path)
     assert not report.passed

@@ -44,7 +44,7 @@ from typing import Any
 from unittest import mock
 
 from rashid_core import ValidationOptions
-from tests.conftest import CatalogBuilder, mutate_json
+from tests.conftest import CatalogBuilder, mutate_json, table_columns
 
 GENERATOR_VERSION = 1
 
@@ -145,7 +145,7 @@ def _write_data(root: Path, size: str, rng: random.Random) -> None:
     col = cat.collection(
         "layers",
         assets={"thumbnail": _sized_asset("./thumbnail.png", "image/png", ["thumbnail"], b"")},
-        **{"table:columns": _TABLE_COLUMNS},
+        **table_columns(_TABLE_COLUMNS),
     )
     files: list[tuple[str, Path]] = []
     for i in range(per_kind):
@@ -169,12 +169,13 @@ def _write_data(root: Path, size: str, rng: random.Random) -> None:
         else:
             assets.write_cog(path, size=512)
         payload = path.read_bytes()
-        mutate_json(
-            path.parent / f"{iid}.json",
-            lambda d, payload=payload: d["assets"]["data"].update(
+
+        def describe(d: dict[str, Any], payload: bytes = payload) -> None:
+            d["assets"]["data"].update(
                 {"file:size": len(payload), "file:checksum": _multihash(payload)}
-            ),
-        )
+            )
+
+        mutate_json(path.parent / f"{iid}.json", describe)
 
 
 def build(name: str, size: str, dest: Path, seed: int = 0) -> Path:

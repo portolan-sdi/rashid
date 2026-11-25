@@ -29,7 +29,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize(
-    "href,absolute,https,catalog",
+    ("href", "absolute", "https", "catalog"),
     [
         ("./file.json", False, False, False),
         ("/file.json", True, False, False),
@@ -47,7 +47,7 @@ def test_absolute_and_fetch_policies(href: str, absolute: bool, https: bool, cat
 
 
 @pytest.mark.parametrize(
-    "href,structural,crawled,live",
+    ("href", "structural", "crawled", "live"),
     [
         ("../catalog.json", "../catalog.json", "catalog.json", "https://h/cat/catalog.json"),
         ("https://h/cat/a", "a", "a", "https://h/cat/a"),
@@ -94,7 +94,7 @@ def test_graph_and_crawl_keep_their_path_policies() -> None:
 
 
 @pytest.mark.parametrize(
-    "explicit,crawled,claimed,expected",
+    ("explicit", "crawled", "claimed", "expected"),
     [
         (None, None, None, (None, False)),
         ("https://explicit", "https://crawl/", "https://self/", ("https://explicit/", True)),
@@ -233,7 +233,7 @@ def test_uri_reference_grammar_preserves_encoded_and_reserved_characters() -> No
 
 
 @pytest.mark.parametrize(
-    "left,right,equal",
+    ("left", "right", "equal"),
     [
         ("https://HOST:443/a", "https://host/a#fragment", True),
         ("http://host:80/a", "http://host/a", True),
@@ -341,8 +341,8 @@ def test_iri_reference_grammar_follows_rfc_3987() -> None:
         "./a﷐",
         "./a￾",
         "./a\ud800",
-        "./a‎b",
-        "./a‮b",
+        "./a\u200eb",
+        "./a\u202eb",
         "https://h/東京\x7f",
         "\nhttps://h/東京",
     ):
@@ -351,7 +351,9 @@ def test_iri_reference_grammar_follows_rfc_3987() -> None:
 
 
 @pytest.mark.parametrize(
-    "href,wire", [(_TOKYO, _TOKYO_WIRE), (_BARCELONA, _BARCELONA_WIRE)], ids=["tokyo", "barcelona"]
+    ("href", "wire"),
+    [(_TOKYO, _TOKYO_WIRE), (_BARCELONA, _BARCELONA_WIRE)],
+    ids=["tokyo", "barcelona"],
 )
 def test_wire_url_maps_an_iri_to_its_utf8_uri(href: str, wire: str) -> None:
     from rashid_core._href import wire_url

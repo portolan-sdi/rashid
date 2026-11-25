@@ -95,6 +95,8 @@ def test_a_catalog_that_fails_to_parse_keeps_its_parse_error(tmp_path: Path, raw
         json.loads(raw.decode("utf-8"))
     except ValueError as exc:
         expected = str(exc)
+    else:
+        pytest.fail("the fixture bytes must not parse")
 
     graph = CatalogGraph.load(tmp_path)
 
@@ -110,5 +112,6 @@ def test_a_catalog_with_nan_still_loads(tmp_path: Path) -> None:
     graph = CatalogGraph.load(tmp_path)
 
     (node,) = graph.nodes.values()
-    assert node.parse_error is None and node.kind == "catalog"
+    assert node.parse_error is None
+    assert node.kind == "catalog"
     assert math.isnan(node.data["x"])

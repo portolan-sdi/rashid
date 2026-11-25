@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -23,7 +24,7 @@ def _mirror_collection(catalog: CatalogBuilder, **overrides: Any) -> None:
     catalog.overrides.setdefault("updated", "2026-07-01T12:00:00Z")
 
 
-def _add_mirror_links(root, with_canonical: bool = True) -> None:  # type: ignore[no-untyped-def]
+def _add_mirror_links(root: Path, with_canonical: bool = True) -> None:
     links = [{"rel": "via", "href": "https://source.example.org", "type": "text/html"}]
     if with_canonical:
         links.append(

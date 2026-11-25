@@ -6,10 +6,7 @@ Use this guide to set up rashid, run checks, measure performance, and inspect lo
 
 ```bash
 uv sync --all-packages --all-extras
-uv run pre-commit install \
-  --hook-type pre-commit \
-  --hook-type commit-msg \
-  --hook-type pre-push
+uv run prek install
 ```
 
 This installs both workspace distributions, development dependencies, and the geospatial stack.
@@ -23,13 +20,14 @@ Hooks run checks at commit and push time. CI runs both sets.
 ```bash
 # On commit: ruff, ruff-format, codespell,
 # actionlint, zizmor, jscpd, and file hygiene checks
-uv run pre-commit run --all-files
+uv run prek run --all-files
 
-# On push: bandit, deptry, strict mypy, vulture, and import-linter
-uv run pre-commit run --all-files --hook-stage pre-push
+# On push: bandit, deptry, vulture, import-linter, and strict mypy
+# over src/rashid_core, scripts, and tests
+uv run prek run --all-files --stage pre-push
 ```
 
-CI uses [prek](https://github.com/j178/prek) to run the same `.pre-commit-config.yaml`, so these checks apply even if you haven't installed the local hooks.
+[prek](https://github.com/j178/prek) reads `.pre-commit-config.yaml`. CI runs the same commands, so these checks apply even if you haven't installed the local hooks.
 
 ## Tests
 
@@ -42,7 +40,19 @@ uv run pytest -n 8 -m unit     # Fast, isolated tests
 
 Tests use the `unit`, `integration`, and `network` markers. Network tests check live servers for the live pass and remote data validation, and skip when offline. Structural and schema validation use the schema closures vendored in `src/rashid_core/_schemas/` and require no network access.
 
-Set `ENABLE_PRE_PUSH_TESTS=1` to include fast tests in the pre-push hook.
+### Property tests
+
+`tests/property` uses [Hypothesis](https://hypothesis.readthedocs.io) to generate valid catalogs and check two properties:
+
+- `test_invariance.py`: a generated catalog has no findings, and still has none after changes the spec permits. These changes are the `MAY` forms in `permitted.py`, JSON key order and whitespace (RFC 8259), and asset keys (STAC 1.1.0).
+- `test_rules_fire.py`: each check ID appears in the report for a catalog its breaker built to violate it. Breakers register through `@breaks` in `registry.py`. A completeness test requires a breaker for every ID in `rashid_core.registry.CHECKS`, or a reason in `UNBREAKABLE`.
+
+When you add a check, add its breaker. When you add a `MAY` form, add it to `permitted.FORMS`.
+The `HYPOTHESIS_PROFILE` environment variable selects a profile from `tests/conftest.py`: `default` runs 20 examples per test, and `ci` runs the same with derandomized examples.
+
+```bash
+HYPOTHESIS_PROFILE=ci uv run pytest -n 8 tests/property
+```
 
 ## Consolidation guardrails
 
@@ -74,7 +84,7 @@ uvx jscpd@5.2.1 src/rashid_core tests --baseline .jscpd-baseline.json --update-b
 
 The commit hook and CI run the same command with `--fail-on-new-clones 0` instead of `--update-baseline`.
 CI also runs `scripts/gate_selftest.py` in a Linux job after installing the locked dependencies.
-The pinned reusable workflow runs both pre-commit stages; `test_quality_config.py` pins that caller and the jscpd hook.
+The pinned reusable workflow runs both hook stages; `test_quality_config.py` pins that caller and the jscpd hook.
 
 After committing, prove the gates against injected faults:
 

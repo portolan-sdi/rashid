@@ -8,6 +8,7 @@ exactly one aspect (builder kwarg or post-write surgery via ``mutate_json`` /
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 from collections.abc import Callable, Iterable, Iterator
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import settings
 
 from rashid_core import _store, _trace
 from rashid_core._profile import newest_profile_version, profile_uri
@@ -22,6 +24,13 @@ from rashid_core.report import Report
 
 # The local HTTPS server that the obstore tests read from.
 pytest_plugins = ["tests._https"]
+
+# Hypothesis profiles for tests/property. A validation takes tens of
+# milliseconds, so no example deadline; CI derandomizes so a red build
+# reproduces from the same examples.
+settings.register_profile("default", max_examples=20, deadline=None)
+settings.register_profile("ci", parent=settings.get_profile("default"), derandomize=True)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "default"))
 
 
 @pytest.fixture(autouse=True)
@@ -100,6 +109,11 @@ def mirror_providers() -> list[dict[str, Any]]:
         {"name": "Source Org", "roles": ["producer"], "url": "https://source.example.org"},
         {"name": "Mirror Org", "roles": ["host"], "url": "https://mirror.example.org"},
     ]
+
+
+def table_columns(columns: list[dict[str, Any]]) -> dict[str, Any]:
+    """A ``table:columns`` field to splat into a builder; a dict literal would type as its title."""
+    return {"table:columns": columns}
 
 
 def default_asset() -> dict[str, Any]:
@@ -539,7 +553,7 @@ def nest_items_under_organizing_catalog(
     return organizing
 
 
-def mutate_json(path: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
+def mutate_json(path: Path, mutate: Callable[[dict[str, Any]], object]) -> None:
     """Load a JSON file, apply an in-place mutation, and write it back."""
     data = json.loads(path.read_text(encoding="utf-8"))
     mutate(data)
@@ -553,8 +567,8 @@ def rule_ids(report: Report) -> set[str]:
 def resolve_pointer(document: Any, pointer: str) -> Any:
     """The value an RFC 6901 pointer names; raises KeyError or IndexError when none."""
     target = document
-    for token in pointer.split("/")[1:]:
-        token = token.replace("~1", "/").replace("~0", "~")
+    for raw in pointer.split("/")[1:]:
+        token = raw.replace("~1", "/").replace("~0", "~")
         target = target[int(token)] if isinstance(target, list) else target[token]
     return target
 

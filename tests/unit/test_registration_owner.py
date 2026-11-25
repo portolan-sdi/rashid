@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 
 def test_duplicate_pass_ids_are_rejected() -> None:
     check = registry.CHECKS["PTL-DAT-002"]
-    with pytest.raises(registry.RegistryError, match="duplicate.*PTL-DAT-002"):
+    with pytest.raises(registry.RegistryError, match=r"duplicate.*PTL-DAT-002"):
         registry._build((), (check, check))
 
 
@@ -44,7 +44,7 @@ def test_registry_requires_a_description(spec_ids: tuple[str, ...]) -> None:
 
 def test_pass_id_without_spec_metadata_is_rejected() -> None:
     check = replace(registry.CHECKS["PTL-DAT-002"], spec_ids=())
-    with pytest.raises(registry.RegistryError, match="PTL-DAT-002.*spec metadata"):
+    with pytest.raises(registry.RegistryError, match=r"PTL-DAT-002.*spec metadata"):
         registry._build((), (check,))
 
 
@@ -54,7 +54,7 @@ def test_metadata_id_without_spec_metadata_is_rejected() -> None:
         description = "a check with no spec metadata"
         default_severity = Severity.ERROR
 
-    with pytest.raises(registry.RegistryError, match="PTL-TST-999.*spec metadata"):
+    with pytest.raises(registry.RegistryError, match=r"PTL-TST-999.*spec metadata"):
         registry._build((Uncited(),), ())
 
 
@@ -104,13 +104,15 @@ def test_pass_checks_use_the_id_constants_once() -> None:
         and node.func.id == "CheckInfo"
         and any(keyword.arg == "stage" for keyword in node.keywords)
     ]
-    assert all(
-        isinstance(node, ast.Attribute)
+    attributes = [
+        node
+        for node in declarations
+        if isinstance(node, ast.Attribute)
         and isinstance(node.value, ast.Name)
         and node.value.id == "ids"
-        for node in declarations
-    )
-    assert sorted(node.attr for node in declarations) == sorted(constants)
+    ]
+    assert attributes == declarations
+    assert sorted(node.attr for node in attributes) == sorted(constants)
     assert len(set(constants.values())) == len(constants)
 
 
@@ -118,7 +120,7 @@ def test_diagnostic_ids_need_an_explicit_spec_reason() -> None:
     check = registry.CHECKS["PTL-DAT-000"]
     assert check.spec_note
     assert registry._build((), (check,))[check.id] == check
-    with pytest.raises(registry.RegistryError, match="PTL-DAT-000.*spec metadata"):
+    with pytest.raises(registry.RegistryError, match=r"PTL-DAT-000.*spec metadata"):
         registry._build((), (replace(check, spec_note=None),))
 
 

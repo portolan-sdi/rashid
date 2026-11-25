@@ -9,7 +9,8 @@ do not report the permitted form.
 Each test here builds one permitted form and asserts rashid reports nothing.
 The whole report is asserted rather than one rule id, because the risk a
 permission test guards against is an unrelated rule widening until it swallows
-the permission.
+the permission. The forms themselves live in ``tests/property/permitted.py``,
+which ``tests/property/test_invariance.py`` composes over generated catalogs.
 
 :data:`PERMISSION_TESTS` maps each requirement to the test that covers it.
 ``test_spec_coverage.py`` reads the mapping and resolves every name against
@@ -19,22 +20,13 @@ dropping a requirement.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from rashid_core import ValidationOptions, validate
-from tests.conftest import (
-    PORTOLAN_URI,
-    CatalogBuilder,
-    default_asset,
-    default_providers,
-    mutate_json,
-    thumbnail_asset,
-    write_language_trees,
-)
+from tests.conftest import CatalogBuilder, default_asset, mirror_providers, mutate_json
+from tests.property import permitted
 
 pytestmark = pytest.mark.unit
 
@@ -58,45 +50,15 @@ PERMISSION_TESTS: dict[str, str] = {
     "PORTO-ZARR-005": "test_a_zarr_store_may_declare_an_s3_href_beside_the_https_one",
 }
 
-_PARTITION_URI = "https://schemas.portolan-sdi.org/incubating/partition/v1.0.0/schema.json"
-_CONTACTS_URI = "https://stac-extensions.github.io/contacts/v1.0.0/schema.json"
-_WEB_MAP_LINKS_URI = "https://stac-extensions.github.io/web-map-links/v1.3.0/schema.json"
-_PMTILES_LINK = {
-    "rel": "pmtiles",
-    "href": "./data.pmtiles",
-    "type": "application/vnd.pmtiles",
-    "pmtiles:layers": ["data"],
-}
-
-
-def _partition_fields(
-    data: dict[str, Any], glob: str = "s3://demo-bucket/roads/province=*/*.parquet"
-) -> None:
-    """Declare the partition extension and its three required fields."""
-    data["partition:scheme"] = "directory"
-    data["partition:keys"] = [{"name": "province", "type": "string"}]
-    data["partition:glob"] = glob
-    data["stac_extensions"] = [*data["stac_extensions"], _PARTITION_URI]
-
-
-def _pmtiles_asset() -> dict[str, Any]:
-    asset = default_asset()
-    asset["href"] = "./data.pmtiles"
-    asset["type"] = "application/vnd.pmtiles"
-    asset["roles"] = ["visual"]
-    return asset
-
-
-def _style_asset() -> dict[str, Any]:
-    asset = default_asset()
-    asset["href"] = "./styles/default.json"
-    asset["type"] = "application/vnd.mapbox.style+json"
-    asset["roles"] = ["style"]
-    return asset
-
 
 def _collection_json(root: Path, collection_id: str) -> Path:
     return root / collection_id / "collection.json"
+
+
+def _roads(catalog: CatalogBuilder) -> Path:
+    """One collection, ``roads``, written; returns the root."""
+    catalog.collection("roads", title="Road Centerlines")
+    return catalog.write()
 
 
 # --- core.md ---------------------------------------------------------------
@@ -122,7 +84,7 @@ def test_partitioned_collection_may_represent_partitions_as_items(
     """PORTO-CORE-021: partitions MAY be items, and equally MAY not be."""
     catalog.collection("roads", title="Road Centerlines").item("roads-noord-holland")
     root = catalog.write()
-    mutate_json(_collection_json(root, "roads"), _partition_fields)
+    mutate_json(_collection_json(root, "roads"), permitted.partition_fields)
     # The glob names a bucket the data pass would list; the permission is metadata.
     with_items = validate(root, options=_METADATA)
     assert with_items.findings == []
@@ -143,91 +105,41 @@ def test_partitioned_collection_may_represent_partitions_as_items(
 
 def test_non_cloud_native_alternate_may_accompany_the_primary(catalog: CatalogBuilder) -> None:
     """PORTO-CORE-031: a GeoJSON MAY sit alongside the required GeoParquet."""
-    geojson = default_asset()
-    geojson["href"] = "./roads.geojson"
-    geojson["type"] = "application/geo+json"
-    geojson["roles"] = ["data"]
-    catalog.collection(
-        "roads",
-        title="Road Centerlines",
-        assets={
-            "data": default_asset(),
-            "roads-geojson": geojson,
-            "thumbnail": thumbnail_asset(),
-        },
-    )
-    report = validate(catalog.write())
-    assert report.findings == []
+    root = _roads(catalog)
+    mutate_json(_collection_json(root, "roads"), permitted.geojson_alternate)
+    assert validate(root).findings == []
 
 
 def test_one_organization_may_hold_multiple_roles(catalog: CatalogBuilder) -> None:
     """PORTO-CORE-049: one provider MAY be both producer and host."""
-    providers = [
-        {
-            "name": "Demo Org",
-            "roles": ["producer", "processor", "host", "licensor"],
-            "url": "https://example.org/contact",
-        }
-    ]
-    catalog.collection("roads", title="Road Centerlines", providers=providers)
-    report = validate(catalog.write())
-    assert report.findings == []
+    root = _roads(catalog)
+    mutate_json(_collection_json(root, "roads"), permitted.one_provider_many_roles)
+    assert validate(root).findings == []
 
 
 def test_catalogs_may_declare_providers(catalog: CatalogBuilder) -> None:
     """PORTO-CORE-050: a catalog MAY declare providers of its own."""
-    catalog.overrides["providers"] = default_providers()
-    catalog.collection("roads", title="Road Centerlines")
-    report = validate(catalog.write())
-    assert report.findings == []
+    root = _roads(catalog)
+    permitted.catalog_providers(root)
+    assert validate(root).findings == []
 
 
 def test_collection_may_add_the_contacts_extension(catalog: CatalogBuilder) -> None:
     """PORTO-CORE-052: contacts MAY be added on top of the provider url."""
-    catalog.collection("roads", title="Road Centerlines")
-    root = catalog.write()
-
-    def add_contacts(data: dict[str, Any]) -> None:
-        data["stac_extensions"] = [*data["stac_extensions"], _CONTACTS_URI]
-        data["contacts"] = [
-            {
-                "name": "Demo Org Data Desk",
-                "organization": "Demo Org",
-                "emails": [{"value": "data@example.org", "roles": ["work"]}],
-                "roles": ["pointOfContact"],
-            }
-        ]
-
-    mutate_json(_collection_json(root, "roads"), add_contacts)
-    report = validate(root)
-    assert report.findings == []
+    root = _roads(catalog)
+    mutate_json(_collection_json(root, "roads"), permitted.contacts)
+    assert validate(root).findings == []
 
 
 def test_via_and_canonical_may_point_at_different_targets(catalog: CatalogBuilder) -> None:
     """PORTO-CORE-056: via MAY be a human page while canonical is a STAC root."""
     collection = catalog.collection("census", title="Census Tracts")
-    collection.overrides["providers"] = [
-        {"name": "Source Org", "roles": ["producer"], "url": "https://source.example.org"},
-        {"name": "Mirror Org", "roles": ["host"], "url": "https://mirror.example.org"},
-    ]
+    collection.overrides["providers"] = mirror_providers()
     collection.overrides["updated"] = "2026-07-01T12:00:00Z"
     catalog.overrides["updated"] = "2026-07-01T12:00:00Z"
     root = catalog.write()
-    mutate_json(
-        _collection_json(root, "census"),
-        lambda data: data["links"].extend(
-            [
-                {"rel": "via", "href": "https://source.example.org/census", "type": "text/html"},
-                {
-                    "rel": "canonical",
-                    "href": "https://source.example.org/stac/catalog.json",
-                    "type": "application/json",
-                },
-            ]
-        ),
-    )
-    report = validate(root)
-    assert report.findings == []
+    mutate_json(_collection_json(root, "census"), permitted.mirror_links)
+    assert validate(root).findings == []
 
 
 # --- formats.md ------------------------------------------------------------
@@ -235,52 +147,30 @@ def test_via_and_canonical_may_point_at_different_targets(catalog: CatalogBuilde
 
 def test_pmtiles_may_be_registered_as_an_asset_and_a_link(catalog: CatalogBuilder) -> None:
     """PORTO-FMT-013: the pmtiles link and a collection-level asset MAY coexist."""
-    collection = catalog.collection(
-        "roads",
-        title="Road Centerlines",
-        assets={
-            "data": default_asset(),
-            "thumbnail": thumbnail_asset(),
-            "tiles": _pmtiles_asset(),
-            "default-style": _style_asset(),
-        },
-    )
-    collection.item("roads-2024")
+    catalog.collection("roads", title="Road Centerlines").item("roads-2024")
     root = catalog.write()
-    mutate_json(
-        _collection_json(root, "roads"),
-        lambda data: (
-            data["links"].append(dict(_PMTILES_LINK)),
-            data["stac_extensions"].append(_WEB_MAP_LINKS_URI),
-        ),
-    )
-    report = validate(root)
-    assert report.findings == []
+    mutate_json(_collection_json(root, "roads"), permitted.pmtiles_asset_and_link)
+    assert validate(root).findings == []
 
 
 def test_large_files_may_be_partitioned(catalog: CatalogBuilder) -> None:
     """PORTO-FMT-016: a large file MAY be partitioned."""
-    catalog.collection("roads", title="Road Centerlines")
-    root = catalog.write()
-    mutate_json(_collection_json(root, "roads"), _partition_fields)
-    report = validate(root, options=_METADATA)
-    assert report.findings == []
+    root = _roads(catalog)
+    mutate_json(_collection_json(root, "roads"), permitted.partition_fields)
+    assert validate(root, options=_METADATA).findings == []
 
 
 def test_converted_source_may_be_retained_alongside_the_parquet(catalog: CatalogBuilder) -> None:
     """PORTO-FMT-035: a converted CSV MAY be retained with the Parquet primary."""
-    csv = default_asset()
-    csv["href"] = "./prices.csv"
-    csv["type"] = "text/csv"
-    csv["roles"] = ["source"]
     catalog.collection(
         "prices",
         title="Property Transaction Prices",
-        assets={"data": default_asset(), "source": csv},
+        assets={"data": default_asset()},
         **{"table:columns": [{"name": "year", "type": "int64", "description": "Sale year."}]},
     )
-    report = validate(catalog.write())
-    assert report.findings == []
+    root = catalog.write()
+    mutate_json(_collection_json(root, "prices"), permitted.converted_source)
+    assert validate(root).findings == []
 
 
 def test_a_catalog_may_publish_an_alternate_language_tree(catalog: CatalogBuilder) -> None:
@@ -297,14 +187,12 @@ def test_a_catalog_may_publish_an_alternate_language_tree(catalog: CatalogBuilde
     extension. The extension pass validates both roots against its schema and
     finds nothing, rather than reporting that it could not check them.
     """
-    report = validate(write_language_trees(catalog))
-    assert report.findings == []
+    root = _roads(catalog)
+    permitted.language_tree(root)
+    assert validate(root).findings == []
 
 
 # --- incubating/zarr.md ----------------------------------------------------
-
-_ZARR_STORES = Path(__file__).resolve().parents[1] / "fixtures" / "zarr-stores"
-_ALTERNATE_ASSETS_URI = "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json"
 
 
 def test_a_zarr_store_may_declare_an_s3_href_beside_the_https_one(
@@ -320,22 +208,7 @@ def test_a_zarr_store_may_declare_an_s3_href_beside_the_https_one(
     asserted, because the Zarr checks read the same asset and could reach the
     alternate as easily.
     """
-    zarr = default_asset()
-    zarr["href"] = "./data.zarr"
-    zarr["type"] = "application/vnd.zarr; version=3"
-    zarr["bands"] = [
-        {"name": "temp", "nodata": -9999, "statistics": {"minimum": -50.0, "maximum": 50.0}}
-    ]
-    zarr["alternate"] = {
-        "s3": {"href": "s3://example-bucket/temps/data.zarr", "title": "S3 access"}
-    }
-    catalog.collection(
-        "temps",
-        title="Daily Temperatures",
-        assets={"data": zarr, "thumbnail": thumbnail_asset()},
-        stac_extensions=[PORTOLAN_URI, _ALTERNATE_ASSETS_URI],
-    )
+    catalog.collection("temps", title="Daily Temperatures")
     root = catalog.write()
-    shutil.copytree(_ZARR_STORES / "flat", root / "temps" / "data.zarr")
-    report = validate(root)
-    assert report.findings == []
+    permitted.zarr_s3_alternate(root)
+    assert validate(root).findings == []

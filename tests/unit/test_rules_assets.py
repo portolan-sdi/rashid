@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from rashid_core import validate
@@ -11,13 +14,14 @@ from tests.conftest import (
     findings_for,
     mutate_json,
     nest_items_under_organizing_catalog,
+    table_columns,
     thumbnail_asset,
 )
 
 pytestmark = pytest.mark.unit
 
 
-def _asset(**overrides):  # type: ignore[no-untyped-def]
+def _asset(**overrides: Any) -> dict[str, Any]:
     asset = default_asset()
     for key, value in overrides.items():
         if value is None:
@@ -499,7 +503,7 @@ def test_asset_file_fields_for_self_reference(
         assert all(f.fix_hint for f in findings)
 
 
-@pytest.mark.parametrize("scheme,port", [("https", 443), ("http", 80)])
+@pytest.mark.parametrize(("scheme", "port"), [("https", 443), ("http", 80)])
 def test_self_reference_default_port(catalog: CatalogBuilder, scheme: str, port: int) -> None:
     url = f"{scheme}://example.org/roads/collection.json"
     catalog.collection(
@@ -511,7 +515,7 @@ def test_self_reference_default_port(catalog: CatalogBuilder, scheme: str, port:
 
 
 @pytest.mark.parametrize(
-    "encoded,plain,equal",
+    ("encoded", "plain", "equal"),
     [
         ("roads%2Fcollection.json", "roads/collection.json", False),
         ("roads%3Bv/collection.json", "roads;v/collection.json", True),
@@ -533,7 +537,7 @@ def test_self_reference_follows_transport_identity(
 
 
 @pytest.mark.parametrize(
-    "directory,encoded", [("sector 1", "sector%201"), ("東京", "%E6%9D%B1%E4%BA%AC")]
+    ("directory", "encoded"), [("sector 1", "sector%201"), ("東京", "%E6%9D%B1%E4%BA%AC")]
 )
 @pytest.mark.parametrize("prefix", ["catalog", "catalog%2Fv"])
 def test_published_self_reference_under_encoded_directory(
@@ -555,7 +559,7 @@ def test_published_self_reference_under_encoded_directory(
 
 @pytest.mark.parametrize("scope", ["asset", "collection", "item", "glob"])
 @pytest.mark.parametrize(
-    "columns,expected",
+    ("columns", "expected"),
     [
         ([{"name": "population", "type": "int64"}], Severity.ERROR),
         ([{"name": "geometry", "type": "binary"}], None),
@@ -591,7 +595,7 @@ def test_pmtiles_reference_geometry(
 def test_pmtiles_reference_primary_geometry(
     catalog: CatalogBuilder, scope: str, with_columns: bool
 ) -> None:
-    declaration = {"table:primary_geometry": "footprint"}
+    declaration: dict[str, Any] = {"table:primary_geometry": "footprint"}
     if with_columns:
         declaration["table:columns"] = [{"name": "footprint", "type": "binary"}]
     data = default_asset()
@@ -625,7 +629,7 @@ def test_pmtiles_reference_ignores_other_assets_primary_geometry(
 ) -> None:
     catalog.collection(
         "roads",
-        **{"table:columns": [{"name": "population", "type": "int64"}]},
+        **table_columns([{"name": "population", "type": "int64"}]),
         assets={
             "data": default_asset(),
             "other": _asset(roles=[role], **{"table:primary_geometry": "footprint"}),
@@ -670,10 +674,10 @@ def test_pmtiles_reference_combines_column_declarations(
 ) -> None:
     spatial = [{"name": "geometry", "type": "binary"}]
     tabular = [{"name": "population", "type": "int64"}]
-    data = _asset(**{"table:columns": spatial if spatial_scope == "asset" else tabular})
+    data = _asset(**table_columns(spatial if spatial_scope == "asset" else tabular))
     catalog.collection(
         "roads",
-        **{"table:columns": spatial if spatial_scope == "collection" else tabular},
+        **table_columns(spatial if spatial_scope == "collection" else tabular),
         assets={"data": data, "map": {"href": "./map.pmtiles", "roles": ["visual"]}},
     )
     assert findings_for(validate(catalog.write()), "PTL-AST-009") == []
@@ -696,7 +700,7 @@ def test_pmtiles_item_findings_name_the_item(catalog: CatalogBuilder, organized:
     assert all(f.severity is Severity.ERROR for f in findings)
 
 
-def test_orphan_pmtiles_item_still_reports_errors(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_orphan_pmtiles_item_still_reports_errors(tmp_path: Path) -> None:
     from pathlib import PurePosixPath
 
     from rashid_core.catalog import CatalogGraph, Node

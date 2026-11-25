@@ -6,6 +6,7 @@ report, so ``rashid check --json`` stays parseable at every verbosity.
 
 from __future__ import annotations
 
+import atexit
 import json
 from importlib.metadata import version
 from pathlib import Path
@@ -96,7 +97,7 @@ def test_trace_flag_writes_a_chrome_trace(
 ) -> None:
     exits: list[object] = []
     monkeypatch.setattr(_trace, "_trace_paths", [])
-    monkeypatch.setattr(_trace.atexit, "register", exits.append)
+    monkeypatch.setattr(atexit, "register", exits.append)
     out = tmp_path / "trace.json"
     CliRunner().invoke(main, [*_check("--trace", str(out)), str(root)])
     assert exits == [_trace._write_traces]
@@ -109,7 +110,7 @@ def test_trace_alone_adds_no_meta_and_no_table(
     root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(_trace, "_trace_paths", [])
-    monkeypatch.setattr(_trace.atexit, "register", lambda fn: None)
+    monkeypatch.setattr(atexit, "register", lambda fn: None)
     out = str(tmp_path / "trace.json")
     as_json = CliRunner().invoke(main, [*_check("--trace", out), "--json", str(root)])
     assert "meta" not in json.loads(as_json.stdout)

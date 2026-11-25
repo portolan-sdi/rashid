@@ -21,6 +21,9 @@ from rashid_core.data.zarr import check_zarr
 from rashid_core.ids import DAT_COLUMN_DESCRIPTIONS
 from rashid_core.model import Severity, json_pointer
 
+# Bare columns one defect names before it counts the rest.
+_SHOWN = 5
+
 
 def check_node(
     node: Node, reader: AssetReader, graph: CatalogGraph | None = None
@@ -113,8 +116,8 @@ def _bare_columns(
     ]
     if not bare:
         return []  # also no declaration: PTL-DAT-015 and PTL-DAT-017 own it
-    shown = ", ".join(bare[:5])
-    more = f", and {len(bare) - 5} more" if len(bare) > 5 else ""
+    shown = ", ".join(bare[:_SHOWN])
+    more = f", and {len(bare) - _SHOWN} more" if len(bare) > _SHOWN else ""
     return [
         DataDefect(
             DAT_COLUMN_DESCRIPTIONS,

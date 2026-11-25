@@ -20,6 +20,11 @@ from rashid_core.model import Severity, json_pointer
 # bbox comparison tolerance in degrees (~1 km); absorbs rounding and
 # reprojection gridding so only genuine divergence trips PTL-DAT-005.
 _BBOX_TOL = 0.01
+_WGS84 = 4326
+_PMTILES_HEADER_BYTES = 127
+# [minx, miny, maxx, maxy], or with z: [minx, miny, minz, maxx, maxy, maxz].
+_BBOX_2D = 4
+_BBOX_3D = 6
 
 # Intermediate points per bbox edge when reprojecting. A projected rectangle's
 # edges curve in WGS84, and their extremes usually fall between the corners, so
@@ -188,24 +193,24 @@ def bbox_union(
 
 def geo_from_pmtiles(located: Locator) -> Geo | None:
     with located.open_binary() as handle:
-        header = handle.read(127)
-    if len(header) < 127 or header[:7] != PMTILES_MAGIC:
+        header = handle.read(_PMTILES_HEADER_BYTES)
+    if len(header) < _PMTILES_HEADER_BYTES or header[:7] != PMTILES_MAGIC:
         return None
     # v3 header: min/max lon/lat are int32 E7 at byte offsets 102, 106, 110, 114.
     min_lon, min_lat, max_lon, max_lat = struct.unpack_from("<iiii", header, 102)
     bbox = [min_lon / 1e7, min_lat / 1e7, max_lon / 1e7, max_lat / 1e7]
-    return Geo(bbox=bbox, epsg=4326, crs=CRS.from_epsg(4326))
+    return Geo(bbox=bbox, epsg=_WGS84, crs=CRS.from_epsg(_WGS84))
 
 
 def as_bbox(bbox: Any) -> list[float] | None:
-    if not isinstance(bbox, list) or len(bbox) < 4:
+    if not isinstance(bbox, list) or len(bbox) < _BBOX_2D:
         return None
     try:
         values = [float(v) for v in bbox]
     except (TypeError, ValueError):
         return None
     # Drop any z coordinates: [minx, miny, (minz,) maxx, maxy, (maxz)].
-    if len(values) == 6:
+    if len(values) == _BBOX_3D:
         return [values[0], values[1], values[3], values[4]]
     return values[:4]
 
@@ -214,9 +219,9 @@ def wgs84_bounds(geo: Geo) -> Wgs84Bounds | None:
     """Bracket the WGS84 envelope of the data behind a native bbox."""
     if geo.bbox is None:
         return None
-    if geo.crs is None or geo.epsg == 4326:
+    if geo.crs is None or geo.epsg == _WGS84:
         return Wgs84Bounds(outer=geo.bbox, inner=geo.bbox if geo.tight else None)
-    transformer = Transformer.from_crs(geo.crs, CRS.from_epsg(4326), always_xy=True)
+    transformer = Transformer.from_crs(geo.crs, CRS.from_epsg(_WGS84), always_xy=True)
     minx, miny, maxx, maxy = geo.bbox[:4]
     outer = list(transformer.transform_bounds(minx, miny, maxx, maxy, densify_pts=_DENSIFY_PTS))
     if not all(math.isfinite(v) for v in outer):

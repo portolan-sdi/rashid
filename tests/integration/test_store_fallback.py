@@ -16,7 +16,7 @@ pytestmark = pytest.mark.integration
 
 @pytest.mark.parametrize("read", ["crawl", "stream"])
 @pytest.mark.parametrize(
-    "escaped,literal", [("%3B", ";"), ("%5B", "["), ("%5D", "]"), ("%5E", "^"), ("%7C", "|")]
+    ("escaped", "literal"), [("%3B", ";"), ("%5B", "["), ("%5D", "]"), ("%5E", "^"), ("%7C", "|")]
 )
 def test_fetch_fallback_keeps_object_identity(
     catalog: CatalogBuilder, https_server: HttpsServer, read: str, escaped: str, literal: str
@@ -74,4 +74,5 @@ def test_fetch_fallback_keeps_object_identity(
         assert not [f for f in findings if f["rule_id"].startswith("PTL-DAT-")], findings
         assert not [f for f in findings if f["rule_id"] == "PTL-AST-003"], findings
         gets = [r.path for r in https_server.seen if r.method == "GET" and "v.json" in r.path]
-        assert gets and set(gets) == {f"/roads/{literal_name}"}
+        assert gets
+        assert set(gets) == {f"/roads/{literal_name}"}

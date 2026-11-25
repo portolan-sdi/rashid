@@ -319,7 +319,7 @@ def _parse_timestamp(value: str) -> datetime | None:
         return None
     fraction = (match["fraction"] or "").ljust(6, "0")[:6]
     offset = (match["offset"] or "Z").replace("Z", "+00:00").replace("z", "+00:00")
-    if len(offset) == 5:  # +HHMM, which fromisoformat wants as +HH:MM
+    if len(offset) == len("+HHMM"):  # fromisoformat wants +HH:MM
         offset = f"{offset[:3]}:{offset[3:]}"
     try:
         return _as_utc(datetime.fromisoformat(f"{match['stamp']}.{fraction}{offset}"))

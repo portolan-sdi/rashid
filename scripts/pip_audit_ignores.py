@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Emit pip-audit --ignore-vuln args from the .pip-audit-ignores file.
 
-Single source of truth for pip-audit ignores, consumed by both the tests.yml
-security job and the security-audit.yml workflow:
+Single source of truth for pip-audit ignores, consumed by both the security
+job in the shared reusable-python-ci.yml and the security-audit.yml workflow:
 
     uv run pip-audit $(uv run python scripts/pip_audit_ignores.py)
 
@@ -30,7 +30,7 @@ class IgnoreFileError(ValueError):
 def active_ignores(path: Path, today: datetime.date) -> list[str]:
     """Return non-expired vulnerability IDs from the ignore file."""
     ids: list[str] = []
-    for lineno, raw in enumerate(path.read_text().splitlines(), start=1):
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue

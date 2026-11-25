@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from rashid_core import validate
@@ -8,7 +11,7 @@ from tests.conftest import CatalogBuilder, findings_for, mutate_json
 pytestmark = pytest.mark.unit
 
 
-def _set_collection_bbox(root, bbox) -> None:  # type: ignore[no-untyped-def]
+def _set_collection_bbox(root: Path, bbox: list[Any]) -> None:
     mutate_json(
         root / "roads" / "collection.json",
         lambda d: d["extent"]["spatial"].__setitem__("bbox", [bbox]),

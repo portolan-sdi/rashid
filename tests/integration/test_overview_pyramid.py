@@ -24,7 +24,8 @@ def test_overview_pyramid_depth_and_reductions(tmp_path: Path, factors: list[int
         dst.build_overviews(factors, Resampling.nearest)
     _declare(directory, [path.name])
     findings = _findings(tmp_path, "PTL-DAT-011")
-    assert len(findings) == 1 and findings[0]["severity"] == "error"
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "error"
     assets.write_cog(path, size=1024, blocksize=256)
     assert not _findings(tmp_path, "PTL-DAT-011")
 
@@ -58,7 +59,8 @@ def test_narrow_raster_uses_actual_overview_dimensions(
     with rasterio.open(
         path, overview_level=factors.index(8) if 8 in factors else len(factors) - 1
     ) as overview:
-        assert overview.width == (1 if width == 1 else 3) and overview.height <= 256
+        assert overview.width == (1 if width == 1 else 3)
+        assert overview.height <= 256
     assert not _findings(tmp_path, "PTL-DAT-011")
 
 

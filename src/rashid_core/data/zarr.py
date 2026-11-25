@@ -31,10 +31,12 @@ name second.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import Any, TypeGuard
 
 from rashid_core import _json, _trace
@@ -535,12 +537,11 @@ def _declared_axes(store: _Store, array: _Meta, entry: dict[str, Any]) -> tuple[
 
 def _two_dimension_names(raw: object) -> TypeGuard[list[str]]:
     """Whether a value is two distinct dimension names, as the convention requires."""
-    return (
-        isinstance(raw, list)
-        and len(raw) == 2
-        and all(isinstance(name, str) and name for name in raw)
-        and raw[0] != raw[1]
-    )
+    match raw:
+        case [str() as first, str() as second] if isinstance(raw, list):
+            return bool(first) and bool(second) and first != second
+        case _:
+            return False
 
 
 def _guessed_axes(array: _Meta) -> tuple[str, str] | None:
@@ -627,7 +628,7 @@ def _positional_axes(array: _Meta) -> tuple[str, str] | None:
     right: with no names declared there is no declared order to contradict.
     """
     dimensions = array.dimensions
-    if array.named or len(dimensions) < 2:
+    if array.named or len(dimensions) <= 1:
         return None
     return (dimensions[-2], dimensions[-1])
 
@@ -899,7 +900,7 @@ def _check_missing_root(key: str, store: _Store) -> DataDefect:
     rather than unchecked. Any other failure leaves the question open and is
     reported as information.
     """
-    if store.root_status == 404:
+    if store.root_status == HTTPStatus.NOT_FOUND:
         return _defect(
             ZAR_STORE_VERSION,
             Severity.ERROR,
@@ -950,7 +951,7 @@ def _malformed_convention_fields(root: _Meta) -> list[str]:
     if "spatial:bbox" in attributes and _numbers(attributes["spatial:bbox"], 4) is None:
         problems.append("spatial:bbox is not four numbers")
     code = attributes.get("proj:code")
-    if code is not None and (not isinstance(code, str) or len(code.split(":")) != 2):
+    if code is not None and (not isinstance(code, str) or code.count(":") != 1):
         problems.append("proj:code is not an 'authority:code' string")
     if _declares(root, MULTISCALES_CONVENTION) and not _layout(root):
         problems.append("multiscales declares no layout array")
@@ -962,7 +963,7 @@ def _check_conventions(key: str, root: _Meta, *, pyramid: bool) -> list[DataDefe
     required = [SPATIAL_CONVENTION, PROJ_CONVENTION]
     if pyramid:
         required.append(MULTISCALES_CONVENTION)
-    missing = [name for _uuid, name in required if not _declares(root, (_uuid, name))]
+    missing = [name for uuid, name in required if not _declares(root, (uuid, name))]
     defects: list[DataDefect] = []
     if missing:
         defects.append(
@@ -1050,7 +1051,7 @@ def _check_pyramid(key: str, store: _Store, levels: list[_Level]) -> list[DataDe
     """PTL-ZAR-009: a wide store carries a pyramid, and its coarsest level is small."""
     defects: list[DataDefect] = []
     finest = _level_chunks(store, levels[0]) if levels else None
-    if len(levels) < 2 and finest is not None and finest > COARSEST_CHUNKS:
+    if len(levels) <= 1 and finest is not None and finest > COARSEST_CHUNKS:
         defects.append(
             _defect(
                 ZAR_PYRAMID,
@@ -1109,7 +1110,7 @@ def _check_layout(key: str, levels: list[_Level]) -> list[DataDefect]:
                 " spatial:shape: " + ", ".join(incomplete),
             )
         )
-    if len(levels) >= 2:
+    if len(levels) > 1:
         defects.extend(_check_steps(key, levels))
     return defects
 
@@ -1127,7 +1128,7 @@ def _halves(fine: int, coarse: int) -> bool:
 def _check_steps(key: str, levels: list[_Level]) -> list[DataDefect]:
     """PTL-ZAR-011: consecutive levels differ by a factor of 2 on each spatial axis."""
     offenders: list[str] = []
-    for finer, coarser in zip(levels, levels[1:], strict=False):
+    for finer, coarser in itertools.pairwise(levels):
         fine, coarse = finer.extent, coarser.extent
         if fine is None or coarse is None:
             continue
@@ -1152,7 +1153,7 @@ def _check_variables(
     if not levels:
         return []
     variables = sorted({array.name for array in levels[0].variables})
-    if len(variables) < 2:
+    if len(variables) <= 1:
         return []
     if any(isinstance(holder.get("cube:variables"), dict) for holder in declarations):
         return []

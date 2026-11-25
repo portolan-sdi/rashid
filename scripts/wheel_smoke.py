@@ -10,6 +10,7 @@ import tempfile
 import tomllib
 import venv
 import zipfile
+from email import policy
 from email.parser import BytesParser
 from pathlib import Path
 
@@ -55,7 +56,7 @@ def python_in(path: Path) -> str:
 
 
 def check_base(python: str, core: Path) -> None:
-    from tests.conftest import CatalogBuilder, default_asset
+    from tests.conftest import CatalogBuilder, default_asset, table_columns
 
     run([python, "-I", "-m", "pip", "install", str(core)])
     installed = json.loads(
@@ -78,7 +79,7 @@ def check_base(python: str, core: Path) -> None:
     catalog = CatalogBuilder(Path(python).parents[1] / "catalog")
     catalog.collection(
         "broken",
-        **{"table:columns": [{"name": "value", "type": "int64"}]},
+        **table_columns([{"name": "value", "type": "int64"}]),
         assets={
             "data": default_asset(),
             "zarr": {
@@ -143,8 +144,8 @@ def main() -> None:
         with zipfile.ZipFile(meta) as archive:
             assert all(".dist-info/" in name for name in archive.namelist()), archive.namelist()
             (metadata_path,) = [name for name in archive.namelist() if name.endswith("/METADATA")]
-            metadata = BytesParser().parsebytes(archive.read(metadata_path))
-            assert metadata.get_payload().strip(), "metapackage description is missing"
+            metadata = BytesParser(policy=policy.default).parsebytes(archive.read(metadata_path))
+            assert metadata.get_content().strip(), "metapackage description is missing"
             assert metadata["License-File"] == "LICENSE"
             assert (
                 archive.read(metadata_path.removesuffix("METADATA") + "licenses/LICENSE")

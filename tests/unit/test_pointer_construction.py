@@ -47,10 +47,8 @@ def _pointer_value(node: ast.AST) -> ast.expr | None:
     if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         if any(
-            isinstance(target, ast.Name)
-            and target.id in {"json_pointer", "pointer"}
-            or isinstance(target, ast.Attribute)
-            and target.attr in {"json_pointer", "pointer"}
+            (isinstance(target, ast.Name) and target.id in {"json_pointer", "pointer"})
+            or (isinstance(target, ast.Attribute) and target.attr in {"json_pointer", "pointer"})
             for target in targets
         ) and _is_builder(node.value):
             return node.value
@@ -79,9 +77,17 @@ def _first_literal(node: ast.AST) -> str:
 def _fstring_pointer(node: ast.JoinedStr) -> bool:
     if not node.values:
         return False
-    literals = "".join(part.value for part in node.values if isinstance(part, ast.Constant))
+    literals = "".join(
+        part.value
+        for part in node.values
+        if isinstance(part, ast.Constant) and isinstance(part.value, str)
+    )
     first = node.values[0]
-    starts = isinstance(first, ast.Constant) and bool(_POINTER.match(first.value))
+    starts = (
+        isinstance(first, ast.Constant)
+        and isinstance(first.value, str)
+        and bool(_POINTER.match(first.value))
+    )
     extends = (
         isinstance(first, ast.FormattedValue)
         and isinstance(first.value, ast.Name)
@@ -103,7 +109,7 @@ def _slash_join(node: ast.AST) -> bool:
 
 
 def test_no_handbuilt_pointers_in_src() -> None:
-    copies = []
+    copies: list[str] = []
     root = Path(__file__).resolve().parents[2]
     for path in (root / "src/rashid_core").rglob("*.py"):
         if path == root / "src/rashid_core/model.py":

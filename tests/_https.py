@@ -280,7 +280,8 @@ class ServedTree:
         return f"{self.base}/{path.lstrip('/')}"
 
     def _ask(self, command: str) -> dict[str, Any]:
-        assert self._child.stdin is not None and self._child.stdout is not None
+        assert self._child.stdin is not None
+        assert self._child.stdout is not None
         self._child.stdin.write(command + "\n")
         self._child.stdin.flush()
         reply: dict[str, Any] = json.loads(self._child.stdout.readline())
@@ -362,8 +363,8 @@ def _serve_tree(root: Path, latency: float) -> None:
             elif command == "peak":
                 reply = {"peak": server.peak_in_flight}
             elif command.startswith("fail "):
-                _, path, count, agent = command.split(" ", 3)
-                failing = server.routes[path]
+                _, route_path, count, agent = command.split(" ", 3)
+                failing = server.routes[route_path]
                 failing.fail_first, failing.fail_agent = int(count), agent
                 reply = {}
             else:

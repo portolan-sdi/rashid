@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 import sys
 from pathlib import Path
 
@@ -20,9 +21,11 @@ def test_posix_partition_filename_keeps_a_literal_backslash(tmp_path: Path) -> N
     path = directory / r"part\bad.parquet"
     assets.write_geoparquet(path, version="1.0.0", columns={"extra": list(range(6))})
     versions = _findings(tmp_path, "PTL-DAT-012")
-    assert len(versions) == 1 and path.name in versions[0]["message"]
+    assert len(versions) == 1
+    assert path.name in versions[0]["message"]
     schemas = _findings(tmp_path, "PTL-DAT-014")
-    assert len(schemas) == 1 and path.name in schemas[0]["message"]
+    assert len(schemas) == 1
+    assert path.name in schemas[0]["message"]
 
 
 def test_windows_partition_display_uses_posix_separators(
@@ -37,7 +40,7 @@ def test_windows_partition_display_uses_posix_separators(
     path = directory / match
     path.parent.mkdir(parents=True, exist_ok=True)
     assets.write_geoparquet(path, version="1.0.0")
-    monkeypatch.setattr(_files.globmodule, "glob", lambda *args, **kwargs: [match])
+    monkeypatch.setattr(glob, "glob", lambda *args, **kwargs: [match])
     monkeypatch.setattr(_files, "Path", PureWindowsPath)
     versions = _findings(tmp_path, "PTL-DAT-012")
     assert len(versions) == 1

@@ -19,9 +19,8 @@ from typing import Any
 
 import pytest
 
-import rashid_core.data.checks as checks
 from rashid_core.catalog import CatalogGraph, Node
-from rashid_core.data import storage
+from rashid_core.data import checks, storage
 from rashid_core.data._results import DataDefect
 from rashid_core.data.reader import Locator
 from rashid_core.ids import DAT_CHECKSUM, DAT_FORMAT, DAT_SIZE
@@ -171,7 +170,8 @@ def test_format_mismatch_still_found_from_the_head() -> None:
     defects = _run(_asset(type="application/vnd.pmtiles"), reader)
 
     assert [d.rule_id for d in defects] == [DAT_FORMAT]
-    assert "pmtiles" in defects[0].message and "parquet" in defects[0].message
+    assert "pmtiles" in defects[0].message
+    assert "parquet" in defects[0].message
     assert reader.consumed == storage._HEAD_BYTES
 
 

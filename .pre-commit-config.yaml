@@ -3,8 +3,11 @@
 #                   workflow lint, duplicate code).
 #   pre-push stage — whole-project gates (types, dead code,
 #                   dependency hygiene, import contracts, security). CI runs both
-#                   stages via `pre-commit run --all-files [--hook-stage
-#                   pre-push]`, so nothing here is skippable by accident.
+#                   stages via `prek run --all-files [--hook-stage pre-push]`
+#                   through the shared portolan-ops workflow, so nothing here
+#                   is skippable by accident.
+# A bare `prek install` installs all three hook types.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 repos:
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.19.3
@@ -108,13 +111,6 @@ repos:
       - id: import-linter
         name: import-linter (layer contracts)
         entry: uv run lint-imports
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-
-      - id: fast-tests
-        name: fast tests (opt-in via ENABLE_PRE_PUSH_TESTS=1)
-        entry: bash -c 'if [ "${ENABLE_PRE_PUSH_TESTS:-0}" = "1" ]; then uv run pytest -n 8 --tb=short; fi'
         language: system
         pass_filenames: false
         stages: [pre-push]

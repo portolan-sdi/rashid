@@ -70,7 +70,7 @@ from rashid_core.ids import (
 )
 from rashid_core.model import Severity
 from rashid_core.runner import validate
-from tests.conftest import CatalogBuilder
+from tests.conftest import CatalogBuilder, table_columns
 
 pytestmark = pytest.mark.unit
 
@@ -346,7 +346,7 @@ def test_missing_geospatial_stack_downgrades_to_warning(
             "zarr": {**store, "href": "../store"},
         },
     )
-    catalog.collection("empty", **{"table:columns": [{"name": "value", "type": "int64"}]})
+    catalog.collection("empty", **table_columns([{"name": "value", "type": "int64"}]))
     root = catalog.write()
     (root / "roads/wrong.bin").write_bytes(b"\x89PNG\r\n\x1a\n")
     (root / "roads/store").mkdir()

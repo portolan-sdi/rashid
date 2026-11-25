@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from rashid_core import _trace
+from rashid_core import _store, _trace
 from rashid_core._href import is_catalog_url, split_catalog_url
 from rashid_core._jsonschema import SchemaError
 from rashid_core._profile import declared_schema_uris
@@ -310,7 +310,7 @@ def _validate_url(
         status = crawled.statuses.get(root_url)
         if status is None:  # pragma: no cover - crawl raises FetchError for the root
             return _missing_root(f"root catalog.json cannot be fetched: GET {root_url} failed")
-        if not 200 <= status < 300:
+        if not _store.is_success(status):
             return _missing_root(
                 f"root catalog.json cannot be fetched: GET {root_url} returned {status}"
             )

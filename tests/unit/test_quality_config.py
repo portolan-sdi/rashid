@@ -15,8 +15,8 @@ import yaml
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
-JSCPD_BASELINE_FINGERPRINTS = 29
-JSCPD_BASELINE_CLONES = 29
+JSCPD_BASELINE_FINGERPRINTS = 26
+JSCPD_BASELINE_CLONES = 26
 
 
 def test_tid251_bans_the_owner_apis() -> None:
@@ -171,7 +171,7 @@ def test_jscpd_baseline_skips_when_base_ref_is_unavailable(monkeypatch: pytest.M
         return subprocess.CompletedProcess(command, 128, stdout="", stderr="unknown revision")
 
     monkeypatch.setattr(subprocess, "run", git)
-    with pytest.raises(pytest.skip.Exception, match="origin/main.*unavailable"):
+    with pytest.raises(pytest.skip.Exception, match=r"origin/main.*unavailable"):
         test_jscpd_baseline_only_shrinks()
 
 
@@ -210,7 +210,8 @@ def test_jscpd_hook_runs_in_the_ci_commit_stage() -> None:
     (hook,) = [hook for repo in config["repos"] for hook in repo["hooks"] if hook["id"] == "jscpd"]
     command = shlex.split(hook["entry"])
     assert command[0] == "uvx"
-    assert command[1].startswith("jscpd@") and command[1].removeprefix("jscpd@")
+    assert command[1].startswith("jscpd@")
+    assert command[1].removeprefix("jscpd@")
     assert command[2:] == [
         "src/rashid_core",
         "tests",

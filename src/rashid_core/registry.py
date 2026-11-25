@@ -109,12 +109,14 @@ PassName = Literal["metadata", "runner", "structural", "extensions", "schema", "
 #: findings themselves, so neither a new check nor a severity override can
 #: turn an incubating requirement into a conformance failure.
 INCUBATING_FAMILIES = frozenset({"ZAR"})
+# A check ID is PTL-<family>-<number>.
+_ID_PARTS = 3
 
 
 def is_incubating(check_id: str) -> bool:
     """Whether ``check_id`` belongs to a family that enforces incubating spec text."""
     parts = check_id.split("-")
-    return len(parts) == 3 and parts[1] in INCUBATING_FAMILIES
+    return len(parts) == _ID_PARTS and parts[1] in INCUBATING_FAMILIES
 
 
 @dataclass(frozen=True)

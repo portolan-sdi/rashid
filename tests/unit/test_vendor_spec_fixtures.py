@@ -134,7 +134,7 @@ def test_wrong_schema_id_fails_before_reset(spec: Path, contents: bytes) -> None
     previous = vendor.BUNDLED_SCHEMAS / "previous.json"
     previous.write_bytes(b"preserve")
 
-    with pytest.raises(SystemExit, match="(?:at tag v0.2.0|tag v0.2.0 must contain)"):
+    with pytest.raises(SystemExit, match=r"(?:at tag v0\.2\.0|tag v0\.2\.0 must contain)"):
         vendor._vendor_schemas(spec)
 
     assert previous.read_bytes() == b"preserve"

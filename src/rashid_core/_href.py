@@ -310,7 +310,7 @@ def _reference_grammar(ucschar: str = "", iprivate: str = "") -> Callable[[str],
 
     def check(href: str) -> bool:
         # urlsplit strips some whitespace and controls; reject them before parsing.
-        if any(ord(char) <= 32 or ord(char) == 127 for char in href):
+        if any(char <= " " or char == "\x7f" for char in href):
             return False
         parsed = split_href(href)
         if parsed is None:

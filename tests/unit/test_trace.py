@@ -9,6 +9,7 @@ spans that survive a thread pool, and log records that reach stderr only.
 from __future__ import annotations
 
 import ast
+import atexit
 import contextlib
 import io
 import itertools
@@ -153,8 +154,8 @@ def test_a_plain_pool_loses_the_parent_and_pool_map_keeps_it() -> None:
 def test_a_worker_span_counts_its_own_thread_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
     """The main thread reads the process clock; a worker reads its thread clock."""
     process, thread_clock = itertools.count(0, 1000), itertools.count(0, 7)
-    monkeypatch.setattr(_trace.time, "process_time_ns", lambda: next(process))
-    monkeypatch.setattr(_trace.time, "thread_time_ns", lambda: next(thread_clock))
+    monkeypatch.setattr(time, "process_time_ns", lambda: next(process))
+    monkeypatch.setattr(time, "thread_time_ns", lambda: next(thread_clock))
     _trace.enable("on")
     with _trace.span("main"):
         pass
@@ -381,7 +382,7 @@ def test_trace_to_enables_spans_and_writes_each_path_once_at_exit(
 ) -> None:
     registered: list[object] = []
     monkeypatch.setattr(_trace, "_trace_paths", [])
-    monkeypatch.setattr(_trace.atexit, "register", registered.append)
+    monkeypatch.setattr(atexit, "register", registered.append)
     out = str(tmp_path / "t.json")
     _trace.trace_to(out)
     _trace.trace_to(out)
@@ -396,11 +397,11 @@ def test_trace_to_enables_spans_and_writes_each_path_once_at_exit(
 
 def test_trace_to_keeps_mem_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(_trace, "_trace_paths", [])
-    monkeypatch.setattr(_trace.atexit, "register", lambda fn: None)
+    monkeypatch.setattr(atexit, "register", lambda fn: None)
     _trace.enable("mem")
     try:
         _trace.trace_to(str(tmp_path / "t.json"))
-        assert _trace._mode == "mem"
+        assert _trace._State.mode == "mem"
     finally:
         _trace.enable(None)
 
@@ -529,8 +530,8 @@ def test_debug_captures_warnings_and_teardown_releases_them(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[bool] = []
-    monkeypatch.setattr(_trace.logging, "captureWarnings", calls.append)
-    monkeypatch.setattr(_trace, "_captured_warnings", False)
+    monkeypatch.setattr(logging, "captureWarnings", calls.append)
+    monkeypatch.setattr(_trace._State, "captured_warnings", False)
     _trace.configure_logging("info")
     assert calls == []
     _trace.configure_logging("debug")
@@ -590,7 +591,7 @@ def test_env_false_timings_leave_spans_off(value: str) -> None:
 def test_env_timings_turn_spans_on(value: str, mode: str) -> None:
     try:
         _trace.configure_from_env({"RASHID_TIMINGS": value})
-        assert _trace._mode == mode
+        assert _trace._State.mode == mode
     finally:
         _trace.enable(None)
 
@@ -620,7 +621,7 @@ def test_env_invalid_level_prints_one_line_and_continues(
 
 def test_env_trace_registers_the_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(_trace, "_trace_paths", [])
-    monkeypatch.setattr(_trace.atexit, "register", lambda fn: None)
+    monkeypatch.setattr(atexit, "register", lambda fn: None)
     out = str(tmp_path / "t.json")
     _trace.configure_from_env({"RASHID_TRACE": out})
     assert _trace._trace_paths == [out]
@@ -638,7 +639,7 @@ def test_env_trace_into_a_missing_directory_prints_one_line(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(_trace, "_trace_paths", [])
-    monkeypatch.setattr(_trace.atexit, "register", lambda fn: None)
+    monkeypatch.setattr(atexit, "register", lambda fn: None)
     _trace.configure_from_env({"RASHID_TRACE": str(tmp_path / "missing" / "t.json")})
     err = capsys.readouterr().err
     assert err.startswith("rashid: ignoring RASHID_TRACE: trace directory")
