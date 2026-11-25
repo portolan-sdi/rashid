@@ -5,14 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from rashid_core._profile import (
-    _EXTENSION_URI_PATTERN,
+    EXTENSION_URI_PATTERN,
     SCHEMA_URI_PATTERN,
-    _registry,
     declared_schema_uris,
     newest_profile_version,
     profile_uri,
     profile_version,
     profile_version_key,
+    registry,
 )
 from rashid_core._stac import PARTITION_EXTENSION_PREFIX
 from rashid_core.catalog import CatalogGraph, Node
@@ -233,16 +233,16 @@ class ExtensionVersionRule(Rule):
         declared = node.data.get("stac_extensions")
         if not isinstance(declared, list):
             return
-        registry = _registry()
+        registered = registry()
         for index, uri in enumerate(declared):
             if not isinstance(uri, str) or SCHEMA_URI_PATTERN.match(uri):
                 continue
-            parsed = _EXTENSION_URI_PATTERN.match(uri)
+            parsed = EXTENSION_URI_PATTERN.match(uri)
             if parsed is None:
                 continue  # not a versioned schema URI; nothing to compare
             if node.kind == "collection" and uri.startswith(PARTITION_EXTENSION_PREFIX):
                 continue  # PTL-PRT-001 owns the partition version on a collection
-            entry = registry.get(parsed["base"])
+            entry = registered.get(parsed["base"])
             if entry is None:
                 continue  # unregistered extension: out of the registry's scope
             name, pinned = entry

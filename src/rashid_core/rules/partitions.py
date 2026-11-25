@@ -17,7 +17,7 @@ import re
 from collections.abc import Iterable
 
 from rashid_core._href import BUCKET_SCHEMES, bucket_glob, split_href
-from rashid_core._stac import PARTITION_EXTENSION_PREFIX, _declared_extensions, is_partitioned
+from rashid_core._stac import PARTITION_EXTENSION_PREFIX, declared_extensions, is_partitioned
 from rashid_core.catalog import CatalogGraph, Node
 from rashid_core.model import Finding, Severity, json_pointer
 from rashid_core.rule import Rule
@@ -72,7 +72,7 @@ class PartitionFieldsRule(Rule):
                 json_pointer=json_pointer("partition:glob"),
                 fix_hint="add partition:glob, e.g. 's3://bucket/data/*.parquet'",
             )
-        declared = _declared_extensions(node)
+        declared = declared_extensions(node)
         if not declared:
             yield self.finding(
                 node,

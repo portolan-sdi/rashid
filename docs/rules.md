@@ -177,7 +177,7 @@ The Python API accepts a reader factory instead of a scope flag:
 
 ```python
 from rashid_core import ValidationOptions, validate
-from rashid_core.data.reader import LocalOnlyReader
+from rashid_core.api import LocalOnlyReader
 
 report = validate("path/to/catalog", options=ValidationOptions(data_reader_factory=LocalOnlyReader))
 ```
@@ -185,8 +185,8 @@ report = validate("path/to/catalog", options=ValidationOptions(data_reader_facto
 Pass the same factory to run the data pass directly:
 
 ```python
-from rashid_core.data import validate_data
-from rashid_core.data.reader import LocalOnlyReader
+from rashid_core import validate_data
+from rashid_core.api import LocalOnlyReader
 
 report = validate_data(graph, reader_factory=LocalOnlyReader)
 ```

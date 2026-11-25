@@ -38,12 +38,12 @@ from typing import Any
 
 from rashid_core import _json, _package
 from rashid_core._stac import (
-    _ABSENT,
+    ABSENT,
     CLASSES_FIELD,
     ClassList,
-    _home,
     asset_class_lists,
     band_count,
+    home,
     is_integer,
     is_source_asset,
 )
@@ -308,7 +308,7 @@ class NodataClassRule(Rule):
                             expected=True,
                         )
                     continue
-                if found.nodata is _ABSENT:
+                if found.nodata is ABSENT:
                     yield self.finding(
                         node,
                         f"class {pointer} is marked nodata, but its band declares no nodata value",
@@ -342,7 +342,7 @@ def _misplaced(asset: dict[str, Any], found: ClassList) -> str | None:
         return "the band it describes in bands"
     if found.band_field == ("bands" if multi else None):
         return None
-    if found.band_field == "raster:bands" and _home(asset, found.band_index or 0) is not None:
+    if found.band_field == "raster:bands" and home(asset, found.band_index or 0) is not None:
         return None
     return f"bands/{found.band_index}" if multi else "the asset"
 

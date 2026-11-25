@@ -49,7 +49,7 @@ def default_validator() -> Validator:
     from jsonschema import Draft7Validator
 
     from rashid_core._jsonschema import (
-        _STAC_BASE,
+        STAC_BASE,
         STAC_VERSION,
         compile_rust,
         screened,
@@ -60,7 +60,7 @@ def default_validator() -> Validator:
     rust_registry = stac_rust_registry()
     validators: dict[str, Validator] = {}
     for stac_type, path in _ROOT_SCHEMAS.items():
-        root = {"$ref": f"{_STAC_BASE}{path}"}
+        root = {"$ref": f"{STAC_BASE}{path}"}
         validators[stac_type] = screened(
             Draft7Validator(root, registry=registry),
             compile_rust(root, rust_registry, draft7=True),

@@ -21,7 +21,7 @@ from jsonschema import Draft7Validator
 from jsonschema.validators import validator_for
 
 from rashid_core._jsonschema import (
-    _STAC_BASE,
+    STAC_BASE,
     compile_rust,
     extension_registry,
     extension_rust_registry,
@@ -118,7 +118,7 @@ def _pairs() -> list[tuple[str, Any, Any]]:
     """(label, jsonschema validator, jsonschema-rs validator) for every schema rashid runs."""
     pairs: list[tuple[str, Any, Any]] = []
     for stac_type, path in _ROOT_SCHEMAS.items():
-        root = {"$ref": f"{_STAC_BASE}{path}"}
+        root = {"$ref": f"{STAC_BASE}{path}"}
         pairs.append(
             (
                 f"stac:{stac_type}",

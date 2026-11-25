@@ -78,19 +78,19 @@ _REGISTRY_RESOURCE = "extension-registry.json"
 # Every registered URI pins a version: <base>/vX.Y.Z/schema.json. The base
 # has the host and the extension's path, so it identifies the extension
 # across versions on either host the registry uses.
-_EXTENSION_URI_PATTERN = re.compile(
+EXTENSION_URI_PATTERN = re.compile(
     r"^(?P<base>https://\S+?)/(?P<version>v\d+\.\d+\.\d+)/schema\.json$"
 )
 
 
 @lru_cache(maxsize=1)
-def _registry() -> dict[str, tuple[str, str]]:
+def registry() -> dict[str, tuple[str, str]]:
     """Registered extensions, keyed by base URI: base -> (name, pinned version)."""
     resource = _package.schemas().joinpath(_REGISTRY_RESOURCE)
     document: dict[str, Any] = _json.loads(resource.read_bytes())
     registered: dict[str, tuple[str, str]] = {}
     for name, uri in document["extensions"].items():
-        parsed = _EXTENSION_URI_PATTERN.match(str(uri))
+        parsed = EXTENSION_URI_PATTERN.match(str(uri))
         if parsed is None:  # pragma: no cover - the vendoring script rejects these
             continue
         registered[parsed["base"]] = (str(name), parsed["version"])
@@ -105,10 +105,10 @@ def registered_extension(uri: str) -> tuple[str, str] | None:
     the registry does not pin. :func:`registered_at_other_version` tells the
     last case apart.
     """
-    parsed = _EXTENSION_URI_PATTERN.match(uri)
+    parsed = EXTENSION_URI_PATTERN.match(uri)
     if parsed is None:
         return None
-    entry = _registry().get(parsed["base"])
+    entry = registry().get(parsed["base"])
     if entry is None or entry[1] != parsed["version"]:
         return None
     return entry
@@ -123,10 +123,10 @@ def registered_at_other_version(uri: str) -> tuple[str, str] | None:
     every schema error into a PTL-CNF-004 warning. The extension pass uses this
     to validate such objects against the schema of the version they declare.
     """
-    parsed = _EXTENSION_URI_PATTERN.match(uri)
+    parsed = EXTENSION_URI_PATTERN.match(uri)
     if parsed is None:
         return None
-    entry = _registry().get(parsed["base"])
+    entry = registry().get(parsed["base"])
     if entry is None or entry[1] == parsed["version"]:
         return None
     return entry[0], parsed["version"]

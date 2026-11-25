@@ -254,12 +254,10 @@ PARTITION_EXTENSION_PREFIX = "https://schemas.portolan-sdi.org/incubating/partit
 
 
 def is_partitioned(node: Node) -> bool:
-    return any(key.startswith("partition:") for key in node.data) or bool(
-        _declared_extensions(node)
-    )
+    return any(key.startswith("partition:") for key in node.data) or bool(declared_extensions(node))
 
 
-def _declared_extensions(node: Node) -> list[tuple[int, str]]:
+def declared_extensions(node: Node) -> list[tuple[int, str]]:
     """``(index, uri)`` of each partition extension URI in ``stac_extensions``."""
     extensions = node.data.get("stac_extensions")
     if not isinstance(extensions, list):
@@ -305,7 +303,7 @@ def has_datetime(fields: dict[str, Any]) -> bool:
 
 CLASSES_FIELD = "classification:classes"
 BAND_FIELDS = ("bands", "raster:bands")
-_ABSENT = object()
+ABSENT = object()
 
 
 @dataclass(frozen=True)
@@ -313,7 +311,7 @@ class ClassList:
     """One ``classification:classes`` array and the band facts that bind it.
 
     ``nodata`` is the band's own value, or the enclosing asset's when the
-    band leaves it out, as STAC 1.1 inherits it. ``_ABSENT`` marks a value
+    band leaves it out, as STAC 1.1 inherits it. ``ABSENT`` marks a value
     declared at neither level. ``band_field`` and
     ``band_index`` locate the band in its asset's band list, so the data pass
     can pair it with the band of the same position in the file; both are None
@@ -344,7 +342,7 @@ def asset_class_lists(pointer: str, asset: dict[str, Any]) -> list[ClassList]:
     A legacy ``raster:bands`` list is left out where it mirrors a list in
     ``bands`` or, for the asset's only band, on the asset.
     """
-    nodata = asset.get("nodata", _ABSENT)
+    nodata = asset.get("nodata", ABSENT)
     found: list[ClassList] = []
     if CLASSES_FIELD in asset:
         found.append(
@@ -371,7 +369,7 @@ def asset_class_lists(pointer: str, asset: dict[str, Any]) -> list[ClassList]:
     return found
 
 
-def _home(asset: dict[str, Any], index: int) -> dict[str, Any] | None:
+def home(asset: dict[str, Any], index: int) -> dict[str, Any] | None:
     """The ``bands`` entry, or the single-band asset, with classes for legacy band ``index``."""
     if _has_classes(asset, index):
         band: dict[str, Any] = asset["bands"][index]
@@ -383,11 +381,11 @@ def _home(asset: dict[str, Any], index: int) -> dict[str, Any] | None:
 
 def _mirrors(asset: dict[str, Any], index: int, legacy: dict[str, Any]) -> bool:
     """Whether a legacy ``raster:bands`` entry repeats the class list and nodata of its home."""
-    home = _home(asset, index)
-    if home is None or home.get(CLASSES_FIELD) != legacy[CLASSES_FIELD]:
+    current_home = home(asset, index)
+    if current_home is None or current_home.get(CLASSES_FIELD) != legacy[CLASSES_FIELD]:
         return False
-    inherited = asset.get("nodata", _ABSENT)
-    return bool(home.get("nodata", inherited) == legacy.get("nodata", inherited))
+    inherited = asset.get("nodata", ABSENT)
+    return bool(current_home.get("nodata", inherited) == legacy.get("nodata", inherited))
 
 
 def is_integer(value: Any) -> TypeGuard[int]:

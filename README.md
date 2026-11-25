@@ -23,7 +23,7 @@ For a light installation, install `rashid-core` without the geospatial libraries
 
 ```bash
 pip install rashid-core
-python -m rashid_core check --no-data tests/fixtures/reference-catalog
+python -m rashid_core check --no-data path/to/catalog
 ```
 
 `rashid-core` provides the Python library and module entry point. Only `rashid` installs the `rashid` console command.
@@ -32,7 +32,14 @@ It reports `PTL-DAT-000` when geospatial checks cannot run.
 Install `rashid-core[data]` to add geospatial validation, or install `rashid` for the full tool.
 Both distributions require Python 3.11 or later.
 
-Update existing Python imports to `rashid_core`, including the public `rashid_core.api` module.
+## Upgrade from 0.4
+
+| Before | After |
+|---|---|
+| `from rashid import validate` | `from rashid_core import validate` |
+| `rashid.api` and internal modules such as `rashid.catalog` | `rashid_core.api` |
+| `rashid` as a library dependency | `rashid-core`, or `rashid-core[data]` for the data checks |
+| `logging.getLogger("rashid")` | `logging.getLogger("rashid_core")` |
 
 ## Check a Catalog
 

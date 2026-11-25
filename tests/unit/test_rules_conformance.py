@@ -9,10 +9,10 @@ from click.testing import CliRunner
 
 from rashid_core import ValidationOptions, validate
 from rashid_core._profile import (
-    _registry,
     bundled_profile_versions,
     newest_profile_version,
     profile_uri,
+    registry,
 )
 from rashid_core.cli import main
 from rashid_core.model import Severity
@@ -156,9 +156,9 @@ def _with_extension(uri: str) -> Callable[[dict[str, Any]], None]:
 
 
 def test_vendored_registry_pins_every_extension() -> None:
-    registry = _registry()
-    assert len(registry) >= 10, "the vendored extension registry looks truncated"
-    assert registry["https://stac-extensions.github.io/raster"] == ("Raster", "v2.0.0")
+    registered = registry()
+    assert len(registered) >= 10, "the vendored extension registry looks truncated"
+    assert registered["https://stac-extensions.github.io/raster"] == ("Raster", "v2.0.0")
 
 
 def test_registry_version_passes(catalog: CatalogBuilder) -> None:

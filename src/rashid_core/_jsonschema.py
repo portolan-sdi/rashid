@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 
 STAC_VERSION = "1.1.0"
 _STAC_HOST = "https://schemas.stacspec.org/"
-_STAC_BASE = f"{_STAC_HOST}v{STAC_VERSION}/"
+STAC_BASE = f"{_STAC_HOST}v{STAC_VERSION}/"
 _GEOJSON_BASE = "https://geojson.org/schema/"
 
 
@@ -243,7 +243,7 @@ def _rust_registry_over(trees: tuple[tuple[Traversable, str], ...]) -> Any:
 def _stac_trees() -> tuple[tuple[Traversable, str], ...]:
     schemas = _package.schemas()
     return (
-        (schemas.joinpath("stac").joinpath(STAC_VERSION), _STAC_BASE),
+        (schemas.joinpath("stac").joinpath(STAC_VERSION), STAC_BASE),
         (schemas.joinpath("geojson"), _GEOJSON_BASE),
     )
 
