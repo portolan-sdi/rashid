@@ -127,9 +127,9 @@ FAULTS = (
     ),
     Fault(
         "rules-only-registry",
-        "src/rashid/_gate_fault.py",
-        "",
-        "import rashid.rules.assets\n",
+        "src/rashid/api.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport rashid.rules.assets\n",
         _LAYERS,
         "only the registry may import metadata rules BROKEN",
     ),
