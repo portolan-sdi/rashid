@@ -56,10 +56,11 @@ def test_owner_layer_contracts_cover_new_modules() -> None:
     assert config["tool"]["importlinter"]["exclude_type_checking_imports"] is True
     layers = contracts["package-layers"]
     assert layers["type"] == "layers"
-    assert layers["containers"] == ["rashid"]
+    assert layers["containers"] == ["rashid_core"]
     assert layers["exhaustive"] is True
     assert not layers.get("exhaustive_ignores")
     assert layers["layers"] == [
+        "__main__",
         "cli",
         "api",
         "runner",

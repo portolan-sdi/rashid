@@ -69,7 +69,7 @@ def test_timings_print_a_table_to_stderr_in_text_mode(root: Path) -> None:
 def test_verbosity_sets_the_stderr_level(root: Path, flag: str, debug: bool) -> None:
     result = CliRunner().invoke(main, [*_check(flag), "--json", str(root)])
     json.loads(result.stdout)
-    assert (" DEBUG rashid.runner: rules: start" in result.stderr) is debug
+    assert (" DEBUG rashid_core.runner: rules: start" in result.stderr) is debug
     # rashid logs no INFO record on a clean local run, so -v adds nothing here.
     assert (result.stderr == "") is not debug
 
@@ -144,7 +144,7 @@ def test_verbose_ignores_an_unopenable_log_file_as_the_import_does(
     assert result.exit_code == 0
     assert "no findings" in result.stdout
     assert "ignoring RASHID_LOG/RASHID_LOG_FILE" not in result.stderr
-    assert " DEBUG rashid.runner: rules: start" in result.stderr
+    assert " DEBUG rashid_core.runner: rules: start" in result.stderr
 
 
 def test_verbose_reports_an_unopenable_log_file_once(

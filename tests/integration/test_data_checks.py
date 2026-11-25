@@ -1,6 +1,6 @@
 """Byte-check logic — fake readers with in-memory bytes, no network.
 
-Needs the ``rashid[data]`` extra (importing :mod:`rashid_core.data.formats.checks` pulls the
+Needs the ``rashid-core[data]`` extra (importing :mod:`rashid_core.data.formats.checks` pulls the
 geospatial stack), so it lives under integration and skips when the extra is
 absent. Covers the checksum, size, and format checks with synthetic bytes plus
 the PMTiles header parse and the reprojection helper; the parquet-geo and COG

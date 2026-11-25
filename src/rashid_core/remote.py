@@ -39,7 +39,7 @@ from rashid_core import _href, _json, _store, _trace
 from rashid_core._href import containment_href, crawl_mirror_path, crawl_prefix
 from rashid_core.catalog import ROOT_CATALOG
 
-log = logging.getLogger("rashid.remote")
+log = logging.getLogger(__name__)
 
 #: Documents fetched before the crawl stops enqueuing. Past this a catalog is
 #: large enough that a full remote check wants a local sync anyway, and the

@@ -5,14 +5,16 @@ Use this guide to set up rashid, run checks, measure performance, and inspect lo
 ## Setup
 
 ```bash
-uv sync
+uv sync --all-packages --all-extras
 uv run pre-commit install \
   --hook-type pre-commit \
   --hook-type commit-msg \
   --hook-type pre-push
 ```
 
-`uv sync` installs development dependencies and the local `rashid` metapackage, including the geospatial stack. Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org), which Commitizen checks through the `commit-msg` hook.
+This installs both workspace distributions, development dependencies, and the geospatial stack.
+All Python code lives in `src/rashid_core/`; `meta/rashid/` holds the code-free metapackage and its console entry point.
+Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org), which Commitizen checks through the `commit-msg` hook.
 
 ## Local checks
 
@@ -48,8 +50,8 @@ These gates keep each consolidated concept at its owner ([#266](https://github.c
 
 | Gate | Enforced boundary |
 |---|---|
-| Ruff `TID251` | URL interpretation belongs to `_href.py`; urllib requests and HTTPStore construction to `_store.py`; JSON loading to `_json.py`; raw readers and glob enumeration to `data/formats/_files.py`. |
-| import-linter | Exhaustive layers order every package module and keep metadata rules independent of validation passes. Only optional formats import geospatial libraries; only the CLI imports click. Only the data entry point imports optional formats, and metadata rules cannot import transport. |
+| Ruff `TID251` | `_href.py` owns URL interpretation; `_store.py` owns requests and object stores. `_json.py` owns JSON loading; `_package.py` owns schema resources and installed versions. `data/formats/_files.py` owns readers and glob enumeration. |
+| import-linter | Exhaustive layers start with `__main__` and order every package module. Metadata rules stay independent; only the registry imports them. Only optional formats import geospatial libraries; only the CLI imports click. Only the data entry point imports optional formats, and metadata rules cannot import transport. |
 | jscpd 5.2.1 | New Python clones in `src/rashid_core` and `tests` fail the commit hook. Fixtures and virtual environments are excluded. An empty scan fails. |
 | Package split | `test_packaging.py` checks version agreement and the core dependency closure. `wheel-smoke` checks isolated wheels and upgrades from rashid 0.4.0. |
 | API snapshot | `test_api.py` pins `rashid_core.api` and `rashid_core.__all__`, their defining objects, and callable signatures. Python defines the enum constructor signature. |
@@ -82,7 +84,8 @@ uv run python scripts/gate_selftest.py --fault duplicate-block
 ```
 
 The script extracts `HEAD` with `git archive`, runs each gate on a clean copy, then injects its fault.
-It checks banned APIs, layers and protected import boundaries, duplication, API exports and signatures, duplicate and missing IDs, pointer variants, baseline growth, loose and bare xfails, CI wiring, and exemption growth.
+It checks banned APIs, import boundaries, duplication, API exports and signatures, IDs, and pointer construction.
+It also checks baseline growth, strict xfails, CI wiring, and exemption growth.
 The self-test pins its fault count so dropping a case fails. Each fault must produce its specific diagnostic; syntax errors and clean-copy failures fail the self-test, which runs without modifying the working tree.
 
 ## Measuring performance
@@ -156,21 +159,28 @@ Build both wheels and test isolated installs with:
 uv run python scripts/wheel_smoke.py
 ```
 
-The smoke check verifies the base dependency allowlist, metadata validation, the missing-stack warning, and upgrades from rashid 0.4.0.
+The smoke check verifies the base dependency allowlist, metadata validation, and upgrades from rashid 0.4.0.
+Without the geospatial stack, it requires the missing-stack warning alongside checksum, size, and Zarr findings.
 
 ## Logs and timings
 
 Place logging and profiling flags before `check`:
 
 ```bash
-uv run rashid --timings check --json path/to/catalog
-uv run rashid -vv check path/to/catalog
-uv run rashid --trace trace.json check path/to/catalog
+uv run rashid --timings check --json --no-data tests/fixtures/reference-catalog
+uv run rashid -vv check --no-data tests/fixtures/reference-catalog
+uv run rashid --trace .cache/trace.json check --no-data tests/fixtures/reference-catalog
 ```
 
 - `--timings` adds a `meta` block to JSON reports. Without `--json`, it prints the stage table to stderr.
 - `-v` enables `INFO` logs; `-vv` enables `DEBUG` logs. Logs go to stderr, leaving stdout for the report.
 - `--trace` writes a Chrome trace that you can open in [Perfetto](https://ui.perfetto.dev).
+
+Logger names follow the import package, for example:
+
+```text
++0.055s DEBUG rashid_core.runner: rules: start
+```
 
 When calling `validate()` from a library, use these environment variables:
 

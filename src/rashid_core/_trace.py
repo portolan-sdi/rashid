@@ -1,7 +1,7 @@
 """Counters, stage spans, and logging setup, from the standard library alone.
 
-This module imports nothing from its own package. The logger name and
-public environment variables retain the rashid command's name:
+This module imports nothing from its own package. The logger root follows
+the import package. Public environment variables retain the rashid command's name:
 
 ``RASHID_LOG``
     ``debug``, ``info``, ``warning``, or ``error``. Log records at that level
@@ -50,8 +50,8 @@ from typing import TYPE_CHECKING, Any, TextIO, TypeVar
 if TYPE_CHECKING:
     from concurrent.futures import Executor, Future
 
-_PACKAGE = "rashid"
-_PREFIX = _PACKAGE.upper()
+_PACKAGE = __name__.split(".")[0]
+_PREFIX = "RASHID"
 
 ENV_LOG = f"{_PREFIX}_LOG"
 ENV_LOG_FILE = f"{_PREFIX}_LOG_FILE"
@@ -359,7 +359,7 @@ def chrome_trace() -> dict[str, Any]:
         events.append(
             {
                 "name": record.name,
-                "cat": _PACKAGE,
+                "cat": _PREFIX.lower(),
                 "ph": "X",
                 "ts": record.start_ns / 1000,
                 "dur": record.wall_ns / 1000,
@@ -405,7 +405,7 @@ def _write_traces() -> None:
         try:
             write_chrome_trace(path)
         except OSError as exc:
-            print(f"{_PACKAGE}: cannot write trace {path}: {exc}", file=sys.stderr)
+            print(f"{_PREFIX.lower()}: cannot write trace {path}: {exc}", file=sys.stderr)
 
 
 # --- logging -----------------------------------------------------------------
@@ -419,7 +419,7 @@ _LEVELS = {
 
 
 class _Elapsed(logging.Formatter):
-    """``+3.214s DEBUG rashid._store: message``. The time counts from import."""
+    """``+3.214s DEBUG rashid_core._store: message``. The time counts from import."""
 
     def format(self, record: logging.LogRecord) -> str:
         line = (
@@ -477,14 +477,14 @@ _warned: set[str] = set()
 
 
 def warn_once(message: str) -> None:
-    """Print ``message`` to stderr, prefixed with the package name, once per process.
+    """Print ``message`` to stderr, prefixed with the command name, once per process.
 
     The import and a CLI can both find the same bad variable. The user then
     reads one line, not two.
     """
     if message not in _warned:
         _warned.add(message)
-        print(f"{_PACKAGE}: {message}", file=sys.stderr)
+        print(f"{_PREFIX.lower()}: {message}", file=sys.stderr)
 
 
 def parse_level(name: str) -> int:

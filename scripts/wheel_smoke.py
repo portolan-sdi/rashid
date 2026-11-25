@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import tomllib
 import venv
@@ -12,6 +13,9 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 BASE_DISTRIBUTIONS = {
     "rashid-core",
     "click",
@@ -32,7 +36,7 @@ BASE_DISTRIBUTIONS = {
 }
 
 
-def run(command: list[str]) -> str:
+def run(command: list[str], *, expected_code: int = 0) -> str:
     print("Run:", " ".join(command), flush=True)
     env = {
         k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"}
@@ -40,7 +44,7 @@ def run(command: list[str]) -> str:
     result = subprocess.run(
         command, cwd=ROOT, env=env, capture_output=True, text=True, check=False, timeout=600
     )
-    assert result.returncode == 0, f"{command}:\n{result.stdout}\n{result.stderr}"
+    assert result.returncode == expected_code, f"{command}:\n{result.stdout}\n{result.stderr}"
     return result.stdout
 
 
@@ -50,6 +54,8 @@ def python_in(path: Path) -> str:
 
 
 def check_base(python: str, core: Path) -> None:
+    from tests.conftest import CatalogBuilder, default_asset
+
     run([python, "-I", "-m", "pip", "install", str(core)])
     installed = json.loads(
         run(
@@ -67,9 +73,33 @@ def check_base(python: str, core: Path) -> None:
     assert set(installed) <= BASE_DISTRIBUTIONS, set(installed) - BASE_DISTRIBUTIONS
     fixture = str(ROOT / "tests/fixtures/reference-catalog")
     run([python, "-I", "-m", "rashid_core", "check", "--no-data", fixture])
-    report = json.loads(run([python, "-I", "-m", "rashid_core", "check", "--json", fixture]))
-    assert any(finding["rule_id"] == "PTL-DAT-000" for finding in report["findings"])
-    # TODO(issue #336): assert Zarr findings after the data-pass split merges.
+    catalog = CatalogBuilder(Path(python).parents[1] / "catalog")
+    catalog.collection(
+        "broken",
+        assets={
+            "data": default_asset(),
+            "zarr": {
+                "href": "./data.zarr",
+                "type": "application/vnd.zarr; version=3",
+                "roles": ["data"],
+                "file:size": 1,
+            },
+        },
+    )
+    root = catalog.write()
+    (root / "broken/data.parquet").write_bytes(b"wrong size and checksum")
+    store = root / "broken/data.zarr"
+    store.mkdir()
+    (store / ".zgroup").write_text('{"zarr_format": 2}', encoding="utf-8")
+    report = json.loads(
+        run(
+            [python, "-I", "-m", "rashid_core", "check", "--json", str(root)],
+            expected_code=1,
+        )
+    )
+    ids = [finding["rule_id"] for finding in report["findings"]]
+    assert {"PTL-DAT-000", "PTL-DAT-001", "PTL-DAT-002", "PTL-ZAR-001"} <= set(ids), ids
+    assert ids.count("PTL-DAT-000") == 1, report
 
 
 def check_upgrade(python: str, core: Path, meta: Path, version: str) -> None:

@@ -1,6 +1,6 @@
 """Cloud-native storage rules: COG validity/statistics and GeoParquet layout.
 
-Needs the ``rashid[data]`` extra; skips without it. Drives the check functions
+Needs the ``rashid-core[data]`` extra; skips without it. Drives the check functions
 directly on generated assets — a spec-compliant asset produces no findings, and
 each non-compliant variant raises exactly the rule it violates (formats.md:30/64/
 75/91/95).

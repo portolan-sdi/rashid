@@ -14,7 +14,7 @@ def test_schemas_resolves_bundled_data() -> None:
 
 
 def test_version_matches_the_installed_distribution() -> None:
-    assert _package.version() == metadata.version("rashid")
+    assert _package.version() == metadata.version("rashid-core")
 
 
 def test_version_without_distribution_metadata(monkeypatch: pytest.MonkeyPatch) -> None:

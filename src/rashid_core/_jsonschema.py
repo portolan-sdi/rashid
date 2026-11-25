@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
     from referencing import Registry
 
-log = logging.getLogger("rashid._jsonschema")
+log = logging.getLogger(__name__)
 
 STAC_VERSION = "1.1.0"
 _STAC_HOST = "https://schemas.stacspec.org/"

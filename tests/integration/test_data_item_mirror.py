@@ -6,7 +6,7 @@ These tests cover both halves: a conformant mirror is clean, one that diverges
 in row count, ids, geometry, datetime, or bbox earns ``PTL-DAT-016``, and an
 unordered or statistics-less one earns the findings a vector asset would.
 
-Needs the ``rashid[data]`` extra; skips without it. Fully local — no network.
+Needs the ``rashid-core[data]`` extra; skips without it. Fully local — no network.
 """
 
 from __future__ import annotations

@@ -10,12 +10,12 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [{ name = "Portolan contributors" }]
-# Heavy readers load lazily and are optional for metadata-only installations.
-# Keep the existing dependency floors; changing them is a separate task.
 dependencies = [
     "click>=8.4",
     "jsonschema>=4.26",
+    # Rust screening precedes jsonschema; its registry needs the bundled meta-schemas.
     "jsonschema-rs>=0.58",
+    # Already a jsonschema dependency; declared here for our direct registry import.
     "jsonschema-specifications>=2023.3.6",
     "referencing>=0.30",
     "orjson>=3.11",
@@ -25,10 +25,13 @@ dependencies = [
 
 [project.optional-dependencies]
 data = [
+    # 21 first exposes native GeospatialStatistics. Consumers cap below 25 for the
+    # abseil ABI break, so a >=25 floor would prevent joint installation.
     "pyarrow>=21",
     "rasterio>=1.4.4",
     "rio-cogeo>=6",
     "pyproj>=3.7.1",
+    # Item-mirror geometry comparison uses WKB and GeoJSON; 2.1 is the supported series.
     "shapely>=2.1",
 ]
 
@@ -172,6 +175,7 @@ type = "layers"
 containers = ["rashid_core"]
 exhaustive = true
 layers = [
+    "__main__",
     "cli",
     "api",
     "runner",

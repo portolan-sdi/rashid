@@ -19,7 +19,7 @@ Install `rashid` for the full command, including asset byte validation:
 uv tool install rashid
 ```
 
-For metadata-only use, install `rashid-core` without the geospatial libraries:
+For a light installation, install `rashid-core` without the geospatial libraries:
 
 ```bash
 pip install rashid-core
@@ -27,11 +27,13 @@ python -m rashid_core check --no-data tests/fixtures/reference-catalog
 ```
 
 `rashid-core` provides the Python library and module entry point. It does not install the `rashid` console command.
-Install `rashid-core[data]` to add byte validation, or install `rashid` for the full tool.
+Core still checks checksums, sizes, file signatures, and Zarr metadata by default.
+It reports `PTL-DAT-000` when geospatial checks cannot run.
+Install `rashid-core[data]` to add geospatial validation, or install `rashid` for the full tool.
+The code-free metapackage lives in `meta/rashid/`; all Python code lives in `src/rashid_core/`.
 Both distributions require Python 3.11 or later.
 
-The Python import name changed from `rashid` to `rashid_core`.
-The public `rashid.api` module is now `rashid_core.api`. Update existing Python imports.
+Update existing Python imports to `rashid_core`, including the public `rashid_core.api` module.
 
 ## Check a catalog
 
@@ -61,7 +63,7 @@ Give `rashid check` the URL of the root `catalog.json`, or of the directory that
 rashid check https://data.example.org/my-catalog/catalog.json
 ```
 
-rashid fetches the root catalog and follows its `child`, `item`, and JSON `alternate` links. It fetches `AGENTS.md` and `README.md` beside each catalog and collection. It then runs the same passes as for a directory. The URL is the publish base, so the hosting checks run by default: HTTP range support on COG, Parquet, PMTiles, and COPC assets, CORS on every host, and one HEAD for each link target that the crawl did not fetch. A `child` or `item` link that answers `404` on the host is a `PTL-LIV-006` error. A root `self` link that points to a different location is a `PTL-LIV-007` warning.
+rashid fetches the root catalog and follows its `child`, `item`, and JSON `alternate` links. It fetches `AGENTS.md` and `README.md` beside each catalog and collection. It then runs the same passes as for a directory. The URL is the publish base, so hosting checks run by default. They check HTTP ranges on COG, Parquet, PMTiles, and COPC assets, plus CORS on every host. Each link target outside the crawl gets one HEAD request. A `child` or `item` link that answers `404` on the host is a `PTL-LIV-006` error. A root `self` link that points to a different location is a `PTL-LIV-007` warning.
 
 A crawl reads only the documents that links point to. rashid reports this limit once as `PTL-GEN-002`. The checks that depend on a full directory listing do not run: `PTL-LNK-002`, for an object without an inbound link, and `PTL-COL-005`, for scene files beside a collection. Sync the tree to disk and check the directory for the full view.
 
@@ -74,7 +76,7 @@ rashid check path/to/catalog --live --live-base-url https://data.example.org/my-
 
 Use `--json` for a machine-readable report.
 
-## Read the Report
+## Read the report
 
 Each finding contains a rule ID, severity, message, and file path. MUST requirements produce errors, and SHOULD requirements produce warnings.
 
@@ -82,7 +84,7 @@ A catalog can produce thousands of similar findings. After 50 findings, rashid g
 
 Use `--all` to list every finding. Use `--summary` to group any report by rule. JSON output always contains the complete `findings` array and a `summary.by_rule` object.
 
-## Choose Additional Checks
+## Choose additional checks
 
 rashid provides six separate validation passes:
 
@@ -104,7 +106,7 @@ rashid check path/to/catalog --schema \
 
 The URI must match the profile URI in the root catalog and must not contain `=`. The local JSON object overrides bundled and fetched schemas for that run. Repeat `--schema-map` for more URIs. Each later mapping for a URI replaces its earlier mapping. A malformed mapping, unreadable file, or invalid JSON produces a usage error. `--schema-map` also requires `--schema`. Each unused URI produces a `PTL-SCH-002` warning with the selected and declared profile URIs.
 
-The extension pass uses the versions that the profile's extension registry pins. rashid packages those schemas, so a catalog at the pinned versions needs no network. A catalog that declares an older version of a registered extension is checked against that version's schema, which rashid fetches over https. rashid reports an extension outside the registry as an info finding rather than validating it. Use `--schema-allow-network` to fetch and check such a schema.
+The extension pass uses the versions that the profile's extension registry pins. rashid packages those schemas, so a catalog at the pinned versions needs no network. For an older registered extension, rashid fetches that version's schema over https. An extension outside the registry gets an info finding. Use `--schema-allow-network` to fetch and check such a schema.
 
 If a pass cannot run, rashid reports a warning. It does not treat the skipped pass as successful.
 

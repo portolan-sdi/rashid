@@ -425,22 +425,39 @@ def test_parse_level_refuses_an_unknown_name() -> None:
 
 def test_debug_records_reach_stderr_and_not_stdout(capsys: pytest.CaptureFixture[str]) -> None:
     _trace.configure_logging("debug")
-    logging.getLogger("rashid.example").debug("hello %s", "there")
+    logging.getLogger("rashid_core.example").debug("hello %s", "there")
     captured = capsys.readouterr()
     assert captured.out == ""
     (line,) = captured.err.splitlines()
     assert line.startswith("+")
-    assert line.split(" ", 1)[1] == "DEBUG rashid.example: hello there"
+    assert line.split(" ", 1)[1] == "DEBUG rashid_core.example: hello there"
     assert line.split(" ", 1)[0].endswith("s")
+
+
+def test_storage_and_optional_format_records_reach_the_package_handler(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from rashid_core import _store
+    from rashid_core.data.formats import checks
+
+    _trace.configure_logging("debug")
+    _store.log.debug("storage record")
+    checks.log.debug("format record")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert [line.split(" ", 1)[1] for line in captured.err.splitlines()] == [
+        "DEBUG rashid_core._store: storage record",
+        "DEBUG rashid_core.data.formats.checks: format record",
+    ]
 
 
 def test_the_level_filters_stderr(capsys: pytest.CaptureFixture[str]) -> None:
     _trace.configure_logging("warning")
-    logger = logging.getLogger("rashid.example")
+    logger = logging.getLogger("rashid_core.example")
     logger.info("quiet")
     logger.warning("loud")
     assert [line.split(" ", 1)[1] for line in capsys.readouterr().err.splitlines()] == [
-        "WARNING rashid.example: loud"
+        "WARNING rashid_core.example: loud"
     ]
 
 
@@ -449,9 +466,9 @@ def test_an_exception_is_formatted_under_the_line(capsys: pytest.CaptureFixture[
     try:
         raise KeyError("k")
     except KeyError:
-        logging.getLogger("rashid.example").exception("failed")
+        logging.getLogger("rashid_core.example").exception("failed")
     err = capsys.readouterr().err
-    assert "ERROR rashid.example: failed\nTraceback" in err
+    assert "ERROR rashid_core.example: failed\nTraceback" in err
     assert "KeyError: 'k'" in err
 
 
@@ -460,7 +477,7 @@ def test_log_file_gets_every_record_as_json_lines(
 ) -> None:
     log_file = tmp_path / "run.jsonl"
     _trace.configure_logging(None, str(log_file))
-    logger = logging.getLogger("rashid.example")
+    logger = logging.getLogger("rashid_core.example")
     logger.debug("detail %d", 1)
     logger.warning("visible")
     try:
@@ -472,19 +489,19 @@ def test_log_file_gets_every_record_as_json_lines(
     assert [e["message"] for e in entries] == ["detail 1", "visible", "with traceback"]
     assert [e["level"] for e in entries] == ["DEBUG", "WARNING", "ERROR"]
     assert {e["run_id"] for e in entries} == {_trace.RUN_ID}
-    assert {e["logger"] for e in entries} == {"rashid.example"}
+    assert {e["logger"] for e in entries} == {"rashid_core.example"}
     assert all(e["elapsed_s"] >= 0 and e["time"] > 0 and e["thread"] for e in entries)
     assert "exception" not in entries[0]
     assert "ValueError: bad" in entries[2]["exception"]
     stderr = capsys.readouterr().err.splitlines()
     assert [line.split(" ", 1)[1] for line in stderr[:2]] == [
-        "WARNING rashid.example: visible",
-        "ERROR rashid.example: with traceback",
+        "WARNING rashid_core.example: visible",
+        "ERROR rashid_core.example: with traceback",
     ]
 
 
 def test_configure_again_replaces_handlers_and_none_removes_them() -> None:
-    logger = logging.getLogger("rashid")
+    logger = logging.getLogger("rashid_core")
     before = list(logger.handlers)
     _trace.configure_logging("debug")
     _trace.configure_logging("info")
@@ -534,8 +551,8 @@ def test_stderr_handler_follows_a_swapped_stream(monkeypatch: pytest.MonkeyPatch
     _trace.configure_logging("info")
     swapped = io.StringIO()
     monkeypatch.setattr(sys, "stderr", swapped)
-    logging.getLogger("rashid.example").info("late")
-    assert swapped.getvalue().endswith("INFO rashid.example: late\n")
+    logging.getLogger("rashid_core.example").info("late")
+    assert swapped.getvalue().endswith("INFO rashid_core.example: late\n")
 
 
 def test_stderr_handler_ignores_an_assigned_stream() -> None:
@@ -545,7 +562,7 @@ def test_stderr_handler_ignores_an_assigned_stream() -> None:
 
 
 def test_env_unset_changes_nothing() -> None:
-    logger = logging.getLogger("rashid")
+    logger = logging.getLogger("rashid_core")
     before = list(logger.handlers)
     _trace.configure_from_env({})
     assert logger.handlers == before
@@ -570,13 +587,13 @@ def test_env_timings_turn_spans_on(value: str, mode: str) -> None:
 def test_env_log_and_log_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     log_file = tmp_path / "x.jsonl"
     _trace.configure_from_env({"RASHID_LOG": "info", "RASHID_LOG_FILE": str(log_file)})
-    logger = logging.getLogger("rashid.example")
+    logger = logging.getLogger("rashid_core.example")
     logger.debug("file only")
     logger.info("both")
     _trace.configure_logging(None)
     assert len(log_file.read_text(encoding="utf-8").splitlines()) == 2
     assert [line.split(" ", 1)[1] for line in capsys.readouterr().err.splitlines()] == [
-        "INFO rashid.example: both"
+        "INFO rashid_core.example: both"
     ]
 
 
@@ -638,7 +655,7 @@ def test_env_timings(value: str | None, mode: str | None) -> None:
 
 
 def test_env_names_remain_rashid_after_the_import_rename() -> None:
-    assert _trace._PACKAGE == "rashid"
+    assert _trace._PACKAGE == "rashid_core"
     assert (_trace.ENV_LOG, _trace.ENV_LOG_FILE, _trace.ENV_TIMINGS, _trace.ENV_TRACE) == (
         "RASHID_LOG",
         "RASHID_LOG_FILE",
@@ -648,7 +665,9 @@ def test_env_names_remain_rashid_after_the_import_rename() -> None:
 
 
 def test_the_package_logger_has_a_null_handler() -> None:
-    assert any(isinstance(h, logging.NullHandler) for h in logging.getLogger("rashid").handlers)
+    assert any(
+        isinstance(h, logging.NullHandler) for h in logging.getLogger("rashid_core").handlers
+    )
 
 
 def test_the_module_imports_only_the_standard_library() -> None:

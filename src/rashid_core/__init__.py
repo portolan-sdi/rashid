@@ -26,7 +26,7 @@ from rashid_core.structural import validate_structural
 
 # A library never prints a log record its caller did not ask for. The
 # RASHID_LOG and RASHID_TIMINGS variables are that request (see _trace).
-logging.getLogger("rashid").addHandler(logging.NullHandler())
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 _trace.configure_from_env()
 
 __all__ = [

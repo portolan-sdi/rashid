@@ -8,7 +8,7 @@ data pass cleanly; each test then mutates one metadata field and asserts the one
 finding it should raise. Byte-structure rules (COG validity, spatial ordering,
 statistics) are covered in ``test_data_storage``.
 
-Needs the ``rashid[data]`` extra; skips without it. Fully local — no network.
+Needs the ``rashid-core[data]`` extra; skips without it. Fully local — no network.
 """
 
 from __future__ import annotations
