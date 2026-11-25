@@ -67,7 +67,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 
 from rashid_core import _trace
-from rashid_core._href import is_https_href, object_location
+from rashid_core._href import iri_to_uri, is_https_href, object_location
 from rashid_core._http import user_agent
 
 if TYPE_CHECKING:
@@ -233,6 +233,9 @@ def _request(url: str, method: str, headers: dict[str, str] | None) -> Request:
         store, path = located
         # Match obstore's path-segment encoding, including literal sub-delimiters.
         url = store.url + quote(path, safe="/!$&'()*+,-.:;=@_~[]^|")
+    else:
+        # An IRI goes out as its URI (RFC 3987 section 3.1), as obstore sends it.
+        url = iri_to_uri(url)
     return Request(url, method=method, headers={"User-Agent": user_agent(), **(headers or {})})
 
 

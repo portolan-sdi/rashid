@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from rashid_core._href import is_absolute_href, is_uri_reference
+from rashid_core._href import is_absolute_href, is_iri_reference
 from rashid_core._stac import STRUCTURAL_RELS, assets_of, indexed_links_of, links_of
 from rashid_core.catalog import (
     CatalogGraph,
@@ -240,12 +240,12 @@ class LinkResolutionRule(Rule):
             for pointer, _key, asset in assets_of(node)
         )
         for pointer, href in locations:
-            if isinstance(href, str) and href and not is_uri_reference(href):
+            if isinstance(href, str) and href and not is_iri_reference(href):
                 yield self.finding(
                     node,
-                    f"href {href!r} is not a valid URI reference",
+                    f"href {href!r} is not a valid IRI reference",
                     json_pointer=pointer,
-                    fix_hint="percent-encode characters that RFC 3986 does not permit in a URI reference",
+                    fix_hint="percent-encode characters that RFC 3987 does not permit in an IRI reference, such as spaces",
                     actual=href,
                 )
 
@@ -265,7 +265,7 @@ class LinkResolutionRule(Rule):
                     fix_hint="set the link's href to the target's path, e.g. '../catalog.json'",
                 )
                 continue
-            if not is_uri_reference(href):
+            if not is_iri_reference(href):
                 continue  # The syntax finding above names this exact href.
             judgeable, target = graph.resolve_structural_link(node, href)
             if not judgeable:
