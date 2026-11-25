@@ -92,7 +92,9 @@ def expected_links(graph: CatalogGraph, node: Node) -> tuple[ExpectedLink, ...]:
         targets.extend(
             ("item" if child.kind == "item" else "child", child)
             for child in graph.children_of(node)
-            if graph.language_root_of(child) is root
+            if child.kind != "unknown"
+            and child.parse_error is None
+            and graph.language_root_of(child) is root
         )
     return tuple(
         ExpectedLink(

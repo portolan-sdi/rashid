@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections import Counter
 from dataclasses import FrozenInstanceError
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
@@ -30,7 +29,6 @@ def test_rebuild_structural_links(catalog: CatalogBuilder, tmp_path: Path, tree:
         source = Path(__file__).parents[1] / "fixtures" / "reference-catalog"
         root = shutil.copytree(source, tmp_path / "reference")
     elif tree == "languages":
-        catalog.collection("roads").item("road-2024")
         root = write_language_trees(catalog)
     else:
         for directory in ("my roads", "my %20 roads", "東京", "a:b"):
@@ -47,14 +45,14 @@ def test_rebuild_structural_links(catalog: CatalogBuilder, tmp_path: Path, tree:
 
     options = ValidationOptions(structural=False, extensions=False, data=False)
 
-    def findings() -> Counter[str]:
-        return Counter(
-            json.dumps(finding.to_dict(), sort_keys=True)
+    def findings() -> list[str]:
+        return [
+            finding.rule_id
             for finding in validate(root, options=options).findings
             if finding.rule_id.startswith(("PTL-LNK", "PTL-FIL"))
-        )
+        ]
 
-    before = findings()
+    assert not findings()
     graph = CatalogGraph.load(root)
     generated = {node.path: expected_links(graph, node) for node in graph.iter()}
     for node in graph.iter():
@@ -74,7 +72,7 @@ def test_rebuild_structural_links(catalog: CatalogBuilder, tmp_path: Path, tree:
             assert graph.language_root_of(link.target) is graph.language_root_of(node)
             node.data["links"].append({"rel": link.rel, "href": link.href, "type": link.type})
         node.abs_path.write_text(json.dumps(node.data), encoding="utf-8")
-    assert not (findings() - before)
+    assert not findings()
 
 
 def test_expected_ancestors_and_media_types(catalog: CatalogBuilder) -> None:
@@ -120,3 +118,23 @@ def test_mirror_paths_are_not_encoded_twice(catalog: CatalogBuilder) -> None:
     child.target.kind = "unknown"
     assert expected_links(graph, child.target) == ()
     assert child.target.path == PurePosixPath("my%20roads/collection.json")
+
+
+@pytest.mark.parametrize("contents", ['{"note": "not STAC"}', "invalid JSON"])
+def test_rebuild_ignores_unknown_children(catalog: CatalogBuilder, contents: str) -> None:
+    root = catalog.write()
+    misc = root / "misc" / "catalog.json"
+    misc.parent.mkdir()
+    misc.write_text(contents, encoding="utf-8")
+    graph = CatalogGraph.load(root)
+    assert graph.root is not None
+    node = graph.root
+    node.data["links"] = [
+        {"rel": link.rel, "href": link.href, "type": link.type}
+        for link in expected_links(graph, node)
+    ]
+    node.abs_path.write_text(json.dumps(node.data), encoding="utf-8")
+    findings = validate(root).findings
+    assert not [
+        finding for finding in findings if finding.rule_id in ("PTL-LNK-002", "PTL-LNK-006")
+    ]
