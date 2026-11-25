@@ -174,7 +174,7 @@ def _absolute_scheme(href: object) -> str | None:
         return None  # PTL-AST-001 reports missing hrefs
     parsed = split_href(href)
     if parsed is None:
-        return None  # PTL-LNK-006 reports the malformed URI reference.
+        return None  # PTL-LNK-006 reports the malformed IRI reference.
     return parsed.scheme.lower() or None
 
 

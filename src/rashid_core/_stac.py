@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from rashid_core._href import (
     is_absolute_href,
-    is_uri_reference,
+    is_iri_reference,
     local_path,
     object_location,
     split_href,
@@ -65,7 +65,7 @@ def assets_of(node: Node) -> list[tuple[str, str, dict[str, Any]]]:
 
 def _is_https_url(href: object) -> bool:
     """A well-formed https URL with a host and a valid port."""
-    if not isinstance(href, str) or not is_uri_reference(href):
+    if not isinstance(href, str) or not is_iri_reference(href):
         return False
     parsed = split_href(href)
     if parsed is None or parsed.scheme.lower() != "https" or not parsed.hostname:
