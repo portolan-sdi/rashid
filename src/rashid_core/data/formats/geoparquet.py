@@ -78,6 +78,12 @@ _MIN_ORDERING_ROW_GROUPS = 8
 _ORDERING_CHUNKS = 10
 _MIN_CHUNK_ROWS = 20
 _MIN_ORDERING_ROWS = _ORDERING_CHUNKS * _MIN_CHUNK_ROWS
+# The order a failing file can take instead. In the spec's row-check
+# calibration, Hilbert-sorted rows had a median efficiency of 0.90. A one-strip
+# `gpio sort str` of a small file orders it on X alone and can fail (rashid#339).
+_ORDERING_HINT = (
+    "sort the rows along a space-filling curve such as Hilbert, for example with gpio sort hilbert"
+)
 
 # --- GeoParquet cloud-native structure -------------------------------------
 
@@ -801,6 +807,7 @@ def _ordering_defects(
                 f"{subject} rows are not spatially ordered across its "
                 f"{_plural(groups, 'row group')}: {summary}",
                 key,
+                fix_hint=_ORDERING_HINT,
             )
         ]
     defects: list[DataDefect] = []
@@ -887,6 +894,7 @@ def _row_ordering_defects(
             f"{subject} rows are not spatially ordered: {rows} rows in "
             f"{_plural(groups, 'row group')}, {split}, {summary}",
             key,
+            fix_hint=_ORDERING_HINT,
         )
     ]
 
