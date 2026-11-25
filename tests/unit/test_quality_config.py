@@ -79,7 +79,7 @@ def test_owner_layer_contracts_cover_new_modules() -> None:
     for contract_id, modules, importers in (
         (
             "formats-only-geo",
-            ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"],
+            ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely", "numpy"],
             ["rashid_core.data.formats"],
         ),
         ("cli-only-click", ["click"], ["rashid_core.cli"]),

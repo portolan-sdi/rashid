@@ -68,7 +68,8 @@ def test_import_rashid_loads_no_heavy_module_and_no_cli_framework() -> None:
 
 
 @pytest.mark.parametrize(
-    "module", ["rashid_core.data", "rashid_core.data.storage", "rashid_core.data.zarr"]
+    "module",
+    ["rashid_core.api", "rashid_core.data", "rashid_core.data.storage", "rashid_core.data.zarr"],
 )
 def test_import_data_loads_no_heavy_module(module: str) -> None:
     loaded = _loaded(f"import {module}")

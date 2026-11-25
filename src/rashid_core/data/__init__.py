@@ -137,7 +137,8 @@ def validate_data(
                     message=(
                         "geospatial checks skipped: the geospatial stack could not be imported "
                         "(needs pyarrow, rasterio, rio-cogeo, pyproj, and shapely; "
-                        "install rashid-core[data] or rashid, or pass --no-data)"
+                        "install rashid-core[data] or rashid, or pass --no-data / "
+                        "ValidationOptions(data=False))"
                     ),
                     path=".",
                 )

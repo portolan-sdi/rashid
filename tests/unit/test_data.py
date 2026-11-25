@@ -332,6 +332,8 @@ def test_missing_geospatial_stack_downgrades_to_warning(
     asset = {
         "href": "./wrong.bin",
         "type": "application/vnd.apache.parquet",
+        "roles": ["data"],
+        "table:columns": [{"name": "value", "type": "int64"}],
         "file:size": 999,
         "file:checksum": "1220" + "00" * 32,
     }
@@ -344,6 +346,7 @@ def test_missing_geospatial_stack_downgrades_to_warning(
             "zarr": {**store, "href": "../store"},
         },
     )
+    catalog.collection("empty", **{"table:columns": [{"name": "value", "type": "int64"}]})
     root = catalog.write()
     (root / "roads/wrong.bin").write_bytes(b"\x89PNG\r\n\x1a\n")
     (root / "roads/store").mkdir()
@@ -365,6 +368,7 @@ def test_missing_geospatial_stack_downgrades_to_warning(
         "rashid-core[data]",
         "or rashid",
         "--no-data",
+        "ValidationOptions(data=False)",
     ):
         assert instruction in warnings[0].message
     for object_id in ("roads", "seg1"):
@@ -372,8 +376,11 @@ def test_missing_geospatial_stack_downgrades_to_warning(
             DAT_CHECKSUM,
             DAT_SIZE,
             DAT_FORMAT,
+            DAT_COLUMN_DESCRIPTIONS,
             ZAR_STORE_VERSION,
         ]
+
+    assert [f.rule_id for f in findings if f.object_id == "empty"] == [DAT_COLUMN_DESCRIPTIONS]
 
 
 def test_data_pass_surfaces_by_default(catalog: CatalogBuilder) -> None:

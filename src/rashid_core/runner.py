@@ -216,7 +216,7 @@ def validate(
     pass; disabling a subset just silences those findings. ``options.data_validator``
     injects an alternate validator, chiefly for offline testing. If the
     geospatial stack cannot import (broken GDAL, wheel-less platform), the
-    pass degrades to a single ``PTL-DAT-000`` warning.
+    pass runs storage and Zarr checks and adds one ``PTL-DAT-000`` warning.
 
     ``options.data_reader_factory`` narrows what the pass may read without turning it
     off: passing :class:`~rashid_core.data.reader.LocalOnlyReader` checks the assets

@@ -25,6 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 data = [
+    "numpy>=1.24",
     # 21 first exposes native GeospatialStatistics. Consumers cap below 25 for the
     # abseil ABI break, so a >=25 floor would prevent joint installation.
     "pyarrow>=21",
@@ -196,7 +197,7 @@ layers = [
 id = "formats-only-geo"
 name = "only optional formats may import the geospatial stack"
 type = "protected"
-protected_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"]
+protected_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely", "numpy"]
 allowed_importers = ["rashid_core.data.formats"]
 
 [[tool.importlinter.contracts]]

@@ -10,6 +10,7 @@ import tempfile
 import tomllib
 import venv
 import zipfile
+from email.parser import BytesParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,11 +72,13 @@ def check_base(python: str, core: Path) -> None:
     )
     assert "rashid-core" in installed
     assert set(installed) <= BASE_DISTRIBUTIONS, set(installed) - BASE_DISTRIBUTIONS
+    run([python, "-I", "-c", "import rashid_core.api"])
     fixture = str(ROOT / "tests/fixtures/reference-catalog")
     run([python, "-I", "-m", "rashid_core", "check", "--no-data", fixture])
     catalog = CatalogBuilder(Path(python).parents[1] / "catalog")
     catalog.collection(
         "broken",
+        **{"table:columns": [{"name": "value", "type": "int64"}]},
         assets={
             "data": default_asset(),
             "zarr": {
@@ -98,7 +101,9 @@ def check_base(python: str, core: Path) -> None:
         )
     )
     ids = [finding["rule_id"] for finding in report["findings"]]
-    assert {"PTL-DAT-000", "PTL-DAT-001", "PTL-DAT-002", "PTL-ZAR-001"} <= set(ids), ids
+    assert {"PTL-DAT-000", "PTL-DAT-001", "PTL-DAT-002", "PTL-DAT-020", "PTL-ZAR-001"} <= set(
+        ids
+    ), ids
     assert ids.count("PTL-DAT-000") == 1, report
 
 
@@ -137,6 +142,14 @@ def main() -> None:
             assert not any(name.endswith("/entry_points.txt") for name in archive.namelist())
         with zipfile.ZipFile(meta) as archive:
             assert all(".dist-info/" in name for name in archive.namelist()), archive.namelist()
+            (metadata_path,) = [name for name in archive.namelist() if name.endswith("/METADATA")]
+            metadata = BytesParser().parsebytes(archive.read(metadata_path))
+            assert metadata.get_payload().strip(), "metapackage description is missing"
+            assert metadata["License-File"] == "LICENSE"
+            assert (
+                archive.read(metadata_path.removesuffix("METADATA") + "licenses/LICENSE")
+                == (ROOT / "LICENSE").read_bytes()
+            )
         check_base(python_in(root / "base"), core)
         check_upgrade(python_in(root / "upgrade"), core, meta, version)
     print("Both wheels passed isolated install and upgrade checks.")

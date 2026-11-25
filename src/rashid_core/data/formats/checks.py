@@ -94,11 +94,9 @@ from rashid_core._stac import (
 )
 from rashid_core.catalog import CatalogGraph, Node
 from rashid_core.data._results import DataDefect, DataResults
-from rashid_core.data.checks import check_asset
+from rashid_core.data.checks import check_asset, check_collection_column_descriptions
 from rashid_core.data.formats._files import AssetFiles
 from rashid_core.data.formats.geoparquet import (
-    check_collection_column_descriptions,
-    check_column_descriptions,
     check_geoparquet,
     check_tabular,
     check_vector_columns,
@@ -212,10 +210,6 @@ def _check_asset(
     expected = expected_format(media_type) if isinstance(media_type, str) else None
     if is_zarr_store_asset(asset) and not is_source_asset(asset):
         return defects, None, True
-
-    if expected == "parquet":
-        # Metadata only: it needs no bytes, so an unreachable file still gets it.
-        defects.extend(check_column_descriptions(node, key, asset))
 
     located = reader.locate(node, href)
     if located is None or is_source_asset(asset):

@@ -6,7 +6,9 @@ build-backend = "hatchling.build"
 name = "rashid"
 version = "0.4.0"
 description = "Validator and linter for Portolan catalogs, including data validation"
+readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "Portolan contributors" }]
 dependencies = ["rashid-core[data]==0.4.0"]
@@ -24,4 +26,4 @@ rashid = "rashid_core.cli:main"
 bypass-selection = true
 
 [tool.hatch.build.targets.sdist]
-include = ["pyproject.toml"]
+include = ["pyproject.toml", "README.md", "LICENSE"]
