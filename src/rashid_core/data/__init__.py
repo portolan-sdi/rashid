@@ -296,6 +296,7 @@ def _to_findings(node: Node, defects: list[DataDefect]) -> list[Finding]:
                 json_pointer=pointer,
                 expected=defect.expected,
                 actual=defect.actual,
+                fix_hint=defect.fix_hint,
             )
         )
     return findings

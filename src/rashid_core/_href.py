@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from urllib.parse import SplitResult, quote, unquote, urljoin, urlsplit
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from rashid_core.catalog import Node
 
 
@@ -286,30 +288,80 @@ def location_key(url: str) -> tuple[str, str, str] | None:
 
 # RFC 3986 sections 2 and 3: unreserved, sub-delims, and pct-encoded.
 _URI_ATOM = r"(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[A-Fa-f0-9]{2})"
-_URI_PATH = re.compile(rf"(?:{_URI_ATOM}|[:@/])*")
-_URI_QUERY = re.compile(rf"(?:{_URI_ATOM}|[:@/?])*")
-_URI_AUTHORITY = re.compile(
-    rf"(?:(?:{_URI_ATOM}|:)*@)?"
-    rf"(?:{_URI_ATOM}*|\[(?:{_URI_ATOM}|:)+\])(?::[0-9]*)?"
+# RFC 3987 section 2.2: ucschar extends unreserved everywhere, and iprivate is
+# allowed only in the query. Section 4.1 forbids the bidi formatting
+# characters U+200E, U+200F, and U+202A to U+202E, so the first range skips them.
+_UCSCHAR = (
+    r"\u00a0-\u200d\u2010-\u2029\u202f-\ud7ff\uf900-\ufdcf\ufdf0-\uffef"
+    + "".join(rf"\U{plane:04x}0000-\U{plane:04x}fffd" for plane in range(1, 14))
+    + r"\U000e1000-\U000efffd"
 )
+_IPRIVATE = r"\ue000-\uf8ff\U000f0000-\U000ffffd\U00100000-\U0010fffd"
+
+
+def _reference_grammar(ucschar: str = "", iprivate: str = "") -> Callable[[str], bool]:
+    """A syntax check for RFC 3986 references, or RFC 3987 ones given its ranges."""
+    atom = rf"(?:[A-Za-z0-9._~!$&'()*+,;={ucschar}-]|%[A-Fa-f0-9]{{2}})"
+    path = re.compile(rf"(?:{atom}|[:@/])*")
+    query = re.compile(rf"(?:{atom}|[:@/?{iprivate}])*")
+    fragment = re.compile(rf"(?:{atom}|[:@/?])*")
+    # An IP literal stays ASCII in an IRI too.
+    authority = re.compile(rf"(?:(?:{atom}|:)*@)?(?:{atom}*|\[(?:{_URI_ATOM}|:)+\])(?::[0-9]*)?")
+
+    def check(href: str) -> bool:
+        # urlsplit strips some whitespace and controls; reject them before parsing.
+        if any(char <= " " or char == "\x7f" for char in href):
+            return False
+        parsed = split_href(href)
+        if parsed is None:
+            return False
+        if not parsed.scheme and not href.startswith("/") and ":" in parsed.path.split("/", 1)[0]:
+            return False
+        return bool(
+            path.fullmatch(parsed.path)
+            and query.fullmatch(parsed.query)
+            and fragment.fullmatch(parsed.fragment)
+            and authority.fullmatch(parsed.netloc)
+        )
+
+    return check
+
+
+_is_uri_reference = _reference_grammar()
+_is_iri_reference = _reference_grammar(_UCSCHAR, _IPRIVATE)
 
 
 def is_uri_reference(href: str) -> bool:
     """RFC 3986 URI-reference syntax, without resolving or decoding the href."""
-    # urlsplit strips some whitespace and controls; reject them before parsing.
-    if not href.isascii() or any(char <= " " or char == "\x7f" for char in href):
-        return False
-    parsed = split_href(href)
-    if parsed is None:
-        return False
-    if not parsed.scheme and not href.startswith("/") and ":" in parsed.path.split("/", 1)[0]:
-        return False
-    return bool(
-        _URI_PATH.fullmatch(parsed.path)
-        and _URI_QUERY.fullmatch(parsed.query)
-        and _URI_QUERY.fullmatch(parsed.fragment)
-        and _URI_AUTHORITY.fullmatch(parsed.netloc)
-    )
+    return _is_uri_reference(href)
+
+
+def is_iri_reference(href: str) -> bool:
+    """RFC 3987 IRI-reference syntax, without resolving or decoding the href.
+
+    STAC 1.1 declares every link and asset ``href`` as an ``iri-reference``,
+    so a raw ``./東京.parquet`` is valid there. A space, a control character,
+    or a character outside ``ucschar`` (and ``iprivate`` in the query) is not.
+    """
+    return _is_iri_reference(href)
+
+
+_NON_ASCII = re.compile(r"[^\x00-\x7f]+")
+# RFC 3986 appendix B: the scheme and authority at the start of a reference.
+_ORIGIN = re.compile(r"(?:[A-Za-z][A-Za-z0-9+.-]*:)?(?://[^/?#]*)?")
+
+
+def iri_to_uri(iri: str) -> str:
+    """RFC 3987 section 3.1: percent-encode each non-ASCII character as UTF-8.
+
+    Everything after the authority is mapped, so the path, query, and fragment
+    of ``./東京.parquet?v=東`` go out as the URI a server stores them under.
+    Existing escapes stay as they are. The authority is left to the transport,
+    which converts an internationalized host name itself.
+    """
+    origin = _ORIGIN.match(iri)
+    head = origin[0] if origin is not None else ""
+    return head + _NON_ASCII.sub(lambda run: quote(run[0], safe=""), iri[len(head) :])
 
 
 _ENCODED_SLASH = re.compile(r"%2f", re.IGNORECASE)
@@ -361,6 +413,9 @@ def object_location(url: str, *, base: str | None = None) -> tuple[str, str, str
 def wire_url(base: str, rel: str) -> str:
     """The URL for a path under the base: percent-encoded, existing escapes kept.
 
+    A non-ASCII href is an IRI, and its path, query, and fragment are mapped
+    to UTF-8 escapes (RFC 3987 section 3.1), as a server stores the object.
+
     The one place an href becomes a request URL, shared with the live pass
     and the data reader so the three agree on the URL for one href, and so a
     status the crawl recorded is found under the URL the live pass asks for.
@@ -372,7 +427,7 @@ def wire_url(base: str, rel: str) -> str:
         origin = path[: len(path) - len(parsed.path)] if parsed.path else path
         path = parsed.path
     encoded = quote(path, safe="/%:@!$&'()*+,;=")
-    return f"{base}{origin}{encoded}{href_suffix(str(rel))}"
+    return f"{base}{origin}{encoded}{iri_to_uri(href_suffix(str(rel)))}"
 
 
 # Schemes whose globs a client can list anonymously (formats.md, Partitioned

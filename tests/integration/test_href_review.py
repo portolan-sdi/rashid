@@ -40,7 +40,7 @@ def test_malformed_authority_is_a_finding_not_a_crash(
     assert len(syntax) == 1
     assert syntax[0]["path"] == expected_path
     assert syntax[0]["json_pointer"] == expected_pointer
-    assert "valid URI reference" in syntax[0]["message"]
+    assert "valid IRI reference" in syntax[0]["message"]
     assert syntax[0]["severity"] == "error"
 
 
@@ -147,3 +147,58 @@ def test_encoded_dot_self_identity_matches_local_file_access(
         assert self_errors[0]["json_pointer"] == "/assets/metadata/file:size"
     # A non-self target is actually read; genuine self-references skip byte checks.
     assert any(f["rule_id"] == "PTL-DAT-002" for f in findings) is not self_reference
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["2017年度ツバメの巣分布マップ", "0601040100_Parcel·lari_POL_v"],
+    ids=["tokyo-open-data", "barcelona-open-data"],
+)
+def test_iri_hrefs_resolve_and_fetch_like_ascii_hrefs(
+    catalog: CatalogBuilder, https_server: HttpsServer, name: str
+) -> None:
+    # rashid#338. STAC 1.1 declares href as iri-reference (RFC 3987). The IRI
+    # collection must get exactly the findings of its ASCII twin, from the
+    # file tree and over HTTPS, and every request must carry the UTF-8
+    # percent-encoded URI (RFC 3987 section 3.1).
+    for directory, stem in (("ascii", "data"), ("iri", name)):
+        asset = {
+            "href": f"./{stem}.bin",
+            "roles": ["data"],
+            "type": "application/octet-stream",
+            "file:size": 3,
+        }
+        catalog.collection(directory, assets={"data": asset})
+    root = catalog.write()
+    for directory, stem in (("ascii", "data"), ("iri", name)):
+        (root / directory / f"{stem}.bin").write_bytes(b"abc")
+        link = {"rel": "related", "href": f"./{stem}.bin", "type": "application/octet-stream"}
+
+        def add_link(data: dict[str, Any], link: dict[str, str] = link) -> None:
+            data["links"].append(link)
+
+        mutate_json(root / directory / "collection.json", add_link)
+    for path in root.rglob("*"):
+        if path.is_file():
+            route = "/" + quote(path.relative_to(root).as_posix(), safe="/")
+            # CORS is judged once per host, so it would not land on both twins.
+            cors = {"Access-Control-Allow-Origin": "*"}
+            https_server.routes[route] = Route(body=path.read_bytes(), headers=cors)
+
+    def by_collection(report: dict[str, object]) -> dict[str, list[str]]:
+        findings = report["findings"]
+        assert isinstance(findings, list)
+        assert not [f for f in findings if f["rule_id"] == "PTL-LNK-006"]
+        return {
+            directory: sorted(f["rule_id"] for f in findings if f["path"].startswith(directory))
+            for directory in ("ascii", "iri")
+        }
+
+    local = by_collection(_check(root, "--data"))
+    assert local["iri"] == local["ascii"]
+    remote = by_collection(_check(https_server.url("catalog.json"), "--data", "--live"))
+    assert remote["iri"] == remote["ascii"]
+
+    wire = "/iri/" + quote(f"{name}.bin")
+    assert all(seen.path.isascii() for seen in https_server.seen)
+    assert {"GET", "HEAD"} <= {seen.method for seen in https_server.seen if seen.path == wire}

@@ -189,7 +189,7 @@ def test_remote_relative_asset_preserves_query_in_wire_request(
         "./bad\\name.bin",
         "./bad%name.bin",
         "./bad%2x.bin",
-        "./café.bin",
+        "./Linee impianto a fune.bin",
         "./bad[name].bin",
     ],
 )
@@ -220,7 +220,7 @@ def test_invalid_uri_references_are_errors_at_the_href(
     findings = [
         f
         for f in _check(root, "--no-data")["findings"]
-        if f["rule_id"] == "PTL-LNK-006" and "valid URI reference" in f["message"]
+        if f["rule_id"] == "PTL-LNK-006" and "valid IRI reference" in f["message"]
     ]
     assert len(findings) == 1
     assert findings[0]["severity"] == "error"
@@ -232,7 +232,7 @@ def test_invalid_uri_references_are_errors_at_the_href(
     else:
         mutate_json(path, lambda d: d["links"][-1].update(href=encoded))
     assert not [
-        f for f in _check(root, "--no-data")["findings"] if "valid URI reference" in f["message"]
+        f for f in _check(root, "--no-data")["findings"] if "valid IRI reference" in f["message"]
     ]
 
 

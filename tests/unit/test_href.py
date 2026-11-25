@@ -304,3 +304,67 @@ def test_local_resolution_decodes_once_and_keeps_request_spelling() -> None:
     for unsafe in ("%2e%2e/%2e%2e/outside", "%2Foutside", "a%5Cb", "a%00b"):
         assert local_path("roads", unsafe) is None
         assert request_target("roads", unsafe) == "roads/" + unsafe
+
+
+# Real hrefs from tokyo-open-data and barcelona-open-data (rashid#338).
+_TOKYO = "./2017年度ツバメの巣分布マップ.parquet"
+_TOKYO_WIRE = (
+    "2017%E5%B9%B4%E5%BA%A6%E3%83%84%E3%83%90%E3%83%A1%E3%81%AE"
+    "%E5%B7%A3%E5%88%86%E5%B8%83%E3%83%9E%E3%83%83%E3%83%97.parquet"
+)
+_BARCELONA = "./0601040100_Parcel·lari_POL_v.parquet"
+_BARCELONA_WIRE = "0601040100_Parcel%C2%B7lari_POL_v.parquet"
+
+
+def test_iri_reference_grammar_follows_rfc_3987() -> None:
+    from rashid_core._href import is_iri_reference, is_uri_reference
+
+    for href in (
+        _TOKYO,
+        _BARCELONA,
+        "./café",
+        "../東京/collection.json",
+        "./%E6%9D%B1/東京",
+        "./\U00020000.json",
+        "./a?q=",
+        "https://例え.テスト/パス?クエリ=値#断片",
+    ):
+        assert is_iri_reference(href), href
+    for href in (
+        "./Linee impianto a fune.parquet",
+        "./東京 駅.parquet",
+        "./東京[0]",
+        "./東京%",
+        "./a\x85b",
+        "./a",
+        "./a#",
+        "./a﷐",
+        "./a￾",
+        "./a\ud800",
+        "./a\u200eb",
+        "./a\u202eb",
+        "https://h/東京\x7f",
+        "\nhttps://h/東京",
+    ):
+        assert not is_iri_reference(href), href
+    assert not is_uri_reference(_TOKYO)
+
+
+@pytest.mark.parametrize(
+    ("href", "wire"),
+    [(_TOKYO, _TOKYO_WIRE), (_BARCELONA, _BARCELONA_WIRE)],
+    ids=["tokyo", "barcelona"],
+)
+def test_wire_url_maps_an_iri_to_its_utf8_uri(href: str, wire: str) -> None:
+    from rashid_core._href import wire_url
+
+    assert wire_url("https://h/cat/", href[2:]) == "https://h/cat/" + wire
+    assert wire_url("", "https://h/cat/" + href[2:]) == "https://h/cat/" + wire
+
+
+def test_wire_url_maps_an_iri_query_and_fragment_to_utf8() -> None:
+    from rashid_core._href import wire_url
+
+    assert wire_url("https://h/", "東.parquet?name=東&x=%20#東") == (
+        "https://h/%E6%9D%B1.parquet?name=%E6%9D%B1&x=%20#%E6%9D%B1"
+    )

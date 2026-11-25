@@ -421,3 +421,19 @@ def test_counters_record_urllib_retries(https_server: HttpsServer) -> None:
     with _trace.counting() as delta:
         assert _store.get(https_server.url("x.json?v=1")) == b"{}"
     assert delta == {"http.gets": 1, "http.urllib_fallbacks": 1, "http.retries": 2}
+
+
+@pytest.mark.parametrize("query", ["", "?v=東"], ids=["obstore", "urllib"])
+def test_an_iri_is_requested_as_its_utf8_uri(https_server: HttpsServer, query: str) -> None:
+    # RFC 3987 section 3.1: each non-ASCII character goes out as its UTF-8
+    # octets, percent-encoded. The tokyo-open-data name from rashid#338.
+    wire = "/2017%E5%B9%B4%E5%BA%A6%E3%83%84%E3%83%90%E3%83%A1%E3%81%AE.parquet"
+    wire += query.replace("東", "%E6%9D%B1")
+    https_server.routes[wire] = Route(body=b"0123456789")
+    url = https_server.base + "/2017年度ツバメの.parquet" + query
+
+    assert _store.get(url) == b"0123456789"
+    assert _store.head_size(url) == 10
+    with _store.probe(url, "HEAD", {}) as response:
+        assert response.status == 200
+    assert [s.path for s in https_server.seen] == [wire] * 3
