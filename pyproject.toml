@@ -83,13 +83,18 @@ ignore = ["E501"]
 preview = true
 explicit-preview-rules = true
 extend-select = [
-    "C901",
-    "PLR0911", "PLR0912", "PLR0913", "PLR0914",
-    "PLR0915", "PLR0916", "PLR0917", "PLR1702",
-    "SIM", "FURB", "PIE", "RET", "ARG", "ERA",
-    "PT011", "PT012", "PT017", "PT030", "PLW0129",
-    "TID251", "PERF", "RUF015", "PGH004", "RUF100",
+    "C901", "SIM", "FURB", "PIE", "RET", "ARG", "ERA", "TID251", "PERF", "PGH004",
+    "PT", "RUF", "PL",
+    # Preview rules opt in by name: PL size limits, plus low-noise checks.
+    "PLR0914", "PLR0916", "PLR0917", "PLR1702", "PLR6104", "PLW1514", "RUF052",
 ]
+# Lazy imports are deliberate; tests/unit/test_import_budget.py enforces them.
+extend-ignore = ["PLC0415"]
+
+# Characters quoted from the spec and its sources: the × of "512×512", the en dash of
+# ranges such as "2–10" and in docs/rules.md, and the fullwidth solidus a test feeds
+# to the href parser.
+allowed-confusables = ["×", "–", "／"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -104,6 +109,14 @@ max-bool-expr = 5
 max-locals = 15
 max-returns = 6
 
+[tool.ruff.lint.flake8-pytest-style]
+# rashid defines no warning classes, so PT030 needs no warns-extend-require-match-for.
+raises-extend-require-match-for = [
+    "rashid_core.remote.FetchError",
+    "rashid_core._store.StoreError",
+    "rashid_core.registry.RegistryError",
+]
+
 [tool.ruff.lint.isort]
 known-first-party = ["rashid_core"]
 
@@ -111,7 +124,10 @@ known-first-party = ["rashid_core"]
 # Rules share check(node, graph); many rules do not need the graph context.
 "src/rashid_core/rules/*.py" = ["ARG002"]
 # Test doubles retain protocol method and callback signatures. Keep ARG001 on for fixtures.
-"tests/**" = ["ARG002", "ARG005"]
+# Expected values in assertions are clearest as literals.
+"tests/**" = ["ARG002", "ARG005", "PLR2004"]
+# Developer scripts compare against literal exit codes and thresholds.
+"scripts/**" = ["PLR2004"]
 # Dedicated owners; reasons and live matches are checked in guardrail_exemptions.json.
 "src/rashid_core/_package.py" = ["TID251"]
 "src/rashid_core/_href.py" = ["TID251"]
