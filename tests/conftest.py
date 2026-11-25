@@ -8,6 +8,7 @@ exactly one aspect (builder kwarg or post-write surgery via ``mutate_json`` /
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 from collections.abc import Callable, Iterable, Iterator
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import settings
 
 from rashid_core import _store, _trace
 from rashid_core._profile import newest_profile_version, profile_uri
@@ -22,6 +24,13 @@ from rashid_core.report import Report
 
 # The local HTTPS server that the obstore tests read from.
 pytest_plugins = ["tests._https"]
+
+# Hypothesis profiles for tests/property. A validation takes tens of
+# milliseconds, so no example deadline; CI derandomizes so a red build
+# reproduces from the same examples.
+settings.register_profile("default", max_examples=20, deadline=None)
+settings.register_profile("ci", parent=settings.get_profile("default"), derandomize=True)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "default"))
 
 
 @pytest.fixture(autouse=True)

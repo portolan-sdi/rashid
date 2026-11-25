@@ -14,3 +14,5 @@ coverage.xml
 .cache/
 # roborev snapshots
 /.roborev/
+# Hypothesis example database
+.hypothesis/
