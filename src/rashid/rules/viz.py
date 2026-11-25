@@ -21,7 +21,7 @@ from typing import Any
 from rashid.catalog import CatalogGraph, Node
 from rashid.model import Finding, Severity
 from rashid.rule import Rule
-from rashid.rules._common import links_of, roles_of
+from rashid.rules._common import is_cog_media_type, links_of, roles_of
 from rashid.rules.assets import _assets_of
 
 PMTILES_MEDIA_TYPE = "application/vnd.pmtiles"
@@ -206,10 +206,10 @@ class ThumbnailRule(Rule):
 
 
 class StylesForDerivativeRule(Rule):
-    """A collection with a visualization derivative registers style assets.
+    """A derivative needs styles unless it is a self-rendering browse COG.
 
-    Self-rendering collections (no derivative) are exempt: whether the data
-    asset is display-ready is not decidable from metadata.
+    A visual COG without the data role declares the display-ready browse
+    path exempted by core.md. Primary data and PMTiles still need styles.
     """
 
     id = "PTL-VIZ-002"
@@ -219,7 +219,11 @@ class StylesForDerivativeRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        has_visual = any("visual" in roles_of(asset) for _p, _k, asset in _assets_of(node))
+        has_visual = any(
+            "visual" in roles_of(asset)
+            and ("data" in roles_of(asset) or not is_cog_media_type(asset.get("type")))
+            for _p, _k, asset in _assets_of(node)
+        )
         has_pmtiles_asset, has_pmtiles_link = _pmtiles_registration(node)
         if not (has_visual or has_pmtiles_asset or has_pmtiles_link):
             return

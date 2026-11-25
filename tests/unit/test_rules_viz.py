@@ -21,6 +21,7 @@ _PMTILES_LINK = {
     "pmtiles:layers": ["data"],
 }
 _WEB_MAP_LINKS_URI = "https://stac-extensions.github.io/web-map-links/v1.3.0/schema.json"
+_COG_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
 
 
 def _pmtiles_asset() -> dict:
@@ -245,6 +246,68 @@ def test_visual_asset_with_style_passes(catalog: CatalogBuilder) -> None:
     report = validate(root)
     assert findings_for(report, "PTL-VIZ-002") == []
     assert findings_for(report, "PTL-VIZ-003") == []
+
+
+def _raster_collection(catalog: CatalogBuilder, visual: dict) -> None:
+    """A tiled raster Collection shaped like tokyo-open-data-dem.
+
+    COG scene Items plus one collection-level visual asset, and no style.
+    """
+    scene = default_asset()
+    scene["href"] = "./scene.tif"
+    scene["type"] = _COG_TYPE
+    collection = catalog.collection(
+        "elevation",
+        assets={"thumbnail": thumbnail_asset(), "overview": visual},
+    )
+    collection.item("sheet-09kd", assets={"data": scene})
+
+
+def _visual_cog(roles: list[str], media_type: str = "") -> dict:
+    asset = default_asset()
+    asset["href"] = "./overview.tif"
+    asset["type"] = media_type or _COG_TYPE
+    asset["roles"] = roles
+    return asset
+
+
+@pytest.mark.parametrize(
+    "roles", [["visual", "overview"], ["visual", "overview", "cloud-optimized"]]
+)
+def test_overview_cog_needs_no_style(catalog: CatalogBuilder, roles: list[str]) -> None:
+    """core.md: a display-ready COG is self-rendering and needs no style file."""
+    _raster_collection(catalog, _visual_cog(roles))
+    assert findings_for(validate(catalog.write()), "PTL-VIZ-002") == []
+
+
+def test_overview_cog_does_not_exempt_pmtiles(catalog: CatalogBuilder) -> None:
+    """A browse COG cannot exempt a second render path that needs a style."""
+    _raster_collection(catalog, _visual_cog(["visual", "overview"]))
+    root = catalog.write()
+    mutate_json(
+        root / "elevation" / "collection.json",
+        lambda d: d["assets"].update(tiles=_pmtiles_asset()),
+    )
+    assert len(findings_for(validate(root), "PTL-VIZ-002")) == 1
+
+
+@pytest.mark.parametrize(
+    ("roles", "media_type"),
+    [
+        (["visual", "data"], _COG_TYPE),
+        (["visual", "overview", "data"], _COG_TYPE),
+        (["visual", "overview"], "image/tiff; application=geotiff"),
+        (["visual", "overview"], "image/png"),
+    ],
+)
+def test_non_browse_visual_still_needs_style(
+    catalog: CatalogBuilder, roles: list[str], media_type: str
+) -> None:
+    """Primary-data COGs and visuals that are not COGs keep the style check."""
+    _raster_collection(catalog, _visual_cog(roles, media_type))
+    findings = findings_for(validate(catalog.write()), "PTL-VIZ-002")
+    assert len(findings) == 1
+    assert "'style'" in findings[0].message
 
 
 def test_pmtiles_asset_without_link(catalog: CatalogBuilder) -> None:
