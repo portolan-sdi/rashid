@@ -27,6 +27,7 @@ To run validation, use the top-level package:
 
 from __future__ import annotations
 
+from rashid._href import is_absolute_href
 from rashid._media import has_cog, is_cog_media_type
 from rashid._multihash import (
     SHA2_256,
@@ -44,18 +45,32 @@ from rashid._profile import (
 )
 from rashid._spdx import SPDX_LICENSE_IDS, canonical_spdx_id
 from rashid._stac import STRUCTURAL_RELS, links_of, parse_rfc3339, roles_of
+from rashid.catalog import CatalogGraph, ExpectedLink, Node, expected_links
+from rashid.config import RulesConfig
+from rashid.data.reader import LocalOnlyReader
+from rashid.model import Severity
+from rashid.report import Report
 from rashid.runner import ValidationOptions
 
 __all__ = [
+    "CatalogGraph",
+    "ExpectedLink",
+    "LocalOnlyReader",
+    "Node",
+    "Report",
+    "RulesConfig",
     "SHA2_256",
     "SPDX_LICENSE_IDS",
     "STRUCTURAL_RELS",
+    "Severity",
     "ValidationOptions",
     "bundled_profile_versions",
     "canonical_spdx_id",
     "decode_multihash",
     "encode_multihash",
+    "expected_links",
     "has_cog",
+    "is_absolute_href",
     "is_cog_media_type",
     "is_well_formed_multihash",
     "links_of",

@@ -18,6 +18,7 @@ from rashid import _json
 from rashid._href import (
     is_absolute_href,
     local_path,
+    relative_href,
     relative_path,
     self_link_base,
     structural_prefix,
@@ -47,6 +48,60 @@ class Node:
     id: str | None
     data: dict[str, Any]
     parse_error: str | None = None
+
+
+@dataclass(frozen=True)
+class ExpectedLink:
+    """A required structural link to an existing object in the graph."""
+
+    rel: str
+    target: Node
+    href: str
+    type: str
+
+
+def _structural_link_type(rel: str) -> str:
+    return "application/geo+json" if rel == "item" else "application/json"
+
+
+def _required_link_targets(graph: CatalogGraph, node: Node) -> dict[str, Node | None]:
+    root = graph.language_root_of(node)
+    targets = {"root": root}
+    if node is not root:
+        targets["parent"] = graph.parent_of(node)
+    if node.kind == "item":
+        targets["collection"] = graph.enclosing_collection_of(node)
+    return targets
+
+
+def expected_links(graph: CatalogGraph, node: Node) -> tuple[ExpectedLink, ...]:
+    """Required links, in root, parent, collection, then contained-object order.
+
+    Hrefs use the graph's URI spelling, including percent-encoded local names.
+    Translation trees have their own root and no containment links between
+    languages. Missing ancestor targets are omitted; validation reports the
+    incomplete tree separately. Unknown objects have no required links.
+    """
+    if node.kind == "unknown":
+        return ()
+    targets = list(_required_link_targets(graph, node).items())
+    if node.kind in ("catalog", "collection"):
+        root = graph.language_root_of(node)
+        targets.extend(
+            ("item" if child.kind == "item" else "child", child)
+            for child in graph.children_of(node)
+            if graph.language_root_of(child) is root
+        )
+    return tuple(
+        ExpectedLink(
+            rel=rel,
+            target=target,
+            href=relative_href(str(graph.href_path(node)), str(graph.href_path(target))),
+            type=_structural_link_type(rel),
+        )
+        for rel, target in targets
+        if target is not None
+    )
 
 
 def _detect_kind(data: dict[str, Any]) -> Kind:

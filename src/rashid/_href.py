@@ -25,6 +25,12 @@ def is_absolute_href(href: str) -> bool:
     return href.startswith("/") or parsed is None or bool(parsed.scheme)
 
 
+def relative_href(source: str, target: str) -> str:
+    """Relative URI reference between two already-encoded document paths."""
+    path = posixpath.relpath(target, posixpath.dirname(source) or ".")
+    return path if path.startswith("../") else "./" + path
+
+
 def href_host(href: str) -> str:
     """Live authority key, using the shared authority normalization."""
     parsed = split_href(href)
