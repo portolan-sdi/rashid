@@ -44,6 +44,20 @@ Tests use the `unit`, `integration`, and `network` markers. Network tests check 
 
 Set `ENABLE_PRE_PUSH_TESTS=1` to include fast tests in the pre-push hook.
 
+### Property tests
+
+`tests/property` uses [Hypothesis](https://hypothesis.readthedocs.io) to generate valid catalogs and check two properties:
+
+- `test_invariance.py`: a generated catalog has no findings, and still has none after changes the spec permits. These changes are the `MAY` forms in `permitted.py`, JSON key order and whitespace (RFC 8259), and asset keys (STAC 1.1.0).
+- `test_rules_fire.py`: each check ID appears in the report for a catalog its breaker built to violate it. Breakers register through `@breaks` in `registry.py`. A completeness test requires a breaker for every ID in `rashid_core.registry.CHECKS`, or a reason in `UNBREAKABLE`.
+
+When you add a check, add its breaker. When you add a `MAY` form, add it to `permitted.FORMS`.
+The `HYPOTHESIS_PROFILE` environment variable selects a profile from `tests/conftest.py`: `default` runs 20 examples per test, and `ci` runs the same with derandomized examples.
+
+```bash
+HYPOTHESIS_PROFILE=ci uv run pytest -n 8 tests/property
+```
+
 ## Consolidation guardrails
 
 These gates keep each consolidated concept at its owner ([#266](https://github.com/portolan-sdi/rashid/issues/266)).
