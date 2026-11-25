@@ -47,8 +47,8 @@ from rashid._jsonschema import (
     vendored_extension_schemas,
 )
 from rashid.catalog import CatalogGraph, Node
+from rashid.ids import EXT_INVALID, EXT_UNAVAILABLE, EXT_UNVALIDATED
 from rashid.model import Finding, Severity
-from rashid.registry import EXT_INVALID, EXT_UNAVAILABLE, EXT_UNVALIDATED
 from rashid.rules.conformance import (
     SCHEMA_URI_PATTERN,
     registered_at_other_version,

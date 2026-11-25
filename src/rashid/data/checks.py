@@ -114,10 +114,8 @@ from rashid.data.spatial import (
 )
 from rashid.data.storage import check_bytes, expected_format
 from rashid.data.zarr import check_zarr
+from rashid.ids import DAT_CONSISTENCY
 from rashid.model import Severity
-from rashid.registry import (
-    DAT_CONSISTENCY,
-)
 from rashid.rules._common import (
     asset_refers_to_self,
     assets_of,

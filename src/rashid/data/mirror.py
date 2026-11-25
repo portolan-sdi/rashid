@@ -18,10 +18,8 @@ from rashid.data import DataDefect
 from rashid.data._files import AssetFiles
 from rashid.data.geoparquet import bbox_column_values, bbox_struct, geo_metadata
 from rashid.data.spatial import as_bbox
+from rashid.ids import DAT_MIRROR
 from rashid.model import Severity
-from rashid.registry import (
-    DAT_MIRROR,
-)
 
 # --- item mirrors -----------------------------------------------------------
 

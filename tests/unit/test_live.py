@@ -23,9 +23,7 @@ from rashid import RulesConfig, ValidationOptions, _store, validate, validate_li
 from rashid import live as live_mod
 from rashid._href import resolve_live_base
 from rashid.catalog import CatalogGraph
-from rashid.live import ProbeResponse, _DefaultProber
-from rashid.model import Severity
-from rashid.registry import (
+from rashid.ids import (
     LIV_CORS_EXPOSE,
     LIV_CORS_ORIGIN,
     LIV_CORS_PREFLIGHT,
@@ -37,6 +35,8 @@ from rashid.registry import (
     LIV_UNAVAILABLE,
     ZAR_CORS,
 )
+from rashid.live import ProbeResponse, _DefaultProber
+from rashid.model import Severity
 from rashid.rules._common import is_partial_read_media_type
 from tests._https import HttpsServer, Route
 from tests.conftest import VALID_MULTIHASH, CatalogBuilder, mutate_json

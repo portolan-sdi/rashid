@@ -15,8 +15,7 @@ from rashid.catalog import Node
 from rashid.data import DataDefect
 from rashid.data._files import AssetFiles
 from rashid.data.spatial import Geo, as_bbox, bbox_union, unreadable_spatial_metadata
-from rashid.model import Severity, json_pointer
-from rashid.registry import (
+from rashid.ids import (
     DAT_COLUMN_DESCRIPTIONS,
     DAT_GEOPARQUET_VERSION,
     DAT_NATIVE_CRS,
@@ -26,6 +25,7 @@ from rashid.registry import (
     DAT_TABULAR,
     DAT_VECTOR_COLUMNS,
 )
+from rashid.model import Severity, json_pointer
 from rashid.rules._common import (
     assets_of,
     has_table_columns,

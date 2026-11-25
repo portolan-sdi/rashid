@@ -165,7 +165,7 @@ FAULTS = (
     ),
     Fault(
         "duplicate-rule-id",
-        "src/rashid/registry.py",
+        "src/rashid/ids.py",
         'DAT_SIZE = "PTL-DAT-002"',
         'DAT_SIZE = "PTL-DAT-001"',
         _REGISTRY,

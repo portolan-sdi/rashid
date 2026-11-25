@@ -16,12 +16,8 @@ from rashid.data import DataDefect, _files
 from rashid.data._files import AssetFiles
 from rashid.data.geoparquet import check_geoparquet, partitioned_vector_columns
 from rashid.data.reader import BUCKET_PROBE, AssetReader, Locator
+from rashid.ids import DAT_ORDERING, DAT_PARTITION_SCHEMA, DAT_UNAVAILABLE
 from rashid.model import Severity, json_pointer
-from rashid.registry import (
-    DAT_ORDERING,
-    DAT_PARTITION_SCHEMA,
-    DAT_UNAVAILABLE,
-)
 from rashid.rules._common import (
     assets_of,
 )

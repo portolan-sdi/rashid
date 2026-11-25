@@ -21,13 +21,13 @@ from rashid.catalog import CatalogGraph, Node
 from rashid.data import _reads_remote, partitions
 from rashid.data._files import glob_regex, listing_prefix
 from rashid.data.reader import Locator
-from rashid.model import Severity
-from rashid.registry import (
+from rashid.ids import (
     DAT_GEOPARQUET_VERSION,
     DAT_PARTITION_SCHEMA,
     DAT_UNAVAILABLE,
     DAT_VECTOR_COLUMNS,
 )
+from rashid.model import Severity
 from tests._https import HttpsServer, Route
 from tests.conftest import CatalogBuilder, mutate_json
 from tests.integration import _data_assets as assets

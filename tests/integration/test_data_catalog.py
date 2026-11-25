@@ -29,8 +29,8 @@ pytest.importorskip("rio_cogeo")
 from rashid import validate
 from rashid.catalog import CatalogGraph
 from rashid.data import validate_data
+from rashid.ids import DAT_CHECKSUM, DAT_CONSISTENCY, DAT_FORMAT, DAT_ORDERING, DAT_SIZE
 from rashid.model import Severity
-from rashid.registry import DAT_CHECKSUM, DAT_CONSISTENCY, DAT_FORMAT, DAT_ORDERING, DAT_SIZE
 from tests.conftest import CatalogBuilder, mutate_json, thumbnail_asset
 from tests.integration import _data_assets as assets
 

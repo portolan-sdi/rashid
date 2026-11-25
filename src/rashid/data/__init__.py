@@ -44,8 +44,8 @@ from rashid import _trace
 from rashid._href import bucket_glob
 from rashid.catalog import CatalogGraph, Kind, Node
 from rashid.data.reader import BUCKET_PROBE, AssetReader, FilesystemHttpReader, Locator
+from rashid.ids import DAT_UNAVAILABLE
 from rashid.model import Finding, Severity, json_pointer
-from rashid.registry import DAT_UNAVAILABLE
 from rashid.rules._common import assets_of, read_target
 
 # Assets are declared on collections and items; catalogs carry none.

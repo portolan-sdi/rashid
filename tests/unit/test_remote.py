@@ -23,14 +23,14 @@ from rashid._href import is_catalog_url, split_catalog_url, wire_url
 from rashid.catalog import CatalogGraph
 from rashid.cli import main
 from rashid.data.reader import FilesystemHttpReader, LocalOnlyReader
-from rashid.model import Severity
-from rashid.registry import (
+from rashid.ids import (
     GEN_MISSING_ROOT,
     GEN_PARTIAL_TREE,
     LIV_LINK_TARGET,
     LIV_SELF_BASE,
     LIV_UNAVAILABLE,
 )
+from rashid.model import Severity
 from rashid.remote import (
     Crawl,
     Fetched,

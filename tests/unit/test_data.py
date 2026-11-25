@@ -22,8 +22,7 @@ from rashid.catalog import CatalogGraph, Node
 from rashid.config import RulesConfig
 from rashid.data import DataDefect, validate_data
 from rashid.data.reader import AssetReader, Locator
-from rashid.model import Severity
-from rashid.registry import (
+from rashid.ids import (
     DAT_CHECKSUM,
     DAT_CLASS_COLORS,
     DAT_COG,
@@ -66,6 +65,7 @@ from rashid.registry import (
     ZAR_TRANSFORM,
     ZAR_VARIABLES,
 )
+from rashid.model import Severity
 from rashid.runner import validate
 from tests.conftest import CatalogBuilder
 

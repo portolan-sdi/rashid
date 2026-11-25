@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from rashid import registry
+from rashid import ids, registry
 from rashid.model import Severity
 from rashid.rule import Rule
 
@@ -59,16 +59,16 @@ def test_metadata_id_without_spec_metadata_is_rejected() -> None:
 
 
 def test_registered_ids_equal_ids_emitted_in_src() -> None:
-    """Read executable AST nodes, including registry constants used by passes."""
+    """Read executable AST nodes, including ID constants used by passes."""
     emitted = set()
     for path in (Path(__file__).resolve().parents[2] / "src/rashid").rglob("*.py"):
-        if path.name == "registry.py":
+        if path.name in {"registry.py", "ids.py"}:
             continue  # declarations do not prove an emitter exists
         tree = ast.parse(path.read_text(encoding="utf-8"))
         aliases = {
-            alias.asname or alias.name: getattr(registry, alias.name, None)
+            alias.asname or alias.name: getattr(ids, alias.name, None)
             for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module == "rashid.registry"
+            if isinstance(node, ast.ImportFrom) and node.module == "rashid.ids"
             for alias in node.names
         }
         for node in ast.walk(tree):
@@ -86,9 +86,10 @@ def test_registered_ids_equal_ids_emitted_in_src() -> None:
 def test_pass_checks_use_the_id_constants_once() -> None:
     """Pass identity is declared once, then referenced by CheckInfo and emitters."""
     tree = ast.parse(Path(registry.__file__).read_text(encoding="utf-8"))
+    id_tree = ast.parse(Path(ids.__file__).read_text(encoding="utf-8"))
     constants = {
         node.targets[0].id: node.value.value
-        for node in tree.body
+        for node in id_tree.body
         if isinstance(node, ast.Assign)
         and isinstance(node.targets[0], ast.Name)
         and isinstance(node.value, ast.Constant)
@@ -148,7 +149,7 @@ def test_an_incubating_check_may_not_declare_an_error() -> None:
     a store with broken metadata fail a run; ``rashid.runner.cap_incubating``
     caps the findings as the second guard.
     """
-    check = registry.CHECKS[registry.ZAR_STORE_VERSION]
+    check = registry.CHECKS[ids.ZAR_STORE_VERSION]
     assert registry.is_incubating(check.id)
     assert registry._build((), (check,))[check.id] == check
     with pytest.raises(registry.RegistryError, match="may not declare an error"):

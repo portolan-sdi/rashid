@@ -34,8 +34,7 @@ from rashid.cli import main
 from rashid.data import DataDefect, DataResults, geoparquet, partitions, raster
 from rashid.data._files import AssetFiles
 from rashid.data.reader import Locator
-from rashid.model import Severity
-from rashid.registry import (
+from rashid.ids import (
     DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
@@ -54,6 +53,7 @@ from rashid.registry import (
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
 )
+from rashid.model import Severity
 from tests.conftest import CatalogBuilder, resolve_pointer
 from tests.integration import _data_assets as assets
 

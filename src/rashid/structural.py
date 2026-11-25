@@ -20,8 +20,8 @@ from typing import Any
 
 from rashid._jsonschema import SchemaError, SchemaPass, Validator, schema_targets, stac_registry
 from rashid.catalog import CatalogGraph
+from rashid.ids import STR_INVALID, STR_UNAVAILABLE
 from rashid.model import Finding, json_pointer
-from rashid.registry import STR_INVALID, STR_UNAVAILABLE
 
 _PASS = SchemaPass("structural", STR_INVALID, STR_UNAVAILABLE)
 

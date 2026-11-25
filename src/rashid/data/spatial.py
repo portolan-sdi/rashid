@@ -14,10 +14,8 @@ from rashid.catalog import Node
 from rashid.data import DataDefect
 from rashid.data.reader import Locator
 from rashid.data.storage import PMTILES_MAGIC
+from rashid.ids import DAT_CONSISTENCY
 from rashid.model import Severity, json_pointer
-from rashid.registry import (
-    DAT_CONSISTENCY,
-)
 
 # bbox comparison tolerance in degrees (~1 km); absorbs rounding and
 # reprojection gridding so only genuine divergence trips PTL-DAT-005.

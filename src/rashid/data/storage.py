@@ -11,12 +11,8 @@ from rashid._multihash import decode_multihash
 from rashid.catalog import Node
 from rashid.data import DataDefect
 from rashid.data.reader import AssetReader
+from rashid.ids import DAT_CHECKSUM, DAT_FORMAT, DAT_SIZE
 from rashid.model import Severity
-from rashid.registry import (
-    DAT_CHECKSUM,
-    DAT_FORMAT,
-    DAT_SIZE,
-)
 from rashid.rules._common import (
     is_tiff_media_type,
     read_target,

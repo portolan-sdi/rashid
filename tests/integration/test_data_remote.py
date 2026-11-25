@@ -18,8 +18,8 @@ import pytest
 
 from rashid.catalog import CatalogGraph
 from rashid.data import validate_data
+from rashid.ids import DAT_CHECKSUM, DAT_SIZE
 from rashid.model import Severity
-from rashid.registry import DAT_CHECKSUM, DAT_SIZE
 from tests.conftest import CatalogBuilder, skip_if_network_flaked
 
 pytestmark = [pytest.mark.integration, pytest.mark.network]

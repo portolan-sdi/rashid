@@ -10,14 +10,8 @@ from rashid.catalog import Node
 from rashid.config import RulesConfig
 from rashid.data import DataDefect
 from rashid.data.reader import AssetReader
-from rashid.registry import (
-    CHECKS,
-    DAT_MIRROR,
-    DAT_UNAVAILABLE,
-    LIV_UNAVAILABLE,
-    check_ids,
-    is_incubating,
-)
+from rashid.ids import DAT_MIRROR, DAT_UNAVAILABLE, LIV_UNAVAILABLE
+from rashid.registry import CHECKS, check_ids, is_incubating
 from rashid.runner import validate
 from tests.conftest import CatalogBuilder
 

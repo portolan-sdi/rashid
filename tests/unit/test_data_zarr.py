@@ -26,9 +26,7 @@ from rashid._href import store_member_href
 from rashid.catalog import CatalogGraph, Node
 from rashid.data.reader import LocalOnlyReader, Locator
 from rashid.data.zarr import check_zarr
-from rashid.model import Report, Severity
-from rashid.registry import (
-    CHECKS,
+from rashid.ids import (
     ZAR_ASSET,
     ZAR_AXIS_ORDER,
     ZAR_CHUNK_SIZE,
@@ -47,8 +45,9 @@ from rashid.registry import (
     ZAR_STORE_VERSION,
     ZAR_TRANSFORM,
     ZAR_VARIABLES,
-    is_incubating,
 )
+from rashid.model import Report, Severity
+from rashid.registry import CHECKS, is_incubating
 from rashid.rules._common import COG_MEDIA_TYPE
 from tests.conftest import CatalogBuilder, default_asset, thumbnail_asset
 

@@ -110,8 +110,7 @@ from rashid._href import (
     wire_url,
 )
 from rashid.catalog import CatalogGraph, Kind, Node
-from rashid.model import Finding, Severity, json_pointer
-from rashid.registry import (
+from rashid.ids import (
     LIV_CORS_EXPOSE,
     LIV_CORS_ORIGIN,
     LIV_CORS_PREFLIGHT,
@@ -123,6 +122,7 @@ from rashid.registry import (
     LIV_UNAVAILABLE,
     ZAR_CORS,
 )
+from rashid.model import Finding, Severity, json_pointer
 from rashid.rules._common import (
     assets_of,
     https_alternate,

@@ -18,8 +18,7 @@ from rashid.data import DataDefect
 from rashid.data._files import AssetFiles
 from rashid.data.reader import Locator
 from rashid.data.spatial import Geo
-from rashid.model import Severity, json_pointer
-from rashid.registry import (
+from rashid.ids import (
     DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
@@ -29,6 +28,7 @@ from rashid.registry import (
     DAT_TILE_SIZE,
     DAT_VALID_PERCENT,
 )
+from rashid.model import Severity, json_pointer
 from rashid.rules._common import is_overview_asset, roles_of
 from rashid.rules.classification import asset_class_lists, band_count, is_integer
 

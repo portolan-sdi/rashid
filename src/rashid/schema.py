@@ -41,8 +41,8 @@ from rashid._jsonschema import (
     schema_targets,
 )
 from rashid.catalog import CatalogGraph
+from rashid.ids import SCH_INVALID, SCH_UNAVAILABLE, SCH_UNUSED_MAP
 from rashid.model import Finding, Severity
-from rashid.registry import SCH_INVALID, SCH_UNAVAILABLE, SCH_UNUSED_MAP
 from rashid.rules.conformance import declared_schema_uris
 
 # The newest bundled profile schema, used when the root declares no single URI.

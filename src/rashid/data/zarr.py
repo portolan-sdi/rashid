@@ -42,8 +42,7 @@ from rashid._href import store_member_href
 from rashid.catalog import Node
 from rashid.data import DataDefect
 from rashid.data.reader import AssetReader
-from rashid.model import Severity
-from rashid.registry import (
+from rashid.ids import (
     ZAR_ASSET,
     ZAR_AXIS_ORDER,
     ZAR_CHUNK_SIZE,
@@ -63,6 +62,7 @@ from rashid.registry import (
     ZAR_TRANSFORM,
     ZAR_VARIABLES,
 )
+from rashid.model import Severity
 from rashid.rules._common import (
     ZARR_MEDIA_TYPE,
     media_base_type,
