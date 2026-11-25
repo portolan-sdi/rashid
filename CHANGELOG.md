@@ -1,3 +1,21 @@
+## v0.5.0 (2026-11-25)
+
+### BREAKING CHANGE
+
+- The import name is rashid_core. Replace "from rashid import ..." with "from rashid_core import ...", and import public helpers from rashid_core.api. Depend on rashid-core for metadata validation, or rashid-core[data] for the data checks. Logger names are now rashid_core.*.
+
+### Feat
+
+- split rashid into rashid-core and a rashid metapackage (#341)
+
+### Fix
+
+- **data**: accept GDAL overview levels that round down (PTL-DAT-011) (#351)
+- **rules**: read Shape, wkb_* and binary columns as possible geometry (#335)
+- **rules**: clarify missing collection and forbidden member messages (#350)
+- **data**: name a passing row order in the PTL-DAT-006 fix hint (#344)
+- **rules**: accept RFC 3987 IRI references in link and asset hrefs (#342)
+
 ## v0.4.0 (2026-11-17)
 
 ### BREAKING CHANGE
