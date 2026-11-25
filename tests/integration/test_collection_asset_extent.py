@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -168,10 +169,11 @@ def test_collection_extent_with_geoparquet_without_bbox(tmp_path: Path, scope: s
     _declare(directory, ["west.parquet", "east.parquet"])
 
     for extent, expected in (([0, 0, 2, 1], 0), ([0, 0, 0.5, 1], 1)):
-        mutate_json(
-            directory / "collection.json",
-            lambda d, extent=extent: d["extent"]["spatial"].update(bbox=[extent]),
-        )
+
+        def extend(d: dict[str, Any], extent: object = extent) -> None:
+            d["extent"]["spatial"]["bbox"] = [extent]
+
+        mutate_json(directory / "collection.json", extend)
         report = _check(tmp_path, "--data-scope", scope)
         findings = [f for f in report["findings"] if f["rule_id"] == "PTL-DAT-005"]
         assert len(findings) == expected, (scope, extent, findings)

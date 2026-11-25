@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from click.testing import CliRunner
 
@@ -11,7 +12,7 @@ from rashid_core.cli import main
 from tests.conftest import CatalogBuilder
 
 
-def _catalog(root: Path, **fields: object) -> Path:
+def _catalog(root: Path, **fields: Any) -> Path:
     cat = CatalogBuilder(root)
     cat.collection("layers", assets={}, **fields)
     cat.write()

@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 
 from rashid_core import validate
+from rashid_core._media import PARQUET_MEDIA_TYPE
 from rashid_core._stac import MIRROR_ROLE
 from rashid_core.model import Severity
-from rashid_core.rules.item_mirror import PARQUET_MEDIA_TYPE
 from tests.conftest import (
     CatalogBuilder,
     findings_for,
@@ -40,12 +40,11 @@ def _scene_collection(catalog: CatalogBuilder, *item_ids: str) -> Path:
     root = catalog.write()
     mutate_json(_collection(root), lambda d: d["assets"].pop("data", None))
     for item_id in item_ids:
-        mutate_json(
-            _item(root, item_id),
-            lambda d, i=item_id: d["assets"]["data"].update(
-                {"href": f"./{i}.tif", "type": _COG_TYPE}
-            ),
-        )
+
+        def retarget(d: dict[str, Any], i: str = item_id) -> None:
+            d["assets"]["data"].update({"href": f"./{i}.tif", "type": _COG_TYPE})
+
+        mutate_json(_item(root, item_id), retarget)
     return root
 
 

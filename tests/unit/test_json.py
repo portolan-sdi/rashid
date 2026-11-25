@@ -95,6 +95,8 @@ def test_a_catalog_that_fails_to_parse_keeps_its_parse_error(tmp_path: Path, raw
         json.loads(raw.decode("utf-8"))
     except ValueError as exc:
         expected = str(exc)
+    else:
+        pytest.fail("the fixture bytes must not parse")
 
     graph = CatalogGraph.load(tmp_path)
 

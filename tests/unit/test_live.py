@@ -799,7 +799,11 @@ def test_link_findings_follow_sorted_url_order(catalog: CatalogBuilder) -> None:
     link_calls = [u for u in prober.head_calls if u not in asset_urls]
     assert link_calls[0] == link_urls[0]
     assert sorted(link_calls) == link_urls
-    reported = [re.search(r"HEAD (\S+) returned", f.message)[1] for f in _link_findings(findings)]
+    reported = [
+        match[1]
+        for f in _link_findings(findings)
+        if (match := re.search(r"HEAD (\S+) returned", f.message))
+    ]
     assert reported == link_urls
 
 
@@ -1161,7 +1165,7 @@ def _record(monkeypatch: pytest.MonkeyPatch, probe: str) -> Request:
     """Run one probe kind against a recording opener and return its Request."""
     requests: list[Request] = []
     monkeypatch.setattr(_store._probe_opener(), "open", _recorder(requests))
-    monkeypatch.setattr(live_mod._store, "head_size", _store_fails)
+    monkeypatch.setattr(_store, "head_size", _store_fails)
     getattr(_DefaultProber(), probe)(_URL)
     (request,) = requests
     return request
@@ -1231,7 +1235,7 @@ def test_default_head_falls_back_to_urllib(
         raise failure
 
     requests: list[Request] = []
-    monkeypatch.setattr(live_mod._store, "head_size", fail)
+    monkeypatch.setattr(_store, "head_size", fail)
     monkeypatch.setattr(_store._probe_opener(), "open", _recorder(requests))
 
     response = _DefaultProber().head(_URL)
@@ -1249,7 +1253,7 @@ def test_default_head_does_not_ask_a_dead_host_twice(monkeypatch: pytest.MonkeyP
         raise dead
 
     requests: list[Request] = []
-    monkeypatch.setattr(live_mod._store, "head_size", fail)
+    monkeypatch.setattr(_store, "head_size", fail)
     monkeypatch.setattr(_store._probe_opener(), "open", _recorder(requests))
 
     with pytest.raises(_store.StoreError) as raised:
@@ -1507,7 +1511,9 @@ _MOVED = ProbeResponse(status=302, headers={"location": "http://data.example.com
 class _PerUrlProber(FakeProber):
     """FakeProber whose answers for the URLs in ``moved`` redirect off https."""
 
-    def __init__(self, moved: set[str], range_moved: set[str] = frozenset(), **kw: Any) -> None:
+    def __init__(
+        self, moved: set[str], range_moved: frozenset[str] | set[str] = frozenset(), **kw: Any
+    ) -> None:
         super().__init__(**kw)
         self.moved = moved
         self.range_moved = moved | range_moved
@@ -1710,7 +1716,7 @@ def test_a_metadata_cors_probe_off_https_is_reported(catalog: CatalogBuilder) ->
     graph = _metadata_only_tree(catalog)
     findings = validate_live(graph, _PublishHostProber(_MOVED), base_url=_BASE)
     assert _ids(findings) == [LIV_UNAVAILABLE, LIV_OFF_HTTPS]
-    assert findings[1].json_pointer.startswith("/links/")
+    assert (findings[1].json_pointer or "").startswith("/links/")
     assert "rel:'agents'" in findings[1].message
 
 

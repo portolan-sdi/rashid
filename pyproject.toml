@@ -59,6 +59,9 @@ dev = [
     "pip>=26.1",
     "pip-audit>=2.10",
     "trustme>=1.2.1",
+    "pyarrow-stubs>=20.0.0.20260819",
+    "types-shapely>=2.2.0.20261122",
+    "types-pyyaml>=6.0.12.20261122",
 ]
 
 [tool.uv.workspace]
@@ -122,19 +125,42 @@ known-first-party = ["rashid_core"]
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "pytest.xfail" = { msg = "use @pytest.mark.xfail(strict=True) keyed to an open issue and listed in the ledger" }
 
+# Strict mypy covers the package, developer scripts, and tests. With explicit package
+# bases, src/rashid_core resolves as `rashid_core` (through mypy_path) and tests/ as `tests`.
 [tool.mypy]
 strict = true
 python_version = "3.11"
-files = ["src/rashid_core"]
+files = ["src/rashid_core", "scripts", "tests"]
+mypy_path = ["src"]
+explicit_package_bases = true
+enable_error_code = [
+    "ignore-without-code",
+    "redundant-expr",
+    "truthy-bool",
+    "possibly-undefined",
+    "redundant-self",
+    "unused-awaitable",
+    "deprecated",
+    "exhaustive-match",
+]
+
+# Tests may leave helpers and fixtures unannotated; every other strict check applies.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
 
 # jsonschema and jsonschema-specifications ship no py.typed marker.
 [[tool.mypy.overrides]]
 module = ["jsonschema.*", "jsonschema_specifications.*"]
 ignore_missing_imports = true
 
-# The data-pass geospatial stack (rashid-core[data]) ships no usable type information.
+# rasterio ships no py.typed marker. pyproj and rio-cogeo ship one; pyarrow-stubs and
+# types-shapely (dev dependencies) type the rest of the data-pass stack.
 [[tool.mypy.overrides]]
-module = ["pyarrow.*", "rasterio.*", "pyproj.*", "rio_cogeo.*", "shapely.*"]
+module = ["rasterio.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

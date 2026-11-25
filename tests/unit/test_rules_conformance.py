@@ -116,13 +116,12 @@ def test_version_field_without_extension_flags_cnf_003(catalog: CatalogBuilder) 
 def test_version_field_with_extension_passes(catalog: CatalogBuilder) -> None:
     catalog.collection("roads")
     root = catalog.write()
-    mutate_json(
-        root / "roads" / "collection.json",
-        lambda d: (
-            d.__setitem__("version", "2.1.0"),
-            d.__setitem__("stac_extensions", [*d["stac_extensions"], _VERSION_URI]),
-        ),
-    )
+
+    def version(d: dict[str, Any]) -> None:
+        d["version"] = "2.1.0"
+        d["stac_extensions"] = [*d["stac_extensions"], _VERSION_URI]
+
+    mutate_json(root / "roads" / "collection.json", version)
     assert findings_for(validate(root), "PTL-CNF-003") == []
 
 

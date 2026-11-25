@@ -209,9 +209,9 @@ def _profile(args: argparse.Namespace) -> int:
             return result.returncode or 1
         print(f"# {stem}: {refs:,} instructions (cachegrind Ir); details in {out}")
         return 0
-    result = subprocess.run(command)
-    if result.returncode != 0:
-        return result.returncode
+    returncode = subprocess.run(command).returncode
+    if returncode != 0:
+        return returncode
     if args.mode == "time":
         print(out.read_text(encoding="utf-8"))
         print(f"# saved to {out}")

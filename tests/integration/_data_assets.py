@@ -12,6 +12,7 @@ import contextlib
 import hashlib
 import json
 import struct
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -120,7 +121,7 @@ def write_geoparquet(  # noqa: PLR0913 - keyword-only fixture settings vary inde
     row_group_size: int = 2,
     geo: bool = True,
     version: str = "1.1.0",
-    columns: dict[str, list[object]] | None = None,
+    columns: Mapping[str, object] | None = None,
     bboxes: list[tuple[float, float, float, float]] | None = None,
     null_rows: set[int] | None = None,
 ) -> None:
@@ -210,7 +211,8 @@ class _WkbGeometryType(pa.ExtensionType):
 def _wkb_geometry_type() -> _WkbGeometryType:
     # One process runs many tests; the name registers once.
     with contextlib.suppress(pa.ArrowKeyError):
-        pa.register_extension_type(_WkbGeometryType())
+        # pyarrow-stubs 20 types the argument as the removed PyExtensionType.
+        pa.register_extension_type(_WkbGeometryType())  # type: ignore[arg-type]
     return _WkbGeometryType()
 
 
@@ -219,7 +221,7 @@ def write_native_geoparquet(
     *,
     points: list[tuple[float, float]] | None = None,
     row_group_size: int = 2,
-    columns: dict[str, list[object]] | None = None,
+    columns: Mapping[str, object] | None = None,
 ) -> None:
     """A Parquet file whose geometry is the native ``GEOMETRY`` logical type.
 
@@ -263,7 +265,7 @@ def write_item_mirror(  # noqa: PLR0913 - keyword-only fixture settings vary ind
     count = len(ids) if ids else 1
     source = ordered_points(max(count, 2)) if ordered else interleaved_points()
     pts = points if points is not None else source[:count]
-    columns: dict[str, list[object]] = {}
+    columns: dict[str, object] = {}
     if ids is not None:
         columns["id"] = pa.array(ids, type=pa.string())
     if datetimes is not None:

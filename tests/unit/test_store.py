@@ -99,7 +99,8 @@ def test_urllib_stream_does_not_read_tls_after_eof(
     """Windows 3.13 can raise ENOENT on a second TLS read after ragged EOF."""
     https_server.routes["/stream.bin"] = Route(body=b"body", length=False)
     exhausted: set[ssl.SSLSocket] = set()
-    original = ssl.SSLSocket.read
+    # The test wraps the deprecated method http.client still reads TLS through.
+    original = ssl.SSLSocket.read  # type: ignore[deprecated]
 
     def read(sock: ssl.SSLSocket, *args: Any, **kwargs: Any) -> Any:
         if sock in exhausted:

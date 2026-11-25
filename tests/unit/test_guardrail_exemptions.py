@@ -89,7 +89,7 @@ def _imports(module: str) -> set[str]:
         }
     path = ROOT / "src" / module.replace(".", "/")
     path = path / "__init__.py" if path.is_dir() else path.with_suffix(".py")
-    imports = set()
+    imports: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.Import):
             imports.update(alias.name for alias in node.names)
@@ -144,9 +144,10 @@ def xfail_issues(source: str) -> set[str]:
             f"bare xfail marker at line {node.lineno}"
         )
         keywords = {keyword.arg: keyword.value for keyword in call.keywords}
-        assert (
-            isinstance(keywords.get("strict"), ast.Constant) and keywords["strict"].value is True
-        ), "xfail must use strict=True"
+        strict = keywords.get("strict")
+        assert isinstance(strict, ast.Constant) and strict.value is True, (
+            "xfail must use strict=True"
+        )
         reason = keywords.get("reason")
         assert isinstance(reason, ast.Constant) and isinstance(reason.value, str)
         match = re.match(r"#\d+\b", reason.value)

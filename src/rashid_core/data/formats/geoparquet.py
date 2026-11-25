@@ -1057,7 +1057,7 @@ def _geometry_row_bboxes(
     except Exception:
         return None
     bounds = shapely.bounds(geometries)
-    missing = np.isnan(bounds).any(axis=1)
+    missing = np.any(np.isnan(bounds), axis=1)
     boxes: list[tuple[float, float, float, float] | None] = []
     for row, absent in zip(bounds.tolist(), missing, strict=True):
         if absent:

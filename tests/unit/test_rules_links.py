@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from rashid_core import validate
@@ -127,7 +129,12 @@ def test_absolute_child_link_resolves_through_root_self(catalog: CatalogBuilder)
     # child href under it maps onto the tree and resolves normally.
     catalog.collection("roads")
     root = catalog.write()
-    mutate_json(root / "catalog.json", lambda d: (_add_root_self(d), _absolutize_child(d)))
+
+    def absolutize(d: dict[str, Any]) -> None:
+        _add_root_self(d)
+        _absolutize_child(d)
+
+    mutate_json(root / "catalog.json", absolutize)
     report = validate(root)
     assert findings_for(report, "PTL-LNK-002") == []
     assert findings_for(report, "PTL-LNK-006") == []
@@ -139,12 +146,13 @@ def test_absolute_dangling_child_link_reported_through_root_self(
     catalog.collection("roads")
     root = catalog.write()
 
-    def dangle(d: dict) -> None:
+    def dangle(d: dict[str, Any]) -> None:
+        _add_root_self(d)
         for link in d["links"]:
             if link["rel"] == "child":
                 link["href"] = "https://example.org/gone/collection.json"
 
-    mutate_json(root / "catalog.json", lambda d: (_add_root_self(d), dangle(d)))
+    mutate_json(root / "catalog.json", dangle)
     findings = findings_for(validate(root), "PTL-LNK-006")
     assert len(findings) == 1
     assert "does not resolve" in findings[0].message

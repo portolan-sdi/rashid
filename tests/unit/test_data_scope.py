@@ -21,7 +21,7 @@ from click.testing import CliRunner
 
 import rashid_core.cli as cli_mod
 import rashid_core.data.reader as reader_mod
-from rashid_core import ValidationOptions
+from rashid_core import ValidationOptions, _store
 from rashid_core.catalog import CatalogGraph, Node
 from rashid_core.cli import main
 from rashid_core.data import Validator, validate_data
@@ -102,7 +102,7 @@ def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError(f"the reader reached the network: {url}")
 
     # Every remote read resolves its URL through _store._locate first.
-    monkeypatch.setattr(reader_mod._store, "_locate", refuse)
+    monkeypatch.setattr(_store, "_locate", refuse)
 
 
 # --- LocalOnlyReader --------------------------------------------------------

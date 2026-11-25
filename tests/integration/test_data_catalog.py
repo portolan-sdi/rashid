@@ -31,7 +31,7 @@ from rashid_core.catalog import CatalogGraph
 from rashid_core.data import validate_data
 from rashid_core.ids import DAT_CHECKSUM, DAT_CONSISTENCY, DAT_FORMAT, DAT_ORDERING, DAT_SIZE
 from rashid_core.model import Severity
-from tests.conftest import CatalogBuilder, mutate_json, thumbnail_asset
+from tests.conftest import CatalogBuilder, mutate_json, table_columns, thumbnail_asset
 from tests.integration import _data_assets as assets
 
 pytestmark = pytest.mark.integration
@@ -75,7 +75,7 @@ def _build(root: Path) -> Path:
             "extra": _asset("./extra.parquet", _PARQUET_TYPE),
             "thumbnail": thumbnail_asset(),
         },
-        **{"table:columns": _TABLE_COLUMNS},
+        **table_columns(_TABLE_COLUMNS),
     )
     col.item(
         "points",

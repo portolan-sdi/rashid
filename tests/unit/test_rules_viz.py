@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from rashid_core import validate
@@ -10,6 +12,7 @@ from tests.conftest import (
     default_asset,
     findings_for,
     mutate_json,
+    table_columns,
     thumbnail_asset,
 )
 
@@ -154,12 +157,14 @@ def test_undecidable_message_names_geometryless_items(
     for index in range(count):
         collection.item(f"prices-202{index}")
     root = catalog.write()
+
+    def drop_geometry(d: dict[str, Any]) -> None:
+        d["geometry"] = None
+        d.pop("bbox")
+
     for index in range(count):
         item_id = f"prices-202{index}"
-        mutate_json(
-            root / "prices" / item_id / f"{item_id}.json",
-            lambda d: (d.__setitem__("geometry", None), d.pop("bbox")),
-        )
+        mutate_json(root / "prices" / item_id / f"{item_id}.json", drop_geometry)
     findings = findings_for(validate(root), "PTL-VIZ-001")
     assert len(findings) == 1
     assert clause in findings[0].message
@@ -218,7 +223,7 @@ def test_declared_columns_without_geometry_mark_tabular(catalog: CatalogBuilder)
     catalog.collection(
         "prices",
         assets={"data": default_asset()},
-        **{"table:columns": [{"name": "year", "type": "int64"}]},
+        **table_columns([{"name": "year", "type": "int64"}]),
     )
     assert findings_for(validate(catalog.write()), "PTL-VIZ-001") == []
 
@@ -227,7 +232,7 @@ def test_geometry_column_marks_geospatial(catalog: CatalogBuilder) -> None:
     catalog.collection(
         "places",
         assets={"data": default_asset()},
-        **{"table:columns": [{"name": "geometry", "type": "binary"}]},
+        **table_columns([{"name": "geometry", "type": "binary"}]),
     )
     findings = findings_for(validate(catalog.write()), "PTL-VIZ-001")
     assert len(findings) == 1

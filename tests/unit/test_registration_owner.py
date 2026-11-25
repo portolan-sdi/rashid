@@ -104,13 +104,15 @@ def test_pass_checks_use_the_id_constants_once() -> None:
         and node.func.id == "CheckInfo"
         and any(keyword.arg == "stage" for keyword in node.keywords)
     ]
-    assert all(
-        isinstance(node, ast.Attribute)
+    attributes = [
+        node
+        for node in declarations
+        if isinstance(node, ast.Attribute)
         and isinstance(node.value, ast.Name)
         and node.value.id == "ids"
-        for node in declarations
-    )
-    assert sorted(node.attr for node in declarations) == sorted(constants)
+    ]
+    assert attributes == declarations
+    assert sorted(node.attr for node in attributes) == sorted(constants)
     assert len(set(constants.values())) == len(constants)
 
 

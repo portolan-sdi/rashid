@@ -2088,6 +2088,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pyarrow-stubs"
+version = "20.0.0.20260819"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyarrow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/12/a7/8a2ca91ffe4c6576207f932de655d7d8a36485c520dccce70ce7d492b256/pyarrow_stubs-20.0.0.20260819.tar.gz", hash = "sha256:150710a72248bc834bf048d3092713f070904a4af76d40289c43afb3ee189823", size = 238222, upload-time = "2026-08-19T05:52:53.618Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/65/6c/eea1d03e475217aea95b1d52aee09c97575d05bbc592c39c085b71dab89f/pyarrow_stubs-20.0.0.20260819-py3-none-any.whl", hash = "sha256:297e60b6e5314739c082b4757d090d8be6047465510eb0684ca954ef7ea58be3", size = 235949, upload-time = "2026-08-19T05:52:54.711Z" },
+]
+
+[[package]]
 name = "pycparser"
 version = "3.12"
 source = { registry = "https://pypi.org/simple" }
@@ -2583,12 +2595,15 @@ dev = [
     { name = "pip" },
     { name = "pip-audit" },
     { name = "prek" },
+    { name = "pyarrow-stubs" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
     { name = "rashid" },
     { name = "ruff" },
     { name = "trustme" },
+    { name = "types-pyyaml" },
+    { name = "types-shapely" },
     { name = "vulture" },
 ]
 
@@ -2624,12 +2639,15 @@ dev = [
     { name = "pip", specifier = ">=26.1" },
     { name = "pip-audit", specifier = ">=2.10" },
     { name = "prek", specifier = ">=0.5.11" },
+    { name = "pyarrow-stubs", specifier = ">=20.0.0.20260819" },
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-cov", specifier = ">=7" },
     { name = "pytest-xdist", specifier = ">=3.8" },
     { name = "rashid", editable = "meta/rashid" },
     { name = "ruff", specifier = ">=0.17.3" },
     { name = "trustme", specifier = ">=1.2.1" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20261122" },
+    { name = "types-shapely", specifier = ">=2.2.0.20261122" },
     { name = "vulture", specifier = ">=2.16" },
 ]
 
@@ -3179,6 +3197,28 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4b/c5/931476f4cf1cd9e736f32651005078061a50dc164a2569fb874e00eb2786/trustme-1.2.1.tar.gz", hash = "sha256:6528ba2bbc7f2db41f33825c8dd13e3e3eb9d334ba0f909713c8c3139f4ae47f", size = 26844, upload-time = "2025-01-02T01:55:32.632Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b5/f3/c34dbabf6da5eda56fe923226769d40e11806952cd7f46655dd06e10f018/trustme-1.2.1-py3-none-any.whl", hash = "sha256:d768e5fc57c86dfc5ec9365102e9b092541cd6954b35d8c1eea01a84f35a762a", size = 16530, upload-time = "2025-01-02T01:55:30.181Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20261122"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3d/fe/e4d32b089d06f3b5d2f3f1909b1cb450ce2e18ea6e2c1863d2b29ad0090e/types_pyyaml-6.0.12.20261122.tar.gz", hash = "sha256:7fa577c893a1db255cbb02320884ffcb97b7a219fe515bec6c5f15d5d3af41ed", size = 19093, upload-time = "2026-11-22T08:57:28.481Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4c/71/8dc5553ca25c3a4799ce789f8300d2c3933d427585222c431c77450ed60d/types_pyyaml-6.0.12.20261122-py3-none-any.whl", hash = "sha256:689fbbe883b60471166dede9dba6ac0dbdbcf0ea98062d7ec195430f5bbdb009", size = 21356, upload-time = "2026-11-22T08:57:27.509Z" },
+]
+
+[[package]]
+name = "types-shapely"
+version = "2.2.0.20261122"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f4/5a/508ed77840d77e954b21cefbae28eea1cf14538b03bcb4ad4ae11ffb85b0/types_shapely-2.2.0.20261122.tar.gz", hash = "sha256:7a0a32e172fd4f403c09512e0659acdf4ee8b5484d9b83f55906e022e9a289ea", size = 28548, upload-time = "2026-11-22T09:00:24.328Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fc/ca/4cff01adb3b1b204c396b5fd66c16f4ee2b9ca143015deaf17eb19faf42b/types_shapely-2.2.0.20261122-py3-none-any.whl", hash = "sha256:b6bbcd5556f5c3c171210891a9fa73f67f528c2a88f07bf49ecc17a1f3745094", size = 39444, upload-time = "2026-11-22T09:00:23.551Z" },
 ]
 
 [[package]]

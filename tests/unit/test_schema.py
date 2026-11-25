@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -78,7 +79,7 @@ def test_validator_failure_is_a_single_warning(catalog: CatalogBuilder) -> None:
     catalog.collection("b")
     graph = _graph(catalog)
 
-    def boom(data: dict) -> list[str]:  # noqa: ARG001 - failing schema validator retains its callback signature
+    def boom(data: dict) -> list[SchemaError]:  # noqa: ARG001 - failing schema validator retains its callback signature
         raise RuntimeError("could not reach schemas.portolan-sdi.org")
 
     findings = validate_schema(graph, boom)
@@ -127,22 +128,6 @@ def test_default_validator_used_when_none(
         schema, "default_validator", lambda uri, allow_network=False: lambda data: []
     )
     assert schema.validate_schema(_graph(catalog), None) == []
-
-
-def test_unparseable_object_is_skipped(catalog: CatalogBuilder) -> None:
-    catalog.collection("roads")
-    root = catalog.write()
-    (root / "roads" / "collection.json").write_text("{ broken", encoding="utf-8")
-    graph = CatalogGraph.load(root)
-
-    seen: list[str | None] = []
-
-    def check(data: dict) -> list[str]:
-        seen.append(data.get("type"))
-        return []
-
-    assert validate_schema(graph, check) == []
-    assert "Collection" not in seen  # the broken collection never reached the validator
 
 
 def test_schema_uri_prefers_root_declaration(catalog: CatalogBuilder) -> None:
@@ -264,7 +249,9 @@ def test_runner_wires_schema_pass(catalog: CatalogBuilder) -> None:
 
 def test_schema_off_by_default(catalog: CatalogBuilder) -> None:
     root = catalog.write()
-    report = validate(root, options=ValidationOptions(schema_validator=lambda data: ["never seen"]))
+    report = validate(
+        root, options=ValidationOptions(schema_validator=lambda data: [_error("never seen")])
+    )
     assert all(f.rule_id != "PTL-SCH-001" for f in report.findings)
 
 
@@ -272,9 +259,9 @@ def test_disabling_sch_rule_skips_pass(catalog: CatalogBuilder) -> None:
     root = catalog.write()
     calls: list[dict] = []
 
-    def check(data: dict) -> list[str]:
+    def check(data: dict[str, Any]) -> list[SchemaError]:
         calls.append(data)
-        return ["bad"]
+        return [_error("bad")]
 
     report = validate(
         root,

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from rashid_core import validate
@@ -146,7 +149,7 @@ def test_absolute_readme_href(catalog: CatalogBuilder) -> None:
     assert "relative path" in findings[0].message
 
 
-def _append_link(path, link: dict) -> None:  # type: ignore[no-untyped-def]
+def _append_link(path: Path, link: dict[str, Any]) -> None:
     mutate_json(path, lambda d: d["links"].append(link))
 
 
@@ -241,7 +244,7 @@ def test_readme_link_on_collection(catalog: CatalogBuilder) -> None:
     assert findings[0].path == "roads/collection.json"
 
 
-def _readme(root, *parts):  # type: ignore[no-untyped-def]
+def _readme(root: Path, *parts: str) -> Path:
     path = root
     for part in parts:
         path = path / part

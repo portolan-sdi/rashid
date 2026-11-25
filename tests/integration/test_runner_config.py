@@ -199,9 +199,9 @@ def test_validation_options_are_frozen_and_keyword_only() -> None:
     assert PublicOptions is ValidationOptions
     options = ValidationOptions(data=False)
     with pytest.raises(FrozenInstanceError, match="cannot assign to field 'data'"):
-        options.data = True
+        options.data = True  # type: ignore[misc]  # asserts the options are frozen
     with pytest.raises(TypeError, match="positional argument"):
-        ValidationOptions(False)
+        ValidationOptions(False)  # type: ignore[call-arg, arg-type]  # asserts keyword-only
 
 
 def test_validate_requires_options_for_settings(catalog: CatalogBuilder) -> None:
@@ -209,6 +209,6 @@ def test_validate_requires_options_for_settings(catalog: CatalogBuilder) -> None
 
     root = catalog.write()
     with pytest.raises(TypeError, match="unexpected keyword argument 'data'"):
-        validate(root, data=False)
+        validate(root, data=False)  # type: ignore[call-arg]  # asserts options are required
     with pytest.raises(TypeError, match="positional argument"):
-        validate(root, ValidationOptions(data=False))
+        validate(root, ValidationOptions(data=False))  # type: ignore[call-arg]  # asserts keyword-only

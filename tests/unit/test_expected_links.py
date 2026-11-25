@@ -89,7 +89,7 @@ def test_expected_ancestors_and_media_types(catalog: CatalogBuilder) -> None:
         ("collection", "roads/collection.json", "../../collection.json", "application/json"),
     ]
     with pytest.raises(FrozenInstanceError):
-        links[0].rel = "parent"
+        links[0].rel = "parent"  # type: ignore[misc]  # asserts the dataclass is frozen
 
 
 def test_missing_targets_do_not_hide_required_links(catalog: CatalogBuilder) -> None:
