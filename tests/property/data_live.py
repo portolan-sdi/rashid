@@ -404,11 +404,11 @@ _GEOPARQUET_REWRITES: dict[str, dict[str, Any]] = {
     DAT_GEOPARQUET_VERSION: {"version": "1.0.0"},
 }
 _COG_REWRITES: dict[str, Any] = {
-    DAT_COG: lambda path: assets.write_plain_tiff(path),
+    DAT_COG: assets.write_plain_tiff,
     DAT_COG_STATS: lambda path: assets.write_cog(path, size=256, stats=False),
     DAT_VALID_PERCENT: lambda path: assets.write_cog(path, size=256, valid_percent=False),
     DAT_OVERVIEWS: lambda path: assets.write_cog(path, size=400, blocksize=256, overviews=False),
-    DAT_TILE_SIZE: lambda path: assets.write_tiled_tiff(path),
+    DAT_TILE_SIZE: assets.write_tiled_tiff,
     DAT_SCENE_MASK: lambda path: assets.write_cog(path, size=256, count=3),
 }
 
@@ -435,7 +435,7 @@ def write_native_crs_geoparquet(path: Path, crs: str) -> None:
     pyarrow drops an authority-code crs on write but keeps an ``srid:`` one.
     """
 
-    class _Wkb(pa.ExtensionType):  # type: ignore[misc]
+    class _Wkb(pa.ExtensionType):
         def __init__(self) -> None:
             super().__init__(pa.binary(), "geoarrow.wkb")
 

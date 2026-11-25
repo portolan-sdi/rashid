@@ -33,7 +33,7 @@ from tests.property.data_live import (
     live_options,
     write_catalog,
 )
-from tests.property.registry import BREAKERS, UNBREAKABLE
+from tests.property.registry import BREAKERS, Target
 
 pytestmark = pytest.mark.integration
 
@@ -78,14 +78,9 @@ def test_rule_fires(check_id: str, specs: list[Spec]) -> None:
     with TemporaryDirectory() as tmp:
         root = write_catalog(Path(tmp) / "catalog", specs)
         before = _findings(_valid_report(root))
-        report = validate(root, options=BREAKERS[check_id](root))
+        options = BREAKERS[check_id](root)
+        assert not isinstance(options, Target), "data and live breakers validate the root"
+        report = validate(root, options=options)
     assert check_id in rule_ids(report)
     new = {finding for finding in _findings(report) - before if finding[0] == check_id}
     assert new, f"{check_id} reports nothing the valid catalog did not already have"
-
-
-def test_every_data_and_live_check_is_breakable_or_explained() -> None:
-    """Superseded by the global gate once every stage registers its breakers."""
-    covered = set(BREAKERS) | set(UNBREAKABLE)
-    assert [c for c in CHECK_IDS if c not in covered] == []
-    assert set(BREAKERS) & set(UNBREAKABLE) == set()
