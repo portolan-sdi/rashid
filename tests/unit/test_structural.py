@@ -80,7 +80,7 @@ def test_validator_failure_is_a_single_warning(catalog: CatalogBuilder) -> None:
 def test_missing_package_is_a_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid_core.structural as structural
+    from rashid_core import structural
 
     def raise_import() -> None:
         raise ImportError("No module named 'jsonschema'")
@@ -95,7 +95,7 @@ def test_missing_package_is_a_warning(
 def test_default_validator_used_when_none(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid_core.structural as structural
+    from rashid_core import structural
 
     monkeypatch.setattr(structural, "default_validator", lambda: lambda data: [])
     assert structural.validate_structural(_graph(catalog), None) == []

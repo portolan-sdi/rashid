@@ -40,6 +40,7 @@ def test_malformed_geo_reports_once(tmp_path: Path, raw: bytes, native: bool) ->
             if finding["rule_id"].startswith("PTL-DAT-")
         ]
         assert {finding["rule_id"] for finding in findings} == {"PTL-DAT-005"}
-        assert len(findings) == 1 and findings[0]["severity"] == "info"
+        assert len(findings) == 1
+        assert findings[0]["severity"] == "info"
         assert "spatial metadata could not be read" in findings[0]["message"]
         assert "malformed.parquet" in findings[0]["message"]

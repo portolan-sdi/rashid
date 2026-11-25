@@ -120,7 +120,8 @@ def test_many_partitions_open_once_without_exhausting_handles(tmp_path: Path) ->
     assert result.returncode == 1, result.stderr
     report = json.loads(result.stdout)
     findings = [f for f in report["findings"] if f["rule_id"] == "PTL-DAT-012"]
-    assert len(findings) == 1 and findings[0]["message"].startswith("100 of 100 partition files")
+    assert len(findings) == 1
+    assert findings[0]["message"].startswith("100 of 100 partition files")
     assert report["meta"]["counters"]["parquet.opens"] == 100
 
 
@@ -135,7 +136,8 @@ def test_partition_open_failure_reports_unavailable_data(tmp_path: Path) -> None
     result = CliRunner().invoke(main, ["check", "--json", "--data-scope", "local", str(tmp_path)])
     assert result.exit_code == 1, result.output
     findings = [f for f in json.loads(result.output)["findings"] if f["rule_id"] == "PTL-DAT-000"]
-    assert len(findings) == 1 and findings[0]["severity"] == "warning"
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "warning"
     assert "broken.parquet" in findings[0]["message"]
     assert findings[0]["json_pointer"] == "/partition:glob"
 

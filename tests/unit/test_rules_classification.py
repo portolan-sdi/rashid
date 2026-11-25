@@ -530,7 +530,7 @@ def test_differing_legacy_item_list_needs_no_template_band(catalog: CatalogBuild
 def test_misplaced_item_classes_are_left_to_placement(catalog: CatalogBuilder) -> None:
     root = _scene_catalog(catalog, None)
     for path in (root / "flood").rglob("scene-*.json"):
-        mutate_json(path, lambda data: _single_band(data))
+        mutate_json(path, _single_band)
     report = validate(root)
     assert [f.rule_id for rule in _ALL for f in findings_for(report, rule)] == [
         "PTL-CLS-005",

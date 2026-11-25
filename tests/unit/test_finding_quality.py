@@ -179,18 +179,16 @@ def _add_collections(catalog: CatalogBuilder) -> None:
     )
 
     # Two styles, neither carrying the 'default' role: the default is unidentifiable.
-    _STYLE_TYPE = "application/vnd.mapbox.style+json"
+    style_type = "application/vnd.mapbox.style+json"
     catalog.collection(
         "unmarked-styles",
         assets={
             "data": default_asset(),
             "thumbnail": thumbnail_asset(),
             "style-categorical": _asset(
-                href="./styles/categorical.json", type=_STYLE_TYPE, roles=["style"]
+                href="./styles/categorical.json", type=style_type, roles=["style"]
             ),
-            "style-labeled": _asset(
-                href="./styles/labeled.json", type=_STYLE_TYPE, roles=["style"]
-            ),
+            "style-labeled": _asset(href="./styles/labeled.json", type=style_type, roles=["style"]),
         },
     )
 

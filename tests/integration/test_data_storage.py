@@ -28,12 +28,11 @@ from click.testing import CliRunner
 from pyproj import CRS
 
 import rashid_core.data.formats._files as file_owner
-import rashid_core.data.formats.checks as checks
 from rashid_core.catalog import Node
 from rashid_core.cli import main
 from rashid_core.data import checks as core_checks
 from rashid_core.data._results import DataDefect, DataResults
-from rashid_core.data.formats import geoparquet, partitions, raster
+from rashid_core.data.formats import checks, geoparquet, partitions, raster
 from rashid_core.data.formats._files import AssetFiles
 from rashid_core.data.reader import Locator
 from rashid_core.ids import (
@@ -277,7 +276,8 @@ def test_row_group_layout_is_reported_not_judged_below_the_floor(
     message = infos[0].message
     assert f"has {groups} row groups, under the 8 the footer check needs" in message
     assert "its rows are judged instead" in message
-    assert "reads" in message and "of the bytes" in message
+    assert "reads" in message
+    assert "of the bytes" in message
     area_sum = re.search(r"the boxes sum to (\d+\.\d\d) of the extent", message)
     assert area_sum is not None
 
@@ -1111,14 +1111,17 @@ def test_native_detection_shrugs_off_unhelpful_schemas() -> None:
 
 def test_resolve_native_crs_covers_each_form() -> None:
     crs84 = geoparquet._resolve_native_crs(_NativeCrsParquet(None), "geometry")
-    assert crs84 is not None and crs84.to_epsg() == 4326
+    assert crs84 is not None
+    assert crs84.to_epsg() == 4326
     authority = geoparquet._resolve_native_crs(_NativeCrsParquet("EPSG:3857"), "geometry")
-    assert authority is not None and authority.to_epsg() == 3857
+    assert authority is not None
+    assert authority.to_epsg() == 3857
     projjson = CRS.from_epsg(4326).to_json().encode()
     reference = geoparquet._resolve_native_crs(
         _NativeCrsParquet("projjson:my_crs", {b"my_crs": projjson}), "geometry"
     )
-    assert reference is not None and reference.to_epsg() == 4326
+    assert reference is not None
+    assert reference.to_epsg() == 4326
     assert (
         geoparquet._resolve_native_crs(_NativeCrsParquet("projjson:gone", {}), "geometry") is None
     )
@@ -1595,7 +1598,8 @@ def test_unreadable_partition_reports_unavailable_data(tmp_path: Path) -> None:
     parts.mkdir()
     (parts / "a.parquet").write_bytes(b"not parquet")
     defects = _partition_bytes(_partitioned_collection(tmp_path))
-    assert len(defects) == 1 and defects[0].rule_id == DAT_UNAVAILABLE
+    assert len(defects) == 1
+    assert defects[0].rule_id == DAT_UNAVAILABLE
     assert defects[0].severity is Severity.WARNING
 
 
@@ -2123,7 +2127,8 @@ def test_footer_weights_skip_a_null_only_row_group(
     )  # type: ignore[arg-type]
     assert found is not None
     boxes, kept = found
-    assert 2 not in kept and len(kept) == len(boxes) == meta.num_row_groups - 1
+    assert 2 not in kept
+    assert len(kept) == len(boxes) == meta.num_row_groups - 1
     layouts: list[Any] = []
     real = geoparquet._ordering_defects
 
@@ -2228,7 +2233,8 @@ def test_an_all_null_native_chunk_is_not_missing_statistics(tmp_path: Path) -> N
     assert pq.ParquetFile(path).metadata.row_group(0).column(2).geo_statistics.xmin is None
     assert DAT_ROWGROUP_STATS not in [d.rule_id for d in _gpq(path)]
     found = geoparquet._native_bboxes(pq.ParquetFile(path), {"primary_column": "g2"})
-    assert found is not None and found[1] == [1]
+    assert found is not None
+    assert found[1] == [1]
 
 
 def test_empty_native_statistics_on_a_chunk_with_rows_are_missing(

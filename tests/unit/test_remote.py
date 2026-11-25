@@ -100,7 +100,7 @@ def _rel_files(dest: Path) -> set[str]:
 
 
 @pytest.mark.parametrize(
-    "location, expected",
+    ("location", "expected"),
     [
         ("https://h/cat", True),
         ("https://h/cat/catalog.json", True),
@@ -301,7 +301,8 @@ def test_crawl_never_writes_outside_the_destination(
     before = set(tmp_path.rglob("*"))
     crawl(_BASE, dest, Yes(root))
     created = set(tmp_path.rglob("*")) - before
-    assert created and all(p == dest or dest in p.parents for p in created), created
+    assert created, created
+    assert all(p == dest or dest in p.parents for p in created), created
     assert not Path("/tmp/rashid-pwned").exists()
 
 
@@ -551,7 +552,8 @@ def test_url_mode_says_once_what_it_cannot_see(catalog: CatalogBuilder) -> None:
     assert note.severity is Severity.WARNING
     assert note.path == "."
     assert "5 document(s)" in note.message
-    assert "PTL-LNK-002" in note.message and "PTL-COL-005" in note.message
+    assert "PTL-LNK-002" in note.message
+    assert "PTL-COL-005" in note.message
     assert _ROOT_URL in note.message
 
 
@@ -568,7 +570,8 @@ def test_url_mode_live_can_be_turned_off(catalog: CatalogBuilder) -> None:
     root = _nested(catalog)
     prober = StatusProber()
     report = _check_url(root, live=False, live_prober=prober)
-    assert prober.head_calls == [] and prober.range_calls == []
+    assert prober.head_calls == []
+    assert prober.range_calls == []
     assert not any(f.rule_id.startswith("PTL-LIV") for f in report.findings)
 
 
@@ -610,7 +613,8 @@ def test_url_mode_compares_the_self_link_with_the_url(catalog: CatalogBuilder) -
     )
     report = _check_url(root)
     [finding] = [f for f in report.findings if f.rule_id == LIV_SELF_BASE]
-    assert "old.example.org" in finding.message and _BASE in finding.message
+    assert "old.example.org" in finding.message
+    assert _BASE in finding.message
 
 
 def test_url_mode_with_a_matching_self_link_is_quiet(catalog: CatalogBuilder) -> None:
@@ -628,7 +632,8 @@ def test_url_mode_root_404_is_a_missing_root(catalog: CatalogBuilder) -> None:
     report = _check_url(root, DirFetcher(root, missing={"catalog.json"}))
     [finding] = report.findings
     assert finding.rule_id == GEN_MISSING_ROOT
-    assert "404" in finding.message and _ROOT_URL in finding.message
+    assert "404" in finding.message
+    assert _ROOT_URL in finding.message
     assert not report.passed
 
 
@@ -702,7 +707,8 @@ def test_reader_resolves_relative_assets_under_the_base(catalog: CatalogBuilder)
     node = graph.nodes[PurePosixPath("sector-1/roads/collection.json")]
     reader = FilesystemHttpReader(graph)
     located = reader.locate(node, "./data.parquet")  # not on disk, as after a crawl
-    assert located is not None and located.is_remote
+    assert located is not None
+    assert located.is_remote
     assert located.source == f"{_BASE}sector-1/roads/data.parquet"
 
 
@@ -736,7 +742,8 @@ def test_reader_prefers_the_file_on_disk(catalog: CatalogBuilder) -> None:
     node = graph.nodes[PurePosixPath("sector-1/roads/collection.json")]
     (root / "sector-1" / "roads" / "data.parquet").write_bytes(b"PAR1")
     located = FilesystemHttpReader(graph).locate(node, "./data.parquet")
-    assert located is not None and not located.is_remote
+    assert located is not None
+    assert not located.is_remote
 
 
 def test_reader_without_a_base_keeps_a_missing_file_unfetchable(catalog: CatalogBuilder) -> None:
@@ -892,7 +899,9 @@ def test_default_fetcher_crawls_a_served_tree(
 
 def test_crawl_result_is_a_plain_record() -> None:
     result = Crawl(base=_BASE)
-    assert result.statuses == {} and result.errors == {} and not result.capped
+    assert result.statuses == {}
+    assert result.errors == {}
+    assert not result.capped
 
 
 def test_options_can_be_reused_without_resolving_the_callers_live_default(

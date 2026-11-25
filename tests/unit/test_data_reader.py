@@ -91,7 +91,8 @@ def test_http_stream_reads_whole_object(catalog: CatalogBuilder, https_server: H
     assert stream is not None
     assert b"".join(stream) == payload
     (seen,) = https_server.seen
-    assert seen.method == "GET" and seen.headers["user-agent"] == _AGENT
+    assert seen.method == "GET"
+    assert seen.headers["user-agent"] == _AGENT
 
 
 def test_http_stream_failure_is_an_os_error(
@@ -111,7 +112,8 @@ def test_range_file_seek_and_read(https_server: HttpsServer) -> None:
     https_server.routes["/x.bin"] = Route(body=payload)
 
     handle = _HttpRangeFile(https_server.url("x.bin"))
-    assert handle.seekable() and handle.readable()
+    assert handle.seekable()
+    assert handle.readable()
 
     handle.seek(-4, io.SEEK_END)
     assert handle.tell() == 252
@@ -166,6 +168,8 @@ def test_range_reads_send_a_named_user_agent_and_keep_range(https_server: HttpsS
     assert handle.read(4) == payload[8:12]
 
     head, ranged = https_server.seen
-    assert head.method == "HEAD" and head.headers["user-agent"] == _AGENT
-    assert ranged.method == "GET" and ranged.headers["user-agent"] == _AGENT
+    assert head.method == "HEAD"
+    assert head.headers["user-agent"] == _AGENT
+    assert ranged.method == "GET"
+    assert ranged.headers["user-agent"] == _AGENT
     assert ranged.headers["range"] == "bytes=8-11"

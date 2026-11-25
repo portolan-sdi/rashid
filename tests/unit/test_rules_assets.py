@@ -499,7 +499,7 @@ def test_asset_file_fields_for_self_reference(
         assert all(f.fix_hint for f in findings)
 
 
-@pytest.mark.parametrize("scheme,port", [("https", 443), ("http", 80)])
+@pytest.mark.parametrize(("scheme", "port"), [("https", 443), ("http", 80)])
 def test_self_reference_default_port(catalog: CatalogBuilder, scheme: str, port: int) -> None:
     url = f"{scheme}://example.org/roads/collection.json"
     catalog.collection(
@@ -511,7 +511,7 @@ def test_self_reference_default_port(catalog: CatalogBuilder, scheme: str, port:
 
 
 @pytest.mark.parametrize(
-    "encoded,plain,equal",
+    ("encoded", "plain", "equal"),
     [
         ("roads%2Fcollection.json", "roads/collection.json", False),
         ("roads%3Bv/collection.json", "roads;v/collection.json", True),
@@ -533,7 +533,7 @@ def test_self_reference_follows_transport_identity(
 
 
 @pytest.mark.parametrize(
-    "directory,encoded", [("sector 1", "sector%201"), ("東京", "%E6%9D%B1%E4%BA%AC")]
+    ("directory", "encoded"), [("sector 1", "sector%201"), ("東京", "%E6%9D%B1%E4%BA%AC")]
 )
 @pytest.mark.parametrize("prefix", ["catalog", "catalog%2Fv"])
 def test_published_self_reference_under_encoded_directory(
@@ -555,7 +555,7 @@ def test_published_self_reference_under_encoded_directory(
 
 @pytest.mark.parametrize("scope", ["asset", "collection", "item", "glob"])
 @pytest.mark.parametrize(
-    "columns,expected",
+    ("columns", "expected"),
     [
         ([{"name": "population", "type": "int64"}], Severity.ERROR),
         ([{"name": "geometry", "type": "binary"}], None),

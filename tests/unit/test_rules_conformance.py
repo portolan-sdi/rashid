@@ -179,11 +179,13 @@ def test_stale_extension_version_is_a_warning(catalog: CatalogBuilder) -> None:
     finding = findings[0]
     assert finding.severity is Severity.WARNING
     assert "Raster" in finding.message
-    assert "v1.1.0" in finding.message and "v2.0.0" in finding.message
+    assert "v1.1.0" in finding.message
+    assert "v2.0.0" in finding.message
     assert finding.json_pointer == "/stac_extensions/1"
     assert finding.actual == _STALE_RASTER
     assert finding.expected == _PINNED_RASTER
-    assert finding.fix_hint is not None and _PINNED_RASTER in finding.fix_hint
+    assert finding.fix_hint is not None
+    assert _PINNED_RASTER in finding.fix_hint
     assert report.passed  # a catalog behind the registry is still valid
 
 

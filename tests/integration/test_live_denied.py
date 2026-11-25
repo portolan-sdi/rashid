@@ -49,7 +49,8 @@ def test_denied_probes_are_inaccessible(
     https_server.routes["/private.bin"] = Route(status=status, body=b"denied", length=length)
     _report, findings = _check_parquet(catalog, https_server.url("private.bin"))
     warnings = [f for f in findings if f["severity"] != "info"]
-    assert warnings and {f["rule_id"] for f in findings} == {"PTL-LIV-000"}, findings
+    assert warnings, findings
+    assert {f["rule_id"] for f in findings} == {"PTL-LIV-000"}, findings
     assert all(f["severity"] == "warning" and str(status) in f["message"] for f in warnings)
 
 
@@ -99,6 +100,7 @@ def test_non_denied_head_failure_keeps_length_error(
     )
     _report, findings = _check_parquet(catalog, https_server.url("data.bin"))
     hosting = [f for f in findings if f["severity"] != "info"]
-    assert len(hosting) == 1 and hosting[0]["rule_id"] == "PTL-LIV-002", findings
+    assert len(hosting) == 1, findings
+    assert hosting[0]["rule_id"] == "PTL-LIV-002", findings
     assert hosting[0]["severity"] == "warning"
     assert {request.method for request in https_server.seen} == {"GET", "OPTIONS"}

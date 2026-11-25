@@ -34,7 +34,8 @@ def test_kind_detection(catalog: CatalogBuilder) -> None:
         "roads/collection.json": "collection",
         "roads/roads-2024/roads-2024.json": "item",
     }
-    assert graph.root is not None and graph.root.id == "root"
+    assert graph.root is not None
+    assert graph.root.id == "root"
 
 
 def test_non_stac_json_is_ignored(catalog: CatalogBuilder) -> None:

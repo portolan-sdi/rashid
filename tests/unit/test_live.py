@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.metadata import version
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, ClassVar
 from urllib.request import Request
 
 import pytest
@@ -275,7 +275,8 @@ def test_head_length_mismatching_declared_size_is_error(catalog: CatalogBuilder)
     findings = validate_live(graph, FakeProber(head_response=_good_head("1234")))
     assert LIV_HEAD_LENGTH in _ids(findings)
     finding = next(f for f in findings if f.rule_id == LIV_HEAD_LENGTH)
-    assert "999" in finding.message and "1234" in finding.message
+    assert "999" in finding.message
+    assert "1234" in finding.message
     # structured mirror of the prose, data-pass convention: expected is the
     # authoritative value (the served bytes), actual is what the object declares
     assert finding.expected == 1234
@@ -791,7 +792,8 @@ def test_link_findings_follow_sorted_url_order(catalog: CatalogBuilder) -> None:
     base, _named = resolve_live_base(_BASE, graph.base_url, graph.published_base())
     assert base is not None
     link_urls = [t.url for t in live_mod._link_targets(graph, base)]
-    assert link_urls == sorted(link_urls) and len(link_urls) > 2
+    assert link_urls == sorted(link_urls)
+    assert len(link_urls) > 2
     prober = StatusProber(dict.fromkeys(link_urls, 404))
 
     findings = validate_live(graph, prober, base_url=_BASE)
@@ -1136,7 +1138,7 @@ class _RecordedResponse:
     """The bare surface ``_request`` reads off an opened response."""
 
     status = 200
-    headers: dict[str, str] = {}
+    headers: ClassVar[dict[str, str]] = {}
 
     def __enter__(self) -> _RecordedResponse:
         return self
@@ -1252,7 +1254,7 @@ def test_default_head_does_not_ask_a_dead_host_twice(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(live_mod._store, "head_size", fail)
     monkeypatch.setattr(_store._probe_opener(), "open", _recorder(requests))
 
-    with pytest.raises(_store.StoreError) as raised:
+    with pytest.raises(_store.StoreError, match="error sending request") as raised:
         _DefaultProber().head(_URL)
     assert raised.value is dead
     assert requests == []
@@ -2099,7 +2101,8 @@ def test_a_preflight_needs_2xx_and_a_permitting_origin(
     if problem is None:
         assert preflights == []
     else:
-        assert len(preflights) == 1 and problem in preflights[0].message
+        assert len(preflights) == 1
+        assert problem in preflights[0].message
 
 
 def test_a_preflight_without_allow_origin_fails(catalog: CatalogBuilder) -> None:
@@ -2169,9 +2172,11 @@ def test_an_s3_href_without_an_https_alternate_is_listed_once(catalog: CatalogBu
     catalog.collection("roads", assets={"data": _s3_asset(None), "copy": _s3_asset(None)})
     findings = validate_live(CatalogGraph.load(catalog.write()), FakeProber())
     notes = [f for f in findings if f.severity is Severity.INFO]
-    assert len(notes) == 1 and notes[0].rule_id == LIV_UNAVAILABLE
+    assert len(notes) == 1
+    assert notes[0].rule_id == LIV_UNAVAILABLE
     assert "2 asset(s) not probed" in notes[0].message
-    assert "#/assets/data" in notes[0].message and "#/assets/copy" in notes[0].message
+    assert "#/assets/data" in notes[0].message
+    assert "#/assets/copy" in notes[0].message
 
 
 def test_the_unprobeable_list_is_capped(catalog: CatalogBuilder) -> None:
@@ -2256,7 +2261,8 @@ def test_a_relative_pmtiles_link_off_https_is_reported_once(catalog: CatalogBuil
     findings = validate_live(CatalogGraph.load(root), prober, base_url=_BASE)
     redirects = [f for f in findings if f.rule_id == LIV_OFF_HTTPS]
     assert len(redirects) == 1
-    assert redirects[0].json_pointer is not None and redirects[0].json_pointer.startswith("/links/")
+    assert redirects[0].json_pointer is not None
+    assert redirects[0].json_pointer.startswith("/links/")
 
 
 def test_an_alternate_off_the_publish_host_is_listed_as_not_probed(

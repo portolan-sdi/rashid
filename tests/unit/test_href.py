@@ -29,7 +29,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize(
-    "href,absolute,https,catalog",
+    ("href", "absolute", "https", "catalog"),
     [
         ("./file.json", False, False, False),
         ("/file.json", True, False, False),
@@ -47,7 +47,7 @@ def test_absolute_and_fetch_policies(href: str, absolute: bool, https: bool, cat
 
 
 @pytest.mark.parametrize(
-    "href,structural,crawled,live",
+    ("href", "structural", "crawled", "live"),
     [
         ("../catalog.json", "../catalog.json", "catalog.json", "https://h/cat/catalog.json"),
         ("https://h/cat/a", "a", "a", "https://h/cat/a"),
@@ -94,7 +94,7 @@ def test_graph_and_crawl_keep_their_path_policies() -> None:
 
 
 @pytest.mark.parametrize(
-    "explicit,crawled,claimed,expected",
+    ("explicit", "crawled", "claimed", "expected"),
     [
         (None, None, None, (None, False)),
         ("https://explicit", "https://crawl/", "https://self/", ("https://explicit/", True)),
@@ -233,7 +233,7 @@ def test_uri_reference_grammar_preserves_encoded_and_reserved_characters() -> No
 
 
 @pytest.mark.parametrize(
-    "left,right,equal",
+    ("left", "right", "equal"),
     [
         ("https://HOST:443/a", "https://host/a#fragment", True),
         ("http://host:80/a", "http://host/a", True),

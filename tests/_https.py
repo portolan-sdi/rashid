@@ -280,7 +280,8 @@ class ServedTree:
         return f"{self.base}/{path.lstrip('/')}"
 
     def _ask(self, command: str) -> dict[str, Any]:
-        assert self._child.stdin is not None and self._child.stdout is not None
+        assert self._child.stdin is not None
+        assert self._child.stdout is not None
         self._child.stdin.write(command + "\n")
         self._child.stdin.flush()
         reply: dict[str, Any] = json.loads(self._child.stdout.readline())

@@ -47,10 +47,8 @@ def _pointer_value(node: ast.AST) -> ast.expr | None:
     if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         if any(
-            isinstance(target, ast.Name)
-            and target.id in {"json_pointer", "pointer"}
-            or isinstance(target, ast.Attribute)
-            and target.attr in {"json_pointer", "pointer"}
+            (isinstance(target, ast.Name) and target.id in {"json_pointer", "pointer"})
+            or (isinstance(target, ast.Attribute) and target.attr in {"json_pointer", "pointer"})
             for target in targets
         ) and _is_builder(node.value):
             return node.value

@@ -163,7 +163,8 @@ def test_wrong_size_flags_dat_002(catalog_root: Path) -> None:
     # expected carries the true byte count, actual the declared value: enough
     # for a caller to repair the metadata without re-reading the asset.
     assert finding.actual == 7
-    assert isinstance(finding.expected, int) and finding.expected != 7
+    assert isinstance(finding.expected, int)
+    assert finding.expected != 7
 
 
 def test_wrong_media_type_flags_dat_003(catalog_root: Path) -> None:
