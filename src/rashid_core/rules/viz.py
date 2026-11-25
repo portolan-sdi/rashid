@@ -335,7 +335,7 @@ class DefaultStyleRoleRule(Rule):
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
         styles = [(key, asset) for _p, key, asset in assets_of(node) if "style" in roles_of(asset)]
-        if len(styles) < 2:
+        if len(styles) <= 1:
             return
         marked = sorted(key for key, asset in styles if "default" in roles_of(asset))
         if len(marked) == 1:

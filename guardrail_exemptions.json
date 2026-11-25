@@ -14,13 +14,17 @@
     },
     "tests/**": {
       "ARG002": "#264: test doubles preserve the uniform check(node, graph) and protocol signatures.",
-      "ARG005": "Test callbacks retain the signatures of the production callbacks they replace."
+      "ARG005": "Test callbacks retain the signatures of the production callbacks they replace.",
+      "PLR2004": "Expected values in test assertions read best as literals."
     },
     "src/rashid_core/rules/*.py": {
       "ARG002": "#264: rules preserve the uniform check(node, graph) signature even when a rule does not need graph."
     },
     "src/rashid_core/_package.py": {
       "TID251": "Owns package schema resources and lazy installed-version lookup (#336)."
+    },
+    "scripts/**": {
+      "PLR2004": "Developer scripts compare against literal exit codes, sizes, and thresholds."
     }
   },
   "import-linter": {},

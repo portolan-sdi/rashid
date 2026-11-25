@@ -250,7 +250,8 @@ def test_proj_two_groups_above_the_array_does_not_reach_it(catalog: CatalogBuild
 
 def test_a_wide_store_without_a_pyramid_is_reported(catalog: CatalogBuilder) -> None:
     message = zarr_findings(write_store(catalog, "no-pyramid"))[ZAR_PYRAMID]
-    assert "16 chunks" in message and "declares no multiscale pyramid" in message
+    assert "16 chunks" in message
+    assert "declares no multiscale pyramid" in message
 
 
 def test_a_pyramid_whose_coarsest_level_is_too_wide_is_reported(

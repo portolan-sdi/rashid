@@ -53,15 +53,15 @@ from rashid_core.report import Report
 from rashid_core.runner import ValidationOptions
 
 __all__ = [
+    "SHA2_256",
+    "SPDX_LICENSE_IDS",
+    "STRUCTURAL_RELS",
     "CatalogGraph",
     "ExpectedLink",
     "LocalOnlyReader",
     "Node",
     "Report",
     "RulesConfig",
-    "SHA2_256",
-    "SPDX_LICENSE_IDS",
-    "STRUCTURAL_RELS",
     "Severity",
     "ValidationOptions",
     "bundled_profile_versions",
@@ -78,7 +78,7 @@ __all__ = [
     "parse_rfc3339",
     "profile_uri",
     "profile_version",
+    "profile_version_key",
     "roles_of",
     "spec_commit",
-    "profile_version_key",
 ]

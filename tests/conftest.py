@@ -558,8 +558,8 @@ def rule_ids(report: Report) -> set[str]:
 def resolve_pointer(document: Any, pointer: str) -> Any:
     """The value an RFC 6901 pointer names; raises KeyError or IndexError when none."""
     target = document
-    for token in pointer.split("/")[1:]:
-        token = token.replace("~1", "/").replace("~0", "~")
+    for raw in pointer.split("/")[1:]:
+        token = raw.replace("~1", "/").replace("~0", "~")
         target = target[int(token)] if isinstance(target, list) else target[token]
     return target
 

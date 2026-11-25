@@ -37,9 +37,8 @@ from pathlib import Path
 
 import pytest
 
-import rashid_core.registry as registry
 import tests.unit.test_may_permissions as may_permissions
-from rashid_core import ids
+from rashid_core import ids, registry
 from rashid_core.model import Severity
 from rashid_core.registry import CHECKS
 

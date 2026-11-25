@@ -338,7 +338,7 @@ def _glob_note(severity: Severity, message: str) -> DataDefect:
 
 def _partition_schema_defects(schemas: list[tuple[str, dict[str, str]]]) -> list[DataDefect]:
     """Every listed partition MUST share the first readable file's schema."""
-    if len(schemas) < 2:
+    if len(schemas) <= 1:
         return []  # nothing to compare
     reference_name, reference = schemas[0]
     defects: list[DataDefect] = []
@@ -387,7 +387,7 @@ def _schema_difference(reference: dict[str, str], other: dict[str, str]) -> str 
         if extra:
             parts.append(f"extra column(s) {extra}")
         return ", ".join(parts)
-    for name in reference:
-        if reference[name] != other[name]:
-            return f"column '{name}' is {other[name]}, expected {reference[name]}"
+    for name, expected in reference.items():
+        if expected != other[name]:
+            return f"column '{name}' is {other[name]}, expected {expected}"
     return None

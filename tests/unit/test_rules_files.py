@@ -247,7 +247,7 @@ def test_readme_link_on_collection(catalog: CatalogBuilder) -> None:
 def _readme(root: Path, *parts: str) -> Path:
     path = root
     for part in parts:
-        path = path / part
+        path /= part
     return path / "README.md"
 
 

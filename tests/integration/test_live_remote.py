@@ -51,7 +51,9 @@ def test_prober_reads_range_and_head() -> None:
 
     headed = _probe(prober.head, _URL)
     length = headed.header("content-length")
-    assert length is not None and length.isdigit() and int(length) > 0
+    assert length is not None
+    assert length.isdigit()
+    assert int(length) > 0
 
 
 def test_prober_survives_a_preflight() -> None:

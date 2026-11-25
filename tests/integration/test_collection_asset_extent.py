@@ -27,7 +27,8 @@ def test_collection_extent_contains_partial_assets(tmp_path: Path) -> None:
     assert not _findings(tmp_path, "PTL-DAT-005")
     assets.write_geoparquet(paths[1], points=[(5.0, 51.0), (7.0, 53.0)])
     findings = _findings(tmp_path, "PTL-DAT-005")
-    assert len(findings) == 1 and findings[0]["json_pointer"] == "/extent/spatial/bbox/0"
+    assert len(findings) == 1
+    assert findings[0]["json_pointer"] == "/extent/spatial/bbox/0"
 
     cat = CatalogBuilder(tmp_path / "items")
     cat.collection("layers", assets={}).item(
@@ -39,7 +40,8 @@ def test_collection_extent_contains_partial_assets(tmp_path: Path) -> None:
         tmp_path / "items/layers/part/part.parquet", points=[(4.0, 50.0), (5.0, 51.0)]
     )
     findings = _findings(tmp_path / "items", "PTL-DAT-005")
-    assert len(findings) == 1 and "does not match" in findings[0]["message"]
+    assert len(findings) == 1
+    assert "does not match" in findings[0]["message"]
 
 
 def test_collection_extent_can_exclude_a_raster_nodata_collar(tmp_path: Path) -> None:
@@ -83,7 +85,8 @@ def test_collection_extent_matches_the_asset_union(
         assets.write_geoparquet(directory / name, points=[(box[0], box[1]), (box[2], box[3])])
     _declare(directory, names)
     findings = _findings(tmp_path, "PTL-DAT-005")
-    assert len(findings) == 1 and findings[0]["severity"] == "warning"
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "warning"
     metadata = directory / "collection.json"
     document = json.loads(metadata.read_text())
     document["extent"]["spatial"]["bbox"] = [[4.005, 50, boxes[-1][2], boxes[-1][3]]]

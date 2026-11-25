@@ -77,7 +77,7 @@ class Fetched:
 
     @property
     def ok(self) -> bool:
-        return 200 <= self.status < 300
+        return _store.is_success(self.status)
 
 
 class Fetcher(Protocol):

@@ -119,7 +119,7 @@ def test_encoded_local_self_reference_keeps_the_file_field_exemption(
 
 
 @pytest.mark.parametrize(
-    "href,self_reference",
+    ("href", "self_reference"),
     [("%2e/../a.json", False), ("%2e/../a/a.json", True)],
 )
 def test_encoded_dot_self_identity_matches_local_file_access(

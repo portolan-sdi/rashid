@@ -112,5 +112,6 @@ def test_a_catalog_with_nan_still_loads(tmp_path: Path) -> None:
     graph = CatalogGraph.load(tmp_path)
 
     (node,) = graph.nodes.values()
-    assert node.parse_error is None and node.kind == "catalog"
+    assert node.parse_error is None
+    assert node.kind == "catalog"
     assert math.isnan(node.data["x"])

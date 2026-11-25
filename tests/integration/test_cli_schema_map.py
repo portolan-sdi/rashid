@@ -129,7 +129,7 @@ def test_malformed_schema_map_is_a_usage_error(catalog: CatalogBuilder, value: s
 
 
 @pytest.mark.parametrize(
-    "contents, message",
+    ("contents", "message"),
     [
         (None, "cannot read schema file"),
         ("{bad", "invalid JSON"),

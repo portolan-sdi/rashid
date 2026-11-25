@@ -33,7 +33,7 @@ def test_get_returns_the_body_and_sends_the_named_agent(https_server: HttpsServe
 def test_get_reports_the_status(https_server: HttpsServer, status: int) -> None:
     https_server.routes["/x.json"] = Route(status=status)
 
-    with pytest.raises(_store.StoreError) as raised:
+    with pytest.raises(_store.StoreError, match=rf"returned {status}") as raised:
         _store.get(https_server.url("x.json"))
     assert raised.value.status == status
     assert f"returned {status}" in str(raised.value)
@@ -44,12 +44,14 @@ def test_a_failure_is_an_os_error(https_server: HttpsServer) -> None:
         _store.get(https_server.url("missing.json"))
 
 
-def test_get_without_a_server_has_no_status() -> None:
+# obstore serves a plain path; a query string sends the request through urllib.
+@pytest.mark.parametrize("query", ["", "?v=1"])
+def test_get_without_a_server_has_no_status(query: str) -> None:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    with pytest.raises(_store.StoreError) as raised:
-        _store.get(f"https://127.0.0.1:{port}/catalog.json")
+    with pytest.raises(_store.StoreError, match="GET https://127") as raised:
+        _store.get(f"https://127.0.0.1:{port}/catalog.json{query}")
     assert raised.value.status is None
     assert not raised.value.refused
 
@@ -74,7 +76,7 @@ def test_get_refuses_a_redirect_to_http(https_server: HttpsServer) -> None:
         status=302, headers={"Location": "http://127.0.0.1:9/new.json"}
     )
 
-    with pytest.raises(_store.StoreError) as raised:
+    with pytest.raises(_store.StoreError, match="redirect") as raised:
         _store.get(https_server.url("old.json"))
     assert raised.value.status is None
     assert raised.value.refused
@@ -126,7 +128,7 @@ def test_urllib_keeps_the_body_cap(https_server: HttpsServer) -> None:
 def test_a_head_without_content_length_is_refused(https_server: HttpsServer) -> None:
     https_server.routes["/x.bin"] = Route(body=b"abc", length=False)
 
-    with pytest.raises(_store.StoreError) as raised:
+    with pytest.raises(_store.StoreError, match="Content-Length") as raised:
         _store.head_size(https_server.url("x.bin"))
     assert raised.value.refused
     assert raised.value.status is None
@@ -148,7 +150,7 @@ def test_a_semicolon_stays_in_the_path(https_server: HttpsServer) -> None:
 
 
 @pytest.mark.parametrize(
-    "left,right,left_request,right_request",
+    ("left", "right", "left_request", "right_request"),
     [
         ("/a%3Bv.json", "/a;v.json", "/a;v.json", "/a;v.json"),
         ("/a%2Fv.json", "/a/v.json", "/a%2Fv.json", "/a/v.json"),
@@ -203,7 +205,7 @@ def test_urls_obstore_cannot_request_go_over_urllib_as_written(
 
 
 def test_urllib_reports_the_status(https_server: HttpsServer) -> None:
-    with pytest.raises(_store.StoreError) as raised:
+    with pytest.raises(_store.StoreError, match="returned 404") as raised:
         _store.get(https_server.url("missing.json?v=1"))
     assert raised.value.status == 404
     assert "returned 404" in str(raised.value)
@@ -220,7 +222,7 @@ def test_urllib_refuses_a_redirect_to_http(https_server: HttpsServer) -> None:
         status=302, headers={"Location": "http://127.0.0.1:9/new.json"}
     )
 
-    with pytest.raises(_store.StoreError) as raised:
+    with pytest.raises(_store.StoreError, match="redirect") as raised:
         _store.get(https_server.url("old.json?v=1"))
     assert raised.value.refused
     assert len(https_server.seen) == 1
@@ -235,7 +237,7 @@ def test_head_size_reads_content_length(https_server: HttpsServer) -> None:
 
 
 def test_head_size_reports_the_status(https_server: HttpsServer) -> None:
-    with pytest.raises(_store.StoreError) as raised:
+    with pytest.raises(_store.StoreError, match="returned 404") as raised:
         _store.head_size(https_server.url("missing.bin"))
     assert raised.value.status == 404
 
@@ -290,7 +292,7 @@ def test_a_stalled_download_fails(
     _store.reset()
     https_server.routes["/x.bin"] = Route(body=b"xx", delay=3)
 
-    with pytest.raises(_store.StoreError) as raised:
+    with pytest.raises(_store.StoreError, match="GET https://") as raised:
         b"".join(_store.stream(https_server.url("x.bin"), 1))
     assert raised.value.status is None
     assert not raised.value.refused
@@ -340,18 +342,8 @@ def test_urllib_follows_a_redirect_to_https(https_server: HttpsServer) -> None:
     assert _store.get(https_server.url("old.json?v=1")) == b"{}"
 
 
-def test_urllib_without_a_server_has_no_status() -> None:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    with pytest.raises(_store.StoreError) as raised:
-        _store.get(f"https://127.0.0.1:{port}/catalog.json?v=1")
-    assert raised.value.status is None
-    assert not raised.value.refused
-
-
 def test_get_range_reports_the_status(https_server: HttpsServer) -> None:
-    with pytest.raises(_store.StoreError) as raised:
+    with pytest.raises(_store.StoreError, match="returned 404") as raised:
         _store.get_range(https_server.url("missing.bin"), 0, 4)
     assert raised.value.status == 404
 
@@ -372,14 +364,14 @@ def test_both_transports_give_up_after_the_retries(
     _store.reset()
     https_server.routes[path] = Route(body=b"{}", fail_first=10)
 
-    with pytest.raises(_store.StoreError) as raised:
+    with pytest.raises(_store.StoreError, match="returned 503") as raised:
         _store.get(https_server.base + path)
     assert raised.value.status == 503
     assert len(https_server.seen) == 3
 
 
 def test_urllib_does_not_retry_a_4xx(https_server: HttpsServer) -> None:
-    with pytest.raises(_store.StoreError):
+    with pytest.raises(_store.StoreError, match="returned 404"):
         _store.get(https_server.url("missing.json?v=1"))
     assert len(https_server.seen) == 1
 
@@ -396,9 +388,9 @@ def test_urllib_retries_a_failed_connection(monkeypatch: pytest.MonkeyPatch) -> 
             calls.append(request.full_url)
             return real().open(request, timeout=timeout)
 
-    monkeypatch.setattr(_store, "_opener", lambda: Counting())
+    monkeypatch.setattr(_store, "_opener", Counting)
 
-    with pytest.raises(_store.StoreError) as raised:
+    with pytest.raises(_store.StoreError, match="GET https://127") as raised:
         _store.get(f"https://127.0.0.1:{port}/x.json?v=1")
     assert raised.value.status is None
     assert len(calls) == 1 + _store._RETRY["max_retries"]

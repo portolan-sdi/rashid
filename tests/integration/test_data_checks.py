@@ -25,13 +25,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pyproj import CRS, Transformer
 
-import rashid_core.data.formats.checks as checks
 from rashid_core import _trace
 from rashid_core._stac import is_source_asset
 from rashid_core.catalog import Node
 from rashid_core.data import storage
 from rashid_core.data._results import DataDefect, DataResults
-from rashid_core.data.formats import geoparquet, mirror, raster, spatial
+from rashid_core.data.formats import checks, geoparquet, mirror, raster, spatial
 from rashid_core.data.formats._files import AssetFiles
 from rashid_core.data.reader import Locator
 from rashid_core.ids import DAT_CHECKSUM, DAT_COG, DAT_CONSISTENCY, DAT_FORMAT, DAT_SIZE
@@ -124,7 +123,8 @@ def test_format_mismatch_is_error() -> None:
     asset = _asset(type="application/vnd.pmtiles", **{"file:size": len(payload)})
     defects = _run(payload, asset)
     assert [d.rule_id for d in defects] == [DAT_FORMAT]
-    assert "pmtiles" in defects[0].message and "parquet" in defects[0].message
+    assert "pmtiles" in defects[0].message
+    assert "parquet" in defects[0].message
 
 
 def test_unsupported_hash_is_info_not_error() -> None:
@@ -346,7 +346,7 @@ def test_bbox_within_tolerance() -> None:
 
 
 @pytest.mark.parametrize(
-    "head,expected",
+    ("head", "expected"),
     [
         (b"\x89PNG\r\n\x1a\n", "png"),
         (b"\xff\xd8\xff\xe0", "jpeg"),
@@ -359,7 +359,7 @@ def test_detect_format_variants(head: bytes, expected: str | None) -> None:
 
 
 @pytest.mark.parametrize(
-    "media,expected",
+    ("media", "expected"),
     [
         ("image/png", "png"),
         ("image/jpeg", "jpeg"),
@@ -373,7 +373,7 @@ def test_expected_format_variants(media: str, expected: str | None) -> None:
 
 
 @pytest.mark.parametrize(
-    "raw,out",
+    ("raw", "out"),
     [
         ([1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0]),
         ([1.0, 2.0, 9.0, 3.0, 4.0, 9.0], [1.0, 2.0, 3.0, 4.0]),  # drop z
@@ -808,7 +808,7 @@ def test_spatial_ordering_zero_extent_is_not_judged() -> None:
 
 
 @pytest.mark.parametrize(
-    "roles,expected",
+    ("roles", "expected"),
     [
         (["data"], False),
         (["source"], True),
@@ -932,7 +932,7 @@ def test_unusable_covering_declaration_yields_no_bbox_column(geo: dict[str, obje
 
 
 @pytest.mark.parametrize(
-    "row,expected",
+    ("row", "expected"),
     [
         ({"xmin": 4, "ymin": 50, "xmax": 6, "ymax": 52}, [4.0, 50.0, 6.0, 52.0]),
         ({"xmin": 4, "ymin": 50, "xmax": 6, "ymax": None}, None),
@@ -954,7 +954,8 @@ def test_mirror_rows_read_a_file_with_no_geo_metadata(tmp_path: Path) -> None:
     assert rows is not None
     assert rows.ids == ["a"]
     assert rows.geometry == [_wkb_point(5.0, 51.0)]
-    assert rows.datetimes is None and rows.bboxes is None
+    assert rows.datetimes is None
+    assert rows.bboxes is None
 
 
 def test_unreadable_mirror_columns_yield_no_rows() -> None:
@@ -962,7 +963,7 @@ def test_unreadable_mirror_columns_yield_no_rows() -> None:
 
 
 @pytest.mark.parametrize(
-    "geometry,blob",
+    ("geometry", "blob"),
     [
         ({"type": "Point", "coordinates": [5.0, 51.0]}, _wkb_point(5.0, 51.0)),
         (  # big-endian
@@ -1027,7 +1028,7 @@ def test_unreadable_wkb_leaves_the_row_alone(blob: bytes) -> None:
 
 
 @pytest.mark.parametrize(
-    "geometry,expected",
+    ("geometry", "expected"),
     [
         ({"type": "Point", "coordinates": [5.0, 51.0]}, "Point"),
         ({"type": "Polygon", "coordinates": [_SQUARE_JSON]}, "Polygon"),
@@ -1068,7 +1069,7 @@ def test_geometry_agreement_holds_within_the_tolerance() -> None:
 
 
 @pytest.mark.parametrize(
-    "blob,expected",
+    ("blob", "expected"),
     [
         (None, False),  # a null row geometry against an item that has one
         (b"\x01\x2a\x00\x00\x00", True),  # an encoding this reader cannot decode
@@ -1107,7 +1108,7 @@ def test_geometry_agreement_reads_structure_not_only_vertices() -> None:
 
 
 @pytest.mark.parametrize(
-    "value,expected",
+    ("value", "expected"),
     [
         ("2024-01-01T00:00:00Z", datetime(2024, 1, 1, tzinfo=UTC)),
         ("2024-01-01t00:00:00z", datetime(2024, 1, 1, tzinfo=UTC)),

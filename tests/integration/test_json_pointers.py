@@ -15,7 +15,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize(
-    "rule, field", [("PTL-AST-003", "file:checksum"), ("PTL-DAT-002", "file:size")]
+    ("rule", "field"), [("PTL-AST-003", "file:checksum"), ("PTL-DAT-002", "file:size")]
 )
 def test_cli_asset_key_pointer(catalog: CatalogBuilder, rule: str, field: str) -> None:
     catalog.collection(
@@ -38,7 +38,7 @@ def test_cli_asset_key_pointer(catalog: CatalogBuilder, rule: str, field: str) -
     assert finding["json_pointer"] == f"/assets/a~1b~0c/{field}"
 
 
-@pytest.mark.parametrize("key, escaped", [("a/b~c", "a~1b~0c"), ("~1", "~01")])
+@pytest.mark.parametrize(("key", "escaped"), [("a/b~c", "a~1b~0c"), ("~1", "~01")])
 def test_cli_property_key_pointer(
     catalog: CatalogBuilder, https_server: HttpsServer, key: str, escaped: str
 ) -> None:

@@ -45,6 +45,9 @@ _MAX_ROW_GROUP_ROWS = 150_000
 # expectation, not a sample: the closed form is O(n^2), reads the footer only
 # and has no seed, so another implementation reaches the same number.
 _QUERY_FRACTION = 0.10
+_CORNERS = ("xmin", "ymin", "xmax", "ymax")
+# A row covering path is [struct column, corner field]: the one struct level the spec uses.
+_ROW_PATH_DEPTH = 2
 # The windows a verdict's message reports the read share for. The reporting
 # rules of spatial-order.md name the absolute cost at the query window and add
 # the 1% and 25% windows beside it.
@@ -400,14 +403,14 @@ def bbox_struct(
     bbox = covering.get("bbox") if isinstance(covering, dict) else None
     if not isinstance(bbox, dict):
         return None
-    paths: list[Any] = [bbox.get(corner) for corner in ("xmin", "ymin", "xmax", "ymax")]
+    paths: list[Any] = [bbox.get(corner) for corner in _CORNERS]
     if policy == "statistics":
         try:
             names = [".".join(path) for path in paths]
         except TypeError:
             return None
         return "", names
-    if not all(isinstance(path, list) and len(path) == 2 for path in paths):
+    if not all(isinstance(path, list) and len(path) == _ROW_PATH_DEPTH for path in paths):
         return None
     roots = {str(path[0]) for path in paths}
     if len(roots) == 1 and (root := roots.pop()) in parquet.schema_arrow.names:
@@ -422,7 +425,7 @@ def bbox_column_values(table: Any, bbox: tuple[str, list[str]]) -> list[Any]:
     for row in table.column(root).to_pylist():
         corners = [row.get(field) for field in fields] if isinstance(row, dict) else []
         numeric = [float(corner) for corner in corners if isinstance(corner, (int, float))]
-        values.append(numeric if len(numeric) == 4 else None)
+        values.append(numeric if len(numeric) == len(_CORNERS) else None)
     return values
 
 
@@ -687,7 +690,7 @@ def _covering_leaf_indices(parquet: Any, geo: dict[str, Any]) -> dict[str, int] 
     paths = covering[1]
     if not all(path in index for path in paths):
         return None
-    return dict(zip(("xmin", "ymin", "xmax", "ymax"), (index[path] for path in paths), strict=True))
+    return dict(zip(_CORNERS, (index[path] for path in paths), strict=True))
 
 
 def _covering_bboxes(parquet: Any, geo: dict[str, Any]) -> _Boxes | None:
@@ -1005,8 +1008,8 @@ def _covering_row_bboxes(
     columns. None when the leaves sit deeper than the single struct level the
     spec uses, or cannot be read."""
     covering = geo["columns"][geo.get("primary_column")]["covering"]["bbox"]
-    paths = [covering.get(corner) for corner in ("xmin", "ymin", "xmax", "ymax")]
-    if not all(isinstance(p, list) and len(p) == 2 for p in paths):
+    paths = [covering.get(corner) for corner in _CORNERS]
+    if not all(isinstance(p, list) and len(p) == _ROW_PATH_DEPTH for p in paths):
         return None
     if len({p[0] for p in paths}) != 1:
         return None

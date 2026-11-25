@@ -50,7 +50,8 @@ def test_an_s3_href_is_read_through_its_https_alternate(
     https_server.routes["/roads.parquet"] = Route(body=body)
     findings = _check(tmp_path)
     sizes = [f for f in findings if f["rule_id"] == "PTL-DAT-002"]
-    assert len(sizes) == 1 and str(len(body)) in sizes[0]["message"], findings
+    assert len(sizes) == 1, findings
+    assert str(len(body)) in sizes[0]["message"], findings
     assert not any(f["rule_id"] == "PTL-DAT-000" for f in findings)
     assert {r.path for r in https_server.seen} == {"/roads.parquet"}
     graph = CatalogGraph.load(tmp_path)
@@ -63,7 +64,8 @@ def test_an_s3_href_without_an_alternate_is_listed_once(tmp_path: Path) -> None:
     _s3_catalog(tmp_path, None, **{"table:columns": columns})
     findings = _check(tmp_path)
     notes = [f for f in findings if f["rule_id"] == "PTL-DAT-000"]
-    assert len(notes) == 1 and notes[0]["severity"] == "info", findings
+    assert len(notes) == 1, findings
+    assert notes[0]["severity"] == "info", findings
     assert "layers/collection.json#/assets/roads.parquet" in notes[0]["message"]
     # The column check reads no bytes, so it still runs on the unreachable asset.
     assert [f["rule_id"] for f in findings if f["severity"] == "warning"] == ["PTL-DAT-020"]

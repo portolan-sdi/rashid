@@ -61,6 +61,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import cache
+from http import HTTPStatus
 from itertools import chain
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError
@@ -79,6 +80,7 @@ log = logging.getLogger(__name__)
 
 # Longest wait for the next bytes of a response, in either transport.
 _IDLE = timedelta(seconds=30)
+
 
 # obstore's errors name the status as "status code: 404 Not Found".
 _STATUS = re.compile(r"status code: (\d{3})\b")
@@ -103,6 +105,11 @@ _BACKOFF = 0.1  # seconds
 
 # Held while obstore loads. See the module docstring.
 _IMPORT_LOCK = threading.Lock()
+
+
+def is_success(status: int) -> bool:
+    """Whether an HTTP status is 2xx."""
+    return HTTPStatus.OK <= status < HTTPStatus.MULTIPLE_CHOICES
 
 
 class StoreError(OSError):
@@ -318,7 +325,7 @@ def _send(url: str, method: str, headers: dict[str, str] | None) -> Any:
         except HTTPError as exc:
             exc.close()
             error = StoreError(f"{method} {url} returned {exc.code}", exc.code)
-            retry, cause = exc.code >= 500, exc
+            retry, cause = exc.code >= HTTPStatus.INTERNAL_SERVER_ERROR, exc
         except StoreError:
             raise
         except Exception as exc:  # urllib raises many types; the message is what matters
@@ -449,7 +456,7 @@ def get_range(url: str, start: int, end: int) -> bytes:
         with _urlopen(url, "GET", {"Range": f"bytes={start}-{end - 1}"}) as response:
             data: bytes = response.read()
             status = response.status
-        return data[start:end] if status == 200 else data
+        return data[start:end] if status == HTTPStatus.OK else data
 
 
 def stream(url: str, chunk_size: int) -> Iterator[bytes]:

@@ -92,7 +92,7 @@ def test_validator_failure_is_a_single_warning(catalog: CatalogBuilder) -> None:
 def test_missing_package_is_a_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid_core.schema as schema
+    from rashid_core import schema
 
     def raise_import(uri: str, allow_network: bool = False) -> None:  # noqa: ARG001 - replacement schema factory accepts URI and allow_network by keyword
         raise ImportError("No module named 'jsonschema'")
@@ -107,7 +107,7 @@ def test_missing_package_is_a_warning(
 def test_schema_fetch_failure_is_a_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid_core.schema as schema
+    from rashid_core import schema
 
     def raise_fetch(uri: str, allow_network: bool = False) -> None:  # noqa: ARG001 - replacement schema factory accepts URI and allow_network by keyword
         raise OSError("connection refused")
@@ -122,7 +122,7 @@ def test_schema_fetch_failure_is_a_warning(
 def test_default_validator_used_when_none(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import rashid_core.schema as schema
+    from rashid_core import schema
 
     monkeypatch.setattr(
         schema, "default_validator", lambda uri, allow_network=False: lambda data: []

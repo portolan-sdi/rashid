@@ -79,8 +79,7 @@ class VersionChainRule(Rule):
             for index, rel, href in _version_links(node):
                 pointer = json_pointer("links", index, "href")
                 if rel == "latest-version":
-                    latest += 1
-                    if latest == 2:
+                    if latest == 1:
                         findings.append(
                             self.finding(
                                 node,
@@ -88,6 +87,7 @@ class VersionChainRule(Rule):
                                 json_pointer=json_pointer("links"),
                             )
                         )
+                    latest += 1
                 if rel == "version-history":
                     findings.extend(self._history_link(node, index, href, graph))
                     continue

@@ -30,7 +30,7 @@ class IgnoreFileError(ValueError):
 def active_ignores(path: Path, today: datetime.date) -> list[str]:
     """Return non-expired vulnerability IDs from the ignore file."""
     ids: list[str] = []
-    for lineno, raw in enumerate(path.read_text().splitlines(), start=1):
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue

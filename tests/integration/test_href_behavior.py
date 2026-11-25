@@ -30,7 +30,7 @@ def _check(root: Path | str, *flags: str) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    "case,rule_id",
+    ("case", "rule_id"),
     [
         ("single", "PTL-COL-001"),
         ("raster", "PTL-COL-004"),
@@ -289,7 +289,7 @@ def test_fragment_aliases_do_not_consume_the_crawl_document_budget(
 
 
 @pytest.mark.parametrize(
-    "href,wire_path",
+    ("href", "wire_path"),
     [
         ("./a.parquet?token=x", "/roads/a.parquet?token=x"),
         ("./a.parquet?token=x#f", "/roads/a.parquet?token=x"),

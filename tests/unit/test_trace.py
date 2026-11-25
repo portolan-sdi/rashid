@@ -401,7 +401,7 @@ def test_trace_to_keeps_mem_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     _trace.enable("mem")
     try:
         _trace.trace_to(str(tmp_path / "t.json"))
-        assert _trace._mode == "mem"
+        assert _trace._State.mode == "mem"
     finally:
         _trace.enable(None)
 
@@ -531,7 +531,7 @@ def test_debug_captures_warnings_and_teardown_releases_them(
 ) -> None:
     calls: list[bool] = []
     monkeypatch.setattr(logging, "captureWarnings", calls.append)
-    monkeypatch.setattr(_trace, "_captured_warnings", False)
+    monkeypatch.setattr(_trace._State, "captured_warnings", False)
     _trace.configure_logging("info")
     assert calls == []
     _trace.configure_logging("debug")
@@ -591,7 +591,7 @@ def test_env_false_timings_leave_spans_off(value: str) -> None:
 def test_env_timings_turn_spans_on(value: str, mode: str) -> None:
     try:
         _trace.configure_from_env({"RASHID_TIMINGS": value})
-        assert _trace._mode == mode
+        assert _trace._State.mode == mode
     finally:
         _trace.enable(None)
 
