@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
@@ -31,7 +32,9 @@ def test_rebuild_structural_links(catalog: CatalogBuilder, tmp_path: Path, tree:
     elif tree == "languages":
         root = write_language_trees(catalog)
     else:
-        for directory in ("my roads", "my %20 roads", "東京", "a:b"):
+        # Windows does not allow a colon in a directory name.
+        colon = () if sys.platform == "win32" else ("a:b",)
+        for directory in ("my roads", "my %20 roads", "東京", *colon):
             catalog.collection(directory).item("été 2024")
         root = catalog.write()
         # Start with valid URI references so the baseline cannot hide encoding failures.
