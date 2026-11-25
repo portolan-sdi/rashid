@@ -93,3 +93,29 @@ def test_square_cog_rounded_overview_factors(tmp_path: Path) -> None:
     with rasterio.open(path) as src:
         assert src.overviews(1) == [2, 4, 8, 16, 31]
     assert not _findings(tmp_path, "PTL-DAT-011")
+
+
+def test_gdal_cog_overviews_rounding_down_pass(tmp_path: Path) -> None:
+    """#327: GDAL's COG driver writes 4000x1001 levels as 2000x500 ... 250x62."""
+    import numpy as np
+    from rasterio.transform import from_bounds
+
+    directory = _catalog(tmp_path)
+    path = directory / "odd.tif"
+    with rasterio.open(
+        path,
+        "w",
+        driver="COG",
+        width=4000,
+        height=1001,
+        count=1,
+        dtype="uint8",
+        blocksize=256,
+        crs="EPSG:4326",
+        transform=from_bounds(*assets.BBOX, 4000, 1001),
+    ) as dst:
+        dst.write(np.ones((1, 1001, 4000), "uint8"))
+    _declare(directory, [path.name])
+    with rasterio.open(path, overview_level=3) as overview:
+        assert (overview.height, overview.width) == (62, 250)
+    assert not _findings(tmp_path, "PTL-DAT-011")
