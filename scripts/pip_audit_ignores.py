@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Emit pip-audit --ignore-vuln args from the .pip-audit-ignores file.
 
-Single source of truth for pip-audit ignores, consumed by both the tests.yml
-security job and the security-audit.yml workflow:
+Single source of truth for pip-audit ignores, consumed by both the security
+job in the shared reusable-python-ci.yml and the security-audit.yml workflow:
 
     uv run pip-audit $(uv run python scripts/pip_audit_ignores.py)
 
