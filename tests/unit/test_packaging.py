@@ -10,19 +10,19 @@ pytestmark = pytest.mark.unit
 
 
 def test_py_typed_marker_is_present() -> None:
-    marker = resources.files("rashid").joinpath("py.typed")
+    marker = resources.files("rashid_core").joinpath("py.typed")
     assert marker.is_file()
 
 
 def test_bundled_extension_registry_is_present() -> None:
     """PTL-CNF-004 reads the vendored registry at runtime, so it must ship."""
-    registry = resources.files("rashid").joinpath("_schemas/extension-registry.json")
+    registry = resources.files("rashid_core").joinpath("_schemas/extension-registry.json")
     assert registry.is_file()
 
 
 def test_bundled_profile_schema_is_present() -> None:
-    root = resources.files("rashid").joinpath("_schemas/portolan")
+    root = resources.files("rashid_core").joinpath("_schemas/portolan")
     versions = [entry.name for entry in root.iterdir() if entry.name.startswith("v")]
-    assert versions, "no bundled profile schema under rashid/_schemas/portolan"
+    assert versions, "no bundled profile schema under rashid_core/_schemas/portolan"
     for version in versions:
         assert root.joinpath(version, "schema.json").is_file()

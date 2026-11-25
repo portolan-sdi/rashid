@@ -79,13 +79,13 @@ def test_owner_layer_contracts_cover_new_modules() -> None:
         (
             "formats-only-geo",
             ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"],
-            ["rashid.data.formats"],
+            ["rashid_core.data.formats"],
         ),
-        ("cli-only-click", ["click"], ["rashid.cli"]),
+        ("cli-only-click", ["click"], ["rashid_core.cli"]),
         (
             "formats-entry-point",
-            ["rashid.data.formats", "rashid.data.formats.**"],
-            ["rashid.data", "rashid.data.formats.**"],
+            ["rashid_core.data.formats", "rashid_core.data.formats.**"],
+            ["rashid_core.data", "rashid_core.data.formats.**"],
         ),
     ):
         contract = contracts[contract_id]
@@ -95,8 +95,8 @@ def test_owner_layer_contracts_cover_new_modules() -> None:
         assert contract.get("as_packages", True) is (contract_id != "formats-entry-point")
     rules = contracts["rules-no-network"]
     assert rules["type"] == "forbidden"
-    assert rules["source_modules"] == ["rashid.rules"]
-    assert rules["forbidden_modules"] == ["rashid._store"]
+    assert rules["source_modules"] == ["rashid_core.rules"]
+    assert rules["forbidden_modules"] == ["rashid_core._store"]
     assert rules.get("as_packages", True) is True
     assert rules.get("allow_indirect_imports", False) is False
 
@@ -104,14 +104,14 @@ def test_owner_layer_contracts_cover_new_modules() -> None:
     assert independent["type"] == "independence"
     assert not independent.get("ignore_imports")
     assert set(independent["modules"]) == {
-        "rashid.rules." + path.stem
-        for path in (ROOT / "src/rashid/rules").glob("*.py")
+        "rashid_core.rules." + path.stem
+        for path in (ROOT / "src/rashid_core/rules").glob("*.py")
         if path.stem != "__init__"
     }
     owner = contracts["rules-only-registry"]
     assert owner["type"] == "protected"
-    assert owner["protected_modules"] == ["rashid.rules"]
-    assert owner["allowed_importers"] == ["rashid.registry"]
+    assert owner["protected_modules"] == ["rashid_core.rules"]
+    assert owner["allowed_importers"] == ["rashid_core.registry"]
     assert owner.get("as_packages", True) is True
     assert not owner.get("ignore_imports")
 
@@ -211,7 +211,7 @@ def test_jscpd_hook_runs_in_the_ci_commit_stage() -> None:
     assert command[0] == "uvx"
     assert command[1].startswith("jscpd@") and command[1].removeprefix("jscpd@")
     assert command[2:] == [
-        "src/rashid",
+        "src/rashid_core",
         "tests",
         "--baseline",
         ".jscpd-baseline.json",

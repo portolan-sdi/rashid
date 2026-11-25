@@ -17,21 +17,21 @@ from urllib.parse import unquote, urlsplit
 import pytest
 from click.testing import CliRunner
 
-from rashid import ValidationOptions, validate
-from rashid import remote as remote_mod
-from rashid._href import is_catalog_url, split_catalog_url, wire_url
-from rashid.catalog import CatalogGraph
-from rashid.cli import main
-from rashid.data.reader import FilesystemHttpReader, LocalOnlyReader
-from rashid.ids import (
+from rashid_core import ValidationOptions, validate
+from rashid_core import remote as remote_mod
+from rashid_core._href import is_catalog_url, split_catalog_url, wire_url
+from rashid_core.catalog import CatalogGraph
+from rashid_core.cli import main
+from rashid_core.data.reader import FilesystemHttpReader, LocalOnlyReader
+from rashid_core.ids import (
     GEN_MISSING_ROOT,
     GEN_PARTIAL_TREE,
     LIV_LINK_TARGET,
     LIV_SELF_BASE,
     LIV_UNAVAILABLE,
 )
-from rashid.model import Severity
-from rashid.remote import (
+from rashid_core.model import Severity
+from rashid_core.remote import (
     Crawl,
     Fetched,
     FetchError,
@@ -773,7 +773,7 @@ def test_cli_accepts_a_catalog_url(
             ),
         )
 
-    monkeypatch.setattr("rashid.cli.validate", fake_validate)
+    monkeypatch.setattr("rashid_core.cli.validate", fake_validate)
     result = CliRunner().invoke(main, ["check", _ROOT_URL])
     assert seen["location"] == _ROOT_URL
     assert seen["live"] is None  # the runner decides the default per mode
@@ -913,7 +913,7 @@ def test_options_can_be_reused_without_resolving_the_callers_live_default(
 def test_signed_request_target_matches_crawl_status_and_data_reader(
     catalog: CatalogBuilder, tmp_path: Path
 ) -> None:
-    from rashid._href import live_host_href, request_target
+    from rashid_core._href import live_host_href, request_target
 
     asset_href = "./data%20file.parquet?token=x#piece"
     catalog.collection("roads", assets={"data": {"href": asset_href}})

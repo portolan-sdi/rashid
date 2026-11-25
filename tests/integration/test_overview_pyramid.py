@@ -63,7 +63,7 @@ def test_narrow_raster_uses_actual_overview_dimensions(
 
 
 def test_ordinary_cog_overviews_reuse_the_open_dataset(tmp_path: Path) -> None:
-    from rashid import _trace
+    from rashid_core import _trace
 
     directory = _catalog(tmp_path)
     path = directory / "ordinary.tif"

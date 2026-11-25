@@ -54,7 +54,7 @@ def test_ruff_exemptions_match_config_and_banned_uses() -> None:
             "lint.per-file-ignores={}",
             "--output-format",
             "json",
-            "src/rashid",
+            "src/rashid_core",
             "tests",
             "scripts",
         ],

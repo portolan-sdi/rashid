@@ -1,6 +1,6 @@
 """Unit tests for the data pass wiring — validator injection, no bytes, no deps.
 
-These exercise :func:`rashid.data.validate_data` and its runner/CLI wiring with a
+These exercise :func:`rashid_core.data.validate_data` and its runner/CLI wiring with a
 fake validator, exactly as ``test_schema.py`` does for the schema pass: the
 byte-reading and geospatial stack are not touched here (that is
 ``test_data_checks``/``test_data_catalog``), so these run without the
@@ -18,14 +18,14 @@ from typing import Any
 
 import pytest
 
-import rashid.data as data_pass
-from rashid import ValidationOptions
-from rashid.catalog import CatalogGraph, Node
-from rashid.config import RulesConfig
-from rashid.data import validate_data
-from rashid.data._results import DataDefect
-from rashid.data.reader import AssetReader, Locator
-from rashid.ids import (
+import rashid_core.data as data_pass
+from rashid_core import ValidationOptions
+from rashid_core.catalog import CatalogGraph, Node
+from rashid_core.config import RulesConfig
+from rashid_core.data import validate_data
+from rashid_core.data._results import DataDefect
+from rashid_core.data.reader import AssetReader, Locator
+from rashid_core.ids import (
     DAT_CHECKSUM,
     DAT_CLASS_COLORS,
     DAT_COG,
@@ -68,8 +68,8 @@ from rashid.ids import (
     ZAR_TRANSFORM,
     ZAR_VARIABLES,
 )
-from rashid.model import Severity
-from rashid.runner import validate
+from rashid_core.model import Severity
+from rashid_core.runner import validate
 from tests.conftest import CatalogBuilder
 
 pytestmark = pytest.mark.unit
@@ -323,7 +323,7 @@ def test_missing_geospatial_stack_downgrades_to_warning(
     attempts = []
 
     def no_formats(name: str, *args: Any, **kwargs: Any) -> Any:
-        if name == "rashid.data.formats":
+        if name == "rashid_core.data.formats":
             attempts.append(name)
             raise ImportError("No module named 'pyarrow'")
         return original_import(name, *args, **kwargs)
@@ -351,7 +351,7 @@ def test_missing_geospatial_stack_downgrades_to_warning(
 
     findings = validate_data(CatalogGraph.load(root))
 
-    assert attempts == ["rashid.data.formats"]
+    assert attempts == ["rashid_core.data.formats"]
     warnings = [f for f in findings if f.rule_id == DAT_UNAVAILABLE]
     assert len(warnings) == 1
     assert warnings[0].severity is Severity.WARNING

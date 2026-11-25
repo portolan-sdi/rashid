@@ -19,12 +19,12 @@ from urllib.request import Request
 
 import pytest
 
-from rashid import RulesConfig, ValidationOptions, _store, validate, validate_live
-from rashid import live as live_mod
-from rashid._href import resolve_live_base
-from rashid._media import is_partial_read_media_type
-from rashid.catalog import CatalogGraph
-from rashid.ids import (
+from rashid_core import RulesConfig, ValidationOptions, _store, validate, validate_live
+from rashid_core import live as live_mod
+from rashid_core._href import resolve_live_base
+from rashid_core._media import is_partial_read_media_type
+from rashid_core.catalog import CatalogGraph
+from rashid_core.ids import (
     LIV_CORS_EXPOSE,
     LIV_CORS_ORIGIN,
     LIV_CORS_PREFLIGHT,
@@ -36,8 +36,8 @@ from rashid.ids import (
     LIV_UNAVAILABLE,
     ZAR_CORS,
 )
-from rashid.live import ProbeResponse, _DefaultProber
-from rashid.model import Severity
+from rashid_core.live import ProbeResponse, _DefaultProber
+from rashid_core.model import Severity
 from tests._https import HttpsServer, Route
 from tests.conftest import VALID_MULTIHASH, CatalogBuilder, mutate_json
 

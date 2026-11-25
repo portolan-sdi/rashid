@@ -7,10 +7,15 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from rashid import ValidationOptions, validate
-from rashid._profile import _registry, bundled_profile_versions, newest_profile_version, profile_uri
-from rashid.cli import main
-from rashid.model import Severity
+from rashid_core import ValidationOptions, validate
+from rashid_core._profile import (
+    _registry,
+    bundled_profile_versions,
+    newest_profile_version,
+    profile_uri,
+)
+from rashid_core.cli import main
+from rashid_core.model import Severity
 from tests.conftest import PORTOLAN_URI, CatalogBuilder, findings_for, mutate_json
 
 pytestmark = pytest.mark.unit

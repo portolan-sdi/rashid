@@ -27,15 +27,15 @@ import pyarrow.parquet as pq
 from click.testing import CliRunner
 from pyproj import CRS
 
-import rashid.data.formats._files as file_owner
-import rashid.data.formats.checks as checks
-from rashid.catalog import Node
-from rashid.cli import main
-from rashid.data._results import DataDefect, DataResults
-from rashid.data.formats import geoparquet, partitions, raster
-from rashid.data.formats._files import AssetFiles
-from rashid.data.reader import Locator
-from rashid.ids import (
+import rashid_core.data.formats._files as file_owner
+import rashid_core.data.formats.checks as checks
+from rashid_core.catalog import Node
+from rashid_core.cli import main
+from rashid_core.data._results import DataDefect, DataResults
+from rashid_core.data.formats import geoparquet, partitions, raster
+from rashid_core.data.formats._files import AssetFiles
+from rashid_core.data.reader import Locator
+from rashid_core.ids import (
     DAT_CLASS_COLORS,
     DAT_COG,
     DAT_COG_STATS,
@@ -54,7 +54,7 @@ from rashid.ids import (
     DAT_VALID_PERCENT,
     DAT_VECTOR_COLUMNS,
 )
-from rashid.model import Severity
+from rashid_core.model import Severity
 from tests.conftest import CatalogBuilder, resolve_pointer
 from tests.integration import _data_assets as assets
 

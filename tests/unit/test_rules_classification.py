@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from rashid import Report
-from rashid import validate as _run
+from rashid_core import Report
+from rashid_core import validate as _run
 from tests.conftest import CatalogBuilder, findings_for, mutate_json, resolve_pointer
 
 pytestmark = pytest.mark.unit

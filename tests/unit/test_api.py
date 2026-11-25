@@ -1,4 +1,4 @@
-"""Tests for the rashid.api surface.
+"""Tests for the rashid_core.api surface.
 
 These tests check what the module exports and that each export still
 resolves to its implementation. The behaviour of each helper is tested in
@@ -17,11 +17,11 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-import rashid
-from rashid import api, validate
-from rashid.catalog import CatalogGraph, Node
-from rashid.model import Finding, Severity
-from rashid.rule import Rule
+import rashid_core
+from rashid_core import api, validate
+from rashid_core.catalog import CatalogGraph, Node
+from rashid_core.model import Finding, Severity
+from rashid_core.rule import Rule
 from tests.conftest import CatalogBuilder
 
 pytestmark = pytest.mark.unit
@@ -29,34 +29,34 @@ pytestmark = pytest.mark.unit
 # Every exported name, paired with the module that defines it. This catches
 # a re-export that no longer resolves to its implementation.
 EXPORTS = {
-    "CatalogGraph": "rashid.catalog",
-    "ExpectedLink": "rashid.catalog",
-    "LocalOnlyReader": "rashid.data.reader",
-    "Node": "rashid.catalog",
-    "Report": "rashid.report",
-    "RulesConfig": "rashid.config",
-    "SHA2_256": "rashid._multihash",
-    "SPDX_LICENSE_IDS": "rashid._spdx",
-    "STRUCTURAL_RELS": "rashid._stac",
-    "Severity": "rashid.model",
-    "ValidationOptions": "rashid.runner",
-    "bundled_profile_versions": "rashid._profile",
-    "canonical_spdx_id": "rashid._spdx",
-    "decode_multihash": "rashid._multihash",
-    "encode_multihash": "rashid._multihash",
-    "expected_links": "rashid.catalog",
-    "has_cog": "rashid._media",
-    "is_absolute_href": "rashid._href",
-    "is_cog_media_type": "rashid._media",
-    "is_well_formed_multihash": "rashid._multihash",
-    "links_of": "rashid._stac",
-    "newest_profile_version": "rashid._profile",
-    "parse_rfc3339": "rashid._stac",
-    "profile_uri": "rashid._profile",
-    "profile_version": "rashid._profile",
-    "roles_of": "rashid._stac",
-    "spec_commit": "rashid._profile",
-    "profile_version_key": "rashid._profile",
+    "CatalogGraph": "rashid_core.catalog",
+    "ExpectedLink": "rashid_core.catalog",
+    "LocalOnlyReader": "rashid_core.data.reader",
+    "Node": "rashid_core.catalog",
+    "Report": "rashid_core.report",
+    "RulesConfig": "rashid_core.config",
+    "SHA2_256": "rashid_core._multihash",
+    "SPDX_LICENSE_IDS": "rashid_core._spdx",
+    "STRUCTURAL_RELS": "rashid_core._stac",
+    "Severity": "rashid_core.model",
+    "ValidationOptions": "rashid_core.runner",
+    "bundled_profile_versions": "rashid_core._profile",
+    "canonical_spdx_id": "rashid_core._spdx",
+    "decode_multihash": "rashid_core._multihash",
+    "encode_multihash": "rashid_core._multihash",
+    "expected_links": "rashid_core.catalog",
+    "has_cog": "rashid_core._media",
+    "is_absolute_href": "rashid_core._href",
+    "is_cog_media_type": "rashid_core._media",
+    "is_well_formed_multihash": "rashid_core._multihash",
+    "links_of": "rashid_core._stac",
+    "newest_profile_version": "rashid_core._profile",
+    "parse_rfc3339": "rashid_core._stac",
+    "profile_uri": "rashid_core._profile",
+    "profile_version": "rashid_core._profile",
+    "roles_of": "rashid_core._stac",
+    "spec_commit": "rashid_core._profile",
+    "profile_version_key": "rashid_core._profile",
 }
 
 
@@ -74,7 +74,7 @@ def test_all_lists_every_documented_export() -> None:
     assert sorted(api.__all__) == sorted(EXPORTS)
 
 
-@pytest.mark.parametrize("module", [api, rashid], ids=["rashid.api", "rashid"])
+@pytest.mark.parametrize("module", [api, rashid_core], ids=["rashid_core.api", "rashid_core"])
 def test_public_api_snapshot(module: object) -> None:
     snapshot = json.loads(Path(__file__).with_name("api_snapshot.json").read_text(encoding="utf-8"))
     expected = snapshot[module.__name__]

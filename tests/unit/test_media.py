@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from rashid._media import media_type_essence
-from rashid._stac import names_a_geometry_column
+from rashid_core._media import media_type_essence
+from rashid_core._stac import names_a_geometry_column
 
 pytestmark = pytest.mark.unit
 

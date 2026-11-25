@@ -45,7 +45,7 @@ def test_remote_data_target_serves_every_file_over_https(tmp_path: Path) -> None
     """The child server answers each file of the tree at its relative path."""
     pytest.importorskip("pyarrow")
     pytest.importorskip("rasterio")
-    from rashid import _store
+    from rashid_core import _store
 
     root = scenarios.cached("data", "small", cache_dir=tmp_path)
     with scenarios.target("remote-data", "small", cache_dir=tmp_path) as target:

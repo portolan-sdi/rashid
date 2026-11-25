@@ -67,7 +67,7 @@ jobs:
       # under us, which can change verdicts between rashid releases.
       - name: Flag edits to already-vendored schemas
         run: |
-          edited=$(git diff --name-only -- src/rashid/_schemas)
+          edited=$(git diff --name-only -- src/rashid_core/_schemas)
           if [ -n "$edited" ]; then
             echo "::warning::upstream edited schemas already vendored here:"
             echo "$edited"
@@ -77,18 +77,18 @@ jobs:
         id: drift
         run: |
           # A new release tag adds an untracked portolan/vX.Y.Z/ directory.
-          new_profile=$(git ls-files --others --exclude-standard -- src/rashid/_schemas/portolan \
-            | sed -n 's|^src/rashid/_schemas/portolan/\(v[0-9.]*\)/schema\.json$|\1|p' \
+          new_profile=$(git ls-files --others --exclude-standard -- src/rashid_core/_schemas/portolan \
+            | sed -n 's|^src/rashid_core/_schemas/portolan/\(v[0-9.]*\)/schema\.json$|\1|p' \
             | sort -V | tail -n 1)
           echo "new_profile=${new_profile}" >> "$GITHUB_OUTPUT"
-          if git diff --quiet -- tests/fixtures src/rashid/_schemas SPEC_REF \
+          if git diff --quiet -- tests/fixtures src/rashid_core/_schemas SPEC_REF \
             && [ -z "$new_profile" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Fixtures already match spec main; nothing to sync."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Spec main has drifted from the vendored fixtures:"
-            git --no-pager diff --stat -- tests/fixtures src/rashid/_schemas SPEC_REF
+            git --no-pager diff --stat -- tests/fixtures src/rashid_core/_schemas SPEC_REF
           fi
 
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -120,7 +120,7 @@ jobs:
           git config user.name "portolan-bot"
           git config user.email "portolan@googlegroups.com"
           git checkout -B "$BRANCH"
-          git add tests/fixtures src/rashid/_schemas SPEC_REF
+          git add tests/fixtures src/rashid_core/_schemas SPEC_REF
           git commit -m "$TITLE"
           git push -f origin "$BRANCH"
           cat > "$RUNNER_TEMP/pr-body.md" <<'BODY'

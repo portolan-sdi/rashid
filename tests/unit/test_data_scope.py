@@ -19,16 +19,16 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-import rashid.cli as cli_mod
-import rashid.data.reader as reader_mod
-from rashid import ValidationOptions
-from rashid.catalog import CatalogGraph, Node
-from rashid.cli import main
-from rashid.data import Validator, validate_data
-from rashid.data._results import DataDefect
-from rashid.data.reader import AssetReader, FilesystemHttpReader, LocalOnlyReader, Locator
-from rashid.report import Report
-from rashid.runner import validate
+import rashid_core.cli as cli_mod
+import rashid_core.data.reader as reader_mod
+from rashid_core import ValidationOptions
+from rashid_core.catalog import CatalogGraph, Node
+from rashid_core.cli import main
+from rashid_core.data import Validator, validate_data
+from rashid_core.data._results import DataDefect
+from rashid_core.data.reader import AssetReader, FilesystemHttpReader, LocalOnlyReader, Locator
+from rashid_core.report import Report
+from rashid_core.runner import validate
 from tests.conftest import VALID_MULTIHASH, CatalogBuilder
 
 pytestmark = pytest.mark.unit

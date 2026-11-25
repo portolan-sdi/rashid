@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from rashid.catalog import CatalogGraph, Node
-from rashid.data.reader import FilesystemHttpReader, Locator, _HttpRangeFile
+from rashid_core.catalog import CatalogGraph, Node
+from rashid_core.data.reader import FilesystemHttpReader, Locator, _HttpRangeFile
 from tests._https import HttpsServer, Route
 from tests.conftest import CatalogBuilder
 

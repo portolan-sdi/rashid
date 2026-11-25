@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from rashid import ValidationOptions, validate
+from rashid_core import ValidationOptions, validate
 from tests.conftest import (
     PORTOLAN_URI,
     CatalogBuilder,

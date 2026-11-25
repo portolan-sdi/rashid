@@ -21,8 +21,8 @@ from typing import Any
 
 import pytest
 
-from rashid import ValidationOptions, validate
-from rashid.model import Finding, Severity
+from rashid_core import ValidationOptions, validate
+from rashid_core.model import Finding, Severity
 from tests.conftest import (
     CatalogBuilder,
     default_asset,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid._jsonschema import _GEOJSON_BASE, _STAC_BASE, SchemaError, describe, stac_registry
+from rashid_core._jsonschema import _GEOJSON_BASE, _STAC_BASE, SchemaError, describe, stac_registry
 
 pytestmark = pytest.mark.unit
 

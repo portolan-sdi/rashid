@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import api, validate
+from rashid_core import api, validate
 from tests.conftest import CatalogBuilder, findings_for, mutate_json
 
 pytestmark = pytest.mark.unit
@@ -37,7 +37,7 @@ def test_case_insensitive_near_miss_gets_hint(catalog: CatalogBuilder) -> None:
 
 
 def test_the_hint_is_built_from_the_exported_lookup(catalog: CatalogBuilder) -> None:
-    """The rule and rashid.api.canonical_spdx_id must agree on the spelling.
+    """The rule and rashid_core.api.canonical_spdx_id must agree on the spelling.
 
     A downstream tool prints the exported lookup's answer. If the rule ever
     grows a second, private lookup again, the two start printing different

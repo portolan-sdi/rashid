@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid import validate
+from rashid_core import validate
 from tests.conftest import CatalogBuilder, findings_for, mutate_json
 
 pytestmark = pytest.mark.unit

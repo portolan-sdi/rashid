@@ -8,7 +8,7 @@ import pyarrow.parquet as pq
 import pytest
 from click.testing import CliRunner
 
-from rashid.cli import main
+from rashid_core.cli import main
 from tests.integration import _data_assets as assets
 from tests.integration._owner_catalog import _catalog, _declare
 from tests.integration.test_native_geoparquet import _WKB

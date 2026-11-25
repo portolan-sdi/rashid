@@ -11,9 +11,9 @@ from urllib.parse import quote
 
 import pytest
 
-from rashid import ValidationOptions, validate
-from rashid.api import STRUCTURAL_RELS, CatalogGraph, expected_links
-from rashid.rules.links import RequiredLinksRule, StructuralLinkTypeRule
+from rashid_core import ValidationOptions, validate
+from rashid_core.api import STRUCTURAL_RELS, CatalogGraph, expected_links
+from rashid_core.rules.links import RequiredLinksRule, StructuralLinkTypeRule
 from tests.conftest import (
     CatalogBuilder,
     mutate_json,

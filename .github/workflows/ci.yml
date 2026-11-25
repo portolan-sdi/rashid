@@ -52,8 +52,8 @@ jobs:
       # The geospatial stack is a core dependency now; no extra needed.
       # Package path, not package name: coverage accepts either, and wily
       # reads this as a directory to walk.
-      coverage-target: src/rashid
-      bandit-target: src/rashid
+      coverage-target: src/rashid_core
+      bandit-target: src/rashid_core
       # rashid has no Codecov project. The upload step fails the run on
       # error, so leaving this on would break every build. The 90%
       # diff-cover gate still runs.

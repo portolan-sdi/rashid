@@ -24,9 +24,9 @@ from typing import Any
 
 import pytest
 
-from rashid import validate
-from rashid.catalog import CatalogGraph
-from rashid.schema import DEFAULT_SCHEMA_URI, bundled_schema, validator_from_schema
+from rashid_core import validate
+from rashid_core.catalog import CatalogGraph
+from rashid_core.schema import DEFAULT_SCHEMA_URI, bundled_schema, validator_from_schema
 from tests.conftest import CatalogBuilder, mutate_json
 
 pytestmark = pytest.mark.unit

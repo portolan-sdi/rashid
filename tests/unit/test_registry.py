@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from rashid.registry import CHECKS, DEFAULT_RULES, describe
+from rashid_core.registry import CHECKS, DEFAULT_RULES, describe
 
 pytestmark = pytest.mark.unit
 

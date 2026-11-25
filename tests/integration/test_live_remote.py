@@ -15,7 +15,7 @@ from urllib.request import urlopen
 
 import pytest
 
-from rashid.live import ProbeResponse, _DefaultProber
+from rashid_core.live import ProbeResponse, _DefaultProber
 
 pytestmark = [pytest.mark.integration, pytest.mark.network]
 

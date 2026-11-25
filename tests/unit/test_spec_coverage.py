@@ -6,7 +6,7 @@ vendored to ``tests/fixtures/requirements.yaml`` by
 stable ID, an RFC 2119 severity, and an enforcement class: ``validator``
 (rashid must cite it) or ``process`` (not machine-checkable). Each rashid check
 declares the manifest IDs it enforces — ``Rule.spec_ids`` for metadata rules,
-``rashid.registry`` for other passes — and ``rashid.registry.CHECKS`` registers
+``rashid_core.registry`` for other passes — and ``rashid_core.registry.CHECKS`` registers
 both in one id-space,
 carrying the strongest severity each check can emit.
 
@@ -26,8 +26,8 @@ This module gates the join in both directions:
 A requirement with ``status: incubating`` comes from a document under
 ``specs/incubating/``. The spec says the validator checks it and reports a
 failure as a warning at most, so its floor and its ceiling are WARNING.
-``rashid.registry`` refuses an ERROR declaration for the check families that
-enforce such text, and ``rashid.runner.cap_incubating`` caps the findings.
+``rashid_core.registry`` refuses an ERROR declaration for the check families that
+enforce such text, and ``rashid_core.runner.cap_incubating`` caps the findings.
 """
 
 from __future__ import annotations
@@ -37,11 +37,11 @@ from pathlib import Path
 
 import pytest
 
-import rashid.registry as registry
+import rashid_core.registry as registry
 import tests.unit.test_may_permissions as may_permissions
-from rashid import ids
-from rashid.model import Severity
-from rashid.registry import CHECKS
+from rashid_core import ids
+from rashid_core.model import Severity
+from rashid_core.registry import CHECKS
 
 pytestmark = pytest.mark.unit
 
@@ -237,7 +237,7 @@ def test_incubating_requirements_are_enforced_by_incubating_checks() -> None:
     """A check citing incubating text must be in a family that cannot error.
 
     The two halves of the cap meet here: the manifest says the requirement is
-    outside the conformance surface, and ``rashid.registry.is_incubating``
+    outside the conformance surface, and ``rashid_core.registry.is_incubating``
     says the check enforcing it caps at a warning. A check that cited one
     without being in such a family would pass the severity floors above while
     still being able to fail a catalog.

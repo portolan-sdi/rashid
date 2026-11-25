@@ -24,11 +24,11 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
-from rashid import validate
-from rashid.catalog import CatalogGraph
-from rashid.data import validate_data
-from rashid.ids import DAT_MIRROR, DAT_ORDERING, DAT_ROWGROUP_STATS, DAT_TABULAR
-from rashid.model import Severity
+from rashid_core import validate
+from rashid_core.catalog import CatalogGraph
+from rashid_core.data import validate_data
+from rashid_core.ids import DAT_MIRROR, DAT_ORDERING, DAT_ROWGROUP_STATS, DAT_TABULAR
+from rashid_core.model import Severity
 from tests.conftest import (
     CatalogBuilder,
     mutate_json,
@@ -168,8 +168,8 @@ def test_matching_mirror_in_fresh_interpreter(catalog_root: Path, tmp_path: Path
     code = (
         "import sys\n"
         "from pathlib import Path\n"
-        "from rashid.catalog import CatalogGraph\n"
-        "from rashid.data import validate_data\n"
+        "from rashid_core.catalog import CatalogGraph\n"
+        "from rashid_core.data import validate_data\n"
         "findings = validate_data(CatalogGraph.load(Path(sys.argv[1])))\n"
         # The two-row mirror has too few rows for the row check (PORTO-FMT-052):
         # the one INFO saying so is the expected clean outcome.

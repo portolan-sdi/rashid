@@ -21,11 +21,11 @@ from pathlib import Path
 
 import pytest
 
-from rashid import ValidationOptions, validate
-from rashid._profile import declared_schema_uris
-from rashid.catalog import CatalogGraph
-from rashid.model import Severity
-from rashid.schema import DEFAULT_SCHEMA_URI, bundled_schema
+from rashid_core import ValidationOptions, validate
+from rashid_core._profile import declared_schema_uris
+from rashid_core.catalog import CatalogGraph
+from rashid_core.model import Severity
+from rashid_core.schema import DEFAULT_SCHEMA_URI, bundled_schema
 from scripts import vendor_spec_fixtures as vendor
 from tests.conftest import CatalogBuilder
 

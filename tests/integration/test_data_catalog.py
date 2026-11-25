@@ -20,17 +20,17 @@ from typing import Any
 
 import pytest
 
-from rashid import ValidationOptions
+from rashid_core import ValidationOptions
 
 pytest.importorskip("pyarrow")
 pytest.importorskip("rasterio")
 pytest.importorskip("rio_cogeo")
 
-from rashid import validate
-from rashid.catalog import CatalogGraph
-from rashid.data import validate_data
-from rashid.ids import DAT_CHECKSUM, DAT_CONSISTENCY, DAT_FORMAT, DAT_ORDERING, DAT_SIZE
-from rashid.model import Severity
+from rashid_core import validate
+from rashid_core.catalog import CatalogGraph
+from rashid_core.data import validate_data
+from rashid_core.ids import DAT_CHECKSUM, DAT_CONSISTENCY, DAT_FORMAT, DAT_ORDERING, DAT_SIZE
+from rashid_core.model import Severity
 from tests.conftest import CatalogBuilder, mutate_json, thumbnail_asset
 from tests.integration import _data_assets as assets
 

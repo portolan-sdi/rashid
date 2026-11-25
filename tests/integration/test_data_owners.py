@@ -12,9 +12,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from rashid import _trace
-from rashid.data._results import DataDefect
-from rashid.model import Severity
+from rashid_core import _trace
+from rashid_core.data._results import DataDefect
+from rashid_core.model import Severity
 from tests.integration import _data_assets as assets
 from tests.integration._owner_catalog import _catalog, _declare, _findings
 
@@ -50,7 +50,7 @@ def test_partition_handles_and_covering_policies(tmp_path: Path, nested: bool) -
 @pytest.mark.parametrize("seed", range(20))
 def test_result_build_is_a_function_of_sources(seed: int) -> None:
     """Rebuilding and extending a built accumulator equals a fresh derivation."""
-    from rashid.data._results import DataResults
+    from rashid_core.data._results import DataResults
 
     rng = random.Random(seed)
     assets_source = [
@@ -99,7 +99,7 @@ def test_many_partitions_open_once_without_exhausting_handles(tmp_path: Path) ->
         assets.write_geoparquet(directory / f"{i:03}.parquet", version="1.0.0")
     code = (
         "import resource; resource.setrlimit(resource.RLIMIT_NOFILE, (80, 80)); "
-        "from rashid.cli import main; main()"
+        "from rashid_core.cli import main; main()"
     )
     result = subprocess.run(
         [
@@ -128,7 +128,7 @@ def test_partition_open_failure_reports_unavailable_data(tmp_path: Path) -> None
     """A failed open must be visible even when no declared asset owns the bytes."""
     from click.testing import CliRunner
 
-    from rashid.cli import main
+    from rashid_core.cli import main
 
     directory = _catalog(tmp_path, **{"partition:glob": "./*.parquet"})
     (directory / "broken.parquet").write_bytes(b"not a Parquet file")
@@ -146,7 +146,7 @@ def test_declared_corrupt_partitions_use_the_full_population(
 ) -> None:
     from click.testing import CliRunner
 
-    from rashid.cli import main
+    from rashid_core.cli import main
 
     directory = _catalog(tmp_path, **{"partition:glob": "./*.parquet"})
     names = ["first.parquet", "second.parquet"]

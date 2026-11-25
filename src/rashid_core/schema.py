@@ -1,0 +1,208 @@
+"""Schema pass: Portolan profile validation, delegated to the published schema.
+
+The metadata pass (:mod:`rashid_core.rules`) checks Portolan requirements by hand over
+raw JSON, deliberately stdlib-only, so it can emit precise per-rule findings with
+fix hints. The Portolan STAC Profile publishes those same requirements as a
+single machine-checkable JSON Schema — the spec calls it "the machine-checkable
+core of the metadata pass". This pass applies that published schema directly to
+every object, exactly as the profile's own ``check-portolan`` test does: an
+authoritative oracle that catches any drift between rashid's hand rules and the
+canonical schema, and any requirement the hand rules do not yet cover.
+
+Because it overlaps the hand rules by design, the pass is opt-in (CLI
+``--schema``; ``validate(path, options=ValidationOptions(schema=True))``).
+When it runs, a defect may be
+reported twice — once by a hand rule with a fix hint, once here with the schema's
+own message; the second is the canonical verdict.
+
+The published schema versions ship inside the wheel (``rashid_core/_schemas/portolan``),
+so the default validator resolves the URI the root catalog declares against the
+bundled copies and runs offline. The network is reached only for a schema version
+this build does not carry, and only when the caller passes ``allow_network=True``;
+without it, an unbundled version downgrades to a single WARNING so the offline
+metadata findings still surface. The validator is injectable so tests can
+substitute their own.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from functools import lru_cache
+from typing import Any
+
+from rashid_core import _json, _package, _profile
+from rashid_core._jsonschema import (
+    SchemaError,
+    SchemaPass,
+    Validator,
+    fetch_schema,
+    schema_nodes,
+    schema_targets,
+)
+from rashid_core._profile import declared_schema_uris
+from rashid_core.catalog import CatalogGraph
+from rashid_core.ids import SCH_INVALID, SCH_UNAVAILABLE, SCH_UNUSED_MAP
+from rashid_core.model import Finding, Severity
+
+# The newest bundled profile schema, used when the root declares no single URI.
+DEFAULT_SCHEMA_URI = _profile.profile_uri(_profile.newest_profile_version())
+
+_PASS = SchemaPass("schema", SCH_INVALID, SCH_UNAVAILABLE, initialization_errors=(Exception,))
+
+
+def _schema_uri_for(graph: CatalogGraph) -> str:
+    """The schema URI to validate against: the root's declared one, or the default.
+
+    The profile schema is a single document (``oneOf`` Catalog/Collection/Item),
+    so one URI validates every object in the tree. A malformed or ambiguous root
+    declaration is the metadata pass's concern (``PTL-CNF-001``); here it simply
+    falls back to the pinned default rather than failing the schema pass.
+    """
+    if graph.root is not None:
+        uris = declared_schema_uris(graph.root)
+        if len(uris) == 1:
+            return uris[0]
+    return DEFAULT_SCHEMA_URI
+
+
+@lru_cache(maxsize=1)
+def _bundled_schemas() -> dict[str, dict[str, Any]]:
+    """Every profile schema shipped in the wheel, keyed by its ``$id`` sans ``#``.
+
+    Versions are discovered from ``rashid_core/_schemas/portolan/<vX.Y.Z>/schema.json``,
+    never hardcoded, so a re-vendor picks up a new spec release with no code
+    change (mirroring the fixture-discovery convention in
+    ``tests/unit/test_schema_uri_invariant.py``).
+    """
+    schemas: dict[str, dict[str, Any]] = {}
+    root = _package.schemas().joinpath("portolan")
+    for version_dir in root.iterdir():
+        schema_file = version_dir.joinpath("schema.json")
+        if not schema_file.is_file():
+            continue
+        schema: dict[str, Any] = _json.loads(schema_file.read_bytes())
+        schemas[str(schema["$id"]).rstrip("#")] = schema
+    return schemas
+
+
+def bundled_schema_versions() -> tuple[str, ...]:
+    """The profile schema versions this build carries, e.g. ``("v0.1.0",)``."""
+    return _profile.bundled_profile_versions()
+
+
+def bundled_schema(schema_uri: str) -> dict[str, Any] | None:
+    """The bundled profile schema whose ``$id`` matches ``schema_uri``, if carried."""
+    return _bundled_schemas().get(schema_uri.rstrip("#"))
+
+
+def validator_from_schema(schema: dict[str, Any]) -> Validator:
+    """Build the ``jsonschema``-backed Portolan profile validator from a schema.
+
+    Split from :func:`default_validator` so the schema can come from anywhere —
+    the bundled copies, a fetched document, or a test's inline dict.
+    ``jsonschema`` is imported lazily because the metadata pass never needs it.
+    Draft-07 is pinned because the published Portolan schema declares
+    ``$schema`` draft-07. Error narrowing (the oneOf discriminator dance) lives
+    in :func:`rashid_core._jsonschema.describe`, shared with the structural pass,
+    and :func:`rashid_core._jsonschema.screened` skips it for a valid object.
+    """
+    from jsonschema import Draft7Validator
+
+    from rashid_core._jsonschema import compile_rust, screened, specifications_rust_registry
+
+    return screened(
+        Draft7Validator(schema),
+        compile_rust(schema, specifications_rust_registry(), draft7=True),
+    )
+
+
+def default_validator(
+    schema_uri: str = DEFAULT_SCHEMA_URI, *, allow_network: bool = False
+) -> Validator:
+    """Build the profile validator for ``schema_uri``, offline first.
+
+    A bundled copy of the schema (shipped in the wheel) is preferred. For a
+    version this build does not carry, ``allow_network=True`` fetches it from
+    ``schema_uri``; without it a ``LookupError`` names the bundled versions.
+    Callers with a local schema in hand can build a validator directly with
+    :func:`validator_from_schema`.
+    """
+    schema = bundled_schema(schema_uri)
+    if schema is not None:
+        return validator_from_schema(schema)
+    if allow_network:
+        return validator_from_schema(fetch_schema(schema_uri))
+    raise LookupError(
+        f"no bundled schema for {schema_uri}; this build carries "
+        f"{', '.join(bundled_schema_versions())} (pass allow_network=True to fetch)"
+    )
+
+
+def _unused_schema_mappings(
+    graph: CatalogGraph,
+    schema_map: Mapping[str, dict[str, Any]],
+    used: set[str],
+    selected: str,
+) -> list[Finding]:
+    """Report ignored caller configuration separately from schema availability."""
+    declared = sorted({uri for node in schema_nodes(graph) for uri in declared_schema_uris(node)})
+    return [
+        Finding(
+            rule_id=SCH_UNUSED_MAP,
+            severity=Severity.WARNING,
+            message=(
+                f"unused profile schema mapping {uri!r}; selected schema URI {selected!r}; "
+                f"declared profile URIs: {', '.join(declared) or '(none)'}"
+            ),
+            path=".",
+            fix_hint="match --schema-map URI to the root catalog's profile URI, or remove the mapping",
+        )
+        for uri in sorted(schema_map.keys() - used)
+    ]
+
+
+def validate_schema(
+    graph: CatalogGraph,
+    validator: Validator | None = None,
+    schema_uri: str | None = None,
+    *,
+    allow_network: bool = False,
+    schema_map: Mapping[str, dict[str, Any]] | None = None,
+) -> list[Finding]:
+    """Validate every catalog, collection, and item against the profile schema.
+
+    ``schema_map`` maps profile URIs (without a trailing ``#``) to local schema
+    objects. A matching entry takes precedence over bundled and fetched copies.
+    The selected schema is compiled once for the whole graph, with no global cache.
+    Each unused map key produces a ``PTL-SCH-002`` warning with the observed URIs.
+
+    Returns ``PTL-SCH-001`` errors for each schema failure. The schema comes
+    from the bundled copies in the wheel; a version this build does not carry
+    is fetched over the network only when ``allow_network`` is set. If the
+    validator is unavailable (missing package, unbundled version offline, or a
+    failed fetch), returns a single ``PTL-SCH-000`` warning instead of failing
+    the run — a systemic failure is reported once, not once per object.
+    """
+    uri = schema_uri if schema_uri is not None else _schema_uri_for(graph)
+    used: set[str] = set()
+
+    def factory() -> Validator:
+        local_schema = (schema_map or {}).get(uri.rstrip("#"))
+        if local_schema is not None:
+            mapped_validator = validator_from_schema(local_schema)
+
+            def mapped(data: dict[str, Any]) -> list[SchemaError]:
+                used.add(uri.rstrip("#"))
+                return mapped_validator(data)
+
+            return mapped
+        return default_validator(uri, allow_network=allow_network)
+
+    findings = _PASS.run(
+        validator,
+        factory,
+        schema_targets(graph, "Portolan profile schema"),
+    ).findings
+    if schema_map:
+        findings.extend(_unused_schema_mappings(graph, schema_map, used, uri))
+    return findings

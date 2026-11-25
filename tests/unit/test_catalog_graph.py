@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from rashid.catalog import CatalogGraph, Node
+from rashid_core.catalog import CatalogGraph, Node
 from tests.conftest import (
     CatalogBuilder,
     mutate_json,

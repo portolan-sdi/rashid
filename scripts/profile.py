@@ -12,7 +12,7 @@ Modes:
 ``mem``
     Run once under memray, then print ``memray stats``. Linux and macOS only.
 ``import``
-    Print the 15 slowest imports of ``rashid.cli`` from ``python -X importtime``.
+    Print the 15 slowest imports of ``rashid_core.cli`` from ``python -X importtime``.
 ``instr``
     Run once under ``valgrind --tool=cachegrind`` and print the instruction
     count. The count varies far less between runs than wall time does.
@@ -47,24 +47,24 @@ MEMRAY = "memray==1.20.0"
 MODES = ("counts", "time", "mem", "import", "instr", "run")
 _PROFILES = REPO / ".cache" / "profiles"
 
-# Example import record: "import time:       437 |      34470 |       rashid._store"
+# Example import record: "import time:       437 |      34470 |       rashid_core._store"
 _IMPORT_LINE = re.compile(r"^import time:\s+(\d+) \|\s+(\d+) \|( *)(\S+)")
 # Example instruction record: "==12345== I   refs:      1,234,567"
 _CACHEGRIND_REFS = re.compile(r"I\s+refs:\s+([\d,]+)")
 
 
 def _run_once(scenario: str, size: str, seed: int, warm: bool) -> None:
-    import rashid
+    import rashid_core
     from tests import scenarios
 
     with scenarios.target(scenario, size, seed) as target:
         if warm:
-            rashid.validate(target.location, options=target.options)
-        rashid.validate(target.location, options=target.options)
+            rashid_core.validate(target.location, options=target.options)
+        rashid_core.validate(target.location, options=target.options)
 
 
 def _counts(scenario: str, size: str, seed: int, warm: bool) -> None:
-    from rashid import _trace
+    from rashid_core import _trace
 
     _trace.enable("on")
     _run_once(scenario, size, seed, warm=False)
@@ -106,7 +106,7 @@ def profiler_command(mode: str, *, scenario: Scenario, out: Path) -> list[str]:
     if mode == "time":
         return [
             *("uv", "run", "--with", PYINSTRUMENT, "python", "-m", "pyinstrument"),
-            *("-r", "text", "--show", "*/rashid/*", "-o", str(out), *target),
+            *("-r", "text", "--show", "*/rashid_core/*", "-o", str(out), *target),
         ]
     if mode == "mem":
         return [
@@ -141,14 +141,16 @@ def parse_cachegrind(stderr: str) -> int | None:
 
 def _imports() -> None:
     result = subprocess.run(
-        [sys.executable, "-X", "importtime", "-c", "import rashid.cli"],
+        [sys.executable, "-X", "importtime", "-c", "import rashid_core.cli"],
         capture_output=True,
         text=True,
         check=True,
     )
     rows = parse_importtime(result.stderr)
-    total = next((cum for cum, _self, name in rows if name == "rashid.cli"), None)
-    print(f"# import rashid.cli: {total / 1000:.1f} ms" if total else "# import rashid.cli")
+    total = next((cum for cum, _self, name in rows if name == "rashid_core.cli"), None)
+    print(
+        f"# import rashid_core.cli: {total / 1000:.1f} ms" if total else "# import rashid_core.cli"
+    )
     print(f"{'cumulative ms':>13}  {'self ms':>8}  module")
     for cumulative, own, name in rows[:15]:
         print(f"{cumulative / 1000:>13.1f}  {own / 1000:>8.1f}  {name}")

@@ -2,7 +2,7 @@
 
 obstore sends its requests from Rust, so a monkeypatched ``urlopen`` cannot
 stand in for the network. This server answers over real TLS with a
-certificate from ``trustme``, and ``rashid._store`` is told to accept it. Each
+certificate from ``trustme``, and ``rashid_core._store`` is told to accept it. Each
 test sets the routes it needs and reads back the requests the server saw.
 """
 
@@ -26,7 +26,7 @@ from xml.sax.saxutils import escape
 import pytest
 import trustme
 
-from rashid import _store
+from rashid_core import _store
 
 
 @dataclass
@@ -213,7 +213,7 @@ class _Server(ThreadingHTTPServer):
 
 @contextmanager
 def serving() -> Iterator[HttpsServer]:
-    """Run a local HTTPS server that ``rashid._store`` trusts until the block ends.
+    """Run a local HTTPS server that ``rashid_core._store`` trusts until the block ends.
 
     ``scripts/profile.py`` and ``tests/scenarios.py`` use this outside pytest,
     so it sets and restores ``allow_invalid_certificates`` itself.
@@ -250,7 +250,7 @@ _UNSET = object()
 
 @pytest.fixture
 def https_server() -> Iterator[HttpsServer]:
-    """A running local HTTPS server that ``rashid._store`` trusts."""
+    """A running local HTTPS server that ``rashid_core._store`` trusts."""
     with serving() as state:
         yield state
 
@@ -311,7 +311,7 @@ def serving_tree(root: Path, latency: float = 0.0) -> Iterator[ServedTree]:
     crawl stays fast and the asset reads carry the cost. The peak in flight
     counts the asset requests only. The crawl fetches each level's documents
     and its ``.md`` files on many threads, and its overlap must not pass for
-    the data pass's. ``rashid._store``
+    the data pass's. ``rashid_core._store``
     trusts the child's certificate for the duration, as with :func:`serving`.
     """
     child = subprocess.Popen(

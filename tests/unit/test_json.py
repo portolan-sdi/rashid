@@ -1,4 +1,4 @@
-"""Unit tests for rashid._json: orjson, with the stdlib's answer where they differ.
+"""Unit tests for rashid_core._json: orjson, with the stdlib's answer where they differ.
 
 orjson rejects some documents the stdlib accepts. Each case here must parse
 exactly as ``json.loads`` parses the same object, bytes or ``str``, and a
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from rashid import _json
-from rashid.catalog import CatalogGraph
+from rashid_core import _json
+from rashid_core.catalog import CatalogGraph
 
 
 @pytest.mark.parametrize(

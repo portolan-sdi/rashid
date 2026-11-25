@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from rashid import _trace
-from rashid.cli import main
+from rashid_core import _trace
+from rashid_core.cli import main
 from tests.conftest import CatalogBuilder
 
 pytestmark = pytest.mark.integration

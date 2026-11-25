@@ -4,7 +4,7 @@ from importlib import metadata
 
 import pytest
 
-from rashid import _package
+from rashid_core import _package
 
 pytestmark = pytest.mark.unit
 

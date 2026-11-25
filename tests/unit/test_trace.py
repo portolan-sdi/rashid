@@ -1,4 +1,4 @@
-"""Unit tests for rashid._trace: counters, spans, the Chrome trace, and logging setup.
+"""Unit tests for rashid_core._trace: counters, spans, the Chrome trace, and logging setup.
 
 The module is stdlib-only and names no rashid module, so the same file can
 serve another package. Each test here checks one behavior a caller relies on:
@@ -24,7 +24,7 @@ from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 import pytest
 
-from rashid import _trace
+from rashid_core import _trace
 
 
 def test_count_adds_and_defaults_to_one() -> None:

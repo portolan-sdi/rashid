@@ -38,7 +38,7 @@ uv run pytest -n 8             # Full suite, as in CI
 uv run pytest -n 8 -m unit     # Fast, isolated tests
 ```
 
-Tests use the `unit`, `integration`, and `network` markers. Network tests check live servers for the live pass and remote data validation, and skip when offline. Structural and schema validation use the schema closures vendored in `src/rashid/_schemas/` and require no network access.
+Tests use the `unit`, `integration`, and `network` markers. Network tests check live servers for the live pass and remote data validation, and skip when offline. Structural and schema validation use the schema closures vendored in `src/rashid_core/_schemas/` and require no network access.
 
 Set `ENABLE_PRE_PUSH_TESTS=1` to include fast tests in the pre-push hook.
 
@@ -50,8 +50,8 @@ These gates keep each consolidated concept at its owner ([#266](https://github.c
 |---|---|
 | Ruff `TID251` | URL interpretation belongs to `_href.py`; urllib requests and HTTPStore construction to `_store.py`; JSON loading to `_json.py`; raw readers and glob enumeration to `data/formats/_files.py`. |
 | import-linter | Exhaustive layers order every package module and keep metadata rules independent of validation passes. Only optional formats import geospatial libraries; only the CLI imports click. Only the data entry point imports optional formats, and metadata rules cannot import transport. |
-| jscpd 5.2.1 | New Python clones in `src/rashid` and `tests` fail the commit hook. Fixtures and virtual environments are excluded. An empty scan fails. |
-| API snapshot | `test_api.py` pins `rashid.api` and `rashid.__all__`, their defining objects, and callable signatures. Python defines the enum constructor signature. |
+| jscpd 5.2.1 | New Python clones in `src/rashid_core` and `tests` fail the commit hook. Fixtures and virtual environments are excluded. An empty scan fails. |
+| API snapshot | `test_api.py` pins `rashid_core.api` and `rashid_core.__all__`, their defining objects, and callable signatures. Python defines the enum constructor signature. |
 | Registry checks | Duplicate IDs fail registry construction. An AST scan compares emitted IDs with `CHECKS` and checks that pass declarations reuse the ID constants. |
 | Pointer construction | An AST scan rejects hand-built pointers outside `model.py`: f-strings, addition, percent formatting, `.format`, and slash joins. Generic slash prefixes are checked in values assigned or passed as `pointer` or `json_pointer`. |
 | Exemption ledger | `guardrail_exemptions.json` lists every Ruff per-file ignore code (including the #264 signature exemptions), import ignore, allowed importer, baseline, and strict xfail issue, with reasons. Tests pin their counts and reject stale entries. |
@@ -66,7 +66,7 @@ Because `origin/main` has no baseline yet, the fingerprint membership comparison
 After deleting duplication, regenerate it and lower the pinned counts in the same commit:
 
 ```bash
-uvx jscpd@5.2.1 src/rashid tests --baseline .jscpd-baseline.json --update-baseline
+uvx jscpd@5.2.1 src/rashid_core tests --baseline .jscpd-baseline.json --update-baseline
 ```
 
 The commit hook and CI run the same command with `--fail-on-new-clones 0` instead of `--update-baseline`.
@@ -146,7 +146,7 @@ Counters are always enabled. `tests/integration/test_operation_counts.py` checks
 
 If your change reduces the work performed, update the expected counts in the same pull request.
 
-`tests/unit/test_import_budget.py` checks that `import rashid` and `rashid --help` do not load the geospatial stack, jsonschema, the network stack, or a profiler. Keep heavy imports inside the functions that need them.
+`tests/unit/test_import_budget.py` checks that `import rashid_core` and `rashid --help` do not load the geospatial stack, jsonschema, the network stack, or a profiler. Keep heavy imports inside the functions that need them.
 
 ## Logs and timings
 
@@ -237,4 +237,4 @@ rashid applies the requirements of the newest profile version it bundles. A spec
 2. The spec tags `vX.Y.Z`. Confirm that the profile URI of that version serves the tagged schema.
 3. Run the sync: `gh workflow run spec-sync.yml -R portolan-sdi/rashid`. The new schema directory makes the pull request a feature, `feat(schema): bundle the Portolan vX.Y.Z profile schema`, with auto-merge off. `DEFAULT_SCHEMA_URI`, `rashid --version`, the JSON report, and `PTL-CNF-005` follow the newest bundled version. The pull request needs no code change. Review it and merge it.
 4. Release rashid again, so that the wheel on PyPI applies `vX.Y.Z`.
-5. Update the downstream pins. Tools read the newest version from `rashid.api.newest_profile_version()`.
+5. Update the downstream pins. Tools read the newest version from `rashid_core.api.newest_profile_version()`.

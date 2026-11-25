@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from rashid import ids, registry
-from rashid.model import Severity
-from rashid.rule import Rule
+from rashid_core import ids, registry
+from rashid_core.model import Severity
+from rashid_core.rule import Rule
 
 pytestmark = pytest.mark.unit
 
@@ -61,14 +61,14 @@ def test_metadata_id_without_spec_metadata_is_rejected() -> None:
 def test_registered_ids_equal_ids_emitted_in_src() -> None:
     """Read executable AST nodes, including ID constants used by passes."""
     emitted = set()
-    for path in (Path(__file__).resolve().parents[2] / "src/rashid").rglob("*.py"):
+    for path in (Path(__file__).resolve().parents[2] / "src/rashid_core").rglob("*.py"):
         if path.name in {"registry.py", "ids.py"}:
             continue  # declarations do not prove an emitter exists
         tree = ast.parse(path.read_text(encoding="utf-8"))
         aliases = {
             alias.asname or alias.name: getattr(ids, alias.name, None)
             for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module == "rashid.ids"
+            if isinstance(node, ast.ImportFrom) and node.module == "rashid_core.ids"
             for alias in node.names
         }
         for node in ast.walk(tree):
@@ -151,7 +151,7 @@ def test_an_incubating_check_may_not_declare_an_error() -> None:
     """An incubating requirement is outside the conformance surface.
 
     The declaration is refused at the registry so a new Zarr check cannot make
-    a store with broken metadata fail a run; ``rashid.runner.cap_incubating``
+    a store with broken metadata fail a run; ``rashid_core.runner.cap_incubating``
     caps the findings as the second guard.
     """
     check = registry.CHECKS[ids.ZAR_STORE_VERSION]

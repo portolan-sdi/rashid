@@ -77,7 +77,7 @@ jobs:
         run: |
           # Attach each --json report schema under a name that carries its version.
           assets=()
-          for schema in src/rashid/_schemas/report/v*/schema.json; do
+          for schema in src/rashid_core/_schemas/report/v*/schema.json; do
             version_dir=$(basename "$(dirname "$schema")")
             asset="$RUNNER_TEMP/rashid-report-${version_dir}.schema.json"
             cp "$schema" "$asset"

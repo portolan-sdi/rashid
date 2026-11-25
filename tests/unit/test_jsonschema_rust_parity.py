@@ -1,6 +1,6 @@
 """jsonschema-rs and jsonschema must reach the same verdict on every object.
 
-``rashid._jsonschema.screened`` trusts ``jsonschema-rs`` to pass a valid
+``rashid_core._jsonschema.screened`` trusts ``jsonschema-rs`` to pass a valid
 object and only asks ``jsonschema`` about a rejected one. Where the engines
 disagree, a finding disappears (Rust passes what Python rejects) or a valid
 object costs a Python call (the reverse). These tests compile every schema
@@ -20,7 +20,7 @@ import pytest
 from jsonschema import Draft7Validator
 from jsonschema.validators import validator_for
 
-from rashid._jsonschema import (
+from rashid_core._jsonschema import (
     _STAC_BASE,
     compile_rust,
     extension_registry,
@@ -31,8 +31,8 @@ from rashid._jsonschema import (
     stac_rust_registry,
     vendored_extension_schemas,
 )
-from rashid.schema import _bundled_schemas
-from rashid.structural import _ROOT_SCHEMAS
+from rashid_core.schema import _bundled_schemas
+from rashid_core.structural import _ROOT_SCHEMAS
 
 pytestmark = pytest.mark.unit
 

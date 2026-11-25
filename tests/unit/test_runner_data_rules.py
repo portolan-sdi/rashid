@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-import rashid.data as data_pass
-from rashid import ValidationOptions
-from rashid.catalog import Node
-from rashid.config import RulesConfig
-from rashid.data._results import DataDefect
-from rashid.data.reader import AssetReader
-from rashid.ids import DAT_MIRROR, DAT_UNAVAILABLE, LIV_UNAVAILABLE
-from rashid.registry import CHECKS, check_ids, is_incubating
-from rashid.runner import validate
+import rashid_core.data as data_pass
+from rashid_core import ValidationOptions
+from rashid_core.catalog import Node
+from rashid_core.config import RulesConfig
+from rashid_core.data._results import DataDefect
+from rashid_core.data.reader import AssetReader
+from rashid_core.ids import DAT_MIRROR, DAT_UNAVAILABLE, LIV_UNAVAILABLE
+from rashid_core.registry import CHECKS, check_ids, is_incubating
+from rashid_core.runner import validate
 from tests.conftest import CatalogBuilder
 
 pytestmark = pytest.mark.unit

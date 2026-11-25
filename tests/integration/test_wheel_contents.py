@@ -37,8 +37,10 @@ def test_wheel_ships_marker_and_schemas(tmp_path: Path) -> None:
     assert build.returncode == 0, f"uv build failed in {REPO_ROOT}:\n{build.stderr}"
     (wheel,) = tmp_path.glob("rashid-*.whl")
     names = zipfile.ZipFile(wheel).namelist()
-    assert "rashid/py.typed" in names
+    assert "rashid_core/py.typed" in names
     schemas = [
-        n for n in names if n.startswith("rashid/_schemas/portolan/") and n.endswith("schema.json")
+        n
+        for n in names
+        if n.startswith("rashid_core/_schemas/portolan/") and n.endswith("schema.json")
     ]
     assert schemas, f"no bundled schema in {wheel.name}"

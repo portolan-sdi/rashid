@@ -99,7 +99,7 @@ For transfer details and every rule ID, see [the rule reference](docs/rules.md).
 ## Use rashid from Python
 
 ```python
-from rashid import ValidationOptions, validate
+from rashid_core import ValidationOptions, validate
 
 report = validate("path/to/catalog")
 published = validate("https://data.example.org/my-catalog/catalog.json")
@@ -113,7 +113,7 @@ for finding in report.errors:
 Use `RulesConfig` to disable rules or change their severity.
 
 ```python
-from rashid import RulesConfig, Severity, ValidationOptions, validate
+from rashid_core import RulesConfig, Severity, ValidationOptions, validate
 
 config = RulesConfig(
     disabled=frozenset({"PTL-VIZ-004"}),
@@ -123,7 +123,7 @@ config = RulesConfig(
 report = validate("path/to/catalog", options=ValidationOptions(config=config))
 ```
 
-The public `rashid.api` module also provides helpers for tools that repair catalogs. Names from this module remain available across 0.x releases. Other internal modules can change in a patch release.
+The public `rashid_core.api` module also provides helpers for tools that repair catalogs. Names from this module remain available across 0.x releases. Other internal modules can change in a patch release.
 
 ## Documentation
 

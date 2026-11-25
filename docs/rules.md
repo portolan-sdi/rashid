@@ -27,11 +27,11 @@ Severities follow the Portolan specification. MUST requirements produce errors, 
 - `PTL-VIZ-004` produces an info finding when a large vector lacks a visual derivative. The render-path MUST depends on whether source rendering is viable, which metadata cannot prove. The 100 MB threshold is also heuristic.
 - `PTL-VIZ-007` applies to a collection when its raster items have two or more distinct bboxes. Each item's bbox must cover at most half of the collection's extent. Metadata cannot show that the items share bands and a time, so rashid reports nothing for fewer or larger items.
 
-`PTL-CNF-004` reads `src/rashid/_schemas/extension-registry.json`. This file contains the profile's registry table from `stac/README.md` in the specification.
+`PTL-CNF-004` reads `src/rashid_core/_schemas/extension-registry.json`. This file contains the profile's registry table from `stac/README.md` in the specification.
 
 At vendor time, `scripts/vendor_spec_fixtures.py` parses that table. The rule ignores extensions that the registry does not list. `PTL-CNF-001` and `PTL-CNF-002` handle the Portolan schema URI's version.
 
-The same file drives `PTL-EXT-001` and the schema vendoring. `scripts/vendor_stac_schemas.py` reads the registry and fetches the `$ref` closure of every pinned extension into `src/rashid/_schemas/extensions/`. A version pinned in the specification arrives with its schema on the next spec sync. rashid needs no code change to validate against it.
+The same file drives `PTL-EXT-001` and the schema vendoring. `scripts/vendor_stac_schemas.py` reads the registry and fetches the `$ref` closure of every pinned extension into `src/rashid_core/_schemas/extensions/`. A version pinned in the specification arrives with its schema on the next spec sync. rashid needs no code change to validate against it.
 
 A registered extension declared at a version the registry does not pin is validated against the schema of the version it declares. rashid fetches that schema over https unless the package retains a compatibility version. Contacts v0.1.1 remains packaged beside v1.0.0. A newer schema would report fields that the declared version never defined. A skip would let a catalog turn its schema errors into a `PTL-CNF-004` warning when it declares an older version.
 
@@ -113,17 +113,17 @@ The rule's message reports absent geometry evidence only. `PTL-COL-005` answers 
 | `PTL-ZAR` | 001–019 | Checks a Zarr store asset against the Zarr profile of the specification. Reads only Zarr metadata, never chunk data. Requires Zarr v3, the `spatial` and `proj` conventions, the `multiscales` convention when the store has or needs a pyramid, the `application/vnd.zarr; version=3` media type on an asset whose `href` names a group, an affine `spatial:transform` on every renderable array with the spatial axes last and Y before X, row-major storage, `proj:code` or `proj:projjson` in the store attributes, a multiscale pyramid whose coarsest level fits in 4 chunks, `cube:variables` for more than one data variable, a display range, a declared `nodata`, chunking that reads no more than 8 samples per drawn sample, chunks of 256 to 1024 samples on X and Y, and codecs with a JavaScript implementation. A band dimension is exempt from the chunk-length rule but still counts toward the 8-sample bound. The lower chunk bound does not apply to a spatial axis shorter than 256 samples. An 8-bit array with three or more bands needs no display range, and an array with an alpha band needs no `nodata`. A convention counts as declared only when `zarr_conventions` carries its UUID. An asset counts as a Zarr store when its media type names Zarr however it is spelled, or when a `data` asset at a `.zarr` prefix has no media type or `application/octet-stream`; rule `004` then names the media type the profile requires. Rule `003` probes the store's cross-origin policy from the live pass, for every store on any host, and exempts a `source` asset. The probe reads the store's `zarr.json`. The live pass does not probe a store `href` as an asset, because a store `href` names a key prefix and a host returns no object for it. A store whose `href` uses another scheme, such as `s3`, is read and probed through its HTTPS `alternate`. Rule `001` reports a store root without `zarr.json` as a warning, because a Zarr v2 store has none. This applies to a remote 404 and to a local Zarr v2 directory. Rule `001` reports a store that it cannot read for another reason as information. It also reports information when it finds no data variable, because the checks for each array then do not run. See [Checks that only warn](#checks-that-only-warn). |
 | `PTL-MIR` | 001–002 | Recommends an `items.parquet` mirror for a raster collection with scene items. Requires a published mirror to be a collection asset with the `collection-mirror` role and `application/vnd.apache.parquet` media type, as the stac-geoparquet specification defines. |
 
-`rashid.registry.CHECKS` provides the same list in machine-readable form. It maps each check ID to its description, highest possible severity, specification requirements, and validation pass. Checks without a manifest requirement record the reason in `spec_note`.
+`rashid_core.registry.CHECKS` provides the same list in machine-readable form. It maps each check ID to its description, highest possible severity, specification requirements, and validation pass. Checks without a manifest requirement record the reason in `spec_note`.
 
-The per-rule summary and JSON `summary.by_rule` object read this registry. Call `rashid.describe(rule_id)` to get a rule's description.
+The per-rule summary and JSON `summary.by_rule` object read this registry. Call `rashid_core.describe(rule_id)` to get a rule's description.
 
-The catalog tree loads from a local directory. `CatalogGraph` in `src/rashid/catalog.py` provides the only metadata I/O layer and loads the tree in one pass. For a catalog URL, `src/rashid/remote.py` first fetches the tree into a temporary directory by following the `child`, `item`, and JSON `alternate` links from the root, and by fetching `AGENTS.md` and `README.md` beside each catalog and collection. `CatalogGraph` then loads that directory. The graph records the URL as `base_url`, so the data pass reads relative asset hrefs from the host and the live pass probes under the same base.
+The catalog tree loads from a local directory. `CatalogGraph` in `src/rashid_core/catalog.py` provides the only metadata I/O layer and loads the tree in one pass. For a catalog URL, `src/rashid_core/remote.py` first fetches the tree into a temporary directory by following the `child`, `item`, and JSON `alternate` links from the root, and by fetching `AGENTS.md` and `README.md` beside each catalog and collection. `CatalogGraph` then loads that directory. The graph records the URL as `base_url`, so the data pass reads relative asset hrefs from the host and the live pass probes under the same base.
 
 ### Checks that only warn
 
 The specification gives some requirements the status `incubating`. Today all of them are in the Zarr profile. Such a requirement is not part of the conformance rules of the current Portolan version, so a store that breaks one is still conformant.
 
-A `PTL-ZAR` check gives a warning at most, also for a MUST requirement. `rashid.registry` rejects a `PTL-ZAR` check that declares an error severity. Before rashid builds the report, the runner changes an error finding from such a check to a warning. The cap runs after severity overrides, so `severity` configuration cannot make a `PTL-ZAR` finding an error. A Zarr store with broken metadata gives warnings, and the run still passes.
+A `PTL-ZAR` check gives a warning at most, also for a MUST requirement. `rashid_core.registry` rejects a `PTL-ZAR` check that declares an error severity. Before rashid builds the report, the runner changes an error finding from such a check to a warning. The cap runs after severity overrides, so `severity` configuration cannot make a `PTL-ZAR` finding an error. A Zarr store with broken metadata gives warnings, and the run still passes.
 
 ## Which spec version rashid applies
 
@@ -176,8 +176,8 @@ Combine `--data-scope local` with `--live` to recover most checks for remote ass
 The Python API accepts a reader factory instead of a scope flag:
 
 ```python
-from rashid import ValidationOptions, validate
-from rashid.data.reader import LocalOnlyReader
+from rashid_core import ValidationOptions, validate
+from rashid_core.data.reader import LocalOnlyReader
 
 report = validate("path/to/catalog", options=ValidationOptions(data_reader_factory=LocalOnlyReader))
 ```
@@ -185,8 +185,8 @@ report = validate("path/to/catalog", options=ValidationOptions(data_reader_facto
 Pass the same factory to run the data pass directly:
 
 ```python
-from rashid.data import validate_data
-from rashid.data.reader import LocalOnlyReader
+from rashid_core.data import validate_data
+from rashid_core.data.reader import LocalOnlyReader
 
 report = validate_data(graph, reader_factory=LocalOnlyReader)
 ```

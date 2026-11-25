@@ -1,4 +1,4 @@
-"""Unit tests for rashid._store: obstore reads against a local HTTPS server."""
+"""Unit tests for rashid_core._store: obstore reads against a local HTTPS server."""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ from typing import Any
 
 import pytest
 
-from rashid import _store, _trace
-from rashid._href import object_location
-from rashid._stac import asset_refers_to_self
-from rashid.catalog import Node
+from rashid_core import _store, _trace
+from rashid_core._href import object_location
+from rashid_core._stac import asset_refers_to_self
+from rashid_core.catalog import Node
 from tests._https import HttpsServer, Route
 
 _AGENT = f"rashid/{version('rashid')} (+https://github.com/portolan-sdi/rashid)"
@@ -314,10 +314,10 @@ def test_only_the_store_imports_urllib_request() -> None:
     import ast
     from pathlib import Path
 
-    import rashid
+    import rashid_core
 
     importers: set[str] = set()
-    for path in sorted(Path(rashid.__file__).parent.rglob("*.py")):
+    for path in sorted(Path(rashid_core.__file__).parent.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             names = (

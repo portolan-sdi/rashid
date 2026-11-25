@@ -19,13 +19,13 @@ from typing import Any
 
 import pytest
 
-import rashid.data.checks as checks
-from rashid.catalog import CatalogGraph, Node
-from rashid.data import storage
-from rashid.data._results import DataDefect
-from rashid.data.reader import Locator
-from rashid.ids import DAT_CHECKSUM, DAT_FORMAT, DAT_SIZE
-from rashid.model import Severity
+import rashid_core.data.checks as checks
+from rashid_core.catalog import CatalogGraph, Node
+from rashid_core.data import storage
+from rashid_core.data._results import DataDefect
+from rashid_core.data.reader import Locator
+from rashid_core.ids import DAT_CHECKSUM, DAT_FORMAT, DAT_SIZE
+from rashid_core.model import Severity
 
 pytestmark = pytest.mark.unit
 
