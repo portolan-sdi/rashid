@@ -26,7 +26,7 @@ pip install rashid-core
 python -m rashid_core check --no-data tests/fixtures/reference-catalog
 ```
 
-`rashid-core` provides the Python library and module entry point. It does not install the `rashid` console command.
+`rashid-core` provides the Python library and module entry point. Only `rashid` installs the `rashid` console command.
 Core still checks checksums, sizes, file signatures, and Zarr metadata by default.
 It reports `PTL-DAT-000` when geospatial checks cannot run.
 Install `rashid-core[data]` to add geospatial validation, or install `rashid` for the full tool.

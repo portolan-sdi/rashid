@@ -13,7 +13,7 @@ uv run pre-commit install \
 ```
 
 This installs both workspace distributions, development dependencies, and the geospatial stack.
-All Python code lives in `src/rashid_core/`; `meta/rashid/` holds the code-free metapackage and its console entry point.
+All Python code is in `src/rashid_core/`; `meta/rashid/` holds the code-free metapackage and its console entry point.
 Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org), which Commitizen checks through the `commit-msg` hook.
 
 ## Local checks
@@ -51,7 +51,7 @@ These gates keep each consolidated concept at its owner ([#266](https://github.c
 | Gate | Enforced boundary |
 |---|---|
 | Ruff `TID251` | `_href.py` owns URL interpretation; `_store.py` owns requests and object stores. `_json.py` owns JSON loading; `_package.py` owns schema resources and installed versions. `data/formats/_files.py` owns readers and glob enumeration. |
-| import-linter | Exhaustive layers start with `__main__` and order every package module. Metadata rules stay independent; only the registry imports them. Only optional formats import geospatial libraries; only the CLI imports click. Only the data entry point imports optional formats, and metadata rules cannot import transport. |
+| import-linter | Exhaustive layers start with `__main__` and order every package module. Metadata rules stay independent, cannot import transport, and are imported by the registry alone. Geospatial libraries are limited to `data/formats/`, which the data entry point alone imports. Click is limited to the CLI. |
 | jscpd 5.2.1 | New Python clones in `src/rashid_core` and `tests` fail the commit hook. Fixtures and virtual environments are excluded. An empty scan fails. |
 | Package split | `test_packaging.py` checks version agreement and the core dependency closure. `wheel-smoke` checks isolated wheels and upgrades from rashid 0.4.0. |
 | API snapshot | `test_api.py` pins `rashid_core.api` and `rashid_core.__all__`, their defining objects, and callable signatures. Python defines the enum constructor signature. |
@@ -174,7 +174,7 @@ uv run rashid --trace trace.json check path/to/catalog
 - `-v` enables `INFO` logs; `-vv` enables `DEBUG` logs. Logs go to stderr, leaving stdout for the report.
 - `--trace` writes a Chrome trace that you can open in [Perfetto](https://ui.perfetto.dev).
 
-Logger names follow the import package, for example:
+Logger names follow the import package:
 
 ```text
 +0.055s DEBUG rashid_core.runner: rules: start
