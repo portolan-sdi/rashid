@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,9 @@ def test_overview_pyramid_depth_and_reductions(tmp_path: Path, factors: list[int
     findings = _findings(tmp_path, "PTL-DAT-011")
     assert len(findings) == 1
     assert findings[0]["severity"] == "error"
+    # Actual level sizes, not Rasterio's rounded factors (#327).
+    sizes = ", ".join(f"{math.ceil(1024 / f)}x{math.ceil(1024 / f)}" for f in factors)
+    assert f"overview levels {sizes} " in findings[0]["message"]
     assets.write_cog(path, size=1024, blocksize=256)
     assert not _findings(tmp_path, "PTL-DAT-011")
 
