@@ -175,90 +175,62 @@ exclude_lines = [
 root_package = "rashid"
 include_external_packages = true
 
-[[tool.importlinter.contracts]]
-name = "validation core must not import a CLI framework"
-type = "forbidden"
-source_modules = [
-    "rashid.model",
-    "rashid.report",
-    "rashid._stac",
-    "rashid._media",
-    "rashid._profile",
-    "rashid._package",
-    "rashid.ids",
-    "rashid.catalog",
-    "rashid.rule",
-    "rashid.runner",
-    "rashid.config",
-    "rashid.rules",
-    "rashid.live",
-    "rashid.api",
-    "rashid._trace",
-]
-forbidden_modules = ["click"]
+# Node annotations in _href do not create a runtime dependency on catalog.
+# Import-linter exposes this option per configuration, rather than per contract.
+exclude_type_checking_imports = true
 
-# The data check modules own the geospatial stack; the core validator and
-# the data-pass glue (entry point, byte reader) stay stdlib-only, so `import
-# rashid` never pulls pyarrow/rasterio/pyproj. The lazy rashid.data -> checks edge is
-# severed here because it fires only inside default_validator(), on demand; the
-# runner -> rashid.data chain then still catches any direct geo import in the glue.
-# rashid.data itself is not a source module: it is a package, so listing it would
-# pull in all the data check modules that import the stack.
 [[tool.importlinter.contracts]]
-name = "core and data readers must not import the geospatial stack"
-type = "forbidden"
-source_modules = [
-    "rashid.model",
-    "rashid.report",
-    "rashid._stac",
-    "rashid._media",
-    "rashid._profile",
-    "rashid._package",
-    "rashid.ids",
-    "rashid.catalog",
-    "rashid.rule",
-    "rashid.runner",
-    "rashid.config",
-    "rashid.rules",
-    "rashid.schema",
-    "rashid.structural",
-    "rashid.cli",
-    "rashid.live",
-    "rashid.data.reader",
-    "rashid.api",
-    "rashid._trace",
+id = "package-layers"
+name = "package imports follow exhaustive layers"
+type = "layers"
+containers = ["rashid"]
+exhaustive = true
+layers = [
+    "cli",
+    "api",
+    "runner",
+    "schema | structural | extensions | remote | live | data",
+    "_jsonschema",
+    "report",
+    "registry",
+    "rules",
+    "_media",
+    "_profile | _stac | rule",
+    "catalog | config",
+    "_store",
+    "_href | _http | _json",
+    "_trace | _multihash | _spdx | ids | model | _package",
 ]
-forbidden_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"]
-ignore_imports = ["rashid.data -> rashid.data.formats.checks"]
+
+[[tool.importlinter.contracts]]
+id = "formats-only-geo"
+name = "only optional formats may import the geospatial stack"
+type = "protected"
+protected_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"]
+allowed_importers = ["rashid.data.formats"]
+
+[[tool.importlinter.contracts]]
+id = "cli-only-click"
+name = "only the cli may import click"
+type = "protected"
+protected_modules = ["click"]
+allowed_importers = ["rashid.cli"]
+
+[[tool.importlinter.contracts]]
+id = "formats-entry-point"
+name = "only the data entry point may import optional formats"
+type = "protected"
+protected_modules = ["rashid.data.formats", "rashid.data.formats.**"]
+# Exact entry module; treating rashid.data as a package would allow every reader.
+as_packages = false
+allowed_importers = ["rashid.data", "rashid.data.formats.**"]
 
 [[tool.importlinter.contracts]]
 id = "rules-no-network"
-name = "metadata rules must not import network passes or transport"
+name = "metadata rules must not import transport"
 type = "forbidden"
 source_modules = ["rashid.rules"]
-forbidden_modules = ["rashid.live", "rashid.remote", "rashid._store"]
-
-[[tool.importlinter.contracts]]
-id = "rules-no-data"
-name = "metadata rules must not import data checks"
-type = "forbidden"
-source_modules = ["rashid.rules"]
-forbidden_modules = ["rashid.data"]
-
-[[tool.importlinter.contracts]]
-id = "data-files-owner"
-name = "only data checks may import the file-handle owner"
-type = "protected"
-protected_modules = ["rashid.data.formats._files"]
-as_packages = false
-# T9 split data/checks.py into these concern modules. No package-wide wildcard.
-allowed_importers = [
-    "rashid.data.formats.checks",
-    "rashid.data.formats.geoparquet",
-    "rashid.data.formats.raster",
-    "rashid.data.formats.mirror",
-    "rashid.data.formats.partitions",
-]
+forbidden_modules = ["rashid._store"]
 
 [[tool.importlinter.contracts]]
 id = "rules-independent"

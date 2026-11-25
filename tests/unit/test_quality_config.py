@@ -43,24 +43,62 @@ def test_tid251_bans_the_owner_apis() -> None:
 def test_owner_layer_contracts_cover_new_modules() -> None:
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     contracts = {row.get("id"): row for row in config["tool"]["importlinter"]["contracts"]}
+    assert set(contracts) == {
+        "package-layers",
+        "formats-only-geo",
+        "cli-only-click",
+        "formats-entry-point",
+        "rules-no-network",
+        "rules-independent",
+        "rules-only-registry",
+    }
+    assert all(not contract.get("ignore_imports") for contract in contracts.values())
+    assert config["tool"]["importlinter"]["exclude_type_checking_imports"] is True
+    layers = contracts["package-layers"]
+    assert layers["type"] == "layers"
+    assert layers["containers"] == ["rashid"]
+    assert layers["exhaustive"] is True
+    assert not layers.get("exhaustive_ignores")
+    assert layers["layers"] == [
+        "cli",
+        "api",
+        "runner",
+        "schema | structural | extensions | remote | live | data",
+        "_jsonschema",
+        "report",
+        "registry",
+        "rules",
+        "_media",
+        "_profile | _stac | rule",
+        "catalog | config",
+        "_store",
+        "_href | _http | _json",
+        "_trace | _multihash | _spdx | ids | model | _package",
+    ]
+    for contract_id, modules, importers in (
+        (
+            "formats-only-geo",
+            ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"],
+            ["rashid.data.formats"],
+        ),
+        ("cli-only-click", ["click"], ["rashid.cli"]),
+        (
+            "formats-entry-point",
+            ["rashid.data.formats", "rashid.data.formats.**"],
+            ["rashid.data", "rashid.data.formats.**"],
+        ),
+    ):
+        contract = contracts[contract_id]
+        assert contract["type"] == "protected"
+        assert contract["protected_modules"] == modules
+        assert contract["allowed_importers"] == importers
+        assert contract.get("as_packages", True) is (contract_id != "formats-entry-point")
     rules = contracts["rules-no-network"]
     assert rules["type"] == "forbidden"
-    assert not rules.get("ignore_imports")
     assert rules["source_modules"] == ["rashid.rules"]
-    assert set(rules["forbidden_modules"]) == {"rashid.live", "rashid.remote", "rashid._store"}
+    assert rules["forbidden_modules"] == ["rashid._store"]
     assert rules.get("as_packages", True) is True
     assert rules.get("allow_indirect_imports", False) is False
-    data = contracts["rules-no-data"]
-    assert data["type"] == "forbidden"
-    assert data["source_modules"] == ["rashid.rules"]
-    assert data["forbidden_modules"] == ["rashid.data"]
-    assert not data.get("ignore_imports")
-    assert data.get("as_packages", True) is True
-    assert data.get("allow_indirect_imports", False) is False
-    files = contracts["data-files-owner"]
-    assert files["type"] == "protected"
-    assert files["protected_modules"] == ["rashid.data.formats._files"]
-    assert files["as_packages"] is False
 
     independent = contracts["rules-independent"]
     assert independent["type"] == "independence"

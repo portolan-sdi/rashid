@@ -21,8 +21,8 @@ EXEMPTIONS = json.loads((ROOT / "guardrail_exemptions.json").read_text(encoding=
 def test_exemption_counts_and_reasons() -> None:
     assert {kind: len(rows) for kind, rows in EXEMPTIONS.items()} == {
         "ruff": 7,
-        "import-linter": 1,
-        "allowed-importers": 6,
+        "import-linter": 0,
+        "allowed-importers": 5,
         "jscpd": 1,
         "xfail": 0,
     }
@@ -33,7 +33,7 @@ def test_exemption_counts_and_reasons() -> None:
             else rows.values()
         )
         assert all(isinstance(reason, str) and reason.strip() for reason in reasons)
-    assert sum(len(edges) for edges in EXEMPTIONS["import-linter"].values()) == 1
+    assert sum(len(edges) for edges in EXEMPTIONS["import-linter"].values()) == 0
 
 
 def test_ruff_exemptions_match_config_and_banned_uses() -> None:
@@ -76,6 +76,17 @@ def test_ruff_exemptions_match_config_and_banned_uses() -> None:
 
 
 def _imports(module: str) -> set[str]:
+    if "*" in module:
+        modules = (
+            ".".join(path.relative_to(ROOT / "src").with_suffix("").parts).removesuffix(".__init__")
+            for path in (ROOT / "src").rglob("*.py")
+        )
+        return {
+            imported
+            for name in modules
+            if fnmatch.fnmatchcase(name, module)
+            for imported in _imports(name)
+        }
     path = ROOT / "src" / module.replace(".", "/")
     path = path / "__init__.py" if path.is_dir() else path.with_suffix(".py")
     imports = set()
@@ -105,10 +116,13 @@ def test_import_exemptions_match_config_and_live_edges() -> None:
     } == set(EXEMPTIONS["allowed-importers"])
     for contract in protected:
         for importer in contract["allowed_importers"]:
+            imports = _imports(importer)
+            if contract.get("as_packages", True):
+                imports.update(_imports(importer + ".**"))
             assert any(
-                imported == owner or imported.startswith(owner + ".")
+                fnmatch.fnmatchcase(imported, owner) or imported.startswith(owner + ".")
                 for owner in contract["protected_modules"]
-                for imported in _imports(importer)
+                for imported in imports
             ), f"stale importer: {importer}"
 
 

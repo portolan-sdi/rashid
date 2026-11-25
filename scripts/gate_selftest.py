@@ -113,9 +113,9 @@ FAULTS = (
         "rule-layer",
         "src/rashid/rules/_gate_fault.py",
         "",
-        "import rashid.live\n",
+        "import rashid._store\n",
         _LAYERS,
-        "metadata rules must not import network passes or transport BROKEN",
+        "metadata rules must not import transport BROKEN",
     ),
     Fault(
         "rules-independent",
@@ -134,12 +134,36 @@ FAULTS = (
         "only the registry may import metadata rules BROKEN",
     ),
     Fault(
-        "file-layer",
-        "src/rashid/_gate_fault.py",
-        "",
-        "import rashid.data.formats._files\n",
+        "package-layers",
+        "src/rashid/model.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport rashid.report\n",
         _LAYERS,
-        "only data checks may import the file-handle owner BROKEN",
+        "package imports follow exhaustive layers BROKEN",
+    ),
+    Fault(
+        "formats-only-geo",
+        "src/rashid/data/reader.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport pyarrow\n",
+        _LAYERS,
+        "only optional formats may import the geospatial stack BROKEN",
+    ),
+    Fault(
+        "cli-only-click",
+        "src/rashid/report.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport click\n",
+        _LAYERS,
+        "only the cli may import click BROKEN",
+    ),
+    Fault(
+        "formats-entry-point",
+        "src/rashid/data/reader.py",
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\nimport rashid.data.formats.raster\n",
+        _LAYERS,
+        "only the data entry point may import optional formats BROKEN",
     ),
     Fault(
         "duplicate-block",
@@ -275,14 +299,6 @@ FAULTS = (
         _pytest("tests/unit/test_guardrail_exemptions.py::test_exemption_counts_and_reasons"),
         "test_exemption_counts_and_reasons",
     ),
-    Fault(
-        "rules-data-layer",
-        "src/rashid/rules/_gate_fault.py",
-        "",
-        "import rashid.data\n",
-        _LAYERS,
-        "metadata rules must not import data checks BROKEN",
-    ),
     *(
         Fault(
             name,
@@ -337,7 +353,7 @@ FAULTS = (
         "def _copy_" + "head(repo:",
         "FAULTS = FAULTS[1:]\n\ndef _copy_" + "head(repo:",
         ("uv", "run", "python", "scripts/gate_selftest.py", "--help"),
-        "expected 48 faults",
+        "expected 50 faults",
     ),
 )
 
@@ -450,8 +466,8 @@ def exercise(repo: Path, fault: Fault) -> bool:
 
 
 def main() -> int:
-    assert len(FAULTS) == 48, f"expected 48 faults, found {len(FAULTS)}"
-    assert len({fault.name for fault in FAULTS}) == 48, "fault names must be unique"
+    assert len(FAULTS) == 50, f"expected 50 faults, found {len(FAULTS)}"
+    assert len({fault.name for fault in FAULTS}) == 50, "fault names must be unique"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fault", choices=[fault.name for fault in FAULTS])
     parser.add_argument(

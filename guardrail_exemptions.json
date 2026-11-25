@@ -23,17 +23,12 @@
       "TID251": "Owns package schema resources and lazy installed-version lookup (#336)."
     }
   },
-  "import-linter": {
-    "core and data readers must not import the geospatial stack": {
-      "rashid.data -> rashid.data.formats.checks": "The lazy default_validator import loads the data stack only when validation runs."
-    }
-  },
+  "import-linter": {},
   "allowed-importers": {
-    "rashid.data.formats.checks": "Owns asset dispatch and shares one file handle across checks (#266).",
-    "rashid.data.formats.geoparquet": "T9 extracted GeoParquet checks from data/checks.py; consumes shared handles (#266).",
-    "rashid.data.formats.raster": "T9 extracted raster checks from data/checks.py; consumes shared handles (#266).",
-    "rashid.data.formats.mirror": "T9 extracted mirror checks from data/checks.py; consumes shared handles (#266).",
-    "rashid.data.formats.partitions": "T9 extracted partition checks from data/checks.py; owns per-partition shared handles (#266).",
+    "rashid.data.formats": "Owns optional geospatial imports; storage and Zarr checks stay independent (#336).",
+    "rashid.cli": "Owns the click command interface (#336).",
+    "rashid.data": "Selects optional format checks through one lazy import (#336).",
+    "rashid.data.formats.**": "Format modules share readers and geospatial helpers within their protected package (#336).",
     "rashid.registry": "Owns metadata rule registration; other production modules use shared helpers (#336)."
   },
   "jscpd": {
