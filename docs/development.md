@@ -84,8 +84,7 @@ uv run python scripts/gate_selftest.py --fault duplicate-block
 ```
 
 The script extracts `HEAD` with `git archive`, runs each gate on a clean copy, then injects its fault.
-It checks banned APIs, import boundaries, duplication, API exports and signatures, IDs, and pointer construction.
-It also checks baseline growth, strict xfails, CI wiring, and exemption growth.
+It checks banned APIs, import boundaries, duplication, API exports and signatures, duplicate and missing IDs, pointer variants, baseline growth, loose and bare xfails, CI wiring, and exemption growth.
 The self-test pins its fault count so dropping a case fails. Each fault must produce its specific diagnostic; syntax errors and clean-copy failures fail the self-test, which runs without modifying the working tree.
 
 ## Measuring performance
@@ -150,8 +149,7 @@ Counters are always enabled. `tests/integration/test_operation_counts.py` checks
 
 If your change reduces the work performed, update the expected counts in the same pull request.
 
-`tests/unit/test_import_budget.py` checks imports, `rashid --help`, and `python -m rashid_core --help`.
-They must not load the geospatial stack, jsonschema, transport, or a profiler. Keep heavy imports inside the functions that need them.
+`tests/unit/test_import_budget.py` checks that `import rashid_core`, `rashid --help`, and `python -m rashid_core --help` do not load the geospatial stack, jsonschema, the network stack, or a profiler. Keep heavy imports inside the functions that need them.
 
 Build both wheels and test isolated installs with:
 
@@ -167,9 +165,9 @@ Without the geospatial stack, it requires the missing-stack warning alongside ch
 Place logging and profiling flags before `check`:
 
 ```bash
-uv run rashid --timings check --json --no-data tests/fixtures/reference-catalog
-uv run rashid -vv check --no-data tests/fixtures/reference-catalog
-uv run rashid --trace .cache/trace.json check --no-data tests/fixtures/reference-catalog
+uv run rashid --timings check --json path/to/catalog
+uv run rashid -vv check path/to/catalog
+uv run rashid --trace trace.json check path/to/catalog
 ```
 
 - `--timings` adds a `meta` block to JSON reports. Without `--json`, it prints the stage table to stderr.

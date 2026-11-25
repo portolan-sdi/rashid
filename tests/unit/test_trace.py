@@ -434,19 +434,30 @@ def test_debug_records_reach_stderr_and_not_stdout(capsys: pytest.CaptureFixture
     assert line.split(" ", 1)[0].endswith("s")
 
 
-def test_storage_and_optional_format_records_reach_the_package_handler(
+def test_storage_records_reach_the_package_handler(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     from rashid_core import _store
-    from rashid_core.data.formats import checks
 
     _trace.configure_logging("debug")
     _store.log.debug("storage record")
-    checks.log.debug("format record")
     captured = capsys.readouterr()
     assert captured.out == ""
     assert [line.split(" ", 1)[1] for line in captured.err.splitlines()] == [
         "DEBUG rashid_core._store: storage record",
+    ]
+
+
+def test_optional_format_records_reach_the_package_handler(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    checks = pytest.importorskip("rashid_core.data.formats.checks")
+
+    _trace.configure_logging("debug")
+    checks.log.debug("format record")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert [line.split(" ", 1)[1] for line in captured.err.splitlines()] == [
         "DEBUG rashid_core.data.formats.checks: format record",
     ]
 
