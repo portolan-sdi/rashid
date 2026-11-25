@@ -199,7 +199,7 @@ def _wrong_target(node: Node, graph: CatalogGraph, rel: str, target: Node) -> st
 
 
 class LinkResolutionRule(Rule):
-    """Link and asset hrefs use URI-reference syntax; structural links resolve.
+    """Link and asset hrefs use IRI-reference syntax (RFC 3987); structural links resolve.
 
     Syntax is checked before resolving targets, including hrefs on links
     whose targets this pass cannot judge.
