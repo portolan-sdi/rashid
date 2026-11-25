@@ -30,10 +30,10 @@ concurrency:
 
 jobs:
   ci:
-    # v1 is a moving major tag. Compatible changes arrive when ops moves
-    # it; a breaking change ships as v2 and reaches this repo as a
-    # Dependabot PR.
-    uses: portolan-sdi/portolan-ops/.github/workflows/reusable-python-ci.yml@v1.14.0
+    # v1 is a moving major tag: every merge to ops main that passes its
+    # checks moves it (portolan-ops#203), so changes arrive here without a
+    # pin bump. A breaking change ships as v2.
+    uses: portolan-sdi/portolan-ops/.github/workflows/reusable-python-ci.yml@v1
     permissions:
       contents: read
       # The reusable test job requests this for Codecov OIDC even when the
