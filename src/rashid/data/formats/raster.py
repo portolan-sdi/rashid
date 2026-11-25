@@ -16,10 +16,10 @@ from rashid import _trace
 from rashid._media import is_overview_asset
 from rashid._stac import asset_class_lists, band_count, is_integer, roles_of
 from rashid.catalog import Node
-from rashid.data import DataDefect
-from rashid.data._files import AssetFiles
+from rashid.data._results import DataDefect
+from rashid.data.formats._files import AssetFiles
+from rashid.data.formats.spatial import Geo
 from rashid.data.reader import Locator
-from rashid.data.spatial import Geo
 from rashid.ids import (
     DAT_CLASS_COLORS,
     DAT_COG,

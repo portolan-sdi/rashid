@@ -8,8 +8,7 @@ full download per asset otherwise (#86). These tests assert on bytes handed out,
 not only on findings, because the findings were already correct before.
 
 The reader is a fake serving in-memory bytes, so nothing here reaches the
-network or the geospatial stack, even though importing ``rashid.data.checks``
-pulls that stack in.
+network or the geospatial stack.
 """
 
 from __future__ import annotations
@@ -22,7 +21,8 @@ import pytest
 
 import rashid.data.checks as checks
 from rashid.catalog import CatalogGraph, Node
-from rashid.data import DataDefect, storage
+from rashid.data import storage
+from rashid.data._results import DataDefect
 from rashid.data.reader import Locator
 from rashid.ids import DAT_CHECKSUM, DAT_FORMAT, DAT_SIZE
 from rashid.model import Severity

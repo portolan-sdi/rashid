@@ -137,7 +137,7 @@ FAULTS = (
         "file-layer",
         "src/rashid/_gate_fault.py",
         "",
-        "import rashid.data._files\n",
+        "import rashid.data.formats._files\n",
         _LAYERS,
         "only data checks may import the file-handle owner BROKEN",
     ),
@@ -200,7 +200,7 @@ FAULTS = (
     ),
     Fault(
         "orphan-registration",
-        "src/rashid/data/raster.py",
+        "src/rashid/data/formats/raster.py",
         "DAT_COG_STATS",
         "DAT_SIZE",
         _REGISTRY,

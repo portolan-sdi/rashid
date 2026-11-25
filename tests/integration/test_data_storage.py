@@ -27,12 +27,13 @@ import pyarrow.parquet as pq
 from click.testing import CliRunner
 from pyproj import CRS
 
-import rashid.data._files as file_owner
-import rashid.data.checks as checks
+import rashid.data.formats._files as file_owner
+import rashid.data.formats.checks as checks
 from rashid.catalog import Node
 from rashid.cli import main
-from rashid.data import DataDefect, DataResults, geoparquet, partitions, raster
-from rashid.data._files import AssetFiles
+from rashid.data._results import DataDefect, DataResults
+from rashid.data.formats import geoparquet, partitions, raster
+from rashid.data.formats._files import AssetFiles
 from rashid.data.reader import Locator
 from rashid.ids import (
     DAT_CLASS_COLORS,

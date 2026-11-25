@@ -67,6 +67,13 @@ def test_import_rashid_loads_no_heavy_module_and_no_cli_framework() -> None:
     assert loaded & (_HEAVY | _PROFILERS | _NETWORK | _METADATA | {"click"}) == set()
 
 
+@pytest.mark.parametrize("module", ["rashid.data", "rashid.data.storage", "rashid.data.zarr"])
+def test_import_data_loads_no_heavy_module(module: str) -> None:
+    loaded = _loaded(f"import {module}")
+    assert module in loaded
+    assert loaded & _HEAVY == set()
+
+
 def test_import_probe_reports_child_stderr() -> None:
     with pytest.raises(AssertionError, match="RuntimeError: import-probe-failure"):
         _loaded("raise RuntimeError('import-probe-failure')")
@@ -117,7 +124,7 @@ def test_a_local_metadata_check_loads_no_network_stack() -> None:
     assert _loaded(code) & (_NETWORK | _METADATA) == set()
 
 
-@pytest.mark.parametrize("module", ["rashid.data.checks"])
+@pytest.mark.parametrize("module", ["rashid.data.formats.checks"])
 def test_the_budget_detects_a_heavy_import(module: str) -> None:
     """The check itself can fail: the data checks module loads the geo stack."""
     pytest.importorskip("pyarrow")

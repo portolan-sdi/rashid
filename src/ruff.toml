@@ -14,9 +14,9 @@ extend = "../pyproject.toml"
 "obstore.store.S3Store" = { msg = "Use rashid._store.list_objects for anonymous bucket listing." }
 "obstore.store.GCSStore" = { msg = "Use rashid._store.list_objects for anonymous bucket listing." }
 "obstore.store.AzureStore" = { msg = "Use rashid._store.list_objects for anonymous bucket listing." }
-"glob.glob" = { msg = "Use rashid.data._files for partition enumeration." }
-"pyarrow.parquet.ParquetFile" = { msg = "Use rashid.data._files for shared, counted readers." }
-"rasterio.open" = { msg = "Use rashid.data._files for shared, counted readers." }
+"glob.glob" = { msg = "Use rashid.data.formats._files for partition enumeration." }
+"pyarrow.parquet.ParquetFile" = { msg = "Use rashid.data.formats._files for shared, counted readers." }
+"rasterio.open" = { msg = "Use rashid.data.formats._files for shared, counted readers." }
 "importlib.resources.files" = { msg = "Use rashid._package.schemas for bundled schemas." }
 "importlib.metadata.version" = { msg = "Use rashid._package.version for distribution metadata." }
 "importlib.import_module" = { msg = "Use static imports so dependency contracts can trace them." }

@@ -13,7 +13,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from rashid import _trace
-from rashid.data import DataDefect
+from rashid.data._results import DataDefect
 from rashid.model import Severity
 from tests.integration import _data_assets as assets
 from tests.integration._owner_catalog import _catalog, _declare, _findings
@@ -50,7 +50,7 @@ def test_partition_handles_and_covering_policies(tmp_path: Path, nested: bool) -
 @pytest.mark.parametrize("seed", range(20))
 def test_result_build_is_a_function_of_sources(seed: int) -> None:
     """Rebuilding and extending a built accumulator equals a fresh derivation."""
-    from rashid.data import DataResults
+    from rashid.data._results import DataResults
 
     rng = random.Random(seed)
     assets_source = [

@@ -9,7 +9,7 @@
     "src/rashid/_json.py": {
       "TID251": "Owns counted JSON parsing and the stdlib fallback (#266)."
     },
-    "src/rashid/data/_files.py": {
+    "src/rashid/data/formats/_files.py": {
       "TID251": "Owns counted reader construction and partition glob enumeration (#266)."
     },
     "tests/**": {
@@ -25,15 +25,15 @@
   },
   "import-linter": {
     "core and data readers must not import the geospatial stack": {
-      "rashid.data -> rashid.data.checks": "The lazy default_validator import loads the data stack only when validation runs."
+      "rashid.data -> rashid.data.formats.checks": "The lazy default_validator import loads the data stack only when validation runs."
     }
   },
   "allowed-importers": {
-    "rashid.data.checks": "Owns asset dispatch and shares one file handle across checks (#266).",
-    "rashid.data.geoparquet": "T9 extracted GeoParquet checks from data/checks.py; consumes shared handles (#266).",
-    "rashid.data.raster": "T9 extracted raster checks from data/checks.py; consumes shared handles (#266).",
-    "rashid.data.mirror": "T9 extracted mirror checks from data/checks.py; consumes shared handles (#266).",
-    "rashid.data.partitions": "T9 extracted partition checks from data/checks.py; owns per-partition shared handles (#266).",
+    "rashid.data.formats.checks": "Owns asset dispatch and shares one file handle across checks (#266).",
+    "rashid.data.formats.geoparquet": "T9 extracted GeoParquet checks from data/checks.py; consumes shared handles (#266).",
+    "rashid.data.formats.raster": "T9 extracted raster checks from data/checks.py; consumes shared handles (#266).",
+    "rashid.data.formats.mirror": "T9 extracted mirror checks from data/checks.py; consumes shared handles (#266).",
+    "rashid.data.formats.partitions": "T9 extracted partition checks from data/checks.py; owns per-partition shared handles (#266).",
     "rashid.registry": "Owns metadata rule registration; other production modules use shared helpers (#336)."
   },
   "jscpd": {

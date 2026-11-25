@@ -13,9 +13,10 @@ from rashid import _store
 from rashid._href import bucket_glob, is_absolute_href, is_https_href, split_href
 from rashid._stac import assets_of
 from rashid.catalog import CatalogGraph, Node
-from rashid.data import DataDefect, _files
-from rashid.data._files import AssetFiles
-from rashid.data.geoparquet import check_geoparquet, partitioned_vector_columns
+from rashid.data._results import DataDefect
+from rashid.data.formats import _files
+from rashid.data.formats._files import AssetFiles
+from rashid.data.formats.geoparquet import check_geoparquet, partitioned_vector_columns
 from rashid.data.reader import BUCKET_PROBE, AssetReader, Locator
 from rashid.ids import DAT_ORDERING, DAT_PARTITION_SCHEMA, DAT_UNAVAILABLE
 from rashid.model import Severity, json_pointer

@@ -8,7 +8,7 @@ import rashid.data as data_pass
 from rashid import ValidationOptions
 from rashid.catalog import Node
 from rashid.config import RulesConfig
-from rashid.data import DataDefect
+from rashid.data._results import DataDefect
 from rashid.data.reader import AssetReader
 from rashid.ids import DAT_MIRROR, DAT_UNAVAILABLE, LIV_UNAVAILABLE
 from rashid.registry import CHECKS, check_ids, is_incubating

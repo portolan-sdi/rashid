@@ -59,7 +59,7 @@ def test_owner_layer_contracts_cover_new_modules() -> None:
     assert data.get("allow_indirect_imports", False) is False
     files = contracts["data-files-owner"]
     assert files["type"] == "protected"
-    assert files["protected_modules"] == ["rashid.data._files"]
+    assert files["protected_modules"] == ["rashid.data.formats._files"]
     assert files["as_packages"] is False
 
     independent = contracts["rules-independent"]

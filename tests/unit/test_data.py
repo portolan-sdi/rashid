@@ -9,10 +9,12 @@ geospatial stack (now a core dependency, still lazily imported).
 
 from __future__ import annotations
 
+import builtins
 import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 
@@ -20,7 +22,8 @@ import rashid.data as data_pass
 from rashid import ValidationOptions
 from rashid.catalog import CatalogGraph, Node
 from rashid.config import RulesConfig
-from rashid.data import DataDefect, validate_data
+from rashid.data import validate_data
+from rashid.data._results import DataDefect
 from rashid.data.reader import AssetReader, Locator
 from rashid.ids import (
     DAT_CHECKSUM,
@@ -316,17 +319,61 @@ def test_systemic_failure_keeps_earlier_findings_and_drops_later_ones(
 def test_missing_geospatial_stack_downgrades_to_warning(
     catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def raise_import(_graph: CatalogGraph | None = None) -> data_pass.Validator:
-        raise ImportError("No module named 'pyarrow'")
+    original_import = builtins.__import__
+    attempts = []
 
-    monkeypatch.setattr(data_pass, "default_validator", raise_import)
+    def no_formats(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "rashid.data.formats":
+            attempts.append(name)
+            raise ImportError("No module named 'pyarrow'")
+        return original_import(name, *args, **kwargs)
 
-    findings = validate_data(_graph(catalog))
+    monkeypatch.setattr(builtins, "__import__", no_formats)
+    asset = {
+        "href": "./wrong.bin",
+        "type": "application/vnd.apache.parquet",
+        "file:size": 999,
+        "file:checksum": "1220" + "00" * 32,
+    }
+    store = {"href": "./store", "type": "application/vnd.zarr; version=3"}
+    collection = catalog.collection("roads", assets={"bad": asset, "zarr": store})
+    collection.item(
+        "seg1",
+        assets={
+            "bad": {**asset, "href": "../wrong.bin"},
+            "zarr": {**store, "href": "../store"},
+        },
+    )
+    root = catalog.write()
+    (root / "roads/wrong.bin").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (root / "roads/store").mkdir()
+    (root / "roads/store/.zgroup").write_text('{"zarr_format": 2}')
 
-    assert len(findings) == 1
-    assert findings[0].rule_id == DAT_UNAVAILABLE
-    assert "geospatial stack" in findings[0].message
-    assert "--no-data" in findings[0].message
+    findings = validate_data(CatalogGraph.load(root))
+
+    assert attempts == ["rashid.data.formats"]
+    warnings = [f for f in findings if f.rule_id == DAT_UNAVAILABLE]
+    assert len(warnings) == 1
+    assert warnings[0].severity is Severity.WARNING
+    assert "geospatial checks skipped" in warnings[0].message
+    for instruction in (
+        "pyarrow",
+        "rasterio",
+        "rio-cogeo",
+        "pyproj",
+        "shapely",
+        "rashid-core[data]",
+        "or rashid",
+        "--no-data",
+    ):
+        assert instruction in warnings[0].message
+    for object_id in ("roads", "seg1"):
+        assert [f.rule_id for f in findings if f.object_id == object_id] == [
+            DAT_CHECKSUM,
+            DAT_SIZE,
+            DAT_FORMAT,
+            ZAR_STORE_VERSION,
+        ]
 
 
 def test_data_pass_surfaces_by_default(catalog: CatalogBuilder) -> None:

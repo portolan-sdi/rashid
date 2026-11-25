@@ -13,9 +13,9 @@ from pyproj import CRS
 from rashid import _json
 from rashid._stac import assets_of, has_table_columns, roles_of, table_declarations
 from rashid.catalog import Node
-from rashid.data import DataDefect
-from rashid.data._files import AssetFiles
-from rashid.data.spatial import Geo, as_bbox, bbox_union, unreadable_spatial_metadata
+from rashid.data._results import DataDefect
+from rashid.data.formats._files import AssetFiles
+from rashid.data.formats.spatial import Geo, as_bbox, bbox_union, unreadable_spatial_metadata
 from rashid.ids import (
     DAT_COLUMN_DESCRIPTIONS,
     DAT_GEOPARQUET_VERSION,

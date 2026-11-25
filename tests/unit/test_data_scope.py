@@ -24,7 +24,8 @@ import rashid.data.reader as reader_mod
 from rashid import ValidationOptions
 from rashid.catalog import CatalogGraph, Node
 from rashid.cli import main
-from rashid.data import DataDefect, Validator, validate_data
+from rashid.data import Validator, validate_data
+from rashid.data._results import DataDefect
 from rashid.data.reader import AssetReader, FilesystemHttpReader, LocalOnlyReader, Locator
 from rashid.report import Report
 from rashid.runner import validate

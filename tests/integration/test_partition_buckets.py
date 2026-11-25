@@ -18,8 +18,9 @@ pytest.importorskip("pyarrow")
 from rashid import _store, _trace, validate
 from rashid._href import bucket_glob
 from rashid.catalog import CatalogGraph, Node
-from rashid.data import _reads_remote, partitions
-from rashid.data._files import glob_regex, listing_prefix
+from rashid.data import _reads_remote
+from rashid.data.formats import partitions
+from rashid.data.formats._files import glob_regex, listing_prefix
 from rashid.data.reader import Locator
 from rashid.ids import (
     DAT_GEOPARQUET_VERSION,

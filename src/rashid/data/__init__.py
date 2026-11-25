@@ -6,13 +6,14 @@ The metadata pass checks that assets *declare* the required fields — an
 catalog can declare a checksum, size, format, or extent that its actual bytes
 contradict and still pass. core.md makes several of these a hard MUST:
 ``file:checksum``/``file:size`` "MUST be regenerated at publish time … so they
-always match what is in the bucket", and each format carries a required media
+always match what is in the bucket", and each format requires a specific media
 type.
 
 This pass reads the bytes — local files and remote ``https`` assets — and
 reports where they diverge from the claim. It runs by default; CLI ``--no-data``
 or ``ValidationOptions(data=False)`` skips it. It reaches the network for remote
-assets and downgrades to a single WARNING when it cannot run.
+assets. If the geospatial stack is missing, storage and Zarr checks still run
+and one WARNING explains which checks were skipped.
 
 Which bytes it may read is the caller's choice. ``reader_factory`` supplies the
 :class:`~rashid.data.reader.AssetReader`, defaulting to
@@ -25,10 +26,9 @@ The pass checks objects on a thread pool and reports in catalog order. On a
 published catalog each asset read waits on the network, and a serial loop
 over thousands of assets took hours (#219).
 
-The heavy geospatial dependencies (``pyarrow``, ``rasterio``, ``rio-cogeo``,
-``pyproj``) are core dependencies but are imported
-lazily by :func:`default_validator`, so the core package stays stdlib-only and a
-catalog with no data pass installs nothing new.
+The geospatial dependencies (``pyarrow``, ``rasterio``, ``rio-cogeo``,
+``pyproj``, ``shapely``) are imported lazily by :func:`default_validator`.
+Storage and Zarr checks need none of them.
 """
 
 from __future__ import annotations
@@ -36,19 +36,19 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from functools import partial
-from typing import Any
 
 from rashid import _trace
 from rashid._href import bucket_glob
 from rashid._stac import assets_of, read_target
 from rashid.catalog import CatalogGraph, Kind, Node
+from rashid.data import checks
+from rashid.data._results import DataDefect
 from rashid.data.reader import BUCKET_PROBE, AssetReader, FilesystemHttpReader, Locator
 from rashid.ids import DAT_UNAVAILABLE
 from rashid.model import Finding, Severity, json_pointer
 
-# Assets are declared on collections and items; catalogs carry none.
+# Assets are declared on collections and items; catalogs have none.
 _DATA_KINDS: tuple[Kind, ...] = ("collection", "item")
 
 #: Objects with a remote asset checked at once. A remote asset costs several
@@ -67,75 +67,6 @@ _REMOTE_WORKERS = 32
 _LOCAL_WORKERS = 4
 
 
-@dataclass(frozen=True)
-class DataDefect:
-    """One byte-vs-metadata mismatch for a single asset.
-
-    A lightweight seed that :func:`validate_data` turns into a :class:`Finding`,
-    filling in the object's path and id. ``asset_key`` and ``field`` locate the
-    asset within the object (``/assets/<key>[/<field>]``); a node-level defect
-    sets ``json_pointer`` directly instead. Two checks do that: the partition
-    check, which binds to no single asset, and the consistency check when the
-    contradicted ``proj:epsg`` is inherited from the enclosing object rather
-    than declared on the asset.
-    """
-
-    rule_id: str
-    severity: Severity
-    message: str
-    asset_key: str
-    field: str | None = None
-    json_pointer: str | None = None
-    expected: Any | None = None
-    actual: Any | None = None
-
-
-class DataResults:
-    """Finding sources; each build derives shared-field and partition results anew."""
-
-    def __init__(self) -> None:
-        self._sources: list[tuple[DataDefect, int | None]] = []
-
-    def extend(self, defects: list[DataDefect], *, partition_total: int | None = None) -> None:
-        self._sources.extend((defect, partition_total) for defect in defects)
-
-    def build(self) -> list[DataDefect]:
-        groups: dict[tuple[object, ...], list[DataDefect]] = {}
-        totals: dict[tuple[object, ...], int] = {}
-        signature: tuple[object, ...]
-        for index, (defect, total) in enumerate(self._sources):
-            if total is not None:
-                signature = ("partition", defect.rule_id, defect.severity)
-                totals[signature] = total
-            elif defect.json_pointer is not None:
-                signature = ("field", defect.rule_id, defect.json_pointer, defect.message)
-            else:
-                signature = ("asset", index)
-            groups.setdefault(signature, []).append(defect)
-        results: list[DataDefect] = []
-        for signature, members in groups.items():
-            first = members[0]
-            if signature[0] != "partition":
-                results.append(first)
-                continue
-            message = first.message
-            if len(members) > 1:
-                message = (
-                    f"{len(members)} of {totals[signature]} partition files fail this check; "
-                    f"e.g. {first.message}"
-                )
-            results.append(
-                DataDefect(
-                    first.rule_id,
-                    first.severity,
-                    message,
-                    "",
-                    json_pointer=json_pointer("partition:glob"),
-                )
-            )
-        return results
-
-
 # A validator inspects one object's assets, given a reader for their bytes, and
 # returns the mismatches it found; an empty list means every asset matched.
 Validator = Callable[[Node, AssetReader], list[DataDefect]]
@@ -148,9 +79,9 @@ ReaderFactory = Callable[[CatalogGraph], AssetReader]
 def default_validator(graph: CatalogGraph | None = None) -> Validator:
     """Build the byte-verifying validator, importing the geospatial deps lazily.
 
-    The metadata pass never needs these packages; importing :mod:`rashid.data.checks`
-    pulls ``pyarrow``/``rasterio``/``pyproj``/``rio_cogeo``. A missing
-    extra surfaces here as ``ImportError`` and is downgraded to one WARNING.
+    Importing :mod:`rashid.data.formats.checks` loads the geospatial stack.
+    A missing extra raises ``ImportError``; :func:`validate_data` then runs
+    storage and Zarr checks and reports one WARNING.
 
     ``graph`` is bound into the returned validator for the one check that needs
     more than a single object: the item mirror must agree with the collection's
@@ -158,7 +89,7 @@ def default_validator(graph: CatalogGraph | None = None) -> Validator:
     (``PTL-DAT-016``).
     Called without it, that check is skipped and the rest run unchanged.
     """
-    from rashid.data import checks
+    from rashid.data.formats import checks
 
     if graph is None:
         return checks.check_node
@@ -174,9 +105,9 @@ def validate_data(
     """Verify every asset's bytes against its declared metadata.
 
     Returns ``PTL-DAT-00x`` findings for each mismatch. If the validator is
-    unavailable (the geospatial stack cannot import) or a call fails
-    systemically, returns a single ``PTL-DAT-000`` warning instead of failing the
-    run — a systemic failure is reported once, not once per object.
+    missing its geospatial dependencies, storage and Zarr checks still run,
+    with one ``PTL-DAT-000`` warning. A systemic validator failure also reports
+    one warning instead of failing the run.
 
     An object with a remote asset is checked on a pool of ``_REMOTE_WORKERS``
     threads, and any other on a pool of ``_LOCAL_WORKERS``; the two run at
@@ -193,18 +124,20 @@ def validate_data(
     catalog's own files. An asset its reader declines is skipped silently, so a
     narrowed scope produces a subset of the findings rather than new ones.
     """
+    unavailable: list[Finding] = []
     if validator is None:
         try:
             validator = default_validator(graph)
         except ImportError:
-            return [
+            validator = partial(checks.check_node, graph=graph)
+            unavailable = [
                 Finding(
                     rule_id=DAT_UNAVAILABLE,
                     severity=Severity.WARNING,
                     message=(
-                        "data validation skipped: the geospatial stack could not be imported "
-                        "(needs pyarrow, rasterio, rio-cogeo, and pyproj; pass data=False "
-                        "or --no-data to skip byte checks)"
+                        "geospatial checks skipped: the geospatial stack could not be imported "
+                        "(needs pyarrow, rasterio, rio-cogeo, pyproj, and shapely; "
+                        "install rashid-core[data] or rashid, or pass --no-data)"
                     ),
                     path=".",
                 )
@@ -212,7 +145,7 @@ def validate_data(
 
     reader = (reader_factory or FilesystemHttpReader)(graph)
     nodes = [node for node in graph.iter(*_DATA_KINDS) if node.parse_error is None]
-    findings = _unreachable_note(nodes)
+    findings = unavailable + _unreachable_note(nodes)
     ended = threading.Event()
     shared = _EndableReader(reader, ended)
     remote = ThreadPoolExecutor(_REMOTE_WORKERS, thread_name_prefix="data-remote")
@@ -315,7 +248,7 @@ def _reads_remote(node: Node, reader: AssetReader) -> bool:
 def _unreachable_note(nodes: list[Node]) -> list[Finding]:
     """One ``PTL-DAT-000`` info that lists the assets whose bytes no reader can reach.
 
-    Their href uses a scheme other than https, such as ``s3``, and they carry no
+    Their href uses a scheme other than https, such as ``s3``, and they have no
     https alternate (PORTO-CORE-087), so no byte check runs on them.
     ``PTL-AST-002`` reports the href itself.
     """

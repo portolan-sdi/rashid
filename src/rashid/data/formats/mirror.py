@@ -14,10 +14,10 @@ from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
 from rashid.catalog import CatalogGraph, Node
-from rashid.data import DataDefect
-from rashid.data._files import AssetFiles
-from rashid.data.geoparquet import bbox_column_values, bbox_struct, geo_metadata
-from rashid.data.spatial import as_bbox
+from rashid.data._results import DataDefect
+from rashid.data.formats._files import AssetFiles
+from rashid.data.formats.geoparquet import bbox_column_values, bbox_struct, geo_metadata
+from rashid.data.formats.spatial import as_bbox
 from rashid.ids import DAT_MIRROR
 from rashid.model import Severity
 

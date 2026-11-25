@@ -126,7 +126,7 @@ known-first-party = ["rashid"]
 "src/rashid/_href.py" = ["TID251"]
 "src/rashid/_store.py" = ["TID251"]
 "src/rashid/_json.py" = ["TID251"]
-"src/rashid/data/_files.py" = ["TID251"]
+"src/rashid/data/formats/_files.py" = ["TID251"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "pytest.xfail" = { msg = "use @pytest.mark.xfail(strict=True) keyed to an open issue and listed in the ledger" }
@@ -229,7 +229,7 @@ source_modules = [
     "rashid._trace",
 ]
 forbidden_modules = ["pyarrow", "rasterio", "pyproj", "rio_cogeo", "shapely"]
-ignore_imports = ["rashid.data -> rashid.data.checks"]
+ignore_imports = ["rashid.data -> rashid.data.formats.checks"]
 
 [[tool.importlinter.contracts]]
 id = "rules-no-network"
@@ -249,15 +249,15 @@ forbidden_modules = ["rashid.data"]
 id = "data-files-owner"
 name = "only data checks may import the file-handle owner"
 type = "protected"
-protected_modules = ["rashid.data._files"]
+protected_modules = ["rashid.data.formats._files"]
 as_packages = false
 # T9 split data/checks.py into these concern modules. No package-wide wildcard.
 allowed_importers = [
-    "rashid.data.checks",
-    "rashid.data.geoparquet",
-    "rashid.data.raster",
-    "rashid.data.mirror",
-    "rashid.data.partitions",
+    "rashid.data.formats.checks",
+    "rashid.data.formats.geoparquet",
+    "rashid.data.formats.raster",
+    "rashid.data.formats.mirror",
+    "rashid.data.formats.partitions",
 ]
 
 [[tool.importlinter.contracts]]

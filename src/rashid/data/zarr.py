@@ -9,7 +9,7 @@ The checks read metadata only. A Zarr v3 store states its whole shape in
 ``zarr.json`` documents — ``zarr_format``, ``node_type``, ``shape``,
 ``chunk_grid``, ``codecs``, ``dimension_names``, and the convention attributes
 under ``attributes`` — so every validator-enforced requirement of the profile
-is decidable without opening one chunk. A root that carries
+is decidable without opening one chunk. A root that includes
 ``consolidated_metadata`` states its descendants' metadata too, which makes the
 usual store one request.
 
@@ -42,7 +42,7 @@ from rashid._href import store_member_href
 from rashid._media import ZARR_MEDIA_TYPE, media_base_type, media_parameters
 from rashid._stac import read_target
 from rashid.catalog import Node
-from rashid.data import DataDefect
+from rashid.data._results import DataDefect
 from rashid.data.reader import AssetReader
 from rashid.ids import (
     ZAR_ASSET,

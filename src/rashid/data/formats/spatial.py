@@ -11,7 +11,7 @@ from typing import Any
 from pyproj import CRS, Transformer
 
 from rashid.catalog import Node
-from rashid.data import DataDefect
+from rashid.data._results import DataDefect
 from rashid.data.reader import Locator
 from rashid.data.storage import PMTILES_MAGIC
 from rashid.ids import DAT_CONSISTENCY
@@ -29,7 +29,7 @@ _DENSIFY_PTS = 21
 
 @dataclass(frozen=True)
 class _EpsgDeclaration:
-    """A ``proj:epsg`` value and the document node that carries it.
+    """A ``proj:epsg`` value and the document node that declares it.
 
     ``pointer`` is ``None`` when the asset declares the value itself. Otherwise
     the asset inherits it from the enclosing collection or item, and ``pointer``
