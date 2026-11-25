@@ -231,6 +231,10 @@ def test_metadata_large_traced_memory_ceiling(cache_dir: Path) -> None:
     for size in scenarios.SIZES:
         root = scenarios.cached("metadata", size, cache_dir=cache_dir)
         rashid_core.validate(root, options=rashid_core.ValidationOptions(data=False))
+        # pathlib interns path parts. Holding them keeps the run from growing
+        # Python's intern table in the traced window, a 3.7 MiB block that
+        # depends on how many strings earlier tests interned, not on rashid.
+        _parts = [path.parts for path in root.rglob("*")]
         tracemalloc.start()
         try:
             rashid_core.validate(root, options=rashid_core.ValidationOptions(data=False))
