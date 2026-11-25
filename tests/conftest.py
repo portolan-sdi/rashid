@@ -102,6 +102,11 @@ def mirror_providers() -> list[dict[str, Any]]:
     ]
 
 
+def table_columns(columns: list[dict[str, Any]]) -> dict[str, Any]:
+    """A ``table:columns`` field to splat into a builder; a dict literal would type as its title."""
+    return {"table:columns": columns}
+
+
 def default_asset() -> dict[str, Any]:
     return {
         "href": "./data.parquet",
@@ -539,7 +544,7 @@ def nest_items_under_organizing_catalog(
     return organizing
 
 
-def mutate_json(path: Path, mutate: Callable[[dict[str, Any]], None]) -> None:
+def mutate_json(path: Path, mutate: Callable[[dict[str, Any]], object]) -> None:
     """Load a JSON file, apply an in-place mutation, and write it back."""
     data = json.loads(path.read_text(encoding="utf-8"))
     mutate(data)

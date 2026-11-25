@@ -7,12 +7,20 @@ too — including the builder's whole tree, which must be structurally valid.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
-from rashid_core import RulesConfig, ValidationOptions, validate, validate_structural
+from rashid_core import (
+    RulesConfig,
+    ValidationOptions,
+    validate,
+    validate_schema,
+    validate_structural,
+)
 from rashid_core._jsonschema import SchemaError
 from rashid_core.catalog import CatalogGraph
-from rashid_core.model import Severity
+from rashid_core.model import Finding, Severity
 from rashid_core.structural import default_validator
 from tests.conftest import CatalogBuilder, mutate_json
 
@@ -101,7 +109,11 @@ def test_default_validator_used_when_none(
     assert structural.validate_structural(_graph(catalog), None) == []
 
 
-def test_unparseable_object_is_skipped(catalog: CatalogBuilder) -> None:
+# The schema pass skips unparseable objects the same way.
+@pytest.mark.parametrize("validate_pass", [validate_structural, validate_schema])
+def test_unparseable_object_is_skipped(
+    catalog: CatalogBuilder, validate_pass: Callable[..., list[Finding]]
+) -> None:
     catalog.collection("roads")
     root = catalog.write()
     (root / "roads" / "collection.json").write_text("{ broken", encoding="utf-8")
@@ -113,7 +125,7 @@ def test_unparseable_object_is_skipped(catalog: CatalogBuilder) -> None:
         seen.append(data.get("type"))
         return []
 
-    assert validate_structural(graph, check) == []
+    assert validate_pass(graph, check) == []
     assert "Collection" not in seen  # the broken collection never reached the validator
 
 

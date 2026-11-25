@@ -362,8 +362,8 @@ def _serve_tree(root: Path, latency: float) -> None:
             elif command == "peak":
                 reply = {"peak": server.peak_in_flight}
             elif command.startswith("fail "):
-                _, path, count, agent = command.split(" ", 3)
-                failing = server.routes[path]
+                _, route_path, count, agent = command.split(" ", 3)
+                failing = server.routes[route_path]
                 failing.fail_first, failing.fail_agent = int(count), agent
                 reply = {}
             else:

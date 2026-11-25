@@ -27,15 +27,14 @@ import pyarrow.parquet as pq
 from click.testing import CliRunner
 from pyproj import CRS
 
-import rashid_core.data.formats._files as file_owner
 import rashid_core.data.formats.checks as checks
-from rashid_core.catalog import Node
+from rashid_core.catalog import Kind, Node
 from rashid_core.cli import main
 from rashid_core.data import checks as core_checks
 from rashid_core.data._results import DataDefect, DataResults
 from rashid_core.data.formats import geoparquet, partitions, raster
 from rashid_core.data.formats._files import AssetFiles
-from rashid_core.data.reader import Locator
+from rashid_core.data.reader import AssetReader, Locator
 from rashid_core.ids import (
     DAT_CLASS_COLORS,
     DAT_COG,
@@ -92,6 +91,13 @@ def _node_with_asset(asset: dict) -> Node:
         id="scene",
         data={"type": "Feature", "bbox": [4.0, 50.0, 6.0, 52.0], "assets": {"a": asset}},
     )
+
+
+def _geo(parquet: pq.ParquetFile) -> dict[str, Any]:
+    """The parsed ``geo`` metadata, ``{}`` when absent; malformed metadata fails the test."""
+    parsed = geoparquet.geo_metadata(parquet) or {}
+    assert isinstance(parsed, dict), parsed
+    return parsed
 
 
 def _gpq(path: Path) -> list:
@@ -171,7 +177,9 @@ def test_chunk_boundaries_follow_the_spec_for_an_uneven_row_count() -> None:
     Each row's box is its own index, so the chunk boxes read back as index
     ranges.
     """
-    boxes = [(float(i), 0.0, float(i), 1.0) for i in range(23)]
+    boxes: list[tuple[float, float, float, float] | None] = [
+        (float(i), 0.0, float(i), 1.0) for i in range(23)
+    ]
     chunks, _ = geoparquet._chunked_bboxes(boxes)
     ranges = [(int(a), int(c)) for a, _, c, _ in chunks]
     assert ranges == [
@@ -229,7 +237,7 @@ def test_footer_verdict_settles_a_file_the_row_check_would_fail(tmp_path: Path) 
         return (k % 5) * 40.0 - 80.0, (k // 5) * 30.0 - 45.0
 
     order = [(i // 2) if i % 2 == 0 else (groups - 1 - i // 2) for i in range(groups)]
-    points = []
+    points: list[tuple[float, float]] = []
     for group, k in enumerate(order):
         cx, cy = cell(k)
         points.extend(
@@ -239,7 +247,7 @@ def test_footer_verdict_settles_a_file_the_row_check_would_fail(tmp_path: Path) 
     path = tmp_path / "footer_pass_rows_fail.parquet"
     assets.write_geoparquet(path, points=points, row_group_size=rows_per_group)
     parquet = pq.ParquetFile(path)
-    geo = geoparquet.geo_metadata(parquet) or {}
+    geo = _geo(parquet)
     found, _ = geoparquet._rowgroup_stat_defects("data", parquet, geo)
     assert found is not None
     footer = geoparquet._pruning_score(found[0])
@@ -320,7 +328,7 @@ def test_low_footer_efficiency_below_eight_groups_takes_the_row_check(
     )
     parquet = pq.ParquetFile(path)
     assert parquet.metadata.num_row_groups == groups
-    found, _ = geoparquet._rowgroup_stat_defects("data", parquet, geoparquet.geo_metadata(parquet))
+    found, _ = geoparquet._rowgroup_stat_defects("data", parquet, _geo(parquet))
     assert found is not None
     assert geoparquet._pruning_score(found[0]).efficiency == pytest.approx(0.0)
     errors = _warnings(_gpq(path))
@@ -397,6 +405,7 @@ def _raster(path: Path, asset: dict | None = None) -> list:
     # Every class finding's pointer resolves in a document that has the asset.
     for defect in defects:
         if defect.rule_id == DAT_CLASS_COLORS:
+            assert defect.json_pointer is not None
             resolve_pointer({"assets": {"data": asset}}, defect.json_pointer)
     return defects
 
@@ -454,7 +463,7 @@ def test_many_row_groups_use_only_footer_for_ordering(
         def read(self, *_args: object, **_kwargs: object) -> None:
             raise AssertionError("PTL-DAT-006 read row data")
 
-    monkeypatch.setattr(file_owner.pq, "ParquetFile", lambda source: _FooterOnlyParquet())
+    monkeypatch.setattr(pq, "ParquetFile", lambda source: _FooterOnlyParquet())
 
     assert _gpq(path) == []
 
@@ -630,7 +639,7 @@ def test_all_null_geometry_is_never_faulted_as_disorder(tmp_path: Path) -> None:
         null_rows=set(range(len(points))),
     )
     parquet = pq.ParquetFile(path)
-    assert geoparquet._row_bboxes(parquet, geoparquet.geo_metadata(parquet) or {}) is None
+    assert geoparquet._row_bboxes(parquet, _geo(parquet)) is None
     ordering = [d for d in _gpq(path) if d.rule_id == DAT_ORDERING]
     assert [d for d in ordering if d.severity is Severity.ERROR] == []
 
@@ -938,7 +947,7 @@ def test_null_and_empty_geometries_keep_their_place_and_miss_the_floor(tmp_path:
     table = table.set_column(0, "geometry", pa.array(wkb, type=pa.binary()))
     pq.write_table(table, path)
     parquet = pq.ParquetFile(path)
-    boxes = geoparquet._row_bboxes(parquet, geoparquet.geo_metadata(parquet) or {})
+    boxes = geoparquet._row_bboxes(parquet, _geo(parquet))
     assert boxes is not None
     assert len(boxes) == 210
     assert [i for i, b in enumerate(boxes) if b is None] == [*range(5), *range(200, 210)]
@@ -1311,9 +1320,9 @@ def test_raster_larger_than_its_own_small_tile_needs_overviews(tmp_path: Path) -
 _COG_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
 
 
-def _display(tmp_path: Path, kind: str, roles: list[str], **cog: object) -> list[DataDefect]:
+def _display(tmp_path: Path, kind: Kind, roles: list[str], **cog: Any) -> list[DataDefect]:
     path = tmp_path / "raster.tif"
-    assets.write_cog(path, size=256, **cog)  # type: ignore[arg-type]
+    assets.write_cog(path, size=256, **cog)
     asset = {"href": "./raster.tif", "type": _COG_TYPE, "roles": roles}
     node = _node_with_asset(asset)
     node = Node(path=node.path, abs_path=node.abs_path, kind=kind, id=node.id, data=node.data)
@@ -1356,7 +1365,7 @@ def test_non_overview_collection_raster_is_not_judged(tmp_path: Path, roles: lis
     ids=["unmasked-rgb", "nodata", "alpha", "internal-mask", "single-band", "collection-asset"],
 )
 def test_imagery_scene_declares_nodata_or_alpha(
-    tmp_path: Path, kind: str, cog: dict, flagged: bool
+    tmp_path: Path, kind: Kind, cog: dict, flagged: bool
 ) -> None:
     defects = _display(tmp_path, kind, ["data"], **cog)
     assert [d.rule_id for d in defects] == ([DAT_SCENE_MASK] if flagged else [])
@@ -1480,7 +1489,7 @@ def _partition_schemas(node: Node) -> list:
     return schemas
 
 
-def _partition_bytes(node: Node, reader: object | None = None) -> list:
+def _partition_bytes(node: Node, reader: AssetReader | None = None) -> list:
     _, groups = partitions.check_partitions(node, reader or _NoAssets())
     source = DataResults()
     for defects, total in groups:
@@ -1919,7 +1928,7 @@ def test_described_collections_and_items_get_no_collection_finding(tmp_path: Pat
     described.data["table:columns"] = _COLUMNS
     assert check(described) == []
     item = _tabular_collection(**{"table:columns": [{"name": "value", "type": "int64"}]})
-    item.kind = "item"  # type: ignore[misc]
+    item.kind = "item"
     assert check(item) == []
 
 
@@ -2118,9 +2127,7 @@ def test_footer_weights_skip_a_null_only_row_group(
     path = tmp_path / "nulls.parquet"
     assets.write_geoparquet(path, points=points, null_rows={4, 5})
     meta = pq.ParquetFile(path).metadata
-    found = geoparquet._covering_bboxes(
-        pq.ParquetFile(path), geoparquet.geo_metadata(pq.ParquetFile(path))
-    )  # type: ignore[arg-type]
+    found = geoparquet._covering_bboxes(pq.ParquetFile(path), _geo(pq.ParquetFile(path)))
     assert found is not None
     boxes, kept = found
     assert 2 not in kept and len(kept) == len(boxes) == meta.num_row_groups - 1
@@ -2225,7 +2232,9 @@ def test_an_all_null_native_chunk_is_not_missing_statistics(tmp_path: Path) -> N
     # pyarrow writes empty GeospatialStatistics for an all-null chunk.
     path = tmp_path / "two.parquet"
     _two_native_columns(path, "g2")
-    assert pq.ParquetFile(path).metadata.row_group(0).column(2).geo_statistics.xmin is None
+    column = pq.ParquetFile(path).metadata.row_group(0).column(2)
+    # pyarrow-stubs 20 predates ColumnChunkMetaData.geo_statistics (pyarrow 21).
+    assert column.geo_statistics.xmin is None  # type: ignore[attr-defined]
     assert DAT_ROWGROUP_STATS not in [d.rule_id for d in _gpq(path)]
     found = geoparquet._native_bboxes(pq.ParquetFile(path), {"primary_column": "g2"})
     assert found is not None and found[1] == [1]

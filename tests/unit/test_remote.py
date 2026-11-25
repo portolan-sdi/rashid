@@ -38,6 +38,7 @@ from rashid_core.remote import (
     _StoreFetcher,
     crawl,
 )
+from rashid_core.report import Report
 from tests._https import HttpsServer, Route
 from tests.conftest import CatalogBuilder, mutate_json
 from tests.unit.test_live import FakeProber, StatusProber
@@ -515,7 +516,7 @@ def test_crawl_encodes_the_request_url_but_keeps_the_path_as_spelled(
 # --- the runner in URL mode ----------------------------------------------------
 
 
-def _check_url(root: Path, fetcher: DirFetcher | None = None, **kwargs: Any):  # type: ignore[no-untyped-def]
+def _check_url(root: Path, fetcher: DirFetcher | None = None, **kwargs: Any) -> Report:
     fetcher = fetcher or DirFetcher(root)
     kwargs.setdefault("live_prober", StatusProber())
     kwargs.setdefault("data", False)
@@ -763,7 +764,7 @@ def test_cli_accepts_a_catalog_url(
     root = _nested(catalog)
     seen: dict[str, Any] = {}
 
-    def fake_validate(location: Path | str, *, options: ValidationOptions):  # type: ignore[no-untyped-def]
+    def fake_validate(location: Path | str, *, options: ValidationOptions) -> Report:
         seen["location"] = location
         seen.update(vars(options))
         return validate(

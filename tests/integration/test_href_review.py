@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import quote
 
 import pytest
@@ -90,10 +91,11 @@ def test_encoded_asset_href_reads_the_local_filename(catalog: CatalogBuilder, sc
     outside = root.parent / "secret.bin"
     outside.write_bytes(b"abc")
     for href in ("%2e%2e/%2e%2e/secret.bin", "%2Fsecret.bin", "..%5Csecret.bin", "a%00b"):
-        mutate_json(
-            root / "roads/collection.json",
-            lambda d, href=href: d["assets"]["data"].update(href=href),
-        )
+
+        def point(d: dict[str, Any], href: str = href) -> None:
+            d["assets"]["data"]["href"] = href
+
+        mutate_json(root / "roads/collection.json", point)
         findings = _check(root, "--data-scope", scope)["findings"]
         assert not [f for f in findings if f["rule_id"] == "PTL-DAT-002"]
 

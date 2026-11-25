@@ -34,7 +34,8 @@ SCHEMAS = sorted(_BUNDLED.glob("v*/schema.json"), key=_version_key)
 
 def _schema_id(schema_path: Path) -> str:
     # $id carries a trailing '#'; the declared stac_extensions URI omits it.
-    return json.loads(schema_path.read_text(encoding="utf-8"))["$id"].rstrip("#")
+    schema_id: str = json.loads(schema_path.read_text(encoding="utf-8"))["$id"]
+    return schema_id.rstrip("#")
 
 
 def test_schemas_are_vendored() -> None:

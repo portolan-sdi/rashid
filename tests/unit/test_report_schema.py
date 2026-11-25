@@ -20,13 +20,15 @@ pytestmark = pytest.mark.unit
 
 def _schema() -> dict[str, Any]:
     path = resources.files("rashid_core").joinpath(f"_schemas/report/v{REPORT_VERSION}/schema.json")
-    return json.loads(path.read_text(encoding="utf-8"))
+    schema: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return schema
 
 
 def _cli_report(args: list[str]) -> dict[str, Any]:
     result = CliRunner().invoke(main, args)
     assert result.exit_code in (0, 1), result.output
-    return json.loads(result.stdout)
+    report: dict[str, Any] = json.loads(result.stdout)
+    return report
 
 
 def test_the_schema_is_valid_and_names_the_uri_the_report_cites() -> None:

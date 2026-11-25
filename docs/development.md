@@ -22,7 +22,8 @@ Hooks run checks at commit and push time. CI runs both sets.
 # actionlint, zizmor, jscpd, and file hygiene checks
 uv run prek run --all-files
 
-# On push: bandit, deptry, strict mypy, vulture, and import-linter
+# On push: bandit, deptry, vulture, import-linter, and strict mypy
+# over src/rashid_core, scripts, and tests
 uv run prek run --all-files --stage pre-push
 ```
 

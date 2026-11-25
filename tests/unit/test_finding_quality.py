@@ -266,14 +266,13 @@ def _add_collections(catalog: CatalogBuilder) -> None:
 def _mutate_collections(root: Path) -> None:
     """Defects that only exist once the tree is on disk."""
     (root / "bad_layer" / "AGENTS.md").unlink()
-    mutate_json(
-        root / "bad_layer" / "collection.json",
-        lambda d: (
-            d.pop("stac_extensions"),
-            d["extent"]["spatial"].__setitem__("bbox", [[4.0, 52.0, 6.0, 50.0]]),
-            d.__setitem__("links", [ln for ln in d["links"] if ln["rel"] != "parent"]),
-        ),
-    )
+
+    def break_layer(d: dict[str, Any]) -> None:
+        d.pop("stac_extensions")
+        d["extent"]["spatial"]["bbox"] = [[4.0, 52.0, 6.0, 50.0]]
+        d["links"] = [ln for ln in d["links"] if ln["rel"] != "parent"]
+
+    mutate_json(root / "bad_layer" / "collection.json", break_layer)
     # The collection's only describedby link is absolute and not markdown. It
     # has to replace the good link rather than sit beside it: a second
     # describedby link is legal, and PTL-FIL-003 passes as long as one link
@@ -320,38 +319,30 @@ def _mutate_collections(root: Path) -> None:
 def _mutate_root(root: Path) -> None:
     """Root-catalog defects: a bad child link and a stray asset."""
 
-    def untitle(links: list[dict[str, Any]]) -> None:
-        for link in links:
+    def break_root(d: dict[str, Any]) -> None:
+        for link in d["links"]:
             if link.get("href") == "./titleless/collection.json":
                 link.pop("title", None)
+        d["links"].append(
+            {
+                "rel": "child",
+                "href": "https://example.org/absent/collection.json",
+                "type": "text/plain",
+                "title": "Absent",
+            }
+        )
+        d["links"].append(
+            {
+                "rel": "child",
+                "href": "./gone/collection.json",
+                "type": "application/json",
+                "title": "Gone",
+            }
+        )
+        d["assets"] = {"stray": default_asset()}
+        d["links"] = [ln for ln in d["links"] if ln.get("href") != "./scenes/collection.json"]
 
-    mutate_json(
-        root / "catalog.json",
-        lambda d: (
-            untitle(d["links"]),
-            d["links"].append(
-                {
-                    "rel": "child",
-                    "href": "https://example.org/absent/collection.json",
-                    "type": "text/plain",
-                    "title": "Absent",
-                }
-            ),
-            d["links"].append(
-                {
-                    "rel": "child",
-                    "href": "./gone/collection.json",
-                    "type": "application/json",
-                    "title": "Gone",
-                }
-            ),
-            d.__setitem__("assets", {"stray": default_asset()}),
-            d.__setitem__(
-                "links",
-                [ln for ln in d["links"] if ln.get("href") != "./scenes/collection.json"],
-            ),
-        ),
-    )
+    mutate_json(root / "catalog.json", break_root)
 
 
 def _add_nested_and_unparseable(root: Path) -> None:

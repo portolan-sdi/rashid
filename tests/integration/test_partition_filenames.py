@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 import sys
 from pathlib import Path
 
@@ -37,7 +38,7 @@ def test_windows_partition_display_uses_posix_separators(
     path = directory / match
     path.parent.mkdir(parents=True, exist_ok=True)
     assets.write_geoparquet(path, version="1.0.0")
-    monkeypatch.setattr(_files.globmodule, "glob", lambda *args, **kwargs: [match])
+    monkeypatch.setattr(glob, "glob", lambda *args, **kwargs: [match])
     monkeypatch.setattr(_files, "Path", PureWindowsPath)
     versions = _findings(tmp_path, "PTL-DAT-012")
     assert len(versions) == 1

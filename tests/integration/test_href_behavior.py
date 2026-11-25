@@ -25,7 +25,8 @@ def _check(root: Path | str, *flags: str) -> dict[str, Any]:
         main, ["check", "--json", *flags, str(root)], catch_exceptions=False
     )
     assert result.exit_code in (0, 1), result.output
-    return json.loads(result.output)
+    report: dict[str, Any] = json.loads(result.output)
+    return report
 
 
 @pytest.mark.parametrize(
