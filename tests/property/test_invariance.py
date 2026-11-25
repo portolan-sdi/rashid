@@ -23,7 +23,14 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from rashid_core import ValidationOptions, validate
-from tests.property.permitted import FORMS, GEOPARQUET_FORMS, METADATA_ONLY, ZARR_FORMS
+from tests.conftest import CatalogBuilder
+from tests.property.permitted import (
+    FORMS,
+    GEOPARQUET_FORMS,
+    METADATA_ONLY,
+    ZARR_FORMS,
+    collection_files,
+)
 from tests.property.strategies import CatalogPlan, catalogs
 
 pytestmark = pytest.mark.integration
@@ -119,3 +126,13 @@ def test_permitted_changes_keep_it_clean(
             FORMS[requirement](root)
         _reformat(root, rng, style, rename_keys)
         assert _report(root, metadata_only=bool(METADATA_ONLY & set(forms))) == []
+
+
+def test_an_item_named_collection_is_not_treated_as_a_collection() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        builder = CatalogBuilder(Path(tmp) / "catalog")
+        builder.collection("roads").item("collection")
+        root = builder.write()
+        assert [p.relative_to(root).as_posix() for p in collection_files(root)] == [
+            "roads/collection.json"
+        ]

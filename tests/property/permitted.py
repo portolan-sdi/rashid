@@ -10,6 +10,7 @@ on the shape of the tree it is given.
 
 from __future__ import annotations
 
+import json
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -34,12 +35,21 @@ ZARR_STORES = Path(__file__).resolve().parents[1] / "fixtures" / "zarr-stores"
 LANGUAGE_DIR = "_ro"
 
 
+def _typed(root: Path, name: str, stac_type: str) -> list[Path]:
+    # An item may be named "collection" or "catalog", so the filename alone is not enough.
+    return sorted(
+        path
+        for path in root.rglob(name)
+        if json.loads(path.read_text(encoding="utf-8")).get("type") == stac_type
+    )
+
+
 def collection_files(root: Path) -> list[Path]:
-    return sorted(root.rglob("collection.json"))
+    return _typed(root, "collection.json", "Collection")
 
 
 def catalog_files(root: Path) -> list[Path]:
-    return sorted(root.rglob("catalog.json"))
+    return _typed(root, "catalog.json", "Catalog")
 
 
 def _each_collection(mutate: Callable[[dict[str, Any]], None]) -> Transform:
