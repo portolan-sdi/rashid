@@ -151,6 +151,8 @@ _VERSION_EXTENSION_PREFIX = "https://stac-extensions.github.io/version/"
 
 # Fields the version extension defines on catalogs, collections, and items.
 _VERSION_FIELDS = ("version", "deprecated", "experimental")
+# Bound untrusted decimal conversion; oversized components retain the warning.
+_MAX_VERSION_DIGITS = 18
 
 
 class VersionExtensionRule(Rule):
@@ -264,8 +266,7 @@ class ExtensionVersionRule(Rule):
 
 def _compatible_extension_version(declared: str, pinned: str) -> bool:
     parts = declared[1:].split(".")
-    # Bound untrusted decimal conversion; oversized components retain the warning.
-    if any(len(part) > 18 for part in parts):
+    if any(len(part) > _MAX_VERSION_DIGITS for part in parts):
         return False
     version = tuple(int(part) for part in parts)
     floor = tuple(int(part) for part in pinned[1:].split("."))

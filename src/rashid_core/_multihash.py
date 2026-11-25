@@ -11,6 +11,8 @@ from __future__ import annotations
 # Hash-function code from the multiformats table. Portolan tooling writes
 # sha2-256. The decoder accepts whatever code a producer used.
 SHA2_256 = 0x12
+# A varint past 64 bits is implausibly large: corrupt input.
+_MAX_SHIFT = 63
 
 
 def _write_varint(value: int) -> bytes:
@@ -35,7 +37,7 @@ def _read_varint(data: bytes, offset: int) -> tuple[int, int] | None:
         if not byte & 0x80:
             return value, offset
         shift += 7
-        if shift > 63:  # implausibly large varint; corrupt input
+        if shift > _MAX_SHIFT:
             return None
     return None  # ran out of bytes mid-varint
 

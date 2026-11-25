@@ -124,7 +124,7 @@ class PartitionGlobSchemeRule(Rule):
         host = parsed.hostname if parsed is not None else None
         scheme = parsed.scheme.lower() if parsed is not None else ""
         # A one-letter scheme is a Windows drive letter, not a URL scheme.
-        unlistable = len(scheme) < 2 or scheme in (*_UNLISTABLE, *BUCKET_SCHEMES)
+        unlistable = len(scheme) <= 1 or scheme in (*_UNLISTABLE, *BUCKET_SCHEMES)
         if unlistable or not host:
             yield self.finding(
                 node,

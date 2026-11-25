@@ -202,14 +202,16 @@ def _profile(args: argparse.Namespace) -> int:
     )
     print("$", " ".join(command), file=sys.stderr)
     if args.mode == "instr":
-        result = subprocess.run(command, capture_output=True, text=True, env=_instr_env())
+        result = subprocess.run(
+            command, capture_output=True, text=True, env=_instr_env(), check=False
+        )
         refs = parse_cachegrind(result.stderr)
         if result.returncode != 0 or refs is None:
             sys.stderr.write(result.stderr)
             return result.returncode or 1
         print(f"# {stem}: {refs:,} instructions (cachegrind Ir); details in {out}")
         return 0
-    result = subprocess.run(command)
+    result = subprocess.run(command, check=False)
     if result.returncode != 0:
         return result.returncode
     if args.mode == "time":
@@ -217,7 +219,7 @@ def _profile(args: argparse.Namespace) -> int:
         print(f"# saved to {out}")
         return 0
     stats = ["uv", "run", "--with", MEMRAY, "python", "-m", "memray", "stats", str(out)]
-    return subprocess.run(stats).returncode
+    return subprocess.run(stats, check=False).returncode
 
 
 def _instr_env() -> dict[str, str]:

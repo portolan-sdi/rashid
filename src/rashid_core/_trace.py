@@ -36,6 +36,7 @@ from __future__ import annotations
 import atexit
 import contextlib
 import contextvars
+import itertools
 import json
 import logging
 import os
@@ -124,19 +125,26 @@ class Span:
 
 
 _MODES = (None, "on", "mem")
-_mode: str | None = None
 _spans: list[Span] = []
-_next_id = 0
+_ids = itertools.count(1)
 _current: contextvars.ContextVar[int | None] = contextvars.ContextVar(
     f"{_PACKAGE}_span", default=None
 )
 _OFF: contextlib.AbstractContextManager[None] = contextlib.nullcontext()
-_started_tracemalloc = False
+
+
+class _State:
+    """Process-wide switches that enable and configure_logging set."""
+
+    mode: str | None = None
+    # Whether enable started tracemalloc, and so must stop it.
+    started_tracemalloc = False
+    # Whether configure_logging turned on logging.captureWarnings, and so must turn it off.
+    captured_warnings = False
 
 
 def enable(mode: str | None = "on") -> None:
     """Turn spans on (``"on"``), on with tracemalloc (``"mem"``), or off (None)."""
-    global _mode, _started_tracemalloc
     if mode not in _MODES:
         raise ValueError(f"timings mode must be one of {_MODES}, got {mode!r}")
     # tracemalloc imports pickle; load it only when memory is measured.
@@ -145,18 +153,18 @@ def enable(mode: str | None = "on") -> None:
 
         if not tracemalloc.is_tracing():
             tracemalloc.start()
-            _started_tracemalloc = True
-    elif _started_tracemalloc:
+            _State.started_tracemalloc = True
+    elif _State.started_tracemalloc:
         import tracemalloc
 
         tracemalloc.stop()
-        _started_tracemalloc = False
-    _mode = mode
+        _State.started_tracemalloc = False
+    _State.mode = mode
 
 
 def enabled() -> bool:
     """Whether spans are being recorded."""
-    return _mode is not None
+    return _State.mode is not None
 
 
 def reset() -> None:
@@ -168,17 +176,15 @@ def reset() -> None:
 
 def span(name: str, **attrs: Any) -> contextlib.AbstractContextManager[None]:
     """Time the block as one span called ``name``, with ``attrs`` attached."""
-    if _mode is None:
+    if _State.mode is None:
         return _OFF
     return _recording(name, attrs)
 
 
 @contextlib.contextmanager
 def _recording(name: str, attrs: dict[str, Any]) -> Iterator[None]:
-    global _next_id
     with _lock:
-        _next_id += 1
-        span_id = _next_id
+        span_id = next(_ids)
     parent = _current.get()
     token = _current.set(span_id)
     start = time.perf_counter_ns()
@@ -392,7 +398,7 @@ def trace_to(path: str) -> None:
     parent = Path(path).parent
     if not parent.is_dir():
         raise FileNotFoundError(f"trace directory {str(parent)!r} does not exist")
-    if _mode is None:
+    if _State.mode is None:
         enable("on")
     if not _trace_paths:
         atexit.register(_write_traces)
@@ -466,8 +472,6 @@ class _Stderr(logging.StreamHandler):  # type: ignore[type-arg]
 
 
 _installed: list[logging.Handler] = []
-# Whether configure_logging turned on logging.captureWarnings, and so must turn it off.
-_captured_warnings = False
 
 # Values of ``*_TIMINGS`` that leave spans off.
 _FALSE = ("", "0", "false", "no", "off")
@@ -505,7 +509,6 @@ def configure_logging(level: str | None, log_file: str | None = None) -> None:
     At DEBUG, or with ``log_file``, Python warnings are logged too. They go
     through the ``py.warnings`` logger, which gets the same handlers.
     """
-    global _captured_warnings
     logger = logging.getLogger(_PACKAGE)
     warnings_logger = logging.getLogger("py.warnings")
     for handler in _installed:
@@ -513,9 +516,9 @@ def configure_logging(level: str | None, log_file: str | None = None) -> None:
         warnings_logger.removeHandler(handler)
         handler.close()
     _installed.clear()
-    if _captured_warnings:
+    if _State.captured_warnings:
         logging.captureWarnings(False)
-        _captured_warnings = False
+        _State.captured_warnings = False
     if level is None and log_file is None:
         logger.setLevel(logging.NOTSET)
         return
@@ -534,7 +537,7 @@ def configure_logging(level: str | None, log_file: str | None = None) -> None:
     logger.setLevel(logging.DEBUG if log_file is not None else threshold)
     if threshold <= logging.DEBUG or log_file is not None:
         logging.captureWarnings(True)
-        _captured_warnings = True
+        _State.captured_warnings = True
         for handler in _installed:
             warnings_logger.addHandler(handler)
 

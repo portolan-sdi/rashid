@@ -65,6 +65,8 @@ _REMOTE_WORKERS = 32
 #: 4 threads, 43 ms on 8, and 60 ms on 32. A few still overlap file reads and
 #: the hashing of large files, which release it.
 _LOCAL_WORKERS = 4
+# Unreachable hrefs one finding names before it counts the rest.
+_SHOWN = 10
 
 
 # A validator inspects one object's assets, given a reader for their bytes, and
@@ -261,8 +263,8 @@ def _unreachable_note(nodes: list[Node]) -> list[Finding]:
     ]
     if not unreachable:
         return []
-    shown = ", ".join(unreachable[:10])
-    more = f", and {len(unreachable) - 10} more" if len(unreachable) > 10 else ""
+    shown = ", ".join(unreachable[:_SHOWN])
+    more = f", and {len(unreachable) - _SHOWN} more" if len(unreachable) > _SHOWN else ""
     return [
         Finding(
             rule_id=DAT_UNAVAILABLE,

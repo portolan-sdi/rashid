@@ -14,6 +14,10 @@ from rashid_core.rule import Rule
 # DBL_MAX and friends written out by broken exporters as "effectively
 # infinite" sentinels. Anything at or beyond this magnitude is garbage.
 _SENTINEL_MAGNITUDE = 1.7e308
+_MAX_LON = 180
+_MAX_LAT = 90
+# [west, south, east, north]; a 3D bbox adds zmin and zmax.
+_BBOX_2D = 4
 
 
 class BboxValidRule(Rule):
@@ -88,14 +92,14 @@ class BboxValidRule(Rule):
 
     def _range_findings(self, node: Node, pointer: str, values: list[float]) -> Iterable[Finding]:
         """Check WGS84 ranges and coordinate ordering after structural validation."""
-        if len(values) == 4:
+        if len(values) == _BBOX_2D:
             west, south, east, north = values
             elevations: tuple[float, float] | None = None
         else:
             west, south, zmin, east, north, zmax = values
             elevations = (zmin, zmax)
         for name, lon in (("west", west), ("east", east)):
-            if not -180 <= lon <= 180:
+            if not -_MAX_LON <= lon <= _MAX_LON:
                 yield self.finding(
                     node,
                     f"bbox {name} longitude {lon} outside WGS84 range [-180, 180]",
@@ -105,7 +109,7 @@ class BboxValidRule(Rule):
                     actual=lon,
                 )
         for name, lat in (("south", south), ("north", north)):
-            if not -90 <= lat <= 90:
+            if not -_MAX_LAT <= lat <= _MAX_LAT:
                 yield self.finding(
                     node,
                     f"bbox {name} latitude {lat} outside WGS84 range [-90, 90]",

@@ -131,9 +131,8 @@ def _check_class_colors(key: str, asset: dict[str, Any], files: AssetFiles) -> l
         src = files.raster()
         tables: dict[int, dict[int, tuple[int, ...]] | None] = {}
         defects: list[DataDefect] = []
-        for band, value, pointer, hint in hinted:
-            if band is None:
-                band = 1 if src.count == 1 else None
+        for declared, value, pointer, hint in hinted:
+            band = declared if declared is not None else 1 if src.count == 1 else None
             if band is None or band > src.count:
                 continue  # placement, which _check_class_placement reports
             if band not in tables:
@@ -217,6 +216,10 @@ def _check_class_placement(key: str, asset: dict[str, Any], files: AssetFiles) -
 # (formats.md:121). Also the overview cutoff for untiled rasters, where no
 # internal tile size exists to compare against.
 _MAX_TILE = 512
+# Each overview level reduces the one before it by a factor in [2, 10].
+_MAX_REDUCTION = 10
+_RGB_BANDS = 3
+_RGBA_BANDS = 4
 
 
 def _tile_shape(src: Any) -> tuple[int, int] | None:
@@ -277,7 +280,9 @@ def _overview_reduction(previous: tuple[int, int], current: tuple[int, int]) -> 
     dimensions = list(zip(previous, current, strict=True))
     scale = max(Fraction(2), *(Fraction(before, after) for before, after in dimensions))
     # ceil(before / scale) == after, with an exact bound at integer pixels.
-    return scale <= 10 and all(before > (after - 1) * scale for before, after in dimensions)
+    return scale <= _MAX_REDUCTION and all(
+        before > (after - 1) * scale for before, after in dimensions
+    )
 
 
 def _check_tile_size(key: str, files: AssetFiles) -> list[DataDefect]:
@@ -400,11 +405,11 @@ def check_display(
         with rasterio.Env(GDAL_PAM_ENABLED="NO"):
             src = files.raster()
             count, dtypes = src.count, sorted(set(src.dtypes))
-            alpha = count == 4 and src.colorinterp[3] == ColorInterp.alpha
+            alpha = count == _RGBA_BANDS and src.colorinterp[3] == ColorInterp.alpha
             masked = any(flags != [MaskFlags.all_valid] for flags in src.mask_flag_enums)
     except Exception:  # unreadable raster: the COG check owns reporting it
         return []
-    if overview and (dtypes != ["uint8"] or not (count == 3 or alpha)):
+    if overview and (dtypes != ["uint8"] or not (count == _RGB_BANDS or alpha)):
         return [
             DataDefect(
                 DAT_OVERVIEW_FORMAT,
@@ -414,7 +419,7 @@ def check_display(
                 key,
             )
         ]
-    if scene and count >= 3 and not masked:
+    if scene and count >= _RGB_BANDS and not masked:
         return [
             DataDefect(
                 DAT_SCENE_MASK,

@@ -297,7 +297,7 @@ _URI_AUTHORITY = re.compile(
 def is_uri_reference(href: str) -> bool:
     """RFC 3986 URI-reference syntax, without resolving or decoding the href."""
     # urlsplit strips some whitespace and controls; reject them before parsing.
-    if not href.isascii() or any(ord(char) <= 32 or ord(char) == 127 for char in href):
+    if not href.isascii() or any(char <= " " or char == "\x7f" for char in href):
         return False
     parsed = split_href(href)
     if parsed is None:

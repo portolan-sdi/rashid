@@ -93,6 +93,7 @@ import logging
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import Any, Protocol
 from urllib.error import HTTPError
 
@@ -143,6 +144,8 @@ _LINK_KINDS: tuple[Kind, ...] = ("catalog", "collection", "item")
 
 # Concurrent HEADs against one host.
 _WORKERS = 32
+# Assets one finding names before it counts the rest.
+_SHOWN = 10
 
 #: Zarr store metadata documents probed per run. A catalog may declare a store
 #: per item, and each probe is a request to somebody's host, so the incubating
@@ -199,7 +202,7 @@ class ProbeResponse:
         built, so a 3xx seen here points off https or names no location. A
         relative ``Location`` keeps the request's https scheme.
         """
-        if not 300 <= self.status < 400:
+        if not HTTPStatus.MULTIPLE_CHOICES <= self.status < HTTPStatus.BAD_REQUEST:
             return None
         location = self.header("location")
         if location is None or not off_https_reference(location):
@@ -536,7 +539,7 @@ def _off_https_finding(
 
 def _check_range(rep: _Target, response: ProbeResponse) -> list[Finding]:
     problems: list[str] = []
-    if response.status != 206:
+    if response.status != HTTPStatus.PARTIAL_CONTENT:
         problems.append(f"a ranged GET returned {response.status}, expected 206 Partial Content")
     if (response.header("accept-ranges") or "").lower() != "bytes":
         problems.append("no 'Accept-Ranges: bytes' header")
@@ -601,7 +604,7 @@ def _check_cors(rep: _Target, response: ProbeResponse) -> list[Finding]:
 
 def _check_preflight(rep: _Target, response: ProbeResponse) -> list[Finding]:
     problems: list[str] = []
-    if not 200 <= response.status < 300:
+    if not _store.is_success(response.status):
         problems.append(f"preflight returned {response.status}, expected 2xx")
     if not _allows_origin(response):
         origin = response.header("access-control-allow-origin")
@@ -951,7 +954,7 @@ def _check_links(
                 )
             )
             break
-        if 200 <= status < 300:
+        if _store.is_success(status):
             continue
         held = heads.response(target.url)
         location = None if held is None else held.off_https()
@@ -993,7 +996,7 @@ def _check_metadata_host(
     that answers 2xx (PORTO-CORE-086). The HEADs are already held, so only the
     one GET goes out.
     """
-    link = next((t for t in targets if 200 <= (heads.status(t.url) or 0) < 300), None)
+    link = next((t for t in targets if _store.is_success(heads.status(t.url) or 0)), None)
     if host in heads.failed or link is None:
         return []
     rep = _Target(
@@ -1112,7 +1115,7 @@ def _check_zarr_cors(stores: list[tuple[Node, str, str]], prober: Prober) -> lis
                 _zarr_unjudged(node, key, f"the Zarr CORS probe of {url} failed: {exc}")
             )
             continue
-        if response.status >= 400 or response.off_https() is not None:
+        if response.status >= HTTPStatus.BAD_REQUEST or response.off_https() is not None:
             findings.append(
                 _zarr_unjudged(
                     node,
@@ -1204,8 +1207,8 @@ def _unprobeable_note(graph: CatalogGraph, base: str | None) -> list[Finding]:
     unprobeable = _unprobeable_assets(graph, base)
     if not unprobeable:
         return []
-    shown = ", ".join(unprobeable[:10])
-    more = f", and {len(unprobeable) - 10} more" if len(unprobeable) > 10 else ""
+    shown = ", ".join(unprobeable[:_SHOWN])
+    more = f", and {len(unprobeable) - _SHOWN} more" if len(unprobeable) > _SHOWN else ""
     return [
         Finding(
             rule_id=LIV_UNAVAILABLE,
