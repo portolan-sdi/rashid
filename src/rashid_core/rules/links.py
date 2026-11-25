@@ -73,9 +73,12 @@ class RequiredLinksRule(Rule):
         required = required_link_targets(graph, node)
         for rel in required:
             if rel not in rels:
+                message = f"missing required structural link rel:'{rel}'"
+                if node.kind == "item" and rel == "collection":
+                    message = f"item is not in a collection: {message}"
                 yield self.finding(
                     node,
-                    f"missing required structural link rel:'{rel}'",
+                    message,
                     json_pointer=json_pointer("links"),
                     fix_hint=f"add a rel:'{rel}' link to links, with a relative href to"
                     f" {_REQUIRED_LINK_TARGETS[rel]} and type application/json",

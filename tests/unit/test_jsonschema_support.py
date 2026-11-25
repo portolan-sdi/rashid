@@ -46,3 +46,39 @@ def test_describe_truncates_long_messages() -> None:
     assert len(error.message) == 300
     assert error.message.endswith("...")
     assert error.json_pointer == "/x"
+
+
+@pytest.mark.parametrize(
+    ("schema", "instance", "message", "pointer"),
+    [
+        (
+            {"properties": {"collection": {"not": {}}}},
+            {"collection": "roads"},
+            "'collection' is not allowed here",
+            "/collection",
+        ),
+        (
+            {"properties": {"nested": {"properties": {"a/b~c": {"not": {}}}}}},
+            {"nested": {"a/b~c": "value"}},
+            "'a/b~c' is not allowed here",
+            "/nested/a~1b~0c",
+        ),
+        ({"items": {"not": {}}}, ["value"], "'0' is not allowed here", "/0"),
+        ({"properties": {"": {"not": {}}}}, {"": 1}, "'' is not allowed here", "/"),
+        ({"not": {}}, {}, "document is not allowed here", ""),
+    ],
+)
+def test_describe_names_a_member_that_must_be_absent(
+    schema: dict, instance: object, message: str, pointer: str
+) -> None:
+    from jsonschema import Draft7Validator
+
+    (raw,) = Draft7Validator(schema).iter_errors(instance)
+    assert describe(raw) == SchemaError(message=message, json_pointer=pointer)
+
+
+def test_describe_preserves_other_not_errors() -> None:
+    from jsonschema import Draft7Validator
+
+    (raw,) = Draft7Validator({"not": {"type": "string"}}).iter_errors("value")
+    assert describe(raw) == SchemaError(message=raw.message, json_pointer="")
