@@ -92,8 +92,8 @@
     "modules": {
       "CheckInfo": "rashid.registry",
       "Finding": "rashid.model",
-      "Report": "rashid.model",
-      "RuleSummary": "rashid.model",
+      "Report": "rashid.report",
+      "RuleSummary": "rashid.report",
       "RulesConfig": "rashid.config",
       "Severity": "rashid.model",
       "ValidationOptions": "rashid.runner",

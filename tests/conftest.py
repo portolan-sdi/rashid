@@ -18,7 +18,7 @@ import pytest
 
 from rashid import _store, _trace
 from rashid._profile import newest_profile_version, profile_uri
-from rashid.model import Report
+from rashid.report import Report
 
 # The local HTTPS server that the obstore tests read from.
 pytest_plugins = ["tests._https"]

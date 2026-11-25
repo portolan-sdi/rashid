@@ -21,7 +21,7 @@ EXEMPTIONS = json.loads((ROOT / "guardrail_exemptions.json").read_text(encoding=
 def test_exemption_counts_and_reasons() -> None:
     assert {kind: len(rows) for kind, rows in EXEMPTIONS.items()} == {
         "ruff": 7,
-        "import-linter": 2,
+        "import-linter": 1,
         "allowed-importers": 6,
         "jscpd": 1,
         "xfail": 0,
@@ -33,7 +33,7 @@ def test_exemption_counts_and_reasons() -> None:
             else rows.values()
         )
         assert all(isinstance(reason, str) and reason.strip() for reason in reasons)
-    assert sum(len(edges) for edges in EXEMPTIONS["import-linter"].values()) == 2
+    assert sum(len(edges) for edges in EXEMPTIONS["import-linter"].values()) == 1
 
 
 def test_ruff_exemptions_match_config_and_banned_uses() -> None:

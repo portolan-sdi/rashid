@@ -64,7 +64,7 @@ def test_owner_layer_contracts_cover_new_modules() -> None:
 
     independent = contracts["rules-independent"]
     assert independent["type"] == "independence"
-    assert independent["ignore_imports"] == ["rashid.model -> rashid.registry"]
+    assert not independent.get("ignore_imports")
     assert set(independent["modules"]) == {
         "rashid.rules." + path.stem
         for path in (ROOT / "src/rashid/rules").glob("*.py")

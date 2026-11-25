@@ -12,7 +12,7 @@ from jsonschema import Draft202012Validator
 
 from rashid import ValidationOptions, _profile, validate
 from rashid.cli import main
-from rashid.model import REPORT_SCHEMA_URI, REPORT_VERSION
+from rashid.report import REPORT_SCHEMA_URI, REPORT_VERSION
 from tests.conftest import PORTOLAN_URI, CatalogBuilder, mutate_json
 
 pytestmark = pytest.mark.unit

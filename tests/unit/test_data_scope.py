@@ -26,7 +26,7 @@ from rashid.catalog import CatalogGraph, Node
 from rashid.cli import main
 from rashid.data import DataDefect, Validator, validate_data
 from rashid.data.reader import AssetReader, FilesystemHttpReader, LocalOnlyReader, Locator
-from rashid.model import Report
+from rashid.report import Report
 from rashid.runner import validate
 from tests.conftest import VALID_MULTIHASH, CatalogBuilder
 

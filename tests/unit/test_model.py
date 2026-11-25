@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from rashid.model import Finding, Report, Severity
+from rashid.model import Finding, Severity
+from rashid.report import Report
 
 pytestmark = pytest.mark.unit
 

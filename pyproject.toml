@@ -180,6 +180,7 @@ name = "validation core must not import a CLI framework"
 type = "forbidden"
 source_modules = [
     "rashid.model",
+    "rashid.report",
     "rashid._stac",
     "rashid._media",
     "rashid._profile",
@@ -208,6 +209,7 @@ name = "core and data readers must not import the geospatial stack"
 type = "forbidden"
 source_modules = [
     "rashid.model",
+    "rashid.report",
     "rashid._stac",
     "rashid._media",
     "rashid._profile",
@@ -262,8 +264,6 @@ allowed_importers = [
 id = "rules-independent"
 name = "metadata rule modules must be independent"
 type = "independence"
-# Removed with the report split in item 4 of #336.
-ignore_imports = ["rashid.model -> rashid.registry"]
 modules = [
     "rashid.rules.assets",
     "rashid.rules.bbox",

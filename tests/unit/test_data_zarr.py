@@ -47,8 +47,9 @@ from rashid.ids import (
     ZAR_TRANSFORM,
     ZAR_VARIABLES,
 )
-from rashid.model import Report, Severity
+from rashid.model import Severity
 from rashid.registry import CHECKS, is_incubating
+from rashid.report import Report
 from tests.conftest import CatalogBuilder, default_asset, thumbnail_asset
 
 pytestmark = pytest.mark.unit

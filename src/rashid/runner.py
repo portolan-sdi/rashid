@@ -22,7 +22,7 @@ from rashid.extensions import validate_extensions
 from rashid.ids import GEN_MISSING_ROOT, GEN_PARTIAL_TREE, GEN_UNPARSEABLE
 from rashid.live import Prober as LiveProber
 from rashid.live import validate_live
-from rashid.model import Finding, Report, Severity
+from rashid.model import Finding, Severity
 from rashid.registry import DEFAULT_RULES, check_ids, is_incubating
 from rashid.remote import (
     DEFAULT_MAX_DOCUMENTS,
@@ -31,6 +31,7 @@ from rashid.remote import (
     FetchError,
     crawl,
 )
+from rashid.report import Report
 from rashid.rule import Rule
 from rashid.schema import validate_schema
 from rashid.structural import validate_structural

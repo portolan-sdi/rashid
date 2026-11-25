@@ -26,9 +26,6 @@
   "import-linter": {
     "core and data readers must not import the geospatial stack": {
       "rashid.data -> rashid.data.checks": "The lazy default_validator import loads the data stack only when validation runs."
-    },
-    "metadata rule modules must be independent": {
-      "rashid.model -> rashid.registry": "Temporary report description lookup; removed when reports move out of model in #336 item 4."
     }
   },
   "allowed-importers": {

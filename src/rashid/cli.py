@@ -16,7 +16,8 @@ import click
 from rashid import ValidationOptions, _json, _profile, _trace
 from rashid._href import is_catalog_url, is_uri_reference, split_href
 from rashid.data.reader import LocalOnlyReader
-from rashid.model import Report, Severity
+from rashid.model import Severity
+from rashid.report import Report
 from rashid.runner import validate
 
 _SEVERITY_TAGS = {

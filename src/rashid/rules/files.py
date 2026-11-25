@@ -2,9 +2,8 @@
 
 Existence, linkage, and the README content minimum. core.md, README.md: "The
 `README.md` MUST contain at minimum a title, description, license, and data
-provenance." The content rules are the one place the metadata pass reads a
-file beyond the graph load: README.md is not a STAC object, so its text is not
-in the graph, and the MUST cannot be judged without it.
+provenance." The graph reads README text on demand because README.md is not
+a STAC object.
 """
 
 from __future__ import annotations
@@ -29,20 +28,6 @@ _HEADING = re.compile(r"(?m)^#{1,6}\s+\S")
 # "data sources", "Provenance:" all count.
 _LICENSE_MARKERS = ("license", "licence", "spdx")
 _PROVENANCE_MARKERS = ("provenance", "source", "produced", "derived", "origin", "collected")
-
-
-def _readme_text(node: Node, graph: CatalogGraph) -> str | None:
-    """The node's sibling README.md text, or None when absent or unreadable.
-
-    Absence is PTL-FIL-001's finding; an unreadable file cannot be graded, so
-    it degrades to silence rather than a false content error.
-    """
-    if not graph.file_exists(node.path.parent / "README.md"):
-        return None
-    try:
-        return (node.abs_path.parent / "README.md").read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
 
 
 @dataclass(frozen=True)
@@ -234,7 +219,7 @@ class ReadmeContentRule(Rule):
     kinds = ("catalog", "collection")
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        text = _readme_text(node, graph)
+        text = graph.read_text(node.path.parent / "README.md")
         if text is None:
             return  # PTL-FIL-001 reports the absence
         if not text.strip():
@@ -272,7 +257,7 @@ class ReadmeSectionsRule(Rule):
     kinds = ("collection",)
 
     def check(self, node: Node, graph: CatalogGraph) -> Iterable[Finding]:
-        text = _readme_text(node, graph)
+        text = graph.read_text(node.path.parent / "README.md")
         if text is None or not text.strip():
             return  # PTL-FIL-001/004 report absence and emptiness
         lowered = text.casefold()

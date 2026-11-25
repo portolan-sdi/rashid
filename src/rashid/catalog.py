@@ -1,7 +1,7 @@
 """In-memory model of a Portolan catalog's file tree.
 
-The graph is built in a single I/O pass; rules query memory and never touch
-disk. STAC objects are raw JSON dicts, not pystac objects, so validation
+The graph owns catalog I/O; rules query its nodes and file helpers.
+STAC objects are raw JSON dicts, not pystac objects, so validation
 observes exactly what is on disk.
 """
 
@@ -254,6 +254,15 @@ class CatalogGraph:
     def file_exists(self, rel_path: PurePosixPath) -> bool:
         """True when the walk saw a file at this relative path."""
         return rel_path.name in self.dir_listing.get(rel_path.parent, set())
+
+    def read_text(self, rel_path: PurePosixPath) -> str | None:
+        """UTF-8 text for a known file, or None when missing or unreadable."""
+        if not self.file_exists(rel_path):
+            return None
+        try:
+            return (self.root_path / rel_path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
 
     def resolve_link(self, from_node: Node, href: str) -> Node | None:
         """Resolve a relative href against the file tree.
