@@ -508,7 +508,10 @@ def test_graph_from_documents_refuses_keys_outside_the_tree(tmp_path: Path, key:
 
 
 @pytest.mark.usefixtures("windows_paths")
-@pytest.mark.parametrize("key", ["C:/collection.json", "c:collection.json"])
+@pytest.mark.parametrize(
+    "key",
+    ["C:/collection.json", "c:collection.json", "./C:/collection.json", "./c:collection.json"],
+)
 def test_graph_from_documents_refuses_a_windows_drive_key(tmp_path: Path, key: str) -> None:
     with pytest.raises(ValueError, match="relative POSIX path"):
         CatalogGraph.from_documents(tmp_path, {key: {}})
@@ -526,6 +529,23 @@ def test_graph_from_documents_marks_a_non_object_catalog(tmp_path: Path) -> None
 def test_graph_from_documents_refuses_two_keys_for_one_path(tmp_path: Path, other: str) -> None:
     with pytest.raises(ValueError, match="same path"):
         CatalogGraph.from_documents(tmp_path, {"c/i.json": {}, other: {}})
+
+
+@pytest.mark.usefixtures("windows_paths")
+def test_keys_that_differ_in_case_name_one_path_on_windows(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="same path"):
+        CatalogGraph.from_documents(tmp_path, {"c/i.json": {}, "c/I.json": {}})
+
+
+def test_keys_that_differ_in_case_stay_distinct_on_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", PurePosixPath)
+    item = {"type": "Feature", "stac_version": "1.1.0", "id": "i", "links": []}
+
+    graph = CatalogGraph.from_documents(tmp_path, {"c/i.json": item, "c/I.json": item})
+
+    assert sorted(graph.nodes) == [PurePosixPath("c/I.json"), PurePosixPath("c/i.json")]
 
 
 def test_a_key_in_documents_and_files_is_allowed(tmp_path: Path) -> None:

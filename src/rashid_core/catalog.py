@@ -10,13 +10,14 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Any, Literal
 from urllib.parse import quote
 
 from rashid_core import _json
 from rashid_core._href import (
     has_host_drive,
+    host_path,
     is_absolute_href,
     relative_href,
     relative_path,
@@ -128,21 +129,26 @@ def _is_hidden(directory: str) -> bool:
 def _tree_paths(keys: Iterable[str]) -> dict[PurePosixPath, str]:
     """Map each key to its normal path, or raise ValueError for a bad key.
 
-    :meth:`CatalogGraph.from_documents` lists the rules.
+    Every check reads the normal path, because the node path is built from
+    it. :meth:`CatalogGraph.from_documents` lists the rules.
     """
     paths: dict[PurePosixPath, str] = {}
+    seen: dict[PurePath, str] = {}
     for key in keys:
         rel = PurePosixPath(key)
+        name = str(rel)
         if (
-            "\\" in key
-            or has_host_drive(key)
+            "\\" in name
+            or has_host_drive(name)
             or rel.is_absolute()
             or ".." in rel.parts
             or not rel.name
         ):
             raise ValueError(f"key must be a relative POSIX path inside the tree: {key!r}")
-        if paths.setdefault(rel, key) != key:
-            raise ValueError(f"keys {paths[rel]!r} and {key!r} name the same path")
+        first = seen.setdefault(host_path(name), key)
+        if first != key:
+            raise ValueError(f"keys {first!r} and {key!r} name the same path")
+        paths[rel] = key
     return paths
 
 
@@ -313,9 +319,12 @@ class CatalogGraph:
             ValueError: A key is not a relative POSIX path inside the tree.
                 That is a key that is empty or absolute, a key that contains
                 ``..`` or a backslash, and on Windows a key with a drive
-                (``C:/x`` or ``C:x``). Also raised when two keys of one
-                mapping name the same path, such as ``c//i.json`` and
-                ``c/i.json``.
+                (``C:/x`` or ``C:x``). These checks read the normal form of
+                the key, so ``./C:/x`` is also refused on Windows. Also
+                raised when two keys of one mapping name the same path on
+                the host, such as ``c//i.json`` and ``c/i.json``. On Windows,
+                ``c/i.json`` and ``c/I.json`` name the same path. On POSIX
+                they name two paths.
         """
         docs = _tree_paths(documents)
         paths = {**_tree_paths(files), **docs}

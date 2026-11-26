@@ -170,7 +170,12 @@ def has_host_drive(path: str) -> bool:
     root path. On POSIX a colon is an ordinary character, so ``a:b`` is a
     directory name and has no drive.
     """
-    return bool(_HOST_PATH(path).drive)
+    return bool(host_path(path).drive)
+
+
+def host_path(path: str) -> PurePath:
+    """The path as the host compares it, case-insensitively on Windows."""
+    return _HOST_PATH(path)
 
 
 def resolve_local_href(document: str | PurePosixPath, href: str) -> PurePosixPath | None:
