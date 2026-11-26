@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import posixpath
 import re
-from pathlib import PurePosixPath
+from pathlib import PurePath, PurePosixPath
 from typing import TYPE_CHECKING
 from urllib.parse import SplitResult, quote, unquote, urljoin, urlsplit
 
@@ -155,7 +155,22 @@ def local_path(directory: str, href: str) -> str | None:
     path = unquote(containment_href(href))
     if posixpath.isabs(path) or "\\" in path or "\x00" in path:
         return None
-    return _relative_join(unquote(directory), path)
+    joined = _relative_join(unquote(directory), path)
+    return None if joined is None or has_host_drive(joined) else joined
+
+
+# PureWindowsPath on Windows and PurePosixPath elsewhere.
+_HOST_PATH: type[PurePath] = type(PurePath())
+
+
+def has_host_drive(path: str) -> bool:
+    """True when the host reads a path as drive-qualified, such as ``C:/x`` or ``C:x``.
+
+    On Windows a drive makes a relative path leave the root when it joins the
+    root path. On POSIX a colon is an ordinary character, so ``a:b`` is a
+    directory name and has no drive.
+    """
+    return bool(_HOST_PATH(path).drive)
 
 
 def resolve_local_href(document: str | PurePosixPath, href: str) -> PurePosixPath | None:
@@ -164,8 +179,9 @@ def resolve_local_href(document: str | PurePosixPath, href: str) -> PurePosixPat
     ``document`` is the root-relative POSIX path of the linking file, with
     decoded filenames. The result is the target's root-relative path with
     percent escapes decoded and the query and fragment removed. The result is
-    None for an empty or absolute href, for an href that leaves the tree, and
-    for one that decodes to a backslash or NUL.
+    None for an empty or absolute href, for an href that leaves the tree, for
+    one that decodes to a backslash or NUL, and on Windows for a result with a
+    drive, such as ``C%3A/x``.
     """
     resolved = local_path(quote(str(PurePosixPath(document).parent), safe="/"), href)
     return PurePosixPath(resolved) if resolved is not None else None

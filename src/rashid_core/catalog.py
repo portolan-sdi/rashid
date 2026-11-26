@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 from rashid_core import _json
 from rashid_core._href import (
+    has_host_drive,
     is_absolute_href,
     relative_href,
     relative_path,
@@ -122,6 +123,27 @@ def _detect_kind(data: dict[str, Any]) -> Kind:
 def _is_hidden(directory: str) -> bool:
     """True for a directory name that the graph does not walk into."""
     return directory.startswith(".")
+
+
+def _tree_paths(keys: Iterable[str]) -> dict[PurePosixPath, str]:
+    """Map each key to its normal path, or raise ValueError for a bad key.
+
+    :meth:`CatalogGraph.from_documents` lists the rules.
+    """
+    paths: dict[PurePosixPath, str] = {}
+    for key in keys:
+        rel = PurePosixPath(key)
+        if (
+            "\\" in key
+            or has_host_drive(key)
+            or rel.is_absolute()
+            or ".." in rel.parts
+            or not rel.name
+        ):
+            raise ValueError(f"key must be a relative POSIX path inside the tree: {key!r}")
+        if paths.setdefault(rel, key) != key:
+            raise ValueError(f"keys {paths[rel]!r} and {key!r} name the same path")
+    return paths
 
 
 def _is_within(path: PurePosixPath, prefix: PurePosixPath) -> bool:
@@ -283,24 +305,29 @@ class CatalogGraph:
         value is the parsed JSON. ``files`` names the other files in the tree,
         such as ``README.md``. ``root_path`` is where the tree is or will be,
         and no file is read from it. The keys go through the same filters as
-        :meth:`load`, so a key under a hidden directory is skipped. The graph keeps the given dicts without a copy, so do not
-        change them after the call.
+        :meth:`load`, so a key under a hidden directory is skipped. The graph
+        keeps the given dicts without a copy, so do not change them after the
+        call.
 
         Raises:
-            ValueError: A key is absolute or leaves the tree.
+            ValueError: A key is not a relative POSIX path inside the tree.
+                That is a key that is empty or absolute, a key that contains
+                ``..`` or a backslash, and on Windows a key with a drive
+                (``C:/x`` or ``C:x``). Also raised when two keys of one
+                mapping name the same path, such as ``c//i.json`` and
+                ``c/i.json``.
         """
+        docs = _tree_paths(documents)
+        paths = {**_tree_paths(files), **docs}
         graph = cls(root_path=root_path.resolve())
-        for key in sorted({*documents, *files}):
-            rel = PurePosixPath(key)
-            if rel.is_absolute() or ".." in rel.parts or not rel.name:
-                raise ValueError(f"key must be a relative POSIX path inside the tree: {key!r}")
+        for rel in sorted(paths):
             if any(_is_hidden(part) for part in rel.parent.parts):
                 continue
             for directory in rel.parents:
                 graph.dir_listing.setdefault(directory, set())
             graph.dir_listing[rel.parent].add(rel.name)
-            if key in documents and rel.name.endswith(".json"):
-                graph._add_document(rel, documents[key])
+            if rel in docs and rel.name.endswith(".json"):
+                graph._add_document(rel, documents[docs[rel]])
         return graph
 
     def _add_document(

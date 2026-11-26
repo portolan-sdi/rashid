@@ -13,7 +13,7 @@ import inspect
 import json
 from collections.abc import Iterable
 from datetime import timedelta
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import ModuleType
 
 import pytest
@@ -327,6 +327,44 @@ def test_resolve_local_href_refuses_hrefs_outside_the_tree(href: str) -> None:
     assert api.resolve_local_href("a/collection.json", href) is None
 
 
+@pytest.fixture
+def windows_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read paths as Windows does, so the drive tests run on any host."""
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", PureWindowsPath)
+
+
+@pytest.mark.usefixtures("windows_paths")
+@pytest.mark.parametrize("href", ["C%3A/x", "c%3a/x", "./C%3A/x", "C%3Ax", "C:x", "C:/x"])
+def test_resolve_local_href_refuses_a_windows_drive(href: str) -> None:
+    # Joined to a Windows root such as D:\catalog, C:/x names C:\x, outside the root.
+    assert api.resolve_local_href("catalog.json", href) is None
+
+
+@pytest.mark.parametrize(
+    ("document", "href", "resolved"),
+    [("catalog.json", "a/b:c.json", "a/b:c.json"), ("a/catalog.json", "C%3A/x", "a/C:/x")],
+)
+@pytest.mark.usefixtures("windows_paths")
+def test_a_colon_after_the_first_segment_is_not_a_drive(
+    document: str, href: str, resolved: str
+) -> None:
+    assert api.resolve_local_href(document, href) == PurePosixPath(resolved)
+
+
+def test_a_posix_host_reads_a_colon_as_part_of_a_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", PurePosixPath)
+    assert api.resolve_local_href("catalog.json", "C%3A/x") == PurePosixPath("C:/x")
+
+
+@pytest.mark.usefixtures("windows_paths")
+def test_graph_local_path_refuses_a_windows_drive(tmp_path: Path) -> None:
+    catalog, _collection = _minimal_tree()
+    graph = CatalogGraph.from_documents(tmp_path, {"catalog.json": catalog})
+    assert graph.root is not None
+
+    assert graph.local_path(graph.root, "C%3A/x") is None
+
+
 def _sidecar_gaps(root: Path, rel: str, target: str) -> tuple[api.SidecarLinkGap, ...]:
     graph = CatalogGraph.load(root)
     assert graph.root is not None
@@ -454,8 +492,24 @@ def test_graph_from_documents_skips_hidden_directories(tmp_path: Path) -> None:
     assert PurePosixPath(".hidden") not in graph.dir_listing
 
 
-@pytest.mark.parametrize("key", ["/catalog.json", "../catalog.json", "a/../../b.json"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "/catalog.json",
+        "../catalog.json",
+        "a/../../b.json",
+        "c\\i.json",
+        "a\\..\\..\\x.json",
+    ],
+)
 def test_graph_from_documents_refuses_keys_outside_the_tree(tmp_path: Path, key: str) -> None:
+    with pytest.raises(ValueError, match="relative POSIX path"):
+        CatalogGraph.from_documents(tmp_path, {key: {}})
+
+
+@pytest.mark.usefixtures("windows_paths")
+@pytest.mark.parametrize("key", ["C:/collection.json", "c:collection.json"])
+def test_graph_from_documents_refuses_a_windows_drive_key(tmp_path: Path, key: str) -> None:
     with pytest.raises(ValueError, match="relative POSIX path"):
         CatalogGraph.from_documents(tmp_path, {key: {}})
 
@@ -466,3 +520,19 @@ def test_graph_from_documents_marks_a_non_object_catalog(tmp_path: Path) -> None
     assert graph.nodes[PurePosixPath("catalog.json")].parse_error == (
         "top-level JSON value is not an object"
     )
+
+
+@pytest.mark.parametrize("other", ["c//i.json", "./c/i.json", "c/./i.json"])
+def test_graph_from_documents_refuses_two_keys_for_one_path(tmp_path: Path, other: str) -> None:
+    with pytest.raises(ValueError, match="same path"):
+        CatalogGraph.from_documents(tmp_path, {"c/i.json": {}, other: {}})
+
+
+def test_a_key_in_documents_and_files_is_allowed(tmp_path: Path) -> None:
+    catalog, _collection = _minimal_tree()
+
+    graph = CatalogGraph.from_documents(
+        tmp_path, {"catalog.json": catalog}, files=["catalog.json", "README.md"]
+    )
+
+    assert graph.dir_listing[PurePosixPath(".")] == {"catalog.json", "README.md"}
