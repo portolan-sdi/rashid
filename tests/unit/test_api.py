@@ -59,6 +59,7 @@ EXPORTS = {
     "spec_commit": "rashid_core._profile",
     "profile_version_key": "rashid_core._profile",
     "CHECKS": "rashid_core.registry",
+    "CheckInfo": "rashid_core.registry",
     "Finding": "rashid_core.model",
     "SidecarLinkGap": "rashid_core._stac",
     "describe": "rashid_core.registry",
@@ -72,6 +73,7 @@ EXPORTS = {
 # (portolan-cli#1133).
 DOWNSTREAM_EXPORTS = (
     "CHECKS",
+    "CheckInfo",
     "Finding",
     "SidecarLinkGap",
     "describe",
@@ -278,7 +280,7 @@ def test_downstream_names_are_public() -> None:
     assert set(DOWNSTREAM_EXPORTS) <= set(api.__all__)
 
 
-@pytest.mark.parametrize("name", ["CHECKS", "Finding", "describe", "validate"])
+@pytest.mark.parametrize("name", ["CHECKS", "CheckInfo", "Finding", "describe", "validate"])
 def test_api_and_package_export_the_same_object(name: str) -> None:
     assert getattr(api, name) is getattr(rashid_core, name)
 
@@ -386,7 +388,12 @@ def test_sidecar_link_to_a_missing_file_is_a_gap(catalog: CatalogBuilder) -> Non
 def test_graph_from_documents_matches_the_loaded_graph(catalog: CatalogBuilder) -> None:
     catalog.collection("air-quality").item("2020")
     root = catalog.write()
+    (root / ".hidden").mkdir()
+    (root / ".hidden" / "collection.json").write_bytes(
+        (root / "air-quality" / "collection.json").read_bytes()
+    )
     files = [p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()]
+    assert ".hidden/collection.json" in files
     documents = {
         name: json.loads((root / name).read_text(encoding="utf-8"))
         for name in files
@@ -404,9 +411,16 @@ def test_graph_from_documents_matches_the_loaded_graph(catalog: CatalogBuilder) 
         ] == [(e.rel, e.target.path, e.href) for e in expected_links(loaded, node)]
 
 
+def _minimal_tree() -> tuple[dict[str, object], dict[str, object]]:
+    """A bare root catalog and collection, new for each test."""
+    return (
+        {"type": "Catalog", "id": "root", "stac_version": "1.1.0", "links": []},
+        {"type": "Collection", "id": "c", "stac_version": "1.1.0", "links": []},
+    )
+
+
 def test_graph_from_documents_needs_no_files_on_disk(tmp_path: Path) -> None:
-    catalog = {"type": "Catalog", "id": "root", "stac_version": "1.1.0", "links": []}
-    collection = {"type": "Collection", "id": "c", "stac_version": "1.1.0", "links": []}
+    catalog, collection = _minimal_tree()
 
     graph = CatalogGraph.from_documents(
         tmp_path / "not-yet-written",
@@ -423,6 +437,21 @@ def test_graph_from_documents_needs_no_files_on_disk(tmp_path: Path) -> None:
         ("parent", "../catalog.json"),
     ]
     assert graph.file_exists(PurePosixPath("c/style.json"))
+
+
+def test_graph_from_documents_skips_hidden_directories(tmp_path: Path) -> None:
+    catalog, collection = _minimal_tree()
+
+    graph = CatalogGraph.from_documents(
+        tmp_path,
+        {"catalog.json": catalog, ".hidden/collection.json": collection},
+        files=[".hidden/README.md"],
+    )
+
+    root = graph.nodes[PurePosixPath("catalog.json")]
+    assert sorted(graph.nodes) == [PurePosixPath("catalog.json")]
+    assert [e.rel for e in expected_links(graph, root)] == ["root"]
+    assert PurePosixPath(".hidden") not in graph.dir_listing
 
 
 @pytest.mark.parametrize("key", ["/catalog.json", "../catalog.json", "a/../../b.json"])

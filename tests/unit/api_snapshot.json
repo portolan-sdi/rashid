@@ -3,6 +3,7 @@
     "exports": [
       "CHECKS",
       "CatalogGraph",
+      "CheckInfo",
       "ExpectedLink",
       "Finding",
       "LocalOnlyReader",
@@ -40,6 +41,7 @@
     ],
     "modules": {
       "CatalogGraph": "rashid_core.catalog",
+      "CheckInfo": "rashid_core.registry",
       "ExpectedLink": "rashid_core.catalog",
       "Finding": "rashid_core.model",
       "LocalOnlyReader": "rashid_core.data.reader",
@@ -74,6 +76,7 @@
     },
     "signatures": {
       "CatalogGraph": "(root_path: 'Path', nodes: 'dict[PurePosixPath, Node]' = <factory>, dir_listing: 'dict[PurePosixPath, set[str]]' = <factory>, base_url: 'str | None' = None, _translation_roots: 'list[Node] | None' = None, _by_kinds: 'dict[frozenset[Kind], list[Node]]' = <factory>, _parents: 'dict[tuple[PurePosixPath, Kind], Node | None]' = <factory>, _children: 'dict[PurePosixPath, list[Node]] | None' = None, _items: 'dict[PurePosixPath, list[Node]] | None' = None) -> None",
+      "CheckInfo": "(id: 'str', description: 'str', severity: 'Severity', spec_ids: 'tuple[str, ...]' = (), stage: 'PassName' = 'metadata', enables_pass: 'bool' = True, spec_note: 'str | None' = None) -> None",
       "ExpectedLink": "(rel: 'str', target: 'Node', href: 'str', type: 'str') -> None",
       "Finding": "(rule_id: 'str', severity: 'Severity', message: 'str', path: 'str', object_id: 'str | None' = None, json_pointer: 'str | None' = None, fix_hint: 'str | None' = None, expected: 'Any | None' = None, actual: 'Any | None' = None, data: 'dict[str, Any] | None' = None) -> None",
       "LocalOnlyReader": "(graph: 'CatalogGraph') -> 'None'",

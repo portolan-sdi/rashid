@@ -75,7 +75,7 @@ from rashid_core.catalog import CatalogGraph, ExpectedLink, Node, expected_links
 from rashid_core.config import RulesConfig
 from rashid_core.data.reader import LocalOnlyReader
 from rashid_core.model import Finding, Severity
-from rashid_core.registry import CHECKS, describe
+from rashid_core.registry import CHECKS, CheckInfo, describe
 from rashid_core.report import Report
 from rashid_core.runner import ValidationOptions, validate
 
@@ -85,6 +85,7 @@ __all__ = [
     "SPDX_LICENSE_IDS",
     "STRUCTURAL_RELS",
     "CatalogGraph",
+    "CheckInfo",
     "ExpectedLink",
     "Finding",
     "LocalOnlyReader",

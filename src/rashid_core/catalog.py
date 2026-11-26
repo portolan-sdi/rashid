@@ -119,6 +119,11 @@ def _detect_kind(data: dict[str, Any]) -> Kind:
     return "unknown"
 
 
+def _is_hidden(directory: str) -> bool:
+    """True for a directory name that the graph does not walk into."""
+    return directory.startswith(".")
+
+
 def _is_within(path: PurePosixPath, prefix: PurePosixPath) -> bool:
     """True when ``path`` sits at or below the directory ``prefix``.
 
@@ -250,7 +255,7 @@ class CatalogGraph:
         """
         graph = cls(root_path=root_path.resolve())
         for dirpath, dirnames, filenames in os.walk(graph.root_path):
-            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+            dirnames[:] = sorted(d for d in dirnames if not _is_hidden(d))
             rel_dir = PurePosixPath(Path(dirpath).relative_to(graph.root_path).as_posix())
             graph.dir_listing[rel_dir] = set(filenames)
             for filename in sorted(filenames):
@@ -277,8 +282,8 @@ class CatalogGraph:
         yet. Each key of ``documents`` is a root-relative POSIX path, and each
         value is the parsed JSON. ``files`` names the other files in the tree,
         such as ``README.md``. ``root_path`` is where the tree is or will be,
-        and no file is read from it. The keys go through the same filter as
-        :meth:`load`. The graph keeps the given dicts without a copy, so do not
+        and no file is read from it. The keys go through the same filters as
+        :meth:`load`, so a key under a hidden directory is skipped. The graph keeps the given dicts without a copy, so do not
         change them after the call.
 
         Raises:
@@ -289,6 +294,8 @@ class CatalogGraph:
             rel = PurePosixPath(key)
             if rel.is_absolute() or ".." in rel.parts or not rel.name:
                 raise ValueError(f"key must be a relative POSIX path inside the tree: {key!r}")
+            if any(_is_hidden(part) for part in rel.parent.parts):
+                continue
             for directory in rel.parents:
                 graph.dir_listing.setdefault(directory, set())
             graph.dir_listing[rel.parent].add(rel.name)
