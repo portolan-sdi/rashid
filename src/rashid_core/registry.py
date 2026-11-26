@@ -479,9 +479,10 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
     ),
     CheckInfo(
         ids.ZAR_STORE_VERSION,
-        "a Zarr store asset points at a readable Zarr v3 store",
+        "a Zarr store asset points at a readable Zarr v3 store, or an Icechunk asset"
+        " at a version 2 repository",
         Severity.WARNING,
-        ("PORTO-ZARR-001",),
+        ("PORTO-ZARR-001", "PORTO-ZARR-030"),
         stage="data",
     ),
     CheckInfo(
@@ -493,9 +494,10 @@ _PASS_CHECKS: tuple[CheckInfo, ...] = (
     ),
     CheckInfo(
         ids.ZAR_ASSET,
-        "the asset declares the Zarr v3 media type and its href names a group",
+        "the asset declares the Zarr v3 or Icechunk media type and its href names a group"
+        " or the repository root",
         Severity.WARNING,
-        ("PORTO-ZARR-004",),
+        ("PORTO-ZARR-004", "PORTO-ZARR-027", "PORTO-ZARR-028"),
         stage="data",
     ),
     CheckInfo(

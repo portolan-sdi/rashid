@@ -13,10 +13,12 @@ The checks run through the real data pass, so what these assert is what
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
-from collections.abc import Iterator
-from pathlib import Path
+import sys
+from collections.abc import Callable, Iterator
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pytest
@@ -26,7 +28,7 @@ from rashid_core._href import store_member_href
 from rashid_core._media import COG_MEDIA_TYPE
 from rashid_core.catalog import CatalogGraph, Node
 from rashid_core.data.reader import LocalOnlyReader, Locator
-from rashid_core.data.zarr import check_zarr
+from rashid_core.data.zarr import check_icechunk, check_zarr
 from rashid_core.ids import (
     ZAR_ASSET,
     ZAR_AXIS_ORDER,
@@ -97,6 +99,50 @@ def write_store(
     return root
 
 
+ICECHUNK_MEDIA_TYPE = "application/vnd.zarr+icechunk"
+
+
+def icechunk_asset(**overrides: Any) -> dict[str, Any]:
+    """:func:`zarr_asset` for the same data as an Icechunk repository."""
+    return zarr_asset(**{"href": "./data.icechunk", "type": ICECHUNK_MEDIA_TYPE, **overrides})
+
+
+def commit_store(path: Path, store: str, *, branch: str = "main", version: int = 2) -> None:
+    """Commit the metadata documents of ``store`` to ``branch`` of the repository at ``path``.
+
+    Icechunk keeps each ``zarr.json`` as written, so the plain-Zarr fixtures
+    serve as repository contents unchanged.
+    """
+    icechunk = pytest.importorskip("icechunk")
+    from zarr.core.buffer import default_buffer_prototype
+
+    storage = icechunk.local_filesystem_storage(str(path))
+    repository = icechunk.Repository.open_or_create(storage, create_version=version)
+    if branch not in repository.list_branches():
+        repository.create_branch(branch, repository.lookup_branch("main"))
+    session = repository.writable_session(branch)
+    buffer = default_buffer_prototype().buffer
+    # Parents first: a node's group must exist before the node.
+    for document in sorted((STORES / store).rglob("zarr.json"), key=lambda p: len(p.parts)):
+        key = document.relative_to(STORES / store).as_posix()
+        asyncio.run(session.store.set(key, buffer.from_bytes(document.read_bytes())))
+    session.commit(f"write {store}")
+
+
+def write_repository(
+    catalog: CatalogBuilder, store: str, *, asset: dict[str, Any] | None = None
+) -> Path:
+    """:func:`write_store`, with ``store`` committed to ``main`` of an Icechunk repository."""
+    catalog.collection(
+        "temps",
+        title="Daily Temperatures",
+        assets={"data": asset or icechunk_asset(), "thumbnail": thumbnail_asset()},
+    )
+    root = catalog.write()
+    commit_store(root / "temps" / "data.icechunk", store)
+    return root
+
+
 def zarr_report(root: Path) -> Report:
     """Validate ``root`` with only the passes the Zarr checks need."""
     return validate(
@@ -114,18 +160,25 @@ def zarr_findings(root: Path) -> dict[str, str]:
 # --- the conforming pair ---------------------------------------------------
 
 
+@pytest.mark.parametrize("write", [write_store, write_repository])
 @pytest.mark.parametrize("store", ["pyramid", "flat"])
-def test_a_conforming_store_reports_nothing(catalog: CatalogBuilder, store: str) -> None:
-    assert zarr_findings(write_store(catalog, store)) == {}
+def test_a_conforming_store_reports_nothing(
+    catalog: CatalogBuilder, store: str, write: Callable[..., Path]
+) -> None:
+    assert zarr_findings(write(catalog, store)) == {}
 
 
-def test_a_conforming_catalog_passes_every_pass(catalog: CatalogBuilder) -> None:
+@pytest.mark.parametrize("write", [write_store, write_repository])
+def test_a_conforming_catalog_passes_every_pass(
+    catalog: CatalogBuilder, write: Callable[..., Path]
+) -> None:
     """The whole validator accepts the store, not just the Zarr checks.
 
     ``file:size`` and ``file:checksum`` are absent because a store is a key
     prefix rather than one object, so ``PTL-AST-003`` warns; nothing else does.
+    The pass reads no Icechunk repository as one file either.
     """
-    report = validate(write_store(catalog, "pyramid"))
+    report = validate(write(catalog, "pyramid"))
     assert {f.rule_id for f in report.findings} == {"PTL-AST-003"}
 
 
@@ -399,14 +452,23 @@ def test_a_broken_store_never_fails_the_catalog(catalog: CatalogBuilder) -> None
     assert ZAR_STORE_VERSION in {f.rule_id for f in report.warnings}
 
 
-def test_a_remote_store_is_left_unread_in_local_scope(catalog: CatalogBuilder) -> None:
+@pytest.mark.parametrize(
+    "asset",
+    [
+        zarr_asset(href="https://data.example.org/temps.zarr"),
+        icechunk_asset(href="https://data.example.org/temps.icechunk"),
+    ],
+)
+def test_a_remote_store_is_left_unread_in_local_scope(
+    catalog: CatalogBuilder, asset: dict[str, Any]
+) -> None:
     """``--data-scope local`` reads the catalog's own files and nothing else.
 
     The store reads go through the pass's asset reader, so narrowing the
     reader narrows them too: no request leaves, and the profile's verdict is
-    that it could not be reached.
+    that it could not be reached. The reader also decides whether an Icechunk
+    repository is read, though the Icechunk library sends the requests.
     """
-    asset = zarr_asset(href="https://data.example.org/temps.zarr")
     catalog.collection(
         "temps",
         title="Daily Temperatures",
@@ -699,10 +761,90 @@ def test_a_typeless_data_asset_with_a_zarr_href_triggers_the_checks(
     assert ZAR_ASSET in findings
 
 
-def test_an_icechunk_asset_is_not_a_zarr_store_asset(catalog: CatalogBuilder) -> None:
-    """Icechunk is its own format; the profile's media type does not name it."""
-    asset = zarr_asset(href="./data.icechunk", type="application/x-icechunk")
-    assert zarr_findings(write_store(catalog, "no-pyramid", asset=asset)) == {}
+def test_a_misspelled_icechunk_media_type_still_triggers_the_checks(
+    catalog: CatalogBuilder,
+) -> None:
+    """An Icechunk asset is checked as a repository, never as a plain Zarr store."""
+    asset = icechunk_asset(type="application/x-icechunk")
+    findings = zarr_findings(write_repository(catalog, "no-pyramid", asset=asset))
+    assert ZAR_PYRAMID in findings
+    assert ICECHUNK_MEDIA_TYPE in findings[ZAR_ASSET]
+
+
+def test_the_checks_read_the_tip_of_main(catalog: CatalogBuilder) -> None:
+    """A fix committed to another branch does not change what the collection describes."""
+    root = write_repository(catalog, "no-crs")
+    commit_store(root / "temps" / "data.icechunk", "flat", branch="draft")
+    assert ZAR_CRS in zarr_findings(root)
+
+
+class _RepositoryReader:
+    """Locates the ``repo`` file at the href whether or not it exists, as a remote host does."""
+
+    def __init__(self, root: str, *, remote: bool) -> None:
+        self._root = root
+        self._remote = remote
+
+    def locate(self, node: Node, href: str) -> Locator | None:
+        return Locator(is_remote=self._remote, source=f"{self._root}/{href}")
+
+    def stream(self, node: Node, href: str) -> Iterator[bytes] | None:
+        return None
+
+
+def _check_repository(root: str, *, remote: bool = False) -> dict[str, str]:
+    """``check_icechunk`` on the repository ``data.icechunk`` under ``root``."""
+    node = Node(PurePosixPath("collection.json"), Path(), "collection", "temps", {})
+    asset = icechunk_asset(href="data.icechunk")
+    reader = _RepositoryReader(root, remote=remote)
+    return {
+        d.rule_id: d.message for d in check_icechunk(node, key="data", asset=asset, reader=reader)
+    }
+
+
+def test_an_href_without_a_repository_is_reported(tmp_path: Path) -> None:
+    pytest.importorskip("icechunk")
+    (tmp_path / "data.icechunk").mkdir()
+    message = _check_repository(str(tmp_path))[ZAR_ASSET]
+    assert "no Icechunk repository at the href" in message
+
+
+def test_a_version_1_repository_is_reported(tmp_path: Path) -> None:
+    commit_store(tmp_path / "data.icechunk", "flat", version=1)
+    findings = _check_repository(str(tmp_path))
+    assert "version 1 of the Icechunk storage format" in findings[ZAR_STORE_VERSION]
+
+
+def test_an_unreachable_repository_cannot_be_judged() -> None:
+    """A transport failure settles nothing, so the checks report that they did not run."""
+    pytest.importorskip("icechunk")
+    # Nothing listens on the discard port, so the connection is refused at once.
+    findings = _check_repository("https://127.0.0.1:9", remote=True)
+    assert set(findings) == {ZAR_STORE_VERSION}
+    assert "could not be read" in findings[ZAR_STORE_VERSION]
+
+
+def test_a_repository_without_the_icechunk_library_is_left_unread(
+    catalog: CatalogBuilder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The library is an optional extra; without it, only the media type is judged."""
+    catalog.collection(
+        "temps",
+        title="Daily Temperatures",
+        assets={
+            "data": icechunk_asset(type="application/x-icechunk"),
+            "thumbnail": thumbnail_asset(),
+        },
+    )
+    root = catalog.write()
+    (root / "temps" / "data.icechunk").mkdir()
+    (root / "temps" / "data.icechunk" / "repo").write_bytes(b"")
+    monkeypatch.setitem(sys.modules, "icechunk", None)
+    report = zarr_report(root)
+    findings = {f.rule_id: f for f in report.findings if is_incubating(f.rule_id)}
+    assert findings[ZAR_STORE_VERSION].severity is Severity.INFO
+    assert "rashid-core[icechunk]" in findings[ZAR_STORE_VERSION].message
+    assert ICECHUNK_MEDIA_TYPE in findings[ZAR_ASSET].message
 
 
 @pytest.mark.parametrize(
@@ -724,9 +866,12 @@ def test_a_non_zarr_asset_is_never_treated_as_a_store(
     assert zarr_findings(catalog.write()) == {}
 
 
-def test_a_store_asset_needs_no_file_checksum(catalog: CatalogBuilder) -> None:
+@pytest.mark.parametrize("make_asset", [zarr_asset, icechunk_asset])
+def test_a_store_asset_needs_no_file_checksum(
+    catalog: CatalogBuilder, make_asset: Callable[..., dict[str, Any]]
+) -> None:
     """The profile's Size and checksum section exempts a store from the recommendation."""
-    asset = zarr_asset(**{"file:size": 4096})
+    asset = make_asset(**{"file:size": 4096})
     report = validate(write_store(catalog, "pyramid", asset=asset))
     assert [f.message for f in report.findings if f.rule_id == "PTL-AST-003"] == []
 

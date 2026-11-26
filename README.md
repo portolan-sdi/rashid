@@ -30,6 +30,7 @@ python -m rashid_core check --no-data path/to/catalog
 Core still checks checksums, sizes, file signatures, and Zarr metadata by default.
 It reports `PTL-DAT-000` when geospatial checks cannot run.
 Install `rashid-core[data]` to add geospatial validation, or install `rashid` for the full tool.
+Install `rashid-core[icechunk]` to check Icechunk repositories. It requires Python 3.12 or later.
 Both distributions require Python 3.11 or later.
 
 ## Upgrade from 0.4

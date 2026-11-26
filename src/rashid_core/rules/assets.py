@@ -15,7 +15,7 @@ from rashid_core._media import (
     is_cog_media_type,
     is_pmtiles_asset,
     is_raster_data_asset,
-    is_zarr_store_asset,
+    is_zarr_or_icechunk_asset,
 )
 from rashid_core._multihash import is_well_formed_multihash
 from rashid_core._stac import (
@@ -282,11 +282,12 @@ class AssetFileFieldsRule(Rule):
                     fix_hint="set file:size to the asset's byte count, unquoted and greater than 0",
                     actual=size,
                 )
-            if asset.get("file:checksum") is None and not is_zarr_store_asset(asset):
-                # incubating/zarr.md, Size and checksum: a Zarr store is a key
-                # prefix holding thousands of objects, with no single digest,
-                # so core.md's recommendation does not reach it. file:size
-                # still does: it is the total size of those objects.
+            if asset.get("file:checksum") is None and not is_zarr_or_icechunk_asset(asset):
+                # incubating/zarr.md, Size and checksum: a Zarr store or an
+                # Icechunk repository is a key prefix holding thousands of
+                # objects, with no single digest, so core.md's recommendation
+                # does not reach it. file:size still does: it is the total size
+                # of those objects.
                 yield self.finding(
                     node,
                     f"asset '{key}' has no file:checksum",

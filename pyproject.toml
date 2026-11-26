@@ -35,6 +35,14 @@ data = [
     # Item-mirror geometry comparison uses WKB and GeoJSON; 2.1 is the supported series.
     "shapely>=2.1",
 ]
+# incubating/zarr.md, Icechunk: the PTL-ZAR checks read an Icechunk repository's
+# hierarchy at the tip of main through the Icechunk library.
+icechunk = [
+    # Icechunk 2 supports Python 3.12 and later; on 3.11 the checks report that they did not run.
+    "icechunk>=2,<3; python_version >= '3.12'",
+    # An Icechunk store reads a key into a buffer of zarr's buffer prototype.
+    "zarr>=3; python_version >= '3.12'",
+]
 
 [project.urls]
 Homepage = "https://github.com/portolan-sdi/rashid"
