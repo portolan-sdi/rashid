@@ -13,14 +13,14 @@ import inspect
 import json
 from collections.abc import Iterable
 from datetime import timedelta
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from types import ModuleType
 
 import pytest
 
 import rashid_core
 from rashid_core import api, validate
-from rashid_core.catalog import CatalogGraph, Node
+from rashid_core.catalog import CatalogGraph, Node, expected_links
 from rashid_core.model import Finding, Severity
 from rashid_core.rule import Rule
 from tests.conftest import CatalogBuilder
@@ -58,7 +58,30 @@ EXPORTS = {
     "roles_of": "rashid_core._stac",
     "spec_commit": "rashid_core._profile",
     "profile_version_key": "rashid_core._profile",
+    "CHECKS": "rashid_core.registry",
+    "CheckInfo": "rashid_core.registry",
+    "Finding": "rashid_core.model",
+    "SidecarLinkGap": "rashid_core._stac",
+    "describe": "rashid_core.registry",
+    "is_pmtiles_asset": "rashid_core._media",
+    "resolve_local_href": "rashid_core._href",
+    "sidecar_link_gaps": "rashid_core._stac",
+    "validate": "rashid_core.runner",
 }
+
+# Names portolan-cli needs to import rashid only through rashid_core.api
+# (portolan-cli#1133).
+DOWNSTREAM_EXPORTS = (
+    "CHECKS",
+    "CheckInfo",
+    "Finding",
+    "SidecarLinkGap",
+    "describe",
+    "is_pmtiles_asset",
+    "resolve_local_href",
+    "sidecar_link_gaps",
+    "validate",
+)
 
 
 def _node(data: dict[str, object]) -> Node:
@@ -251,3 +274,347 @@ def test_the_exported_list_holds_no_licenseref_entries() -> None:
 def test_the_exported_list_excludes_the_stac_escape_hatch() -> None:
     # "other" is a STAC value, not SPDX; a caller has to allow it separately
     assert "other" not in api.SPDX_LICENSE_IDS
+
+
+def test_downstream_names_are_public() -> None:
+    assert set(DOWNSTREAM_EXPORTS) <= set(api.__all__)
+
+
+@pytest.mark.parametrize("name", ["CHECKS", "CheckInfo", "Finding", "describe", "validate"])
+def test_api_and_package_export_the_same_object(name: str) -> None:
+    assert getattr(api, name) is getattr(rashid_core, name)
+
+
+@pytest.mark.parametrize(
+    "asset",
+    [
+        {"href": "./tiles.pmtiles"},
+        {"href": "https://example.com/TILES.PMTILES?sig=abc#z"},
+        {"type": "application/vnd.pmtiles"},
+    ],
+)
+def test_pmtiles_asset_by_type_or_href(asset: dict[str, object]) -> None:
+    assert api.is_pmtiles_asset(asset)
+
+
+@pytest.mark.parametrize(
+    "asset",
+    [{"href": "./data.parquet"}, {"href": "./tiles.pmtiles.json"}, {"href": 42}, {}],
+)
+def test_other_assets_are_not_pmtiles(asset: dict[str, object]) -> None:
+    assert not api.is_pmtiles_asset(asset)
+
+
+@pytest.mark.parametrize(
+    ("document", "href", "resolved"),
+    [
+        ("collection.json", "./README.md", "README.md"),
+        ("a/collection.json", "../b/item.json", "b/item.json"),
+        ("a b/collection.json", "./my%20file.parquet?x=1#y", "a b/my file.parquet"),
+        (PurePosixPath("a/collection.json"), "README.md", "a/README.md"),
+    ],
+)
+def test_resolve_local_href_returns_a_decoded_root_relative_path(
+    document: str | PurePosixPath, href: str, resolved: str
+) -> None:
+    assert api.resolve_local_href(document, href) == PurePosixPath(resolved)
+
+
+@pytest.mark.parametrize(
+    "href", ["", "https://example.com/a.json", "/abs/a.json", "../../out.json", "a%5Cb.json"]
+)
+def test_resolve_local_href_refuses_hrefs_outside_the_tree(href: str) -> None:
+    assert api.resolve_local_href("a/collection.json", href) is None
+
+
+@pytest.fixture
+def windows_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read paths as Windows does, so the drive tests run on any host."""
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", PureWindowsPath)
+
+
+@pytest.mark.usefixtures("windows_paths")
+@pytest.mark.parametrize("href", ["C%3A/x", "c%3a/x", "./C%3A/x", "C%3Ax", "C:x", "C:/x"])
+def test_resolve_local_href_refuses_a_windows_drive(href: str) -> None:
+    # Joined to a Windows root such as D:\catalog, C:/x names C:\x, outside the root.
+    assert api.resolve_local_href("catalog.json", href) is None
+
+
+@pytest.mark.parametrize(
+    ("document", "href", "resolved"),
+    [("catalog.json", "a/b:c.json", "a/b:c.json"), ("a/catalog.json", "C%3A/x", "a/C:/x")],
+)
+@pytest.mark.usefixtures("windows_paths")
+def test_a_colon_after_the_first_segment_is_not_a_drive(
+    document: str, href: str, resolved: str
+) -> None:
+    assert api.resolve_local_href(document, href) == PurePosixPath(resolved)
+
+
+def test_a_posix_host_reads_a_colon_as_part_of_a_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", PurePosixPath)
+    assert api.resolve_local_href("catalog.json", "C%3A/x") == PurePosixPath("C:/x")
+
+
+@pytest.mark.usefixtures("windows_paths")
+def test_graph_local_path_refuses_a_windows_drive(tmp_path: Path) -> None:
+    catalog, _collection = _minimal_tree()
+    graph = CatalogGraph.from_documents(tmp_path, {"catalog.json": catalog})
+    assert graph.root is not None
+
+    assert graph.local_path(graph.root, "C%3A/x") is None
+
+
+def _sidecar_gaps(root: Path, rel: str, target: str) -> tuple[api.SidecarLinkGap, ...]:
+    graph = CatalogGraph.load(root)
+    assert graph.root is not None
+    return api.sidecar_link_gaps(graph, graph.root, rel=rel, target=target)
+
+
+@pytest.mark.parametrize(("rel", "target"), [("agents", "AGENTS.md"), ("describedby", "README.md")])
+def test_conforming_sidecar_link_has_no_gaps(
+    catalog: CatalogBuilder, rel: str, target: str
+) -> None:
+    assert _sidecar_gaps(catalog.write(), rel, target) == ()
+
+
+def test_missing_sidecar_link_is_one_gap(catalog: CatalogBuilder) -> None:
+    root = catalog.write()
+    data = json.loads((root / "catalog.json").read_text(encoding="utf-8"))
+    data["links"] = [link for link in data["links"] if link["rel"] != "agents"]
+    (root / "catalog.json").write_text(json.dumps(data), encoding="utf-8")
+
+    (gap,) = _sidecar_gaps(root, "agents", "AGENTS.md")
+
+    assert gap.message == "missing rel:'agents' link to AGENTS.md"
+    assert gap.json_pointer == "/links"
+
+
+def test_sidecar_gaps_name_the_link_that_comes_closest(catalog: CatalogBuilder) -> None:
+    root = catalog.write()
+    data = json.loads((root / "catalog.json").read_text(encoding="utf-8"))
+    index, link = next((i, lk) for i, lk in enumerate(data["links"]) if lk["rel"] == "agents")
+    link["type"] = "text/plain"
+    data["links"].append({"rel": "agents", "href": "https://example.com/x", "type": "text/html"})
+    (root / "catalog.json").write_text(json.dumps(data), encoding="utf-8")
+
+    (gap,) = _sidecar_gaps(root, "agents", "AGENTS.md")
+
+    assert gap.json_pointer == f"/links/{index}/type"
+    assert gap.expected == "text/markdown"
+    assert gap.actual == "text/plain"
+
+
+def test_one_conforming_sidecar_link_is_enough(catalog: CatalogBuilder) -> None:
+    root = catalog.write()
+    data = json.loads((root / "catalog.json").read_text(encoding="utf-8"))
+    data["links"].append({"rel": "describedby", "href": "./schema.html", "type": "text/html"})
+    (root / "catalog.json").write_text(json.dumps(data), encoding="utf-8")
+
+    assert _sidecar_gaps(root, "describedby", "README.md") == ()
+
+
+def test_sidecar_link_to_a_missing_file_is_a_gap(catalog: CatalogBuilder) -> None:
+    root = catalog.write()
+    (root / "README.md").unlink()
+
+    (gap,) = _sidecar_gaps(root, "describedby", "README.md")
+
+    assert "does not resolve to the sibling README.md" in gap.message
+
+
+def test_graph_from_documents_matches_the_loaded_graph(catalog: CatalogBuilder) -> None:
+    catalog.collection("air-quality").item("2020")
+    root = catalog.write()
+    (root / ".hidden").mkdir()
+    (root / ".hidden" / "collection.json").write_bytes(
+        (root / "air-quality" / "collection.json").read_bytes()
+    )
+    files = [p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()]
+    assert ".hidden/collection.json" in files
+    documents = {
+        name: json.loads((root / name).read_text(encoding="utf-8"))
+        for name in files
+        if name.endswith(".json")
+    }
+
+    built = CatalogGraph.from_documents(root, documents, files=files)
+    loaded = CatalogGraph.load(root)
+
+    assert built.nodes == loaded.nodes
+    assert built.dir_listing == loaded.dir_listing
+    for path, node in loaded.nodes.items():
+        assert [
+            (e.rel, e.target.path, e.href) for e in expected_links(built, built.nodes[path])
+        ] == [(e.rel, e.target.path, e.href) for e in expected_links(loaded, node)]
+
+
+def _minimal_tree() -> tuple[dict[str, object], dict[str, object]]:
+    """A bare root catalog and collection, new for each test."""
+    return (
+        {"type": "Catalog", "id": "root", "stac_version": "1.1.0", "links": []},
+        {"type": "Collection", "id": "c", "stac_version": "1.1.0", "links": []},
+    )
+
+
+def test_graph_from_documents_needs_no_files_on_disk(tmp_path: Path) -> None:
+    catalog, collection = _minimal_tree()
+
+    graph = CatalogGraph.from_documents(
+        tmp_path / "not-yet-written",
+        {"catalog.json": catalog, "c/collection.json": collection, "c/style.json": {}},
+    )
+
+    node = graph.nodes[PurePosixPath("c/collection.json")]
+    assert sorted(graph.nodes) == [
+        PurePosixPath("c/collection.json"),
+        PurePosixPath("catalog.json"),
+    ]
+    assert [(e.rel, e.href) for e in expected_links(graph, node)] == [
+        ("root", "../catalog.json"),
+        ("parent", "../catalog.json"),
+    ]
+    assert graph.file_exists(PurePosixPath("c/style.json"))
+
+
+def test_graph_from_documents_skips_hidden_directories(tmp_path: Path) -> None:
+    catalog, collection = _minimal_tree()
+
+    graph = CatalogGraph.from_documents(
+        tmp_path,
+        {"catalog.json": catalog, ".hidden/collection.json": collection},
+        files=[".hidden/README.md"],
+    )
+
+    root = graph.nodes[PurePosixPath("catalog.json")]
+    assert sorted(graph.nodes) == [PurePosixPath("catalog.json")]
+    assert [e.rel for e in expected_links(graph, root)] == ["root"]
+    assert PurePosixPath(".hidden") not in graph.dir_listing
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "/catalog.json",
+        "../catalog.json",
+        "a/../../b.json",
+        "c\\i.json",
+        "a\\..\\..\\x.json",
+    ],
+)
+def test_graph_from_documents_refuses_keys_outside_the_tree(tmp_path: Path, key: str) -> None:
+    with pytest.raises(ValueError, match="relative POSIX path"):
+        CatalogGraph.from_documents(tmp_path, {key: {}})
+
+
+@pytest.mark.usefixtures("windows_paths")
+@pytest.mark.parametrize(
+    "key",
+    ["C:/collection.json", "c:collection.json", "./C:/collection.json", "./c:collection.json"],
+)
+def test_graph_from_documents_refuses_a_windows_drive_key(tmp_path: Path, key: str) -> None:
+    with pytest.raises(ValueError, match="relative POSIX path"):
+        CatalogGraph.from_documents(tmp_path, {key: {}})
+
+
+def test_graph_from_documents_marks_a_non_object_catalog(tmp_path: Path) -> None:
+    graph = CatalogGraph.from_documents(tmp_path, {"catalog.json": []})
+
+    assert graph.nodes[PurePosixPath("catalog.json")].parse_error == (
+        "top-level JSON value is not an object"
+    )
+
+
+@pytest.mark.parametrize("other", ["c//i.json", "./c/i.json", "c/./i.json"])
+def test_graph_from_documents_refuses_two_keys_for_one_path(tmp_path: Path, other: str) -> None:
+    with pytest.raises(ValueError, match="same path"):
+        CatalogGraph.from_documents(tmp_path, {"c/i.json": {}, other: {}})
+
+
+@pytest.mark.usefixtures("windows_paths")
+def test_keys_that_differ_in_case_name_one_path_on_windows(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="same path"):
+        CatalogGraph.from_documents(tmp_path, {"c/i.json": {}, "c/I.json": {}})
+
+
+def test_keys_that_differ_in_case_stay_distinct_on_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", PurePosixPath)
+    item = {"type": "Feature", "stac_version": "1.1.0", "id": "i", "links": []}
+
+    graph = CatalogGraph.from_documents(tmp_path, {"c/i.json": item, "c/I.json": item})
+
+    assert sorted(graph.nodes) == [PurePosixPath("c/I.json"), PurePosixPath("c/i.json")]
+
+
+def _case_split_tree() -> dict[str, object]:
+    catalog, collection = _minimal_tree()
+    item = {"type": "Feature", "stac_version": "1.1.0", "id": "i", "links": []}
+    return {"catalog.json": catalog, "c/collection.json": collection, "C/i.json": item}
+
+
+@pytest.mark.usefixtures("windows_paths")
+def test_directories_that_differ_in_case_name_one_directory_on_windows(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="same path"):
+        CatalogGraph.from_documents(tmp_path, _case_split_tree())
+
+
+@pytest.mark.usefixtures("windows_paths")
+def test_a_file_directory_that_differs_in_case_is_refused_on_windows(tmp_path: Path) -> None:
+    _catalog, collection = _minimal_tree()
+    with pytest.raises(ValueError, match="same path"):
+        CatalogGraph.from_documents(
+            tmp_path, {"c/collection.json": collection}, files=["C/data.parquet"]
+        )
+
+
+def test_directories_that_differ_in_case_stay_distinct_on_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", PurePosixPath)
+
+    graph = CatalogGraph.from_documents(tmp_path, _case_split_tree())
+
+    assert {PurePosixPath("c"), PurePosixPath("C")} <= set(graph.dir_listing)
+    assert graph.parent_of(graph.nodes[PurePosixPath("C/i.json")]) is graph.root
+
+
+def _item_and_case_variant_file(tmp_path: Path) -> CatalogGraph:
+    item = {"type": "Feature", "stac_version": "1.1.0", "id": "i", "links": []}
+    return CatalogGraph.from_documents(tmp_path, {"c/i.json": item}, files=["c/I.json"])
+
+
+@pytest.mark.usefixtures("windows_paths")
+def test_a_document_and_a_file_that_differ_in_case_are_refused_on_windows(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="same path"):
+        _item_and_case_variant_file(tmp_path)
+
+
+def test_a_document_and_a_file_that_differ_in_case_stay_distinct_on_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", PurePosixPath)
+
+    graph = _item_and_case_variant_file(tmp_path)
+
+    assert graph.dir_listing[PurePosixPath("c")] == {"i.json", "I.json"}
+    assert sorted(graph.nodes) == [PurePosixPath("c/i.json")]
+
+
+@pytest.mark.parametrize("host", [PurePosixPath, PureWindowsPath])
+def test_a_key_in_documents_and_files_is_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: type[PurePath]
+) -> None:
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", host)
+    catalog, _collection = _minimal_tree()
+
+    graph = CatalogGraph.from_documents(
+        tmp_path, {"catalog.json": catalog}, files=["catalog.json", "README.md"]
+    )
+
+    assert graph.dir_listing[PurePosixPath(".")] == {"catalog.json", "README.md"}
+    assert graph.root is not None
+    assert graph.root.data is catalog

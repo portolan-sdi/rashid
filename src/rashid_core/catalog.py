@@ -8,18 +8,20 @@ observes exactly what is on disk.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Any, Literal
 from urllib.parse import quote
 
 from rashid_core import _json
 from rashid_core._href import (
+    has_host_drive,
+    host_path,
     is_absolute_href,
-    local_path,
     relative_href,
     relative_path,
+    resolve_local_href,
     self_link_base,
     structural_prefix,
 )
@@ -117,6 +119,49 @@ def _detect_kind(data: dict[str, Any]) -> Kind:
     if stac_type == "Feature" and "stac_version" in data:
         return "item"
     return "unknown"
+
+
+def _is_hidden(directory: str) -> bool:
+    """True for a directory name that the graph does not walk into."""
+    return directory.startswith(".")
+
+
+def _tree_paths(
+    keys: Iterable[str],
+    seen: dict[PurePath, str],
+    directories: dict[PurePath, PurePosixPath],
+) -> dict[PurePosixPath, str]:
+    """Map each key to its normal path, or raise ValueError for a bad key.
+
+    Every check reads the normal path, because the node path is built from
+    it. ``seen`` maps each host path to the first key that names it, and
+    ``directories`` maps each host directory to its first spelling. The
+    caller shares both maps across all keys of the tree.
+    :meth:`CatalogGraph.from_documents` lists the rules.
+    """
+    paths: dict[PurePosixPath, str] = {}
+    for key in keys:
+        rel = PurePosixPath(key)
+        name = str(rel)
+        if (
+            "\\" in name
+            or has_host_drive(name)
+            or rel.is_absolute()
+            or ".." in rel.parts
+            or not rel.name
+        ):
+            raise ValueError(f"key must be a relative POSIX path inside the tree: {key!r}")
+        first = seen.setdefault(host_path(name), key)
+        if first != key:
+            raise ValueError(f"keys {first!r} and {key!r} name the same path")
+        for directory in rel.parents:
+            spelling = directories.setdefault(host_path(str(directory)), directory)
+            if spelling != directory:
+                raise ValueError(
+                    f"directories {str(spelling)!r} and {str(directory)!r} name the same path"
+                )
+        paths[rel] = key
+    return paths
 
 
 def _is_within(path: PurePosixPath, prefix: PurePosixPath) -> bool:
@@ -250,53 +295,100 @@ class CatalogGraph:
         """
         graph = cls(root_path=root_path.resolve())
         for dirpath, dirnames, filenames in os.walk(graph.root_path):
-            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+            dirnames[:] = sorted(d for d in dirnames if not _is_hidden(d))
             rel_dir = PurePosixPath(Path(dirpath).relative_to(graph.root_path).as_posix())
             graph.dir_listing[rel_dir] = set(filenames)
             for filename in sorted(filenames):
                 if not filename.endswith(".json"):
                     continue
-                abs_path = Path(dirpath) / filename
                 rel = (
                     rel_dir / filename if rel_dir != PurePosixPath(".") else PurePosixPath(filename)
                 )
-                structural = filename in ("catalog.json", "collection.json")
                 try:
-                    data = _json.loads(abs_path.read_text(encoding="utf-8"))
+                    data = _json.loads((Path(dirpath) / filename).read_text(encoding="utf-8"))
                 except (ValueError, UnicodeDecodeError) as exc:
-                    if structural:
-                        graph.nodes[rel] = Node(
-                            path=rel,
-                            abs_path=abs_path,
-                            kind="unknown",
-                            id=None,
-                            data={},
-                            parse_error=str(exc),
-                        )
+                    graph._add_document(rel, None, parse_error=str(exc))
                     continue
-                if not isinstance(data, dict):
-                    if structural:
-                        graph.nodes[rel] = Node(
-                            path=rel,
-                            abs_path=abs_path,
-                            kind="unknown",
-                            id=None,
-                            data={},
-                            parse_error="top-level JSON value is not an object",
-                        )
-                    continue
-                kind = _detect_kind(data)
-                if not structural and kind != "item":
-                    continue
-                raw_id = data.get("id")
-                graph.nodes[rel] = Node(
-                    path=rel,
-                    abs_path=abs_path,
-                    kind=kind,
-                    id=raw_id if isinstance(raw_id, str) else None,
-                    data=data,
-                )
+                graph._add_document(rel, data)
         return graph
+
+    @classmethod
+    def from_documents(
+        cls, root_path: Path, documents: Mapping[str, object], files: Iterable[str] = ()
+    ) -> CatalogGraph:
+        """Build the graph from parsed JSON documents instead of a walk of the disk.
+
+        A writer uses this to plan links for documents that are not on disk
+        yet. Each key of ``documents`` is a root-relative POSIX path, and each
+        value is the parsed JSON. ``files`` names the other files in the tree,
+        such as ``README.md``. ``root_path`` is where the tree is or will be,
+        and no file is read from it. The keys go through the same filters as
+        :meth:`load`, so a key under a hidden directory is skipped. The graph
+        keeps the given dicts without a copy, so do not change them after the
+        call.
+
+        Raises:
+            ValueError: A key is not a relative POSIX path inside the tree.
+                That is a key that is empty or absolute, a key that contains
+                ``..`` or a backslash, and on Windows a key with a drive
+                (``C:/x`` or ``C:x``). These checks read the normal form of
+                the key, so ``./C:/x`` is also refused on Windows. Also
+                raised when two keys with different spellings name the same
+                path on the host, such as ``c//i.json`` and ``c/i.json``. On
+                Windows, ``c/i.json`` and ``c/I.json`` name the same path. On
+                POSIX they name two paths. This rule applies to all keys in
+                ``documents`` and ``files`` together, and to their
+                directories, so on Windows ``c/collection.json`` and
+                ``C/i.json`` raise. A key with the same spelling in both
+                mappings is allowed. It gets one listing entry, and its
+                document gives the node.
+        """
+        seen: dict[PurePath, str] = {}
+        directories: dict[PurePath, PurePosixPath] = {}
+        docs = _tree_paths(documents, seen, directories)
+        paths = {**_tree_paths(files, seen, directories), **docs}
+        graph = cls(root_path=root_path.resolve())
+        for rel in sorted(paths):
+            if any(_is_hidden(part) for part in rel.parent.parts):
+                continue
+            for directory in rel.parents:
+                graph.dir_listing.setdefault(directory, set())
+            graph.dir_listing[rel.parent].add(rel.name)
+            if rel in docs and rel.name.endswith(".json"):
+                graph._add_document(rel, documents[docs[rel]])
+        return graph
+
+    def _add_document(
+        self, rel: PurePosixPath, data: object, parse_error: str | None = None
+    ) -> None:
+        """Keep one parsed JSON file if it is a STAC object, as :meth:`load` describes."""
+        structural = rel.name in ("catalog.json", "collection.json")
+        if not isinstance(data, dict):
+            if structural:
+                self.nodes[rel] = Node(
+                    path=rel,
+                    abs_path=self.root_path / rel,
+                    kind="unknown",
+                    id=None,
+                    data={},
+                    parse_error=(
+                        "top-level JSON value is not an object"
+                        if parse_error is None
+                        else parse_error
+                    ),
+                )
+            return
+        kind = _detect_kind(data)
+        if not structural and kind != "item":
+            return
+        raw_id = data.get("id")
+        self.nodes[rel] = Node(
+            path=rel,
+            abs_path=self.root_path / rel,
+            kind=kind,
+            id=raw_id if isinstance(raw_id, str) else None,
+            data=data,
+        )
 
     def iter(self, *kinds: Kind) -> Iterator[Node]:
         """Yield nodes of the given kinds (all nodes when none given), sorted by path."""
@@ -349,8 +441,7 @@ class CatalogGraph:
         """Path in the local tree: decoded filenames, or encoded mirror names."""
         if self.base_url is not None:
             return self.resolve_path(from_node, href)
-        resolved = local_path(str(self.href_path(from_node).parent), href)
-        return PurePosixPath(resolved) if resolved is not None else None
+        return resolve_local_href(from_node.path, href)
 
     def resolve_structural_link(self, node: Node, href: str) -> tuple[bool, Node | None]:
         """Resolve structural links using the language tree's published prefix."""

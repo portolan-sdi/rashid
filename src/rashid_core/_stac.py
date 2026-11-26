@@ -38,6 +38,114 @@ def links_of(node: Node) -> list[dict[str, Any]]:
     return [link for _index, link in indexed_links_of(node)]
 
 
+_MARKDOWN = "text/markdown"
+
+
+@dataclass(frozen=True)
+class SidecarLinkGap:
+    """One reason a link to a sidecar Markdown file does not conform.
+
+    The fields are the ones a finding carries. ``json_pointer`` names the
+    ``links`` array when no link has the relation, or else the field of the
+    link at fault.
+    """
+
+    message: str
+    json_pointer: str
+    fix_hint: str
+    expected: str | None = None
+    actual: object = None
+
+
+def _sidecar_gaps(
+    graph: CatalogGraph, node: Node, index: int, link: dict[str, Any], target: str
+) -> list[SidecarLinkGap]:
+    """Everything wrong with one candidate link, empty when it conforms."""
+    rel = link.get("rel")
+    gaps: list[SidecarLinkGap] = []
+    if link.get("type") != _MARKDOWN:
+        gaps.append(
+            SidecarLinkGap(
+                f"rel:{rel!r} link has type {link.get('type')!r}, expected 'text/markdown'",
+                json_pointer("links", index, "type"),
+                f"set the rel:{rel!r} link type to 'text/markdown'",
+                _MARKDOWN,
+                link.get("type"),
+            )
+        )
+    href = link.get("href")
+    if not isinstance(href, str) or not href or is_absolute_href(href):
+        gaps.append(
+            SidecarLinkGap(
+                f"rel:{rel!r} link href must be a relative path, got {href!r}",
+                json_pointer("links", index, "href"),
+                f'set the href to "./{target}"',
+                f"./{target}",
+                href,
+            )
+        )
+        return gaps
+    expected = node.path.parent / target
+    if graph.local_path(node, href) != expected or not graph.file_exists(expected):
+        gaps.append(
+            SidecarLinkGap(
+                f"rel:{rel!r} link href {href!r} does not resolve to the sibling {target}",
+                json_pointer("links", index, "href"),
+                f'set the href to "./{target}" and make sure that file exists next to this object',
+                f"./{target}",
+                href,
+            )
+        )
+    return gaps
+
+
+def _points_at_sibling(node: Node, graph: CatalogGraph, link: dict[str, Any], target: str) -> bool:
+    """True when the link's href names the sibling ``target``, broken or not."""
+    href = link.get("href")
+    if not isinstance(href, str) or not href or is_absolute_href(href):
+        return False
+    return graph.local_path(node, href) == node.path.parent / target
+
+
+def sidecar_link_gaps(
+    graph: CatalogGraph, node: Node, *, rel: str, target: str
+) -> tuple[SidecarLinkGap, ...]:
+    """Why the node's ``rel`` link to the sibling file ``target`` does not conform.
+
+    PTL-FIL-002 and PTL-FIL-003 report these gaps. The link conforms when it
+    is relative, has the type ``text/markdown``, and resolves to ``target`` in
+    the node's own directory, and that file exists. STAC allows several links
+    under one rel, and a collection can point ``describedby`` at a data
+    dictionary next to its README. So one conforming link is enough, and the
+    result is then empty.
+
+    When no link conforms, the gaps name one link: the link that comes
+    closest to the required one. A fixer must not rewrite a foreign link, so
+    the other candidates get no blame.
+    """
+    matches = [(index, link) for index, link in indexed_links_of(node) if link.get("rel") == rel]
+    if not matches:
+        return (
+            SidecarLinkGap(
+                f"missing rel:{rel!r} link to {target}",
+                json_pointer("links"),
+                f'add {{"rel": "{rel}", "href": "./{target}", "type": "text/markdown"}}',
+            ),
+        )
+    candidates: list[tuple[tuple[bool, bool, int], list[SidecarLinkGap]]] = []
+    for index, link in matches:
+        gaps = _sidecar_gaps(graph, node, index, link, target)
+        if not gaps:
+            return ()
+        rank = (
+            not _points_at_sibling(node, graph, link, target),
+            link.get("type") != _MARKDOWN,
+            index,
+        )
+        candidates.append((rank, gaps))
+    return tuple(min(candidates, key=lambda candidate: candidate[0])[1])
+
+
 def roles_of(asset: dict[str, Any]) -> list[str]:
     """The asset's roles, tolerating a missing or malformed field."""
     raw = asset.get("roles")
