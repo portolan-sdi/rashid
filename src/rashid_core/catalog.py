@@ -8,7 +8,7 @@ observes exactly what is on disk.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
@@ -17,9 +17,9 @@ from urllib.parse import quote
 from rashid_core import _json
 from rashid_core._href import (
     is_absolute_href,
-    local_path,
     relative_href,
     relative_path,
+    resolve_local_href,
     self_link_base,
     structural_prefix,
 )
@@ -256,47 +256,77 @@ class CatalogGraph:
             for filename in sorted(filenames):
                 if not filename.endswith(".json"):
                     continue
-                abs_path = Path(dirpath) / filename
                 rel = (
                     rel_dir / filename if rel_dir != PurePosixPath(".") else PurePosixPath(filename)
                 )
-                structural = filename in ("catalog.json", "collection.json")
                 try:
-                    data = _json.loads(abs_path.read_text(encoding="utf-8"))
+                    data = _json.loads((Path(dirpath) / filename).read_text(encoding="utf-8"))
                 except (ValueError, UnicodeDecodeError) as exc:
-                    if structural:
-                        graph.nodes[rel] = Node(
-                            path=rel,
-                            abs_path=abs_path,
-                            kind="unknown",
-                            id=None,
-                            data={},
-                            parse_error=str(exc),
-                        )
+                    graph._add_document(rel, None, parse_error=str(exc))
                     continue
-                if not isinstance(data, dict):
-                    if structural:
-                        graph.nodes[rel] = Node(
-                            path=rel,
-                            abs_path=abs_path,
-                            kind="unknown",
-                            id=None,
-                            data={},
-                            parse_error="top-level JSON value is not an object",
-                        )
-                    continue
-                kind = _detect_kind(data)
-                if not structural and kind != "item":
-                    continue
-                raw_id = data.get("id")
-                graph.nodes[rel] = Node(
-                    path=rel,
-                    abs_path=abs_path,
-                    kind=kind,
-                    id=raw_id if isinstance(raw_id, str) else None,
-                    data=data,
-                )
+                graph._add_document(rel, data)
         return graph
+
+    @classmethod
+    def from_documents(
+        cls, root_path: Path, documents: Mapping[str, object], files: Iterable[str] = ()
+    ) -> CatalogGraph:
+        """Build the graph from parsed JSON documents instead of a walk of the disk.
+
+        A writer uses this to plan links for documents that are not on disk
+        yet. Each key of ``documents`` is a root-relative POSIX path, and each
+        value is the parsed JSON. ``files`` names the other files in the tree,
+        such as ``README.md``. ``root_path`` is where the tree is or will be,
+        and no file is read from it. The keys go through the same filter as
+        :meth:`load`. The graph keeps the given dicts without a copy, so do not
+        change them after the call.
+
+        Raises:
+            ValueError: A key is absolute or leaves the tree.
+        """
+        graph = cls(root_path=root_path.resolve())
+        for key in sorted({*documents, *files}):
+            rel = PurePosixPath(key)
+            if rel.is_absolute() or ".." in rel.parts or not rel.name:
+                raise ValueError(f"key must be a relative POSIX path inside the tree: {key!r}")
+            for directory in rel.parents:
+                graph.dir_listing.setdefault(directory, set())
+            graph.dir_listing[rel.parent].add(rel.name)
+            if key in documents and rel.name.endswith(".json"):
+                graph._add_document(rel, documents[key])
+        return graph
+
+    def _add_document(
+        self, rel: PurePosixPath, data: object, parse_error: str | None = None
+    ) -> None:
+        """Keep one parsed JSON file if it is a STAC object, as :meth:`load` describes."""
+        structural = rel.name in ("catalog.json", "collection.json")
+        if not isinstance(data, dict):
+            if structural:
+                self.nodes[rel] = Node(
+                    path=rel,
+                    abs_path=self.root_path / rel,
+                    kind="unknown",
+                    id=None,
+                    data={},
+                    parse_error=(
+                        "top-level JSON value is not an object"
+                        if parse_error is None
+                        else parse_error
+                    ),
+                )
+            return
+        kind = _detect_kind(data)
+        if not structural and kind != "item":
+            return
+        raw_id = data.get("id")
+        self.nodes[rel] = Node(
+            path=rel,
+            abs_path=self.root_path / rel,
+            kind=kind,
+            id=raw_id if isinstance(raw_id, str) else None,
+            data=data,
+        )
 
     def iter(self, *kinds: Kind) -> Iterator[Node]:
         """Yield nodes of the given kinds (all nodes when none given), sorted by path."""
@@ -349,8 +379,7 @@ class CatalogGraph:
         """Path in the local tree: decoded filenames, or encoded mirror names."""
         if self.base_url is not None:
             return self.resolve_path(from_node, href)
-        resolved = local_path(str(self.href_path(from_node).parent), href)
-        return PurePosixPath(resolved) if resolved is not None else None
+        return resolve_local_href(from_node.path, href)
 
     def resolve_structural_link(self, node: Node, href: str) -> tuple[bool, Node | None]:
         """Resolve structural links using the language tree's published prefix."""

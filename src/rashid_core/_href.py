@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import posixpath
 import re
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 from urllib.parse import SplitResult, quote, unquote, urljoin, urlsplit
 
@@ -155,6 +156,19 @@ def local_path(directory: str, href: str) -> str | None:
     if posixpath.isabs(path) or "\\" in path or "\x00" in path:
         return None
     return _relative_join(unquote(directory), path)
+
+
+def resolve_local_href(document: str | PurePosixPath, href: str) -> PurePosixPath | None:
+    """Resolve an href against the document that holds it, as the graph does on disk.
+
+    ``document`` is the root-relative POSIX path of the linking file, with
+    decoded filenames. The result is the target's root-relative path with
+    percent escapes decoded and the query and fragment removed. The result is
+    None for an empty or absolute href, for an href that leaves the tree, and
+    for one that decodes to a backslash or NUL.
+    """
+    resolved = local_path(quote(str(PurePosixPath(document).parent), safe="/"), href)
+    return PurePosixPath(resolved) if resolved is not None else None
 
 
 def request_target(directory: str, href: str) -> str | None:
