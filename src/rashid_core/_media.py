@@ -122,7 +122,7 @@ def is_icechunk_asset(asset: dict[str, Any]) -> bool:
     return _ICECHUNK_MARKER in media_base_type(asset.get("type"))
 
 
-def is_store_asset(asset: dict[str, Any]) -> bool:
+def is_zarr_or_icechunk_asset(asset: dict[str, Any]) -> bool:
     """Whether an asset is a Zarr store or an Icechunk repository.
 
     Both are key prefixes with no bytes of their own, so neither has one

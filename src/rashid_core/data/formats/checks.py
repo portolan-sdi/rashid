@@ -84,7 +84,7 @@ from typing import Any
 import rasterio
 
 from rashid_core import _trace
-from rashid_core._media import is_store_asset
+from rashid_core._media import is_zarr_or_icechunk_asset
 from rashid_core._stac import (
     asset_refers_to_self,
     assets_of,
@@ -208,7 +208,7 @@ def _check_asset(
     defects = check_asset(node, key=key, asset=asset, reader=reader)
     media_type = asset.get("type")
     expected = expected_format(media_type) if isinstance(media_type, str) else None
-    if is_store_asset(asset) and not is_source_asset(asset):
+    if is_zarr_or_icechunk_asset(asset) and not is_source_asset(asset):
         return defects, None, True
 
     located = reader.locate(node, href)

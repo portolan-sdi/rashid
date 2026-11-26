@@ -113,7 +113,7 @@ from rashid_core._href import (
 from rashid_core._media import (
     is_icechunk_asset,
     is_partial_read_media_type,
-    is_store_asset,
+    is_zarr_or_icechunk_asset,
 )
 from rashid_core._stac import (
     assets_of,
@@ -411,7 +411,7 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
             continue
         for _pointer, key, asset in sorted(assets_of(node), key=lambda entry: entry[1]):
             # A store href is a key prefix; PTL-ZAR-003 probes the store instead.
-            href = None if is_store_asset(asset) else read_target(asset)
+            href = None if is_zarr_or_icechunk_asset(asset) else read_target(asset)
             if href is None:
                 continue
             size = asset.get("file:size")
@@ -1060,7 +1060,7 @@ def _zarr_stores(graph: CatalogGraph, base: str | None) -> list[tuple[Node, str,
     seen: set[str] = set()
     stores: list[tuple[Node, str, str]] = []
     for node, key, asset in _assets_with_hrefs(graph):
-        if not is_store_asset(asset) or is_source_asset(asset):
+        if not is_zarr_or_icechunk_asset(asset) or is_source_asset(asset):
             continue
         url = _store_url(graph, node, asset, base)
         if url is None:
