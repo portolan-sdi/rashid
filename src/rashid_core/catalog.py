@@ -127,17 +127,19 @@ def _is_hidden(directory: str) -> bool:
 
 
 def _tree_paths(
-    keys: Iterable[str], directories: dict[PurePath, PurePosixPath]
+    keys: Iterable[str],
+    seen: dict[PurePath, str],
+    directories: dict[PurePath, PurePosixPath],
 ) -> dict[PurePosixPath, str]:
     """Map each key to its normal path, or raise ValueError for a bad key.
 
     Every check reads the normal path, because the node path is built from
-    it. ``directories`` maps each host directory to its first spelling, and
-    the caller shares it across all keys of the tree.
+    it. ``seen`` maps each host path to the first key that names it, and
+    ``directories`` maps each host directory to its first spelling. The
+    caller shares both maps across all keys of the tree.
     :meth:`CatalogGraph.from_documents` lists the rules.
     """
     paths: dict[PurePosixPath, str] = {}
-    seen: dict[PurePath, str] = {}
     for key in keys:
         rel = PurePosixPath(key)
         name = str(rel)
@@ -331,16 +333,20 @@ class CatalogGraph:
                 ``..`` or a backslash, and on Windows a key with a drive
                 (``C:/x`` or ``C:x``). These checks read the normal form of
                 the key, so ``./C:/x`` is also refused on Windows. Also
-                raised when two keys of one mapping name the same path on
-                the host, such as ``c//i.json`` and ``c/i.json``. On Windows,
-                ``c/i.json`` and ``c/I.json`` name the same path. On POSIX
-                they name two paths. The same rule applies to the directories
-                of all keys in ``documents`` and ``files`` together, so on
-                Windows ``c/collection.json`` and ``C/i.json`` raise.
+                raised when two keys with different spellings name the same
+                path on the host, such as ``c//i.json`` and ``c/i.json``. On
+                Windows, ``c/i.json`` and ``c/I.json`` name the same path. On
+                POSIX they name two paths. This rule applies to all keys in
+                ``documents`` and ``files`` together, and to their
+                directories, so on Windows ``c/collection.json`` and
+                ``C/i.json`` raise. A key with the same spelling in both
+                mappings is allowed. It gets one listing entry, and its
+                document gives the node.
         """
+        seen: dict[PurePath, str] = {}
         directories: dict[PurePath, PurePosixPath] = {}
-        docs = _tree_paths(documents, directories)
-        paths = {**_tree_paths(files, directories), **docs}
+        docs = _tree_paths(documents, seen, directories)
+        paths = {**_tree_paths(files, seen, directories), **docs}
         graph = cls(root_path=root_path.resolve())
         for rel in sorted(paths):
             if any(_is_hidden(part) for part in rel.parent.parts):

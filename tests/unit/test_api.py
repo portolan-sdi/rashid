@@ -13,7 +13,7 @@ import inspect
 import json
 from collections.abc import Iterable
 from datetime import timedelta
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from types import ModuleType
 
 import pytest
@@ -580,7 +580,35 @@ def test_directories_that_differ_in_case_stay_distinct_on_posix(
     assert graph.parent_of(graph.nodes[PurePosixPath("C/i.json")]) is graph.root
 
 
-def test_a_key_in_documents_and_files_is_allowed(tmp_path: Path) -> None:
+def _item_and_case_variant_file(tmp_path: Path) -> CatalogGraph:
+    item = {"type": "Feature", "stac_version": "1.1.0", "id": "i", "links": []}
+    return CatalogGraph.from_documents(tmp_path, {"c/i.json": item}, files=["c/I.json"])
+
+
+@pytest.mark.usefixtures("windows_paths")
+def test_a_document_and_a_file_that_differ_in_case_are_refused_on_windows(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="same path"):
+        _item_and_case_variant_file(tmp_path)
+
+
+def test_a_document_and_a_file_that_differ_in_case_stay_distinct_on_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", PurePosixPath)
+
+    graph = _item_and_case_variant_file(tmp_path)
+
+    assert graph.dir_listing[PurePosixPath("c")] == {"i.json", "I.json"}
+    assert sorted(graph.nodes) == [PurePosixPath("c/i.json")]
+
+
+@pytest.mark.parametrize("host", [PurePosixPath, PureWindowsPath])
+def test_a_key_in_documents_and_files_is_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: type[PurePath]
+) -> None:
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", host)
     catalog, _collection = _minimal_tree()
 
     graph = CatalogGraph.from_documents(
@@ -588,3 +616,5 @@ def test_a_key_in_documents_and_files_is_allowed(tmp_path: Path) -> None:
     )
 
     assert graph.dir_listing[PurePosixPath(".")] == {"catalog.json", "README.md"}
+    assert graph.root is not None
+    assert graph.root.data is catalog
