@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rashid"
-version = "0.5.0"
+version = "0.5.1"
 description = "Validator and linter for Portolan catalogs, including data validation"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "Portolan contributors" }]
-dependencies = ["rashid-core[data]==0.5.0"]
+dependencies = ["rashid-core[data]==0.5.1"]
 
 [project.optional-dependencies]
 data = []

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rashid-core"
-version = "0.5.0"
+version = "0.5.1"
 description = "Validator and linter for Portolan catalogs"
 readme = "README.md"
 license = "Apache-2.0"
@@ -299,7 +299,7 @@ allowed_importers = ["rashid_core.registry"]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.5.0"
+version = "0.5.1"
 version_files = [
     "pyproject.toml:^version",
     "meta/rashid/pyproject.toml:^version",
