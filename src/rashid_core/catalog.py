@@ -126,11 +126,15 @@ def _is_hidden(directory: str) -> bool:
     return directory.startswith(".")
 
 
-def _tree_paths(keys: Iterable[str]) -> dict[PurePosixPath, str]:
+def _tree_paths(
+    keys: Iterable[str], directories: dict[PurePath, PurePosixPath]
+) -> dict[PurePosixPath, str]:
     """Map each key to its normal path, or raise ValueError for a bad key.
 
     Every check reads the normal path, because the node path is built from
-    it. :meth:`CatalogGraph.from_documents` lists the rules.
+    it. ``directories`` maps each host directory to its first spelling, and
+    the caller shares it across all keys of the tree.
+    :meth:`CatalogGraph.from_documents` lists the rules.
     """
     paths: dict[PurePosixPath, str] = {}
     seen: dict[PurePath, str] = {}
@@ -148,6 +152,12 @@ def _tree_paths(keys: Iterable[str]) -> dict[PurePosixPath, str]:
         first = seen.setdefault(host_path(name), key)
         if first != key:
             raise ValueError(f"keys {first!r} and {key!r} name the same path")
+        for directory in rel.parents:
+            spelling = directories.setdefault(host_path(str(directory)), directory)
+            if spelling != directory:
+                raise ValueError(
+                    f"directories {str(spelling)!r} and {str(directory)!r} name the same path"
+                )
         paths[rel] = key
     return paths
 
@@ -324,10 +334,13 @@ class CatalogGraph:
                 raised when two keys of one mapping name the same path on
                 the host, such as ``c//i.json`` and ``c/i.json``. On Windows,
                 ``c/i.json`` and ``c/I.json`` name the same path. On POSIX
-                they name two paths.
+                they name two paths. The same rule applies to the directories
+                of all keys in ``documents`` and ``files`` together, so on
+                Windows ``c/collection.json`` and ``C/i.json`` raise.
         """
-        docs = _tree_paths(documents)
-        paths = {**_tree_paths(files), **docs}
+        directories: dict[PurePath, PurePosixPath] = {}
+        docs = _tree_paths(documents, directories)
+        paths = {**_tree_paths(files, directories), **docs}
         graph = cls(root_path=root_path.resolve())
         for rel in sorted(paths):
             if any(_is_hidden(part) for part in rel.parent.parts):

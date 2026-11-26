@@ -548,6 +548,38 @@ def test_keys_that_differ_in_case_stay_distinct_on_posix(
     assert sorted(graph.nodes) == [PurePosixPath("c/I.json"), PurePosixPath("c/i.json")]
 
 
+def _case_split_tree() -> dict[str, object]:
+    catalog, collection = _minimal_tree()
+    item = {"type": "Feature", "stac_version": "1.1.0", "id": "i", "links": []}
+    return {"catalog.json": catalog, "c/collection.json": collection, "C/i.json": item}
+
+
+@pytest.mark.usefixtures("windows_paths")
+def test_directories_that_differ_in_case_name_one_directory_on_windows(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="same path"):
+        CatalogGraph.from_documents(tmp_path, _case_split_tree())
+
+
+@pytest.mark.usefixtures("windows_paths")
+def test_a_file_directory_that_differs_in_case_is_refused_on_windows(tmp_path: Path) -> None:
+    _catalog, collection = _minimal_tree()
+    with pytest.raises(ValueError, match="same path"):
+        CatalogGraph.from_documents(
+            tmp_path, {"c/collection.json": collection}, files=["C/data.parquet"]
+        )
+
+
+def test_directories_that_differ_in_case_stay_distinct_on_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("rashid_core._href._HOST_PATH", PurePosixPath)
+
+    graph = CatalogGraph.from_documents(tmp_path, _case_split_tree())
+
+    assert {PurePosixPath("c"), PurePosixPath("C")} <= set(graph.dir_listing)
+    assert graph.parent_of(graph.nodes[PurePosixPath("C/i.json")]) is graph.root
+
+
 def test_a_key_in_documents_and_files_is_allowed(tmp_path: Path) -> None:
     catalog, _collection = _minimal_tree()
 
