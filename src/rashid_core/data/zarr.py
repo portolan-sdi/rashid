@@ -41,9 +41,15 @@ from typing import Any, TypeGuard
 
 from rashid_core import _json, _trace
 from rashid_core._href import store_member_href
-from rashid_core._media import ZARR_MEDIA_TYPE, media_base_type, media_parameters
+from rashid_core._media import (
+    ICECHUNK_MEDIA_TYPE,
+    ZARR_MEDIA_TYPE,
+    media_base_type,
+    media_parameters,
+)
 from rashid_core._stac import read_target
 from rashid_core.catalog import Node
+from rashid_core.data import icechunk
 from rashid_core.data._results import DataDefect
 from rashid_core.data.reader import AssetReader
 from rashid_core.ids import (
@@ -75,6 +81,9 @@ ZARR_FORMAT = 3
 
 #: The media-type parameter that names it.
 ZARR_VERSION_PARAMETER = "3"
+
+#: incubating/zarr.md, Icechunk: the storage format version a repository uses.
+ICECHUNK_FORMAT = 2
 
 #: Convention identity, UUID first then name, as each convention's README
 #: defines it. A UUID "MUST NOT change across versions", while schema and spec
@@ -240,17 +249,16 @@ class _Store:
             self.exhausted = True
             return None
         self._budget -= 1
-        member = store_member_href(self._href, f"{path}/zarr.json" if path else "zarr.json")
-        stream = self._reader.stream(self._node, member)
-        if stream is None:
-            if not path and self._local_v2():
-                # The local answer a remote host gives as a 404: no zarr.json here.
-                self._note(path, "the store root holds no zarr.json", 404)
-            else:
-                self._note(path, "the store is not reachable from this catalog")
-            return None
-        _trace.count("zarr.metadata_reads")
         try:
+            stream = self._stream(_document(path))
+            if stream is None:
+                if not path and self._local_v2():
+                    # The local answer a remote host gives as a 404: no zarr.json here.
+                    self._note(path, "the store root holds no zarr.json", 404)
+                else:
+                    self._note(path, "the store is not reachable from this catalog")
+                return None
+            _trace.count("zarr.metadata_reads")
             raw = _read_capped(stream)
             data = _json.loads(raw)
         except (OSError, ValueError) as exc:
@@ -262,6 +270,10 @@ class _Store:
             self._note(path, "zarr.json is not a JSON object")
             return None
         return _Meta(path, data)
+
+    def _stream(self, document: str) -> Iterator[bytes] | None:
+        """The document's bytes, or ``None`` when the reader cannot reach the store."""
+        return self._reader.stream(self._node, store_member_href(self._href, document))
 
     def _local_v2(self) -> bool:
         """Whether the store is a local directory holding Zarr v2 metadata."""
@@ -295,6 +307,25 @@ class _Store:
     def known(self) -> list[_Meta]:
         """Every node read so far, in path order."""
         return [meta for _path, meta in sorted(self._cache.items()) if meta is not None]
+
+
+class _MainBranch(_Store):
+    """The metadata documents at the tip of an Icechunk repository's ``main``."""
+
+    def __init__(self, node: Node, href: str, reader: AssetReader, read: icechunk.KeyReader):
+        super().__init__(node, href, reader)
+        self._read = read
+
+    def _stream(self, document: str) -> Iterator[bytes] | None:
+        data = self._read(document)
+        if data is None:
+            raise FileNotFoundError(f"main holds no {document}")
+        return iter((data,))
+
+
+def _document(path: str) -> str:
+    """The key of the ``zarr.json`` of the node at ``path``."""
+    return f"{path}/zarr.json" if path else "zarr.json"
 
 
 def _read_capped(stream: Iterator[bytes]) -> bytes:
@@ -1454,24 +1485,119 @@ def check_zarr(
         return []  # PTL-AST-001 reports a missing href
     # PORTO-CORE-087: a client reads an s3 store through its https alternate.
     href = read_target(asset) or href
-    store = _Store(node, href, reader)
     with _trace.span("data.zarr"):
         defects = _check_media_type(key, asset)
-        try:
-            defects.extend(_check_store(key, store, node=node, asset=asset))
-        except _METADATA_FAULTS as exc:
-            log.debug("zarr: %s asset %r: %s", node.path, key, exc)
-            defects.append(
-                _defect(
-                    ZAR_STORE_VERSION,
-                    Severity.INFO,
-                    key,
-                    f"the profile's checks could not read this store's metadata ({exc});"
-                    " they did not run",
-                )
-            )
+        defects.extend(_guarded_store_checks(key, _Store(node, href, reader), node, asset))
     log.debug("zarr: %s asset %r: %d defect(s)", node.path, key, len(defects))
     return defects
+
+
+def check_icechunk(
+    node: Node, *, key: str, asset: dict[str, Any], reader: AssetReader
+) -> list[DataDefect]:
+    """Check one Icechunk repository asset against the incubating Zarr profile.
+
+    incubating/zarr.md, Icechunk: the media type and the ``repo`` file at the
+    href are ``PTL-ZAR-004``, the format version is ``PTL-ZAR-001``, and the
+    other checks run on the hierarchy at the tip of ``main``. Without the
+    Icechunk library, only the media type is judged.
+    """
+    href = asset.get("href")
+    if not isinstance(href, str) or not href:
+        return []  # PTL-AST-001 reports a missing href
+    href = read_target(asset) or href
+    with _trace.span("data.zarr"):
+        defects = _check_icechunk_media_type(key, asset)
+        located = reader.locate(node, store_member_href(href, icechunk.REPO_FILE))
+        if located is None:
+            return [*defects, _not_run(key, "the repository is not reachable from this catalog")]
+        try:
+            version = icechunk.spec_version(located)
+            if version is None:
+                return [*defects, _no_repository(key, located.source)]
+            if version != ICECHUNK_FORMAT:
+                defects.append(_old_format(key, version))
+            store = _MainBranch(node, href, reader, icechunk.main_reader(located))
+        except ImportError:
+            return [
+                *defects,
+                _not_run(
+                    key,
+                    "the icechunk library is not installed; install rashid-core[icechunk]"
+                    " on Python 3.12 or later to read the repository",
+                ),
+            ]
+        except OSError as exc:
+            return [*defects, _not_run(key, f"the repository could not be read ({exc})")]
+        defects.extend(_guarded_store_checks(key, store, node, asset))
+    log.debug("zarr: %s asset %r: %d defect(s)", node.path, key, len(defects))
+    return defects
+
+
+def _guarded_store_checks(
+    key: str, store: _Store, node: Node, asset: dict[str, Any]
+) -> list[DataDefect]:
+    """:func:`_check_store`, with a store whose metadata defeats it reported as one INFO."""
+    try:
+        return _check_store(key, store, node=node, asset=asset)
+    except _METADATA_FAULTS as exc:
+        log.debug("zarr: %s asset %r: %s", node.path, key, exc)
+        return [
+            _defect(
+                ZAR_STORE_VERSION,
+                Severity.INFO,
+                key,
+                f"the profile's checks could not read this store's metadata ({exc});"
+                " they did not run",
+            )
+        ]
+
+
+def _check_icechunk_media_type(key: str, asset: dict[str, Any]) -> list[DataDefect]:
+    """PTL-ZAR-004 for an Icechunk asset, from the STAC asset alone."""
+    base = media_base_type(asset.get("type"))
+    if base == ICECHUNK_MEDIA_TYPE:
+        return []
+    return [
+        _defect(
+            ZAR_ASSET,
+            Severity.ERROR,
+            key,
+            f"the media type's base type is {base!r}; the profile requires"
+            f" '{ICECHUNK_MEDIA_TYPE}' for an Icechunk repository",
+            "type",
+        )
+    ]
+
+
+def _no_repository(key: str, repo_url: str) -> DataDefect:
+    """PTL-ZAR-004: the href is not the root of a repository."""
+    return _defect(
+        ZAR_ASSET,
+        Severity.ERROR,
+        key,
+        f"no Icechunk repository at the href: {repo_url} does not exist; the href"
+        " must be the repository root, the prefix that holds the repo file",
+        "href",
+    )
+
+
+def _old_format(key: str, version: int) -> DataDefect:
+    """PTL-ZAR-001: the repository uses a storage format the profile does not accept."""
+    return _defect(
+        ZAR_STORE_VERSION,
+        Severity.ERROR,
+        key,
+        f"the repository uses version {version} of the Icechunk storage format;"
+        f" the profile requires version {ICECHUNK_FORMAT}",
+    )
+
+
+def _not_run(key: str, reason: str) -> DataDefect:
+    """PTL-ZAR-001 as information: the repository's checks did not run."""
+    return _defect(
+        ZAR_STORE_VERSION, Severity.INFO, key, f"{reason}; the profile's checks did not run"
+    )
 
 
 def _check_store(key: str, store: _Store, *, node: Node, asset: dict[str, Any]) -> list[DataDefect]:

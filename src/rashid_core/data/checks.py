@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from rashid_core import _trace
-from rashid_core._media import is_zarr_store_asset
+from rashid_core._media import is_icechunk_asset, is_zarr_store_asset
 from rashid_core._stac import (
     asset_refers_to_self,
     assets_of,
@@ -17,7 +17,7 @@ from rashid_core.catalog import CatalogGraph, Node
 from rashid_core.data._results import DataDefect
 from rashid_core.data.reader import AssetReader
 from rashid_core.data.storage import check_bytes, expected_format
-from rashid_core.data.zarr import check_zarr
+from rashid_core.data.zarr import check_icechunk, check_zarr
 from rashid_core.ids import DAT_COLUMN_DESCRIPTIONS
 from rashid_core.model import Severity, json_pointer
 
@@ -43,10 +43,13 @@ def check_node(
 def check_asset(
     node: Node, *, key: str, asset: dict[str, Any], reader: AssetReader
 ) -> list[DataDefect]:
-    """Check one asset's bytes, or the metadata inside a Zarr prefix."""
+    """Check one asset's bytes, or the metadata inside a Zarr store or Icechunk repository."""
     if is_zarr_store_asset(asset) and not is_source_asset(asset):
         # A prefix has no bytes of its own; read the zarr.json documents inside it.
         return check_zarr(node, key=key, asset=asset, reader=reader)
+    if is_icechunk_asset(asset) and not is_source_asset(asset):
+        # A repository's keys are not Zarr keys; read its hierarchy at main.
+        return check_icechunk(node, key=key, asset=asset, reader=reader)
     media_type = asset.get("type")
     expected = expected_format(media_type) if isinstance(media_type, str) else None
     defects = check_bytes(key, asset=asset, expected=expected, node=node, reader=reader)

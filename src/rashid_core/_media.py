@@ -17,9 +17,10 @@ COPC_MEDIA_TYPE = "application/vnd.laszip+copc"
 ZARR_MEDIA_TYPE = "application/vnd.zarr"
 # The filename suffix a Zarr store has, with or without a trailing slash.
 ZARR_SUFFIX = ".zarr"
-# Icechunk is its own format. Its media type is not a Zarr media type, and a
-# repository is not a Zarr store unless it is served as plain Zarr v3 under a
-# Zarr media type, so the word is refused wherever "zarr" is matched loosely.
+# incubating/zarr.md, Icechunk: an Icechunk repository asset has this media
+# type. A plain Zarr reader cannot read a repository, so the word is refused
+# wherever "zarr" is matched loosely, and an Icechunk asset is checked apart.
+ICECHUNK_MEDIA_TYPE = "application/vnd.zarr+icechunk"
 _ICECHUNK_MARKER = "icechunk"
 # Media types that say nothing about the format, so an href may speak instead.
 _UNTYPED = frozenset({"", "application/octet-stream", "binary/octet-stream"})
@@ -110,6 +111,24 @@ def is_zarr_store_asset(asset: dict[str, Any]) -> bool:
     href = asset.get("href")
     parsed = split_href(href) if isinstance(href, str) else None
     return parsed is not None and parsed.path.rstrip("/").lower().endswith(ZARR_SUFFIX)
+
+
+def is_icechunk_asset(asset: dict[str, Any]) -> bool:
+    """Whether an asset publishes an Icechunk repository, however its type is spelled.
+
+    A loose match lets ``PTL-ZAR-004`` report a misspelled Icechunk media type
+    rather than let the asset pass as some other format.
+    """
+    return _ICECHUNK_MARKER in media_base_type(asset.get("type"))
+
+
+def is_store_asset(asset: dict[str, Any]) -> bool:
+    """Whether an asset is a Zarr store or an Icechunk repository.
+
+    Both are key prefixes with no bytes of their own, so neither has one
+    checksum or answers a request for its href.
+    """
+    return is_zarr_store_asset(asset) or is_icechunk_asset(asset)
 
 
 def is_cog_media_type(value: object) -> bool:

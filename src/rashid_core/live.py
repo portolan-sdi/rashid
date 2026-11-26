@@ -110,7 +110,11 @@ from rashid_core._href import (
     store_member_href,
     wire_url,
 )
-from rashid_core._media import is_partial_read_media_type, is_zarr_store_asset
+from rashid_core._media import (
+    is_icechunk_asset,
+    is_partial_read_media_type,
+    is_store_asset,
+)
 from rashid_core._stac import (
     assets_of,
     https_alternate,
@@ -406,8 +410,8 @@ def _targets_by_host(graph: CatalogGraph, base_url: str | None = None) -> dict[s
         if node.parse_error is not None:
             continue
         for _pointer, key, asset in sorted(assets_of(node), key=lambda entry: entry[1]):
-            # A store href is a key prefix; PTL-ZAR-003 probes its zarr.json.
-            href = None if is_zarr_store_asset(asset) else read_target(asset)
+            # A store href is a key prefix; PTL-ZAR-003 probes the store instead.
+            href = None if is_store_asset(asset) else read_target(asset)
             if href is None:
                 continue
             size = asset.get("file:size")
@@ -1037,7 +1041,8 @@ def _store_url(
 def _zarr_stores(graph: CatalogGraph, base: str | None) -> list[tuple[Node, str, str]]:
     """Every Zarr store asset's (node, key, metadata URL), one per distinct store.
 
-    The probed URL is the store's own ``zarr.json``. The store href names a key
+    The probed URL is the store's own ``zarr.json``, or the ``repo`` file of an
+    Icechunk repository, which every reader of one opens first. The href names a key
     prefix, which no server returns an object for, so the ranged GET that the
     asset probes send would read a 404 and say nothing about the store's CORS
     policy. CORS is set per bucket rather than per host, and one host serves
@@ -1055,12 +1060,12 @@ def _zarr_stores(graph: CatalogGraph, base: str | None) -> list[tuple[Node, str,
     seen: set[str] = set()
     stores: list[tuple[Node, str, str]] = []
     for node, key, asset in _assets_with_hrefs(graph):
-        if not is_zarr_store_asset(asset) or is_source_asset(asset):
+        if not is_store_asset(asset) or is_source_asset(asset):
             continue
         url = _store_url(graph, node, asset, base)
         if url is None:
             continue
-        metadata = store_member_href(url, "zarr.json")
+        metadata = store_member_href(url, "repo" if is_icechunk_asset(asset) else "zarr.json")
         if metadata in seen:
             continue
         seen.add(metadata)

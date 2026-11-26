@@ -1828,6 +1828,8 @@ def test_a_stand_in_probe_failure_is_a_warning(catalog: CatalogBuilder) -> None:
 
 _STORE_URL = "https://data.example.com/temps.zarr"
 _STORE_METADATA = f"{_STORE_URL}/zarr.json"
+_REPOSITORY_URL = "https://data.example.com/temps.icechunk"
+_REPOSITORY_FILE = f"{_REPOSITORY_URL}/repo"
 
 
 class _ZarrProber(FakeProber):
@@ -1844,11 +1846,17 @@ class _ZarrProber(FakeProber):
 
     def get_range(self, url: str) -> ProbeResponse:
         self.range_calls.append(url)
-        return self._metadata if url == _STORE_METADATA else self.range_response
+        if url in {_STORE_METADATA, _REPOSITORY_FILE}:
+            return self._metadata
+        return self.range_response
 
 
-def _graph_with_store(catalog: CatalogBuilder, href: str = _STORE_URL) -> CatalogGraph:
-    asset = {"href": href, "type": "application/vnd.zarr; version=3", "roles": ["data"]}
+def _graph_with_store(
+    catalog: CatalogBuilder,
+    href: str = _STORE_URL,
+    media_type: str = "application/vnd.zarr; version=3",
+) -> CatalogGraph:
+    asset = {"href": href, "type": media_type, "roles": ["data"]}
     catalog.collection("temps", assets={"data": asset})
     return CatalogGraph.load(catalog.write())
 
@@ -1860,14 +1868,26 @@ def test_a_store_whose_metadata_allows_an_origin_is_accepted(catalog: CatalogBui
     assert _STORE_METADATA in prober.range_calls
 
 
-def test_a_store_whose_metadata_allows_no_origin_is_reported(catalog: CatalogBuilder) -> None:
+@pytest.mark.parametrize(
+    ("href", "media_type", "probed"),
+    [
+        (_STORE_URL, "application/vnd.zarr; version=3", _STORE_METADATA),
+        # An Icechunk reader opens the repo file first; the href is a prefix.
+        (_REPOSITORY_URL, "application/vnd.zarr+icechunk", _REPOSITORY_FILE),
+    ],
+)
+def test_a_store_whose_metadata_allows_no_origin_is_reported(
+    catalog: CatalogBuilder, href: str, media_type: str, probed: str
+) -> None:
     denied = _good_range()
     del denied.headers["access-control-allow-origin"]
-    findings = validate_live(_graph_with_store(catalog), _ZarrProber(denied))
+    prober = _ZarrProber(denied)
+    findings = validate_live(_graph_with_store(catalog, href, media_type), prober)
     finding = next(f for f in findings if f.rule_id == ZAR_CORS)
     assert finding.severity is Severity.WARNING
-    assert _STORE_METADATA in finding.message
+    assert probed in finding.message
     assert finding.json_pointer == "/assets/data/href"
+    assert href not in prober.head_calls + prober.range_calls
 
 
 def test_a_store_that_serves_no_metadata_cannot_be_judged(catalog: CatalogBuilder) -> None:
