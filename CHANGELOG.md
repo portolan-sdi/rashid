@@ -1,3 +1,9 @@
+## v0.5.1 (2026-11-26)
+
+### Feat
+
+- **api**: export the helpers that portolan-cli copies (#379)
+
 ## v0.5.0 (2026-11-25)
 
 ### BREAKING CHANGE

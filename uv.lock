@@ -2544,7 +2544,7 @@ wheels = [
 
 [[package]]
 name = "rashid"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "meta/rashid" }
 dependencies = [
     { name = "rashid-core", extra = ["data"] },
@@ -2556,7 +2556,7 @@ provides-extras = ["data"]
 
 [[package]]
 name = "rashid-core"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
